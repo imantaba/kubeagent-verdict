@@ -14,6 +14,7 @@ dependencies = []
 kv-dataset = "kubeagent_verdict.dataset.cli:main"
 kv-train = "kubeagent_verdict.train.cli:main"
 kv-export = "kubeagent_verdict.export.cli:main"
+kv-eval = "kubeagent_verdict.evals.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
