@@ -16,3 +16,37 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q -m "not network and not slow"
+
+  dataset-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: kv-dataset --seed 7 --size 60 --out /tmp/kv-smoke
+      - run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+          out = Path("/tmp/kv-smoke")
+          man = json.loads((out / "manifest.json").read_text())
+          # train+val can fall short of 60: examples colliding with a
+          # corpus-test fixture's group are dropped by design.
+          assert man["seed"] == 7 and 0 < man["train"] + man["val"] <= 60, man
+          assert man["test"] > 0, "corpus-derived test set is empty"
+          for name in ("train.jsonl", "val.jsonl", "test.jsonl"):
+              assert (out / name).exists(), name
+          print("smoke ok:", man)
+          PYEOF
+
+  train-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,train]" --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: pytest tests/test_train.py -q -m "network"
