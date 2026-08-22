@@ -59,7 +59,7 @@ def run_training(model, tokenizer, rows: list[tuple[str, str, str]],
                 optimizer.step()
                 optimizer.zero_grad()
                 step += 1
-                losses.append(float(loss) * cfg.grad_accum)
+                losses.append(float(loss.detach()) * cfg.grad_accum)
     optimizer.step()  # flush a trailing partial accumulation
     optimizer.zero_grad()
 

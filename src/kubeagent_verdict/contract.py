@@ -158,6 +158,18 @@ def section(name: str, body: str) -> str:
 
 
 def cap_content(s: str) -> str:
+    """Cap ``s`` to MAX_READ_BYTES, decoding the byte-cut with errors="replace".
+
+    The cut is a byte-offset slice, so it can land mid-character on a
+    multi-byte UTF-8 sequence. Decoding with errors="replace" substitutes
+    U+FFFD (a 3-byte sequence in UTF-8) for the straddled bytes instead of
+    raising UnicodeDecodeError — which means the returned string can
+    re-encode to 1-2 bytes over MAX_READ_BYTES after replacement. That is
+    accepted rather than trimmed further: it mirrors kubeagent's own Go
+    pipeline, where json.Marshal substitutes U+FFFD for invalid UTF-8 rather
+    than erroring, so the two pipelines agree on capped, possibly-replaced
+    output rather than one of them refusing to emit at all.
+    """
     data = s.encode("utf-8")
     if len(data) <= MAX_READ_BYTES:
         return s

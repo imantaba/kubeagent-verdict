@@ -152,9 +152,8 @@ def test_bounds_enforced():
 
 
 # --- Fix round 1: FINDING 1 — cap_content / build_user_message must not crash on a
-# byte cut that straddles a multi-byte UTF-8 character; the invalid tail is replaced
-# with U+FFFD instead of raising, matching Go's own pipeline (json.Marshal substitutes
-# invalid UTF-8, capContent never decodes at all).
+# byte cut that straddles a multi-byte UTF-8 character. See cap_content's docstring
+# in contract.py for the errors="replace" rationale.
 
 def test_cap_content_replaces_invalid_utf8_at_cut():
     # "a" * 4095 puts the byte-4096 cut exactly on the leading byte of the em dash

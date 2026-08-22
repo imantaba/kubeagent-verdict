@@ -27,3 +27,10 @@ def test_loader_is_strict(tmp_path):
     p.write_text('[{"kind": "CrashLoopBackOff"}]', encoding="utf-8")
     with pytest.raises(ValueError):
         knownissues.load_knownissues(p)
+
+
+def test_loader_rejects_non_list_top_level(tmp_path):
+    p = tmp_path / "ki.json"
+    p.write_text('{"kind": "CrashLoopBackOff"}', encoding="utf-8")
+    with pytest.raises(TypeError):
+        knownissues.load_knownissues(p)
