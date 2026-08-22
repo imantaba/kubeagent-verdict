@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from kubeagent_verdict import vocab
 from kubeagent_verdict.dataset import catalog, corpus
 
@@ -14,7 +12,6 @@ SAMPLE = {
 }
 
 
-@pytest.mark.xfail(reason="entries land in Task 6", strict=True)
 def test_every_slug_covered_exactly_once():
     count = {s: 0 for s in vocab.FAULT_SLUGS}
     for e in catalog.all_entries():
@@ -23,7 +20,6 @@ def test_every_slug_covered_exactly_once():
     assert all(v == 1 for v in count.values()), count
 
 
-@pytest.mark.xfail(reason="entries land in Task 6", strict=True)
 def test_every_kind_covered_exactly_once():
     count = {k: 0 for k in vocab.ISSUE_KINDS}
     for e in catalog.all_entries():
@@ -32,7 +28,6 @@ def test_every_kind_covered_exactly_once():
     assert all(v == 1 for v in count.values()), count
 
 
-@pytest.mark.xfail(reason="entries land in Task 6", strict=True)
 def test_28_entries_unique_keys():
     entries = catalog.all_entries()
     assert len(entries) == 28
