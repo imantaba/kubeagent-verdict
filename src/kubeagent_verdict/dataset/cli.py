@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from kubeagent_verdict.dataset import generate
@@ -16,5 +17,14 @@ def main() -> None:
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     examples = generate.generate(seed=args.seed, size=args.size)
-    generate.write_jsonl(args.out / "train.jsonl", examples)
-    print(f"wrote {len(examples)} examples to {args.out}")
+    train, val = generate.split(examples, seed=args.seed)
+    test = generate.corpus_test_set()
+    train = generate.drop_held_out(train, test)
+    val = generate.drop_held_out(val, test)
+    generate.write_jsonl(args.out / "train.jsonl", train)
+    generate.write_jsonl(args.out / "val.jsonl", val)
+    generate.write_jsonl(args.out / "test.jsonl", test)
+    man = generate.manifest(args.seed, args.size, train, val, test)
+    (args.out / "manifest.json").write_text(
+        json.dumps(man, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(man, indent=2, sort_keys=True))

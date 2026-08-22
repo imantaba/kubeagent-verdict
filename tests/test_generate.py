@@ -47,3 +47,44 @@ def test_to_row_schema():
     row = generate.to_row(ex)
     assert set(row) == {"messages", "meta"}
     assert [m["role"] for m in row["messages"]] == ["system", "user", "assistant"]
+
+
+def test_counts_for_follows_the_mix():
+    counts = generate.counts_for(1000)
+    assert counts == {"attributed": 400, "none_of_these": 150, "own_cause": 100,
+                      "multi": 150, "truncated": 50, "injection": 100,
+                      "empty_candidates": 50}
+    assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
+
+
+def test_case_mix_present_in_generated_set():
+    exs = generate.generate(seed=17, size=200)
+    seen = {ex.case for ex in exs}
+    assert seen == {"attributed", "none_of_these", "own_cause", "multi",
+                    "truncated", "injection", "empty_candidates"}
+
+
+def test_split_never_straddles_a_group():
+    exs = generate.generate(seed=17, size=300)
+    train, val = generate.split(exs, seed=17)
+    train_groups = {ex.group for ex in train}
+    val_groups = {ex.group for ex in val}
+    assert not (train_groups & val_groups)
+    frac = len(val) / (len(train) + len(val))
+    assert 0.04 <= frac <= 0.20
+
+
+def test_corpus_test_set_derives_from_committed_rows():
+    exs = generate.corpus_test_set()
+    assert exs, "no corpus-derived test examples"
+    for ex in exs:
+        assert ex.meta["source"]["fault"]
+        assert ex.meta["source"]["distro"] in {"kind", "k3s"}
+
+
+def test_drop_held_out_removes_colliding_groups():
+    exs = generate.generate(seed=17, size=60)
+    fake_test = [exs[0]]  # pretend the first example's group is a test fixture
+    kept = generate.drop_held_out(exs, fake_test)
+    assert exs[0].group not in {ex.group for ex in kept}
+    assert len(kept) < len(exs)
