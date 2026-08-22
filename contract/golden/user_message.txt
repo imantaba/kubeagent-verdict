@@ -1,0 +1,41 @@
+== BEGIN inventory ==
+Cluster health (P1): DEGRADED — 2/3 nodes Ready.
+  node worker-2 NotReady (KubeletNotReady)
+
+Cluster resources:
+  CPU: allocatable 6 cores, requests 4200m (70%), limits 5400m (90%)
+  Memory: allocatable 12Gi, requests 9Gi (75%), limits 11Gi (91%)
+
+Workload problems (P2):
+
+- shop/api (Deployment): 0/2 ready, status Progressing, 14 restarts
+    issue: CrashLoopBackOff — back-off restarting failed container (container app restarted 14 times)
+      log cause: fatal: config file /etc/app/app.yaml not found
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n shop logs <pod> -c app --previous
+- web/frontend (Deployment): 1/3 ready, status Progressing, 0 restarts
+    issue: ImagePullBackOff — Back-off pulling image (registry.example.com/web/frontend:v2.4.1 not found)
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n web describe pod <pod>
+Service issues:
+  - shop/api (NoReadyEndpoints): service has 0 ready endpoints
+== END inventory ==
+
+== BEGIN candidates ==
+- shop/api (Deployment) [confidence: high]:
+    considered container app exiting at startup: attributed — previous log names a missing config file
+    considered node worker-2 NotReady: outranked — pod is scheduled on worker-1, not the NotReady node
+- web/frontend (Deployment) [confidence: medium]:
+    considered image tag not found in the registry: attributed — the pull error names the tag as missing
+== END candidates ==
+
+== BEGIN evidence ==
+== events shop/api-7f9c4d5b6-x2x9k ==
+12s Warning BackOff pod/api-7f9c4d5b6-x2x9k back-off restarting failed container app
+
+== log causes shop/api-7f9c4d5b6-x2x9k container app ==
+fatal: config file /etc/app/app.yaml not found
+
+== events web/frontend-5d8f7c9b4-q1w2e ==
+3m Warning Failed pod/frontend-5d8f7c9b4-q1w2e Failed to pull image "registry.example.com/web/frontend:v2.4.1": not found
+== END evidence ==
+
+Judge each listed workload now and answer with the JSON object only.

@@ -1,0 +1,11 @@
+{
+  "verdicts": [
+    {"workload": "shop/api", "cause": "container app exiting at startup",
+     "confidence": "high",
+     "rationale": "The previous-instance log names a missing config file /etc/app/app.yaml, which matches the crash loop."},
+    {"workload": "web/frontend", "cause": "image tag not found in the registry",
+     "confidence": "high",
+     "rationale": "The pull error names registry.example.com/web/frontend:v2.4.1 as not found."}
+  ],
+  "summary": "Two workloads are down for unrelated reasons.\nshop/api crashes on a missing config file.\nweb/frontend cannot pull its image tag.\nThe NotReady node is not implicated in either."
+}

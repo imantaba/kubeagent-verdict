@@ -1,0 +1,58 @@
+{
+  "cluster": {"degraded": true, "nodes_ready": 2, "nodes_total": 3,
+              "node_issues": ["worker-2 NotReady (KubeletNotReady)"], "system_issues": []},
+  "summary": {
+    "cpu": {"allocatable": "6", "requests": "4200m", "requests_pct": 70,
+            "limits": "5400m", "limits_pct": 90},
+    "memory": {"allocatable": "12Gi", "requests": "9Gi", "requests_pct": 75,
+               "limits": "11Gi", "limits_pct": 91},
+    "metrics_available": false
+  },
+  "platform_line": "",
+  "service_issues": [
+    {"namespace": "shop", "name": "api", "type": "NoReadyEndpoints",
+     "detail": "service has 0 ready endpoints"}
+  ],
+  "workloads": [
+    {
+      "namespace": "shop", "name": "api", "kind": "Deployment",
+      "ready": 0, "desired": 2, "status": "Progressing", "restarts": 14,
+      "confidence": "high",
+      "findings": [
+        {"issue": "CrashLoopBackOff", "reason": "back-off restarting failed container",
+         "evidence": "container app restarted 14 times",
+         "log_cause": "fatal: config file /etc/app/app.yaml not found",
+         "next_step": "starts then crashes — inspect the crash output", "command": "kubectl -n shop logs <pod> -c app --previous"}
+      ],
+      "candidates": [
+        {"cause": "container app exiting at startup", "verdict": "attributed",
+         "reason": "previous log names a missing config file"},
+        {"cause": "node worker-2 NotReady", "verdict": "outranked",
+         "reason": "pod is scheduled on worker-1, not the NotReady node"}
+      ]
+    },
+    {
+      "namespace": "web", "name": "frontend", "kind": "Deployment",
+      "ready": 1, "desired": 3, "status": "Progressing", "restarts": 0,
+      "confidence": "medium",
+      "findings": [
+        {"issue": "ImagePullBackOff", "reason": "Back-off pulling image",
+         "evidence": "registry.example.com/web/frontend:v2.4.1 not found",
+         "log_cause": "",
+         "next_step": "the image can't be pulled — verify the tag exists and the registry credentials", "command": "kubectl -n web describe pod <pod>"}
+      ],
+      "candidates": [
+        {"cause": "image tag not found in the registry", "verdict": "attributed",
+         "reason": "the pull error names the tag as missing"}
+      ]
+    }
+  ],
+  "reads": [
+    {"label": "events shop/api-7f9c4d5b6-x2x9k",
+     "content": "12s Warning BackOff pod/api-7f9c4d5b6-x2x9k back-off restarting failed container app\n"},
+    {"label": "log causes shop/api-7f9c4d5b6-x2x9k container app",
+     "content": "fatal: config file /etc/app/app.yaml not found"},
+    {"label": "events web/frontend-5d8f7c9b4-q1w2e",
+     "content": "3m Warning Failed pod/frontend-5d8f7c9b4-q1w2e Failed to pull image \"registry.example.com/web/frontend:v2.4.1\": not found\n"}
+  ]
+}
