@@ -20,7 +20,7 @@ def test_export_chain_commands(monkeypatch, tmp_path):
     assert f"--branch {export.LLAMA_CPP_TAG}" in clone and "--depth 1" in clone
     assert any("convert_hf_to_gguf.py" in cl for cl in joined)
     assert any("llama-quantize" in cl and cl.endswith("Q8_0") for cl in joined)
-    assert any("llama-cli" in cl for cl in joined)  # load-verify step
+    assert any("llama-cli" in cl and "-st" in cl.split() for cl in joined)  # load-verify exits
     assert gguf == out / "kubeagent-verdict-0.6b-q8_0.gguf"
 
 

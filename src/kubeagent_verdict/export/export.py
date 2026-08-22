@@ -59,8 +59,10 @@ def export_all(base: str, adapter_dir: Path, workdir: Path, out_dir: Path) -> Pa
     run_cmd([llama / "build" / "bin" / "llama-quantize", f16, gguf, "Q8_0"])
 
     # Load-verify: the quantized file must produce tokens before we ship it.
+    # --single-turn: the pinned CLI is conversation-first and would otherwise
+    # sit in its interactive prompt loop forever instead of exiting.
     run_cmd([llama / "build" / "bin" / "llama-cli", "-m", gguf,
-             "-p", "hello", "-n", "4", "--temp", "0"])
+             "-p", "hello", "-n", "4", "--temp", "0", "-st"])
 
     write_release_files(out_dir, gguf)
     return gguf
