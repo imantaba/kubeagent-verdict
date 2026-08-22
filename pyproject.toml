@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 kv-dataset = "kubeagent_verdict.dataset.cli:main"
+kv-train = "kubeagent_verdict.train.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
