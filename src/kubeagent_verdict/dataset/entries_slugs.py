@@ -140,7 +140,7 @@ ENTRIES = [
         status="Degraded",
         issue="ProbeFailure",
         reason="the readiness probe keeps failing — the pod is kept out of Service endpoints",
-        evidence='Readiness probe failed: Get "http://{pod}:8080/healthz": dial tcp: i/o timeout',
+        evidence='Readiness probe failed: Get "{pod}:8080/healthz": dial tcp: i/o timeout',
         next_step="check whether a NetworkPolicy now blocks the probe's traffic",
         command="kubectl -n {ns} describe pod {pod}",
         winner_cause="a deny-all NetworkPolicy now selects the pod",
@@ -154,7 +154,7 @@ ENTRIES = [
         reads=(
             ("events {ns}/{pod}",
              ("events for {ns}/{pod}:\n"
-              '  Unhealthy: Readiness probe failed: Get "http://{pod}:8080/healthz": dial tcp: '
+              '  Unhealthy: Readiness probe failed: Get "{pod}:8080/healthz": dial tcp: '
               "i/o timeout (x9)\n")),
         ),
         rationale="The probe timeouts start exactly when the deny-all policy is created and hit "

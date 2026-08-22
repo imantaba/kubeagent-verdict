@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +9,9 @@ description = "Training pipeline for the local verdict model consumed by kubeage
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.scripts]
+kv-dataset = "kubeagent_verdict.dataset.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
