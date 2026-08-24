@@ -7,7 +7,8 @@ from pathlib import Path
 from kubeagent_verdict.evals import client, score
 
 # The slices a short run exists to look at. Everything else can only pass.
-PROBES_FIRST = ("positional_probe", "misattribution_probe", "wrong_attribution")
+PROBES_FIRST = ("contradiction_probe", "positional_probe", "misattribution_probe",
+                "multi_misattribution_probe", "wrong_attribution")
 
 
 def _case(row: dict) -> str:

@@ -258,6 +258,66 @@ def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
                            "misattribution_probe", {"decoy_cause": _decoy_cause(e, n)})
 
 
+def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
+    """EVAL-ONLY: tag, position and phrase length all point away from the answer.
+
+    The three probes above perturb only the candidate menu. Each entry's
+    issue/reason/evidence finding block is byte-identical across every case
+    built from that entry, and no catalog entry is ever held out — all
+    nineteen appear in train, val and test alike. So a model that ignores the
+    menu completely and recites a memorised entry-to-winner lookup table,
+    keyed on that untouched finding block, scores 1.0 cause accuracy on all
+    three probes with a decoy rate of 0.0 and the narrowest possible length
+    split. Every existing release decider reads clean for it.
+
+    This row was built to be the one that cannot be answered that way: the
+    reads contradict the catalog winner (as in `none_of_these`), the decoy
+    leads and carries `attributed` (as in `misattribution_probe`), and the
+    correct answer — "none of these" — is on no candidate line, so it can be
+    neither copied nor pointed at.
+
+    IT DOES NOT DO THAT. The claim is retracted here rather than deleted,
+    because the measurement is worth more than the intention. Negative control
+    v4 scored the known-broken first tune on this slice: 1.0 cause, 0.0 decoy
+    — a clean pass by a model proven elsewhere to follow the `attributed` tag
+    79% of the time, emitting the expected rationale and summary VERBATIM. The
+    confound is that this builder reuses `none_of_these_case`'s read
+    construction exactly — same label, same `e.contradiction` content — and
+    `none_of_these` is 15% of the curriculum, so the contradiction sentence is
+    itself a memorised trigger for a memorised answer template. Holding the
+    adversarial menu roughly fixed and changing only the read text moves cause
+    accuracy from 0.1579 (`misattribution_probe`) and 0.4737
+    (`wrong_attribution`) to 1.0 here. The menu is what this row perturbs, and
+    the menu is what such a model never reads.
+
+    So: an index-copier, a tag-copier and a word counter do score zero here,
+    and that much the slice is kept for. An entry-lookup table does not. No
+    slice built from this catalog can rule one out while every entry appears
+    in training — that needs held-out entries and a retrain, which v0.1.0 does
+    not have. Do not read a pass here as evidence that the model reasons.
+    """
+    if not e.losers:
+        raise ValueError(f"contradiction_probe needs at least one loser: {e.key}")
+    if not e.contradiction:
+        raise ValueError(f"contradiction_probe needs a contradiction read: {e.key}")
+    w = _workload(e, n, _swapped_candidates(e, n), confidence=_confidence(e))
+    reads = (c.EvidenceRead(label=_fmt(e.reads[0][0], n),
+                            content=_fmt(e.contradiction, n)),)
+    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
+             "confidence": "medium",
+             "rationale": "The evidence contradicts every listed candidate rather than "
+                          "supporting one."}]
+    summary = (f"{n.ns}/{n.name} is failing, but the evidence rules out the listed causes.\n"
+               "A closer look at the workload is needed.")
+    return Example(case="contradiction_probe", group=f"{e.key}:{n.ns}/{n.name}",
+                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
+                   meta={"case": "contradiction_probe", "entry": e.key,
+                         "expected_cause": c.NONE_OF_THESE,
+                         "expected_confidence": "medium",
+                         "decoy_cause": _decoy_cause(e, n)})
+
+
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     w = _workload(e, n, (), confidence="")
     user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), _reads(e, n))

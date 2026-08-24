@@ -175,11 +175,63 @@ def test_misattribution_probe_hands_attributed_to_the_decoy():
         "memory limit too low for the workload"
 
 
+# The three probes above all leave the finding block untouched — they perturb
+# only the candidate menu — and every catalog entry appears in train, so a model
+# that ignores the menu entirely and recites a memorised entry-to-winner lookup
+# table scores 1.0 on all of them with a decoy rate of 0.0. This probe is the
+# one row that fails all three known shortcuts at once: the tag points at the
+# decoy, the catalog winner is demoted AND contradicted by the reads, and the
+# only correct answer is a phrase that appears on no candidate line at all.
+def test_contradiction_probe_answers_none_of_these_against_the_tag():
+    n = names.draw(random.Random(45))
+    ex = cases.contradiction_probe(_entry("memory-limit-oomkill"), n)
+    section = _cand_section(ex.user)
+    assert f"considered {ex.meta['decoy_cause']}: attributed" in section
+    assert "considered memory limit too low for the workload: ruled out" in section
+    (row,) = json.loads(ex.assistant)["verdicts"]
+    assert row["cause"] == c.NONE_OF_THESE
+    assert row["confidence"] == "medium"
+    assert ex.meta["case"] == "contradiction_probe"
+    assert ex.meta["expected_cause"] == c.NONE_OF_THESE
+    assert ex.meta["decoy_cause"] != c.NONE_OF_THESE
+
+
+def test_contradiction_probe_defeats_every_known_shortcut():
+    entry = _entry("memory-limit-oomkill")
+    n = names.draw(random.Random(46))
+    ex = cases.contradiction_probe(entry, n)
+    answer = json.loads(ex.assistant)["verdicts"][0]["cause"]
+    lines = _cand_lines(ex.user)
+    assert lines, "the probe must still render a menu to be misled by"
+    causes = [ln.split("considered ", 1)[1].rsplit(": ", 1)[0] for ln in lines]
+    # A tag-copier answers whichever line carries `attributed`.
+    tagged = [ln for ln in lines if ": attributed" in ln]
+    assert tagged
+    assert all(not ln.startswith(f"considered {answer}:") for ln in tagged)
+    # An entry-lookup model answers the entry's stored winner from the finding
+    # block, which this row keeps byte-identical to every other case.
+    assert answer != entry.winner_cause.format(**_fmt_kwargs(n))
+    # A word counter answers the longest candidate phrase.
+    assert answer != max(causes, key=lambda s: len(s.split()))
+    # And the answer is not on the menu at all, so it cannot be copied.
+    assert answer not in causes
+
+
+def test_contradiction_probe_reads_contradict_the_winner():
+    n = names.draw(random.Random(47))
+    entry = _entry("memory-limit-oomkill")
+    ex = cases.contradiction_probe(entry, n)
+    evidence = ex.user.split("== BEGIN evidence ==")[1]
+    assert entry.contradiction.format(**_fmt_kwargs(n)) in evidence
+    assert "OOMKilled, exit code 137" not in evidence
+
+
 def test_probes_refuse_an_entry_with_no_loser():
     import dataclasses
     bare = dataclasses.replace(_entry("memory-limit-oomkill"), losers=())
     n = names.draw(random.Random(43))
-    for builder in (cases.positional_probe, cases.misattribution_probe):
+    for builder in (cases.positional_probe, cases.misattribution_probe,
+                    cases.contradiction_probe):
         try:
             builder(bare, n)
         except ValueError:

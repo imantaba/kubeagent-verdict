@@ -106,11 +106,29 @@ def test_probe_rows_never_enter_train_or_val():
     test = generate.test_set()
     train = generate.drop_held_out(train, test)
     val = generate.drop_held_out(val, test)
-    banned = {"positional_probe", "misattribution_probe"}
+    banned = {"positional_probe", "misattribution_probe", "contradiction_probe",
+              "multi_misattribution_probe"}
     assert not banned & {ex.case for ex in train + val}
-    held = {ex.group for ex in test}
+    # SPLIT on the test side too. This read `{ex.group for ex in test}` and so
+    # re-derived production's own blind spot — it asserted the buggy rule
+    # against itself and passed while 103 train rows leaked at release size.
+    held = {part for ex in test for part in ex.group.split("+")}
     for ex in train + val:
         assert not any(part in held for part in ex.group.split("+"))
+
+
+def test_drop_held_out_splits_compound_test_groups():
+    # A multi-workload test row's group is a "+"-join, so an exclusion set built
+    # from raw test groups never carries its constituents as standalone keys and
+    # a train row reusing one is not recognised as a collision. Both sides must
+    # be split, not just the candidate's.
+    exs = generate.generate(seed=17, size=60)
+    victim = next(ex for ex in exs if "+" not in ex.group)
+    compound = generate.Example(case="multi_misattribution_probe",
+                                group=victim.group + "+other-entry:probes/second",
+                                system="", user="", assistant="", meta={})
+    kept = generate.drop_held_out(exs, [compound])
+    assert victim.group not in {ex.group for ex in kept}
 
 
 def test_test_set_is_deterministic():
@@ -138,9 +156,31 @@ def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
     head = probes[:2 * len(trainable)]
     assert [ex.case for ex in head] == ["positional_probe", "misattribution_probe"] * len(
         trainable)
+    # Each new slice is a LAYER appended after the last, never interleaved, so
+    # every row a previous scoreboard scored keeps its index.
     tail = probes[2 * len(trainable):]
     assert tail, "no multi probe rows were generated"
-    assert {ex.case for ex in tail} == {"multi_misattribution_probe"}
+    seen, order = [], []
+    for ex in tail:
+        if not order or order[-1] != ex.case:
+            assert ex.case not in seen, f"{ex.case} rows are interleaved, not appended"
+            seen.append(ex.case)
+            order.append(ex.case)
+    assert order == ["multi_misattribution_probe", "contradiction_probe"]
+
+
+def test_contradiction_probe_is_appended_last_one_row_per_entry():
+    from kubeagent_verdict.dataset import catalog, generate
+    probes = generate.probe_sets()
+    trainable = [e for e in catalog.trainable() if e.losers and e.contradiction]
+    tail = [ex for ex in probes if ex.case == "contradiction_probe"]
+    assert len(tail) == len(trainable)
+    # Appended, never interleaved: every earlier probe row keeps its position, so
+    # a scoreboard banked against the previous test file still lines up.
+    assert [ex.case for ex in probes[-len(tail):]] == ["contradiction_probe"] * len(tail)
+    for ex in tail:
+        assert ex.meta["expected_cause"] == c.NONE_OF_THESE
+        assert ex.meta["decoy_cause"] in ex.user
 
 
 def test_multi_probe_rows_carry_two_distinct_workloads():

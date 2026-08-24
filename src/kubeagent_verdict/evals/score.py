@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from kubeagent_verdict.contract import NONE_OF_THESE
 from kubeagent_verdict.evals.contract_check import contract_check
 
 KEYWORD_CASES = {"own_cause", "empty_candidates"}
@@ -91,10 +92,16 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         # Single-workload rows only: a multi row carries one expected cause per
         # workload and no scalar `expected_cause`, so it stays unmeasured here
         # rather than being folded in against one of its decoys.
+        # A row whose answer is `none of these` is unmeasured on this axis too:
+        # the correct answer is on no candidate line, so no candidate's length
+        # can point at it. Scoring it anyway would file every such row under
+        # "misleads" and make a model that simply cannot say "none of these"
+        # read as a word counter. Only `contradiction_probe` carries both keys,
+        # so no previously-scored row changes column.
         decoy_cause = meta.get("decoy_cause")
         exp_cause = meta.get("expected_cause")
         length_helps = None
-        if decoy_cause and exp_cause:
+        if decoy_cause and exp_cause and exp_cause != NONE_OF_THESE:
             length_helps = len(str(exp_cause).split()) > len(str(decoy_cause).split())
 
         overconfident = (sum(wrong_cause_grades) / len(wrong_cause_grades)

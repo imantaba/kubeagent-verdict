@@ -119,8 +119,17 @@ def drop_held_out(examples: list[Example], test: list[Example]) -> list[Example]
     spec's split-integrity rule is that a test fixture appears in neither
     train nor val. A multi example is dropped when ANY of its "+"-joined
     constituent groups collides.
+
+    BOTH sides are split. Building `held` from raw test groups — as this did
+    until the leak was found — never inserts a compound test row's individual
+    constituents as standalone keys, so an ordinary `multi` training row that
+    reuses one exact constituent identity is not recognised as a collision.
+    Only the multi-workload test rows have compound groups, which is precisely
+    where it mattered: at seed 17 / size 5500, 103 train and 15 val rows shared
+    an identity with a `multi_misattribution_probe` row that exists to test
+    whether the model weighs evidence over a swapped tag.
     """
-    held = {ex.group for ex in test}
+    held = {part for ex in test for part in ex.group.split("+")}
     return [ex for ex in examples
             if not any(part in held for part in ex.group.split("+"))]
 
@@ -189,13 +198,23 @@ def held_out_case_set() -> list[Example]:
 
 
 def probe_sets() -> list[Example]:
-    """The two adversarial eval-only slices, one row per trainable entry.
+    """The four adversarial eval-only slices, one row per trainable entry.
 
     `positional_probe` puts the correct answer last with an honest tag;
-    `misattribution_probe` puts it last AND hands `attributed` to the decoy.
-    Neither is ever generated into train or val — they exist to make a
-    shortcut visible, and a shortcut the training data rewards is not a
-    shortcut the eval can detect.
+    `misattribution_probe` puts it last AND hands `attributed` to the decoy;
+    `multi_misattribution_probe` does the same in the multi-workload shape the
+    single-workload probes cannot reach; `contradiction_probe` adds a read that
+    rules the winner out, so the answer is on no candidate line at all. None is
+    ever generated into train or val — they exist to make a shortcut visible,
+    and a shortcut the training data rewards is not a shortcut the eval can
+    detect.
+
+    That last sentence is the limit of all four, and `contradiction_probe`
+    found it the hard way: the training data rewards answering `none of these`
+    to the very contradiction sentence that slice reuses, so a memorising
+    model passes it. Every catalog entry appears in train, val and test, so no
+    slice here can separate a model that reads from one that recites per-entry
+    answers. Ruling that out needs held-out entries and a retrain.
     """
     from kubeagent_verdict.dataset import cases, catalog, names
 
@@ -226,6 +245,24 @@ def probe_sets() -> list[Example]:
             continue  # a name collision would merge the two answer rows
         out.append(cases.multi_misattribution_probe(
             [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))
+
+    # APPENDED again, for the same comparability reason. This slice contradicts
+    # the winner in the reads AND hands `attributed` to the decoy, so the only
+    # correct answer appears on no candidate line: a tag-copier, an
+    # index-copier and a word counter all score zero on it.
+    #
+    # It was built to also catch a model reciting a memorised entry-to-winner
+    # lookup table, and it DOES NOT — negative control v4 measured the
+    # known-broken first tune at 1.0 cause / 0.0 decoy here. The read text it
+    # reuses is `none_of_these_case`'s verbatim, which makes the contradiction
+    # sentence a trained trigger rather than something to reason about. See
+    # `cases.contradiction_probe`'s docstring for the full retraction; the
+    # slice is kept for the three shortcuts it does defeat.
+    for entry in catalog.trainable():
+        if not entry.losers or not entry.contradiction:
+            continue
+        out.append(cases.contradiction_probe(
+            entry, names.draw(_entry_rng("contradiction-probe", entry.key))))
     return out
 
 
