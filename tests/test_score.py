@@ -21,7 +21,7 @@ def test_perfect_model_scores_ones():
     board = score.scoreboard(results)
     assert board["overall"]["contract_rate"]["rate"] == 1.0
     assert board["overall"]["cause_accuracy"]["rate"] == 1.0
-    assert board["overall"]["confidence_match"]["rate"] == 1.0
+    assert board["overall"]["confidence_carried"]["rate"] == 1.0
 
 
 def test_garbage_model_scores_zero_contract():
@@ -101,3 +101,62 @@ def test_markdown_carries_the_denominator():
     md = score.render_markdown(board)
     assert "decoy" in md
     assert "1.0 (1)" in md
+
+
+# The prompt prints `[confidence: high]` on the candidate line and the expected
+# answer reuses that value, so this metric is maxed by copying a bracketed
+# string out of the question. It read 1.0 on the broken model's every slice —
+# including the one where the cause was 84% wrong. It measures carrying the
+# deterministic grade, not judgment, and its name has to say so.
+def test_confidence_metric_is_named_for_what_it_measures():
+    board = score.scoreboard(score.evaluate(
+        [ROW], lambda messages: ROW["messages"][2]["content"]))
+    assert "confidence_carried" in board["overall"]
+    assert "confidence_match" not in board["overall"]
+
+
+def _overconfidence_row(model_cause, model_conf):
+    row = json.loads(json.dumps(ROW))
+    answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": model_cause,
+                                       "confidence": model_conf, "rationale": "r"}],
+                         "summary": "s"})
+    return score.scoreboard(score.evaluate([row], lambda messages: answer))
+
+
+# The honest reading of a carried `high` on a cause the model got wrong.
+def test_overconfidence_rate_catches_a_wrong_cause_still_graded_high():
+    board = _overconfidence_row("node worker-2 under memory pressure", "high")
+    assert board["overall"]["overconfidence_rate"] == {"rate": 1.0, "n": 1}
+
+
+def test_overconfidence_rate_spares_a_wrong_cause_graded_low():
+    board = _overconfidence_row("node worker-2 under memory pressure", "low")
+    assert board["overall"]["overconfidence_rate"] == {"rate": 0.0, "n": 1}
+
+
+# No wrong cause means the question was never posed — n/a, not a clean 0.0.
+def test_overconfidence_rate_is_unmeasured_when_every_cause_is_right():
+    board = _overconfidence_row("memory limit too low for the workload", "high")
+    assert board["overall"]["overconfidence_rate"] == {"rate": None, "n": 0}
+
+
+def test_markdown_names_the_two_honest_confidence_columns():
+    board = _overconfidence_row("node worker-2 under memory pressure", "high")
+    md = score.render_markdown(board).lower()
+    assert "carried" in md
+    assert "overconfident" in md
+
+
+# A scorer is what lied about the first tuned model. Keeping the raw output
+# means a later reader can re-score, or just read what the model actually said,
+# without paying for inference again and without trusting these numbers.
+def test_results_keep_the_raw_model_output():
+    out = ROW["messages"][2]["content"]
+    results = score.evaluate([ROW], lambda messages: out)
+    assert results[0]["output"] == out
+
+
+def test_raw_output_is_kept_even_when_it_is_not_json():
+    results = score.evaluate([ROW], lambda messages: "not json at all")
+    assert results[0]["output"] == "not json at all"
+    assert results[0]["contract_ok"] is False

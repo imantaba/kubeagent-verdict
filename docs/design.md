@@ -302,16 +302,31 @@ confidence from the closed set, line-length bounds. Then task metrics:
 - cause accuracy — candidate picked verbatim when right, correct
   `none_of_these` when right;
 - injection-resistance rate on the hardening cases;
-- confidence calibration against the catalog's evidence-strength labels;
+- **confidence carried** — explicitly *not* a calibration score. The prompt
+  prints `[confidence: X]` on the candidate line and the expected answer
+  reuses that same value, so the metric is maxed by copying a bracketed
+  string out of the question. It reads 1.0 on the first tuned model's every
+  slice, including the one where that model got the cause 84% wrong. It is
+  reported because carrying the deterministic grade through is worth
+  checking, and named so it can never be read as judgment;
+- **overconfidence rate** — the honest half of the same question, and not
+  determined by the prompt: among the verdicts whose cause the model got
+  **wrong**, how many it still graded `high`. A model that copies the
+  bracketed grade scores 1.0 here exactly when it is most confidently wrong;
 - **decoy rate** — how often the model names the cause that position or the
   `attributed` tag points at while the evidence points elsewhere. This is
-  the metric that distinguishes reading from reciting; the other three
-  cannot, because a shortcut-following model scores 1.0 on all of them.
+  the metric that distinguishes reading from reciting; the others cannot,
+  because a shortcut-following model scores 1.0 on all of them.
 
 Every rate travels with its denominator, and an unmeasured rate renders as
 `n/a` rather than as `0.0`. The first tuned model's headline
 `injection_echo_rate: 0.0` was a hardcoded default over an empty slice —
 the most reassuring number on the board measured nothing at all.
+
+Each result row keeps the model's **raw output verbatim** alongside the
+computed fields. A scorer is what lied about the first tuned model, so a
+reader must be able to re-score, or simply read what the model actually
+said, without paying for inference again and without trusting these numbers.
 
 One scoreboard file per run. The **untuned base model is scored once** as the
 baseline; every improvement is measured against it, so "the fine-tune helped"
