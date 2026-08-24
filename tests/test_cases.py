@@ -196,3 +196,65 @@ def test_wrong_attribution_answers_the_evidence_not_the_tag():
     assert row["cause"] == "memory limit too low for the workload"
     assert row["cause"] != ex.meta["decoy_cause"]
     assert "deterministic pass attributed a different cause" in row["rationale"]
+
+
+# `multi` is 12.7% of the curriculum and had ZERO test rows, and cases.multi()
+# never swaps a tag — so across all 604 multi training rows the `attributed`
+# tag was right 1757 times out of 1757. "Trust the tag" is a perfect strategy
+# there, and no single-workload probe can catch a model using it, because the
+# multi prompt is a different shape. This probe is the only row that can.
+def _two_entries():
+    from kubeagent_verdict.dataset import catalog
+    ents = [e for e in catalog.trainable() if e.losers]
+    return ents[0], ents[1]
+
+
+def test_multi_probe_hands_attributed_to_the_decoy_in_every_workload():
+    import random
+
+    from kubeagent_verdict.dataset import cases, names
+    e1, e2 = _two_entries()
+    rng = random.Random(7)
+    ex = cases.multi_misattribution_probe(
+        [(e1, names.draw(random.Random(1))), (e2, names.draw(random.Random(2)))], rng)
+    expected = json.loads(ex.assistant)["verdicts"]
+    causes = {r["workload"]: r["cause"] for r in expected}
+    assert len(causes) == 2, "the two workloads must be distinct"
+    # Every `attributed` line in the prompt must point somewhere OTHER than the
+    # answer, so a tag-copier scores zero on this row.
+    tagged = [ln for ln in ex.user.splitlines() if ": attributed —" in ln]
+    assert len(tagged) == 2
+    for line in tagged:
+        cause = line.split("considered ", 1)[1].rsplit(": attributed", 1)[0]
+        assert cause not in causes.values(), f"tag points at the answer: {cause}"
+
+
+def test_multi_probe_answers_are_still_the_catalog_winners():
+    import random
+
+    from kubeagent_verdict.dataset import cases, names
+    e1, e2 = _two_entries()
+    ex = cases.multi_misattribution_probe(
+        [(e1, names.draw(random.Random(1))), (e2, names.draw(random.Random(2)))],
+        random.Random(7))
+    causes = {r["cause"] for r in json.loads(ex.assistant)["verdicts"]}
+    assert causes == {e1.winner_cause.format(**_fmt_kwargs(names.draw(random.Random(1)))),
+                      e2.winner_cause.format(**_fmt_kwargs(names.draw(random.Random(2))))}
+
+
+def _fmt_kwargs(n):
+    return {"ns": n.ns, "name": n.name, "pod": n.pod, "container": n.container,
+            "init_container": n.init_container, "image": n.image, "node": n.node,
+            "pvc": n.pvc, "restarts": n.restarts}
+
+
+def test_multi_probe_meta_lists_every_decoy():
+    import random
+
+    from kubeagent_verdict.dataset import cases, names
+    e1, e2 = _two_entries()
+    ex = cases.multi_misattribution_probe(
+        [(e1, names.draw(random.Random(1))), (e2, names.draw(random.Random(2)))],
+        random.Random(7))
+    assert ex.meta["case"] == "multi_misattribution_probe"
+    assert len(ex.meta["decoy_causes"]) == 2

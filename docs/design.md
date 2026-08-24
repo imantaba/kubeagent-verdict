@@ -244,17 +244,27 @@ truncated or thin → low), so calibration is trained, not guessed.
   verdict. They appear in neither training nor validation.
 - The test set is **stratified across the curriculum**, not corpus rows
   alone. Corpus rows are all `attributed`, so a corpus-only test set scores
-  one case while reporting an overall rate, and the ~45% of the mix that is
+  one case while reporting an overall rate, and the ~55% of the mix that is
   `none_of_these`, `own_cause`, `truncated`, `injection`,
   `empty_candidates` and `wrong_attribution` trains without ever being
   measured. One held-out example per (trainable entry, case) closes that.
-- Two **eval-only adversarial slices** exist that no training example can
+- Three **eval-only adversarial slices** exist that no training example can
   imitate. `positional_probe` places the correct candidate LAST with an
   honest `attributed` tag. `misattribution_probe` places it last AND hands
-  `attributed` to a decoy the evidence contradicts. Both are deterministic
+  `attributed` to a decoy the evidence contradicts. All are deterministic
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
+- The third closes a hole the first two could not see. `multi` is ~13% of
+  the curriculum and had no test row at all, and `cases.multi()` never
+  swaps a tag — so across all 1,757 constituent workloads it generates,
+  "trust the `attributed` tag" is a strategy the training data never once
+  contradicts in that shape. Both single-workload probes render one
+  workload, so neither can reach it. `multi_misattribution_probe` renders
+  two workloads, each with the tag handed to a decoy; naming **either**
+  decoy counts as tag-following. Its rows are **appended** to the test
+  file, never interleaved, so a scoreboard banked against the previous
+  file still lines up row-for-row.
 
 ## Training (kv-train)
 
@@ -314,9 +324,27 @@ confidence from the closed set, line-length bounds. Then task metrics:
   **wrong**, how many it still graded `high`. A model that copies the
   bracketed grade scores 1.0 here exactly when it is most confidently wrong;
 - **decoy rate** — how often the model names the cause that position or the
-  `attributed` tag points at while the evidence points elsewhere. This is
-  the metric that distinguishes reading from reciting; the others cannot,
-  because a shortcut-following model scores 1.0 on all of them.
+  `attributed` tag points at while the evidence points elsewhere. It is
+  unmeasured (`None`, not `False`) on a row the model did not answer at
+  all: a refusal, a parse failure or an omitted workload once averaged in
+  as `0.0`, the best possible score, making a model that hedges on exactly
+  the hardest rows indistinguishable from one that read the evidence and
+  rejected the decoy. Refusing is not resisting;
+- **cause accuracy split by whether candidate length helps**. The decoy
+  rate rules out two shortcuts — position and tag — and was described here
+  as *the* metric that separates reading from reciting. That claim was too
+  wide, and a third shortcut walks through the gap it left. In 15 of the 19
+  trainable catalog entries the winning cause is the longer phrase (mean
+  9.0 words against 6.4), so "pick the longer candidate" scores ~83% on
+  **both** single-workload probe slices while reading nothing at all — no
+  evidence, no tag, no position — and it beats the decoy rate for free,
+  because the trap and the longer phrase usually disagree. Splitting cause
+  accuracy by whether length points **at** the true cause is what separates
+  the two: a word counter scores ~1.0 where length helps and ~0.0 where it
+  misleads; a model that read the evidence scores alike on both. A tie is a
+  coin flip, so it counts as misleading. On the 224-row test set the split
+  is 45 rows where length helps against 12 where it misleads — read the two
+  numbers together or not at all; neither means anything alone.
 
 Every rate travels with its denominator, and an unmeasured rate renders as
 `n/a` rather than as `0.0`. The first tuned model's headline
@@ -340,15 +368,27 @@ repository ever runs it.
 
 **Acceptance for shipping a model release:** the offline scoreboard beats the
 untuned baseline on every metric, contract validity is 100%, the **decoy
-rate on both adversarial slices is low**, and the live tier names the
-injected fault correctly on the chaos scenarios that flag workloads.
+rate on all three adversarial slices is low**, the **length-helps and
+length-misleads cause accuracies are close to each other**, and the live
+tier names the injected fault correctly on the chaos scenarios that flag
+workloads.
 
-The decoy-rate bar is not optional and not a tie-breaker. A model that
-answers by position or by tag can score 1.0 on contract validity, cause
+Neither of those two bars is optional and neither is a tie-breaker. A model
+that answers by position or by tag can score 1.0 on contract validity, cause
 accuracy and confidence match simultaneously — the first tuned model did
 exactly that — because the expected cause is printed verbatim in its own
-prompt beside the `attributed` tag. Those three metrics measure extraction.
-Only the decoy rate measures judgement.
+prompt beside the `attributed` tag. A model that answers by counting words
+defeats the decoy rate as well, without reading anything. Those metrics
+measure extraction; the decoy rate and the length split measure judgement,
+and each one rules out a shortcut the other cannot see.
+
+The length split is a **measurement, not a repair**. The cue lives in 19
+hand-authored winner/loser phrase pairs in the catalog, whose winner text is
+lifted from the strings kubeagent's `internal/rootcause` actually emits —
+so equalising word counts would de-align the shipped model from its only
+consumer's vocabulary to close a shortcut nothing has yet shown the model
+takes. The split makes the shortcut visible first; whether to rebalance the
+catalog is then a decision from data rather than a guess.
 
 **An eval change that could not fail the model it replaced is not a fix.**
 Before a retrain begins on a corrected dataset, the corrected eval is run

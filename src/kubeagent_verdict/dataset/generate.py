@@ -207,6 +207,25 @@ def probe_sets() -> list[Example]:
             entry, names.draw(_entry_rng("positional-probe", entry.key))))
         out.append(cases.misattribution_probe(
             entry, names.draw(_entry_rng("misattribution-probe", entry.key))))
+
+    # APPENDED, never interleaved: the two slices above keep their exact row
+    # positions, so a scoreboard banked against the previous test file still
+    # lines up row-for-row and the negative control stays comparable.
+    #
+    # `multi` is ~13% of the curriculum and had no test row at all, while
+    # `cases.multi()` never swaps a tag — so "trust the attributed tag" is a
+    # strategy the training data never once contradicts in that shape. Neither
+    # probe above can catch it there: both render a single workload. Each entry
+    # is paired with the next so every entry appears twice, in both positions.
+    with_losers = [e for e in catalog.trainable() if e.losers]
+    for i, entry in enumerate(with_losers):
+        other = with_losers[(i + 1) % len(with_losers)]
+        first = names.draw(_entry_rng("multi-probe-a", entry.key))
+        second = names.draw(_entry_rng("multi-probe-b", entry.key, other.key))
+        if (first.ns, first.name) == (second.ns, second.name):
+            continue  # a name collision would merge the two answer rows
+        out.append(cases.multi_misattribution_probe(
+            [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))
     return out
 
 

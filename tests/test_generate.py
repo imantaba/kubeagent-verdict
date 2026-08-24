@@ -125,3 +125,36 @@ def test_every_probe_row_carries_a_decoy_that_is_not_the_answer():
         assert ex.meta["decoy_cause"]
         assert ex.meta["decoy_cause"] != ex.meta["expected_cause"]
         assert ex.meta["decoy_cause"] in ex.user
+
+
+# The multi probe is APPENDED after the two single-workload probe slices, never
+# interleaved: the existing 205 test rows keep their exact positions, so a
+# scoreboard banked against the old file still lines up row-for-row with the
+# new one and the negative control stays comparable.
+def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
+    from kubeagent_verdict.dataset import catalog, generate
+    probes = generate.probe_sets()
+    trainable = [e for e in catalog.trainable() if e.losers]
+    head = probes[:2 * len(trainable)]
+    assert [ex.case for ex in head] == ["positional_probe", "misattribution_probe"] * len(
+        trainable)
+    tail = probes[2 * len(trainable):]
+    assert tail, "no multi probe rows were generated"
+    assert {ex.case for ex in tail} == {"multi_misattribution_probe"}
+
+
+def test_multi_probe_rows_carry_two_distinct_workloads():
+    import json as _json
+
+    from kubeagent_verdict.dataset import generate
+    tail = [ex for ex in generate.probe_sets() if ex.case == "multi_misattribution_probe"]
+    for ex in tail:
+        rows = _json.loads(ex.assistant)["verdicts"]
+        assert len({r["workload"] for r in rows}) == len(rows) >= 2
+
+
+def test_multi_probe_is_deterministic():
+    from kubeagent_verdict.dataset import generate
+    a = [ex.user for ex in generate.probe_sets()]
+    b = [ex.user for ex in generate.probe_sets()]
+    assert a == b

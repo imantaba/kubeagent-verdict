@@ -272,6 +272,45 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
                          "expected_own_keywords": list(e.own_cause_keywords)})
 
 
+def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
+                               rng: random.Random) -> Example:
+    """EVAL-ONLY: `misattribution_probe`, in the multi-workload shape.
+
+    `multi` is ~13% of the curriculum and had no test row of any kind, and
+    `multi()` never swaps a tag — across every multi training example the
+    `attributed` tag points at the true winner for every constituent. "Trust
+    the tag" is therefore a strategy the training data never once contradicts
+    in this shape, and neither single-workload probe can catch a model using
+    it, because a multi row renders a different prompt with several candidate
+    menus in it. This row is the only thing that can.
+
+    Every constituent gets `_swapped_candidates`, so a tag-copier scores zero
+    here while a model that reads the evidence is unaffected.
+    """
+    if not 2 <= len(pairs) <= 4:
+        raise ValueError("multi_misattribution_probe takes 2-4 workloads")
+    if not all(e.losers for e, _n in pairs):
+        raise ValueError("multi_misattribution_probe needs a loser in every entry")
+    workloads, all_reads, rows, decoys = [], [], [], []
+    for e, n in pairs:
+        conf = _confidence(e)
+        workloads.append(_workload(e, n, _swapped_candidates(e, n), confidence=conf))
+        all_reads.extend(_reads(e, n)[:2])
+        decoys.append(_decoy_cause(e, n))
+        rows.append({"workload": f"{n.ns}/{n.name}", "cause": _fmt(e.winner_cause, n),
+                     "confidence": conf, "rationale": _fmt(e.rationale, n)})
+    user = c.build_user_message(None, None, "", (), tuple(workloads),
+                                tuple(all_reads[:c.MAX_TOOL_CALLS]))
+    lines = [f"{len(pairs)} workloads are failing for separate reasons."]
+    lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
+    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    return Example(case="multi_misattribution_probe", group=group, system=c.SYSTEM_PROMPT,
+                   user=user, assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+                   meta={"case": "multi_misattribution_probe",
+                         "expected": {r["workload"]: r["cause"] for r in rows},
+                         "decoy_causes": decoys})
+
+
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
