@@ -6,7 +6,11 @@ LICENSE, and the model card. Model weights never enter git history —
 
 1. Preconditions: clean tree on `main`, `pytest -q` green, `ruff check .`
    clean, and a completed train.md run with both scoreboards recorded in
-   the README.
+   the README. train.md step 2 has you `mv dist/ dist-v<N>-superseded/`; that
+   directory is gitignored, so it satisfies "clean tree" rather than
+   violating it, and the several hundred megabytes it holds cannot be staged
+   by accident. Confirm the same way you confirm everything else here — read
+   `git status --short`, do not assume.
 2. Bump `__version__` in `src/kubeagent_verdict/__init__.py` and the
    `version` in `pyproject.toml` (they must match). Commit with `-s`.
 3. Read `docs/model-card.md` against the just-completed run: the "Known
