@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit, urlunsplit
 
 from kubeagent_verdict.evals import client, score
 
@@ -13,6 +14,37 @@ PROBES_FIRST = ("contradiction_probe", "positional_probe", "misattribution_probe
 
 def _case(row: dict) -> str:
     return row.get("meta", {}).get("case", "unknown")
+
+
+def provenance(model: str, endpoint: str, test: Path,
+               scored: int, available: int) -> dict:
+    """What this scoreboard scored — so two of them can never be confused.
+
+    A release is argued from two scoreboards read side by side, tuned against
+    untuned, and nothing else in the output directory says which model
+    produced which. `--endpoint` defaults to Ollama's port, so a llama-server
+    run that forgets the flag scores whatever Ollama is serving and writes a
+    scoreboard indistinguishable from the intended one.
+
+    Both fields are stripped of anything that could carry an operator's
+    filesystem or a credential: the model keeps only its basename, because
+    `--model /home/<user>/...gguf` is accepted and `/home/` is one of the five
+    leak shapes the provenance denylist exists to catch, and the endpoint
+    drops any `user:password@` userinfo. Neither reduction loses identity —
+    a GGUF basename and a scheme/host/port/path are what distinguish two runs.
+    """
+    parts = urlsplit(endpoint)
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return {
+        "model": PurePosixPath(model).name or model,
+        "endpoint": urlunsplit((parts.scheme, host, parts.path, "", "")),
+        "test_file": test.name,
+        "rows_scored": scored,
+        "rows_available": available,
+        "limited": scored != available,
+    }
 
 
 def _stratified(rows: list[dict], limit: int) -> list[dict]:
@@ -60,6 +92,7 @@ def main() -> None:
 
     rows = [json.loads(line) for line in
             args.test.read_text(encoding="utf-8").splitlines() if line]
+    available = len(rows)
     if args.limit:
         kept = _stratified(rows, args.limit)
         dropped = _dropped_cases(rows, kept)
@@ -72,6 +105,8 @@ def main() -> None:
     results = score.evaluate(
         rows, lambda messages: client.chat(args.endpoint, args.model, messages))
     board = score.scoreboard(results)
+    board["run"] = provenance(args.model, args.endpoint, args.test,
+                              len(rows), available)
     args.out.mkdir(parents=True, exist_ok=True)
     with open(args.out / "results.jsonl", "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in results)

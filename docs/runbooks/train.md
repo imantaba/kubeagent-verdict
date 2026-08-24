@@ -80,6 +80,15 @@ on a workstation — run the training step under `nohup` and watch
    cases it dropped entirely; a scoreboard covering three of ten cases looks
    exactly like one covering all ten, so never bank a limited run.
 
+   **Read `scoreboard.json`'s `run` block before you read any number in it.**
+   It names the model basename, the endpoint, the test file and
+   `rows_scored`/`rows_available`, with `limited: true` when those differ.
+   Two scoreboards are otherwise distinguishable only by directory name,
+   which is exactly the wrong thing to trust when the failure mode is
+   forgetting `--endpoint` and scoring Ollama instead. The model is reduced
+   to its basename and the endpoint drops any userinfo, so neither field can
+   carry a home directory or a credential into a file you might paste.
+
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
    model scored 1.0 on contract validity, cause accuracy and confidence
