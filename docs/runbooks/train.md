@@ -82,7 +82,9 @@ on a workstation — run the training step under `nohup` and watch
      `positional_probe`, `misattribution_probe`, `multi_misattribution_probe`
      — plus `wrong_attribution`. It rules out answering by position or by
      tag. It reads `n/a` on slices that carry no decoy; that is correct, not
-     a gap;
+     a gap. **A slice whose identities are in the training data does not
+     count toward this bullet** — check that before reading it, with the
+     intersection described under "contamination" below;
    - **`length helps` and `length misleads` close together.** Apart, the
      model is counting words: the winning cause is the longer phrase in 15
      of 19 catalog entries, so a word counter beats the decoy rate for free
@@ -110,5 +112,18 @@ on a workstation — run the training step under `nohup` and watch
    that recites per-entry answers.** Do not read this scoreboard as evidence
    of entry-level generalisation. Fixing it means holding whole catalog
    entries out of train and retraining; see `docs/design.md`.
+
+   **Contamination — check this before reading the decoy bullet.** Train and
+   eval must come from the same commit. When they do not — a long run started
+   before a generator fix landed, which happened for v0.1.0 — the newer test
+   rows were never excluded from the older training data, and their slices
+   are uninterpretable rather than merely noisy. Measure it, do not estimate
+   it: regenerate the training commit's `train`+`val` in a `git worktree`,
+   union each example's `group` split on `+`, and intersect against this
+   tree's `generate.test_set()` groups, counting per case. Report any slice
+   with a non-zero count as contaminated and withdraw it from the bar for
+   that release. For v0.1.0 that was `multi_misattribution_probe` (19 of 19)
+   and `contradiction_probe` (14 of 19); every other slice was 0. `kv-eval`
+   does not compute this yet — it should, so the number cannot rot in a doc.
 
    Then the live tier: `docs/runbooks/live-eval.md`.

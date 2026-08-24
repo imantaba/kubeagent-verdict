@@ -176,6 +176,38 @@ score in the table below should be read as evidence that it does. Fixing
 this requires holding whole catalog entries out of training and
 retraining — work this release does not contain.
 
+### The released weights and the released code do not match
+
+The shipped GGUF was trained on a dataset generated at commit `8bd9d28`.
+Three later commits changed the generator, so `kv-dataset --seed 17
+--size 5500` on this tree produces a **different, corrected** dataset —
+4155/432/243 train/val/test against the 4312/451/205 the weights were
+trained on. Running the shipped pipeline end to end reproduces the
+method, not these weights.
+
+The practical consequence is contamination of two eval slices, measured
+rather than estimated (regenerate `8bd9d28`'s train+val in a worktree and
+intersect the group sets with this tree's `generate.test_set()`):
+
+| slice | rows | identities also in training |
+|---|---|---|
+| `multi_misattribution_probe` | 19 | **19** |
+| `contradiction_probe` | 19 | **14** |
+| every other slice | 205 | 0 |
+
+**`multi_misattribution_probe` is therefore uninterpretable for this
+release** — every one of its workload identities appears in the training
+data — and its number is reported below for completeness only, never as
+evidence. `contradiction_probe` was already withdrawn above for a
+separate reason. The three remaining adversarial slices —
+`positional_probe`, `misattribution_probe` and `wrong_attribution` —
+share no identity with training and are the ones that caught this
+project's first broken tune, so the decoy decider stands on those.
+
+The gap is disclosed rather than closed: retraining on the corrected
+dataset would cost a full run, and this release chose to ship the
+measurement instead of hiding it.
+
 Separately, the catalog carries a known length cue in its phrasing: in 15
 of the 19 trainable entries the winning cause is written as the longer of
 the two candidate phrases (mean 9.0 words against 6.4). This is not a
