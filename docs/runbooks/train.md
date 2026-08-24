@@ -32,7 +32,16 @@ on a workstation — run the training step under `nohup` and watch
 
    It must **fail** that model on the adversarial slices. If it passes, the
    eval did not close the hole and there is nothing to retrain for yet.
-   Budget ~30 minutes for 224 rows at this size. Note the endpoint: `kv-eval`
+   Budget **~2¼ hours** for the current 243 rows at this size. That is
+   measured, not estimated: a `llama-server -t 4` run on a workstation CPU
+   completed 149 rows in 81.4 minutes, or ~1.8 rows/minute, so 243 rows take
+   roughly 133 minutes. An earlier version of this line said "~30 minutes for
+   224 rows" and was wrong on both counts — badly enough to make a healthy
+   run look hung, which matters because `kv-eval` prints nothing to stdout
+   until it finishes. To watch progress, count `launch_slot_` lines in the
+   llama-server log; do **not** count `print_timing` lines, which are
+   incremental snapshots emitted several times within a single generation.
+   Note the endpoint: `kv-eval`
    defaults to Ollama's `http://localhost:11434/v1`, so a llama-server run
    without `--endpoint` silently scores whatever Ollama is serving.
 

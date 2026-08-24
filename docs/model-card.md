@@ -74,20 +74,32 @@ a source:
 
 Every identifier a generated example uses — namespace, pod, node, image,
 PVC name — is drawn from a fixed, fictional vocabulary (`shop`, `web`,
-`worker-1`, `registry.example.com` and the like). A provenance test guards
-that, but read it narrowly: it is a **denylist of five known leak shapes**
-— a dotted-quad IP, an `http(s)://` scheme, the word "kubeconfig", a
-`/home/` path prefix, a bare `@` — not a scan for every token outside the
-fictional vocabulary, and it runs only over a generated train/val batch,
-never over `generate.test_set()`, so the corpus-derived, held-out-case and
-probe rows are unchecked by it. No live cluster ever contributes a
-training example: the dataset generator and the offline eval connect to
-nothing — no cluster is queried or read from anywhere in `kv-dataset`,
-`kv-train`, `kv-export`, or `kv-eval`'s offline tier — and no
-live-cluster capture directory is a valid input. (A separate live-eval
-runbook does point a real kubeagent at this served model against a real
-cluster, but that step is run by the kubeagent operator, outside this
-repository's own pipeline, and produces no training data.)
+`worker-1`, `registry.example.com` and the like). Provenance tests guard
+that, but read them narrowly: they are a **denylist of five known leak
+shapes** — a dotted-quad IP, an `http(s)://` scheme, the word
+"kubeconfig", a `/home/` path prefix, a bare `@` — not a scan for every
+token outside the fictional vocabulary. What they cover is now the whole
+generated corpus: one runs over a train/val batch, a second over
+`generate.test_set()` — the corpus-derived, held-out-case and probe rows —
+and a third asserts the scanned corpus actually renders every trainable
+catalog entry, because a sampled 60-example batch renders `own_cause` for
+only 6 of the 19 entries and a denylist cannot guard prose it never emits.
+An earlier version of this paragraph recorded the test-set rows as
+unchecked. That was accurate when written; the gap has since been closed,
+and the coverage assertion is what keeps it closed.
+
+No live cluster ever contributes a training example, and no live-cluster
+capture directory is a valid input. That is a claim about **clusters, not
+about sockets**, and the difference matters: `kv-dataset` alone opens no
+network connection of any kind, while `kv-train` and `kv-export` download
+the base model from the Hugging Face Hub and clone llama.cpp from GitHub,
+and `kv-eval` reaches a `/v1/chat/completions` endpoint as its entire
+scoring mechanism. That endpoint defaults to a local Ollama address, but
+`--endpoint` accepts any host, so pointing it at a remote API is possible
+and is the operator's choice. (A separate live-eval runbook does point a
+real kubeagent at this served model against a real cluster, but that step
+is run by the kubeagent operator, outside this repository's own pipeline,
+and produces no training data.)
 
 ## How to read the scoreboard
 

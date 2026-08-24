@@ -5,6 +5,10 @@ __pycache__/
 .ruff_cache/
 out/
 dist/
+# `train.md` step 2 parks the previous release's model as dist-v<N>-superseded/
+# so nothing downstream picks it up; that directory holds a multi-hundred-MB
+# GGUF and must be ignored as thoroughly as dist/ itself.
+dist-*-superseded/
 build/
 models/
 artifacts/

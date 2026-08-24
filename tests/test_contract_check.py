@@ -60,3 +60,80 @@ def test_extra_key_fails():
     doc = _good()
     doc["notes"] = "hi"
     assert not contract_check(json.dumps(doc), FLAGGED)[0]
+
+
+def test_duplicate_workload_fails():
+    """The one malformation that satisfies every other check.
+
+    Two rows for the same flagged workload pass the row-key, field-type and
+    confidence checks, and the flagged set is fully covered, so nothing else
+    in the checker objects. Without this branch a model could answer the same
+    workload twice — with two different causes — and score as valid.
+    """
+    doc = _good()
+    doc["verdicts"] = doc["verdicts"] + [dict(doc["verdicts"][0], cause="y")]
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("duplicate workload" in r for r in reasons)
+
+
+def test_verdicts_not_a_list_fails():
+    doc = _good()
+    doc["verdicts"] = {"workload": "shop/api"}
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("not a list" in r for r in reasons)
+
+
+def test_empty_verdicts_fails():
+    doc = _good()
+    doc["verdicts"] = []
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("not a list" in r for r in reasons)
+
+
+def test_too_many_rows_fails():
+    doc = _good()
+    doc["verdicts"] = [dict(doc["verdicts"][0], workload=f"ns/w{i}") for i in range(11)]
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("not a list" in r for r in reasons)
+
+
+def test_row_missing_a_key_fails():
+    doc = _good()
+    del doc["verdicts"][0]["rationale"]
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("keys are not exactly" in r for r in reasons)
+
+
+def test_row_that_is_not_an_object_fails():
+    doc = _good()
+    doc["verdicts"] = ["shop/api"]
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("keys are not exactly" in r for r in reasons)
+
+
+def test_non_string_field_fails():
+    doc = _good()
+    doc["verdicts"][0]["cause"] = 42
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("non-string or empty" in r for r in reasons)
+
+
+def test_empty_field_fails():
+    doc = _good()
+    doc["verdicts"][0]["cause"] = ""
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("non-string or empty" in r for r in reasons)
+
+
+def test_non_string_summary_fails():
+    doc = _good()
+    doc["summary"] = ["one line"]
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("summary is not a non-empty string" in r for r in reasons)
+
+
+def test_whitespace_only_summary_fails():
+    doc = _good()
+    doc["summary"] = "   \n  "
+    ok, reasons, _ = contract_check(json.dumps(doc), FLAGGED)
+    assert not ok and any("summary is not a non-empty string" in r for r in reasons)

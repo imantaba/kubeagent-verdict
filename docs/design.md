@@ -165,16 +165,22 @@ Training inputs are exactly two, and nothing else is ever a source:
 
 Every identifier the generator invents comes from a fixed synthetic
 vocabulary (the `web-abc` / `shop` / `worker-1` / `registry.example.com`
-class). A provenance test (`test_provenance_no_banned_text`) checks a
-generated train/val batch against five fixed regexes — a dotted-quad IP, an
-`http(s)://` scheme, the word "kubeconfig", a `/home/` path prefix, a bare
-`@` — and fails on the first hit. It is a denylist of five known leak
-shapes, not a scan for every token outside the synthetic allowlist, and it
-never runs against `generate.test_set()` — the corpus-derived, held-out-case
-and probe rows are unchecked. No live cluster name, node name, private IP,
-internal hostname, kubeconfig path or context name is meant to enter a
-tracked file — the same rule kubeagent's own repository enforces — but this
-test only catches the five shapes above, in the train/val pool.
+class). Three provenance tests check generated text against five fixed
+regexes — a dotted-quad IP, an `http(s)://` scheme, the word "kubeconfig", a
+`/home/` path prefix, a bare `@` — and fail on the first hit.
+`test_provenance_no_banned_text` scans a train/val batch;
+`test_provenance_no_banned_text_in_test_set` scans `generate.test_set()`,
+which is where the corpus-derived, held-out-case and probe rows live; and
+`test_provenance_scan_reaches_every_catalog_entry` asserts the scanned
+corpus renders every trainable catalog entry, because a sampled 60-example
+batch renders `own_cause` for only 6 of the 19 and a denylist cannot guard
+prose it never emits. That third test is the one that makes the first two
+mean something. No live cluster name, node name, private IP, internal
+hostname, kubeconfig path or context name is meant to enter a tracked file —
+the same rule kubeagent's own repository enforces — but these tests still
+only catch the five shapes above, and a denylist is not an allowlist. (This
+paragraph previously said the scan never ran against `generate.test_set()`,
+leaving those rows unchecked. That was true when written.)
 
 ## The dataset generator (kv-dataset)
 
@@ -247,13 +253,22 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~40% | Pick the candidate **verbatim**; calibrate confidence |
+| Candidate attributed, evidence supports it | ~30% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~15% | One verdict row per listed workload, no extras |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
+| `wrong_attribution` — the `attributed` tag is on a candidate the evidence contradicts | ~10% | The tag is a hint, not an answer: evidence overrides it |
+
+That table is `CASE_MIX` in `src/kubeagent_verdict/dataset/generate.py`, and
+it is meant to be read against it rather than trusted on its own. An earlier
+version of this table said `attributed` was ~40% and omitted
+`wrong_attribution` entirely — the one case built specifically to defeat
+tag-copying, which is the shortcut this whole section is about. It was
+wrong from the commit that introduced the case until a pre-publication
+audit recomputed it.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1
@@ -284,16 +299,19 @@ truncated or thin → low), so calibration is trained, not guessed.
   `none_of_these`, `own_cause`, `truncated`, `injection`,
   `empty_candidates` and `wrong_attribution` trains without ever being
   measured. One held-out example per (trainable entry, case) closes that.
-- Three **eval-only adversarial slices** exist that no training example can
-  imitate. `positional_probe` places the correct candidate LAST with an
+- **Eval-only adversarial slices** exist that no training example can
+  imitate — three at first, and a fourth, `contradiction_probe`, added
+  later and then withdrawn from the release bar for the reason recorded
+  below. `positional_probe` places the correct candidate LAST with an
   honest `attributed` tag. `misattribution_probe` places it last AND hands
   `attributed` to a decoy the evidence contradicts. All are deterministic
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
-- The third closes a hole the first two could not see. `multi` is ~13% of
+- The third closes a hole the first two could not see. `multi` is ~15% of
   the curriculum and had no test row at all, and `cases.multi()` never
-  swaps a tag — so across all 1,757 constituent workloads it generates,
+  swaps a tag — so across all 1,600 constituent workloads it contributes to
+  train and val at `--seed 17 --size 5500` (2,478 before `drop_held_out`),
   "trust the `attributed` tag" is a strategy the training data never once
   contradicts in that shape. Both single-workload probes render one
   workload, so neither can reach it. `multi_misattribution_probe` renders
@@ -381,9 +399,12 @@ confidence from the closed set, line-length bounds. Then task metrics:
   accuracy by whether length points **at** the true cause is what separates
   the two: a word counter scores ~1.0 where length helps and ~0.0 where it
   misleads; a model that read the evidence scores alike on both. A tie is a
-  coin flip, so it counts as misleading. On the 224-row test set the split
+  coin flip, so it counts as misleading. On the 243-row test set the split
   is 45 rows where length helps against 12 where it misleads — read the two
-  numbers together or not at all; neither means anything alone.
+  numbers together or not at all; neither means anything alone. (The 57 rows
+  that carry both a decoy and a non-`none_of_these` expected cause are the
+  only ones the split can be computed over; the other 186 contribute to
+  neither number.)
 
 Every rate travels with its denominator, and an unmeasured rate renders as
 `n/a` rather than as `0.0`. The first tuned model's headline
@@ -494,9 +515,13 @@ scoreboard should not be read as evidence of entry-level generalisation.
 - **Split-integrity test** — no family straddles train/validation; test
   fixtures appear in neither.
 - **Provenance scan** — a five-shape denylist (dotted-quad IP, `http(s)://`,
-  "kubeconfig", `/home/`, bare `@`) over a generated train/val batch. Not a
-  scan for every token outside the synthetic allowlist, and it does not run
-  over `generate.test_set()`.
+  "kubeconfig", `/home/`, bare `@`) over a generated train/val batch *and*
+  over `generate.test_set()`, plus a coverage assertion that the scanned
+  corpus renders every trainable catalog entry — a sampled 60-example batch
+  renders `own_cause` for only 6 of 19, and a denylist cannot guard prose it
+  never emits. Still not a scan for every token outside the synthetic
+  allowlist. (This entry previously ended "it does not run over
+  `generate.test_set()`", which was true when written.)
 - **Corpus loader tests** — required keys enforced; slug must be in the
   closed vocabulary; `unknown-scenario` refused; a malformed row is withheld
   and counted, never guessed — the corpus contract's own words.

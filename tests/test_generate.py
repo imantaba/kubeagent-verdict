@@ -198,3 +198,49 @@ def test_multi_probe_is_deterministic():
     a = [ex.user for ex in generate.probe_sets()]
     b = [ex.user for ex in generate.probe_sets()]
     assert a == b
+
+
+def test_provenance_no_banned_text_in_test_set():
+    """The same denylist, over the rows `test_provenance_no_banned_text` cannot see.
+
+    That test scans `generate(seed=17, size=60)` — train/val shaped. The test
+    set comes from a different code path (`test_set`), draws on the
+    corpus-derived and held-out-case fixtures, and appends four probe slices
+    that no train/val batch contains. Those rows ship in
+    `out/dataset/test.jsonl` and get quoted into scoreboards and docs, so they
+    need the same guard.
+    """
+    for ex in generate.test_set():
+        blob = ex.user + "\n" + ex.assistant
+        for pat in BANNED:
+            assert not pat.search(blob), f"{ex.meta}: {pat.pattern}"
+
+
+def test_provenance_scan_reaches_every_catalog_entry():
+    """Coverage, not just patterns: a denylist only guards text it renders.
+
+    `generate(seed=17, size=60)` samples cases at random, so it renders
+    `own_cause` for just 6 of the 19 trainable entries and `contradiction` for
+    9 — the rest of that prose is never scanned at all, however many patterns
+    the denylist grows. `test_set()` renders every trainable entry once per
+    case, which is what makes the test above a real guard rather than a spot
+    check. This fails if that coverage regresses.
+    """
+    from kubeagent_verdict.dataset import catalog
+    trainable = {e.key for e in catalog.trainable()}
+    by_case: dict[str, set[str]] = {}
+    for ex in generate.test_set():
+        entry = ex.meta.get("entry")
+        if entry is not None:  # multi_misattribution_probe rows name several
+            by_case.setdefault(ex.case, set()).add(entry)
+
+    # `own_cause` is the only case that renders an entry's `own_cause` text;
+    # `none_of_these` and `contradiction_probe` are the only ones that render
+    # its `contradiction` text. Full coverage on these three is what carries
+    # every entry's per-entry prose through the scan.
+    for case in ("own_cause", "none_of_these", "contradiction_probe"):
+        assert by_case.get(case) == trainable, (
+            f"{case} renders {len(by_case.get(case, ()))} of {len(trainable)} "
+            f"trainable entries; missing {sorted(trainable - by_case.get(case, set()))}"
+        )
+    assert set().union(*by_case.values()) == trainable

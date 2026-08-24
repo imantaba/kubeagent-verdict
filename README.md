@@ -39,15 +39,22 @@ allowlisted fictional names) and from the redacted chaos-corpus artifacts
 kubeagent's nightly CI publishes. No real, live cluster identifier — node
 name, namespace, hostname, IP, kubeconfig path or context — may appear in
 any tracked file. `data/corpus/README.md` records the exact CI run each
-snapshot came from. A provenance test guards this, but read it narrowly:
-it is a denylist of five known leak shapes — a dotted-quad IP, an
+snapshot came from. Provenance tests guard this, but read them narrowly:
+they are a denylist of five known leak shapes — a dotted-quad IP, an
 `http(s)://` scheme, the word "kubeconfig", a `/home/` path prefix, a bare
-`@` — and it runs over a generated train/val batch only, never over
-`generate.test_set()`. One carve-out: three corpus files still carry the
-chaos harness's own deterministic name for its disposable, CI-created kind
-node (`kubeagent-chaos-v1-<minor>-worker`) — not a live identifier, since
-it names no reachable node or real cluster; see `data/corpus/README.md`
-for why those rows were kept byte-identical rather than scrubbed.
+`@` — not a scan for every token outside the fictional vocabulary. They
+run over a generated train/val batch *and* over `generate.test_set()`, and
+a third test asserts the scanned corpus renders every trainable catalog
+entry, since a denylist cannot guard prose it never emits. One carve-out:
+**all four** corpus files still carry
+the chaos harness's own deterministic name for the disposable node of the
+cluster it creates and tears down inside one CI run —
+`kubeagent-chaos-v1-<minor>-worker` in the three kind files,
+`k3d-kubeagent-chaos-k3s-v1-34-agent-0` in the k3s one. Neither is a live
+identifier: they name no reachable node and no real cluster. See
+`data/corpus/README.md` for why those rows were kept byte-identical rather
+than scrubbed — and for the correction, since this repo previously
+documented the k3s file as the clean one.
 
 ## Scoreboard
 
