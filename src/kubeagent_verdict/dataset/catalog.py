@@ -2,11 +2,13 @@
 
 An entry is a template kit, not an example: Task 7's case builders
 substitute synthetic names (names.py) into the {placeholder} fields and
-assemble full prompts through the contract renderers. Cause phrasing is
-lifted from kubeagent's internal/rootcause/rootcause.go and reasons from
-the known-issues snapshot, so the model trains on the vocabulary kubeagent
-actually emits. Literal braces inside a template must be doubled ({{ }})
-because templates go through str.format.
+assemble full prompts through the contract renderers. Cause phrasing
+(winner_cause) is hand-authored per entry, not lifted from
+internal/rootcause/rootcause.go — none of its node/registry/PVC shapes
+match a winner_cause value. Reason phrasing echoes kubeagent's own
+kubelet/API-server reason strings, not text copied from the known-issues
+snapshot. Literal braces inside a template must be doubled ({{ }}) because
+templates go through str.format.
 """
 
 from __future__ import annotations

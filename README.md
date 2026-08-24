@@ -20,6 +20,11 @@ it byte-identically (tested).
     pip install -e ".[dev]"            # light: dataset + evals, stdlib-only
     pip install -e ".[train,export]" --extra-index-url https://download.pytorch.org/whl/cpu
 
+    # reproducible instead: pip install -r requirements.lock -e .
+    # buys the exact dependency versions the shipped model was trained and
+    # evaluated against, not whatever pyproject.toml's loose lower bounds
+    # resolve to today
+
     kv-dataset --seed 17 --size 5500 --out out/dataset
     kv-train   --dataset out/dataset --out out/adapter
     kv-export  --adapter out/adapter --workdir out/export --out dist/
@@ -31,16 +36,37 @@ Runbooks with timings and verification steps: `docs/runbooks/`.
 
 Training data comes ONLY from synthetic generation (the catalog +
 allowlisted fictional names) and from the redacted chaos-corpus artifacts
-kubeagent's nightly CI publishes. No live cluster identifier — node name,
-namespace, hostname, IP, kubeconfig path or context — may appear in any
-tracked file. `data/corpus/README.md` records the exact CI run each
-snapshot came from; a provenance test bans identifier-shaped text from
-every generated example.
+kubeagent's nightly CI publishes. No real, live cluster identifier — node
+name, namespace, hostname, IP, kubeconfig path or context — may appear in
+any tracked file. `data/corpus/README.md` records the exact CI run each
+snapshot came from. A provenance test guards this, but read it narrowly:
+it is a denylist of five known leak shapes — a dotted-quad IP, an
+`http(s)://` scheme, the word "kubeconfig", a `/home/` path prefix, a bare
+`@` — and it runs over a generated train/val batch only, never over
+`generate.test_set()`. One carve-out: three corpus files still carry the
+chaos harness's own deterministic name for its disposable, CI-created kind
+node (`kubeagent-chaos-v1-<minor>-worker`) — not a live identifier, since
+it names no reachable node or real cluster; see `data/corpus/README.md`
+for why those rows were kept byte-identical rather than scrubbed.
 
 ## Scoreboard
 
-(Recorded by the release process — see docs/runbooks/train.md step 4.)
+(Recorded by the release process — see `docs/runbooks/train.md` step 6 for
+the bar it is read against.) Do not read it without `docs/model-card.md`'s
+"How to read the scoreboard" and "Known limitations": several of these
+metrics cannot fail, and none of them separates a model that reads the
+evidence from one that recites per-entry answers.
 
 ## License
 
 Apache-2.0. Contributions require DCO sign-off (`git commit -s`).
+
+The shipped GGUF (`dist/kubeagent-verdict-0.6b-q8_0.gguf`) merges a LoRA
+adapter into the base model, so it is a derivative of that base model too,
+not only of this repo's training code. The base is `Qwen/Qwen3-0.6B`
+(`train/config.py`'s pinned `base`, downloaded via
+`transformers.AutoModelForCausalLM.from_pretrained` in `train.py` and
+`export.py`); `docs/design.md`'s design record states it is Apache-2.0.
+This repo does not vendor or re-attest that license — consult the base
+model's own Hugging Face repository (`Qwen/Qwen3-0.6B`) for its current
+terms.

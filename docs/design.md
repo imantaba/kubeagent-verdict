@@ -106,7 +106,7 @@ kubeagent-verdict/
 ├── LICENSE                     # Apache-2.0
 ├── README.md                   # purpose, provenance rules, runbooks
 ├── pyproject.toml              # package + pinned tool config
-├── requirements.lock           # fully pinned environment
+├── requirements.lock           # pinned versions; the reproducible install in README + train.md
 ├── contract/                   # the pinned interface to kubeagent
 │   ├── PIN.md                  # what is pinned, to which kubeagent version
 │   ├── system_prompt.txt       # verdictSystemPrompt, verbatim
@@ -154,17 +154,27 @@ Training inputs are exactly two, and nothing else is ever a source:
    snapshots under `data/corpus/` record which nightly run they came from.
 2. **The known-issues reference** — a vendored snapshot of kubeagent's
    `internal/knownissues` sixteen entries (kind, summary, detail, causes,
-   checks), pinned to v1.23.0 in the snapshot's header. kubeagent's
-   `known-issues` command has no JSON output, so the snapshot is derived by
-   hand from the Go slice literal and carries the source file and version.
+   checks, docs). The snapshot itself is a bare JSON array with no header: the
+   v1.23.0 pin lives in `contract/PIN.md`'s repo-wide "pinned against" line,
+   not in this file. It cannot carry one anywhere — `knownissues.py`'s
+   strict loader requires the top level to be a list and rejects any entry
+   whose fields are not exactly `kind`, `summary`, `detail`, `causes`,
+   `checks`, `docs`, so a header object of any shape fails to load.
+   kubeagent's `known-issues` command has no JSON output, so the snapshot is
+   derived by hand from the Go slice literal.
 
 Every identifier the generator invents comes from a fixed synthetic
 vocabulary (the `web-abc` / `shop` / `worker-1` / `registry.example.com`
-class). A provenance test scans the generated dataset for any name-shaped,
-host-shaped or address-shaped token outside the allowlist and fails on the
-first hit. No live cluster name, node name, private IP, internal hostname,
-kubeconfig path or context name can enter a tracked file — the same rule
-kubeagent's own repository enforces.
+class). A provenance test (`test_provenance_no_banned_text`) checks a
+generated train/val batch against five fixed regexes — a dotted-quad IP, an
+`http(s)://` scheme, the word "kubeconfig", a `/home/` path prefix, a bare
+`@` — and fails on the first hit. It is a denylist of five known leak
+shapes, not a scan for every token outside the synthetic allowlist, and it
+never runs against `generate.test_set()` — the corpus-derived, held-out-case
+and probe rows are unchecked. No live cluster name, node name, private IP,
+internal hostname, kubeconfig path or context name is meant to enter a
+tracked file — the same rule kubeagent's own repository enforces — but this
+test only catches the five shapes above, in the train/val pool.
 
 ## The dataset generator (kv-dataset)
 
@@ -199,12 +209,32 @@ Each catalog entry declares:
 - evidence-line templates;
 - the correct verdict: cause, confidence, a one-sentence rationale template.
 
-**The corpus grounds the catalog.** An entry's evidence templates may only
-claim signals the corpus's assertion lines show kubeagent actually surfacing
-for that slug. `configmap-aws-key-leak`'s corpus row asserts "leak location
-named" — so its evidence shows the ConfigMap finding, not invented kubelet
-logs. This is what keeps the synthetic data honest about what kubeagent's
-bounded reads can really contain.
+**The corpus grounds the catalog — for entries that opt in.** A `grounding`
+declaration (`CatalogEntry.grounding`, a tuple of substrings) is optional
+per entry, and the test that checks it,
+`test_grounding_substrings_appear_in_corpus`, skips any entry that leaves it
+unset. `memory-limit-oomkill` declares `grounding=("OOMKilled",)`, and its
+corpus row does assert "OOMKilled diagnosed (found 'OOMKilled')".
+
+Read that check narrowly, because it is narrow. It compares the entry's
+hand-written `grounding` tuple against the corpus assertion text and
+nothing else — `CatalogEntry.evidence` is never read by it, and the two
+fields are not tied together anywhere in the code. Four of the five
+entries that declare grounding prove the gap: `coredns-corefile-broken`
+grounds on `kube-system/coredns` while its evidence line reads
+`container "coredns", restartCount=6`; `worker-containerd-stop` grounds on
+`NotReady` against a `RunContainerError` evidence line;
+`deployment-bad-image-tag` grounds on `ImagePullBackOff` against a
+`Failed to pull image` line; `node-cordon-diskfull` grounds on
+`Unschedulable` while its evidence carries only the lowercase spelling. So
+what the corpus grounds is the declaration, not the evidence template the
+model actually trains on.
+
+And it grounds only where an entry opts in: of the 8 trainable entries
+whose slug has corpus coverage, 5 declare grounding;
+`networkpolicy-deny-all`, `oversized-job-unschedulable` and `crashloop-pod`
+are also trainable, also have corpus rows for their slug, and declare
+none — for those, nothing is checked against the corpus at all.
 
 Rationale and summary text is templated from the known-issues causes/checks
 phrasing and the corpus assertion phrasing, with bounded seeded variation —
@@ -220,10 +250,16 @@ The case mix is what adjudication means, in approximate proportions:
 | Candidate attributed, evidence supports it | ~40% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
-| Multi-workload prompts (2–10 flagged, mixed causes) | ~15% | One verdict row per listed workload, no extras |
+| Multi-workload prompts (2–4 flagged, mixed causes) | ~15% | One verdict row per listed workload, no extras |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
+
+The generator's `multi` case draws `rng.randint(2, 4)` workloads per
+example — it never reaches kubeagent's own gather cap. Verdict contract v1
+allows up to `MAX_VERDICT_ROWS` (10, mirroring kubeagent's
+`MAX_GATHER_WORKLOADS`), so the training data never exercises a prompt at
+the width the real interface permits.
 
 Confidence labels are derived from explicit evidence-strength rules in the
 catalog (direct signal present → high; consistent but indirect → medium;
@@ -268,8 +304,11 @@ truncated or thin → low), so calibration is trained, not guessed.
 
 ## Training (kv-train)
 
-- HF `transformers` + `peft` LoRA on CPU; environment fully pinned by
-  `requirements.lock`.
+- HF `transformers` + `peft` LoRA on CPU; the release runbook
+  (`docs/runbooks/train.md`) installs from `requirements.lock` for the exact
+  versions a release was built and evaluated against. A plain
+  `pip install -e .` — the README's Pipeline section, and every CI job —
+  resolves `pyproject.toml`'s loose lower bounds instead.
 - Defaults, all in one committed config file: r=16, α=32, targeting the
   attention and MLP projections, 2–3 epochs, effective batch via gradient
   accumulation, fixed seed.
@@ -383,18 +422,68 @@ measure extraction; the decoy rate and the length split measure judgement,
 and each one rules out a shortcut the other cannot see.
 
 The length split is a **measurement, not a repair**. The cue lives in 19
-hand-authored winner/loser phrase pairs in the catalog, whose winner text is
-lifted from the strings kubeagent's `internal/rootcause` actually emits —
-so equalising word counts would de-align the shipped model from its only
-consumer's vocabulary to close a shortcut nothing has yet shown the model
-takes. The split makes the shortcut visible first; whether to rebalance the
-catalog is then a decision from data rather than a guess.
+hand-authored winner/loser phrase pairs in the catalog, and it is there for
+a reason that is not an accident of drafting: a correct root cause names a
+specific mechanism, while a plausible wrong answer names a category, so the
+right answer tends to be the longer sentence — in kubeagent's own reports as
+much as here. Equalising the counts by hand would be tuning the data until
+the metric reads well, which is the opposite of what the metric is for. The
+split makes the shortcut visible first; whether to rebalance the catalog is
+then a decision from data rather than a guess.
+
+(An earlier draft justified leaving the cue alone on the grounds that the
+winner phrases were lifted verbatim from `internal/rootcause`, so shortening
+them would de-align the model from its consumer's vocabulary. That was
+checked and is false — none of `rootcause.go`'s shapes matches a
+`winner_cause` value; every one is hand-authored here. The cue is therefore
+this repository's to fix, if the data ever says it should be.)
 
 **An eval change that could not fail the model it replaced is not a fix.**
 Before a retrain begins on a corrected dataset, the corrected eval is run
 against the previous model and must fail it. An eval that still scores the
 broken model highly is not sensitive enough to gate the retrain, and that
 costs one eval run to discover instead of one training run.
+
+**A known limitation: the eval does not test entry-level generalisation.**
+`generate()`'s `rotate(i)` cycles `catalog.trainable()` into the train/val
+pool, and both `held_out_case_set()` and `probe_sets()` iterate
+`catalog.trainable()` too — so every trainable catalog entry appears in
+train, val and test alike, and no entry is ever held out of training. Each
+entry's issue/reason/evidence finding block is also a fingerprint: the
+tuples are distinct across all 19 trainable entries, so a model could in
+principle skip the candidate list entirely and answer from a memorised
+finding-block-to-winner-cause lookup instead of judging the evidence.
+`positional_probe`, `misattribution_probe` and `multi_misattribution_probe`
+cannot catch that: all three perturb only the candidates section and leave
+the finding block untouched, so a pure lookup table scores 1.0 on each with
+a decoy rate of 0.0.
+
+An earlier draft of this section claimed the discriminator already existed
+— that `none_of_these`, `own_cause` and `empty_candidates` hold the finding
+block fixed while requiring an answer other than the stored `winner_cause`,
+and so cannot be passed by recitation. **That claim is retracted.** Scoring
+the known-broken first tune, which follows the `attributed` tag 79% of the
+time on `misattribution_probe`, gives `none_of_these` 1.0, `own_cause`
+0.5789 and `empty_candidates` 0.5789. A model proven not to read the
+evidence clears all three. They are not a discriminator.
+
+A fourth slice, `contradiction_probe`, was then built specifically to be
+one, and negative control v4 scored the same broken model on it: **1.0
+cause, 0.0 decoy**, with the expected rationale and summary reproduced
+verbatim. It reuses `none_of_these_case`'s read text, and `none_of_these`
+is 15% of the curriculum, so the contradiction sentence is a trained
+trigger for a trained answer template rather than something to reason
+about. Holding the adversarial menu roughly fixed and changing only the
+read text moves cause accuracy from 0.1579 (`misattribution_probe`) and
+0.4737 (`wrong_attribution`) to 1.0. The slice is kept — it does defeat an
+index-copier, a tag-copier and a word counter — but not as a memorisation
+test.
+
+The honest position for v0.1.0: **no slice built from this catalog can
+separate a model that reads from one that recites per-entry answers, while
+every entry appears in training.** Closing it means holding whole catalog
+entries out of train and retraining; this release does not do that, and the
+scoreboard should not be read as evidence of entry-level generalisation.
 
 ## Testing
 
@@ -404,8 +493,10 @@ costs one eval run to discover instead of one training run.
 - **Determinism test** — same seed + inputs → byte-identical JSONL.
 - **Split-integrity test** — no family straddles train/validation; test
   fixtures appear in neither.
-- **Provenance scan** — no identifier outside the synthetic allowlist
-  anywhere in generated data.
+- **Provenance scan** — a five-shape denylist (dotted-quad IP, `http(s)://`,
+  "kubeconfig", `/home/`, bare `@`) over a generated train/val batch. Not a
+  scan for every token outside the synthetic allowlist, and it does not run
+  over `generate.test_set()`.
 - **Corpus loader tests** — required keys enforced; slug must be in the
   closed vocabulary; `unknown-scenario` refused; a malformed row is withheld
   and counted, never guessed — the corpus contract's own words.
@@ -418,7 +509,7 @@ costs one eval run to discover instead of one training run.
 
 ## CI
 
-GitHub Actions on every push: lint, pytest, a 50-example smoke dataset build
+GitHub Actions on every push: lint, pytest, a 60-example smoke dataset build
 with a pinned seed, and a one-step training smoke to catch transformers/peft
 API drift. **No real training in CI** — training runs on the operator's
 machine per the runbook. Releases are manual: a tagged GitHub release with

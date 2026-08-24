@@ -1,8 +1,15 @@
 # Runbook: training a release candidate
 
-All commands run from the repo root, inside the venv. The full pipeline is
-CPU-only and takes several hours on a workstation — run the training step
-under `nohup` and watch `train_log.json`.
+All commands run from the repo root, inside a venv installed from the
+pinned lock file:
+
+    pip install -r requirements.lock -e .
+
+That buys the exact dependency versions the release was built and
+evaluated against, not whatever `pyproject.toml`'s loose lower bounds
+resolve to today. The full pipeline is CPU-only and takes several hours
+on a workstation — run the training step under `nohup` and watch
+`train_log.json`.
 
 1. **Dataset** (seconds):
 
@@ -82,5 +89,26 @@ under `nohup` and watch `train_log.json`.
      without reading anything. A wide gap invalidates the decoy rate;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
+
+   **What this bar does NOT decide, and a decider that was withdrawn.** A
+   fifth bullet used to stand first here: cause accuracy on `none_of_these`,
+   `own_cause` and `empty_candidates` substantially above zero, on the
+   grounds that only those slices require an answer other than the entry's
+   stored winner cause, so only they can catch a model reciting a
+   memorised entry-to-cause lookup table. It was withdrawn because it does
+   not do that. Scored against the known-broken first tune — a model that
+   follows the `attributed` tag 79% of the time on `misattribution_probe` —
+   those three slices read 1.0, 0.5789 and 0.5789. It clears the bar it was
+   supposed to fail. A fourth slice built to replace it,
+   `contradiction_probe`, was measured the same way (negative control v4)
+   and read 1.0 cause / 0.0 decoy, because it reuses the read text of
+   `none_of_these`, which is 15% of the curriculum — a trained trigger, not
+   a reasoning test.
+
+   Every trainable catalog entry appears in train, val and test, so **no
+   slice in this eval separates a model that reads the evidence from one
+   that recites per-entry answers.** Do not read this scoreboard as evidence
+   of entry-level generalisation. Fixing it means holding whole catalog
+   entries out of train and retraining; see `docs/design.md`.
 
    Then the live tier: `docs/runbooks/live-eval.md`.
