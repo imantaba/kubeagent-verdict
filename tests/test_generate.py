@@ -51,9 +51,9 @@ def test_to_row_schema():
 
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
-    assert counts == {"attributed": 400, "none_of_these": 150, "own_cause": 100,
+    assert counts == {"attributed": 300, "none_of_these": 150, "own_cause": 100,
                       "multi": 150, "truncated": 50, "injection": 100,
-                      "empty_candidates": 50}
+                      "empty_candidates": 50, "wrong_attribution": 100}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
 
 
@@ -61,7 +61,8 @@ def test_case_mix_present_in_generated_set():
     exs = generate.generate(seed=17, size=200)
     seen = {ex.case for ex in exs}
     assert seen == {"attributed", "none_of_these", "own_cause", "multi",
-                    "truncated", "injection", "empty_candidates"}
+                    "truncated", "injection", "empty_candidates",
+                    "wrong_attribution"}
 
 
 def test_split_never_straddles_a_group():
@@ -88,3 +89,39 @@ def test_drop_held_out_removes_colliding_groups():
     kept = generate.drop_held_out(exs, fake_test)
     assert exs[0].group not in {ex.group for ex in kept}
     assert len(kept) < len(exs)
+
+
+def test_test_set_is_not_all_one_case():
+    # The first tuned model was scored on a held-out set that was 100%
+    # `attributed`, so ~45% of the curriculum trained and was never measured.
+    cases_seen = {ex.case for ex in generate.test_set()}
+    assert "attributed" in cases_seen
+    assert cases_seen >= set(generate.HELD_OUT_CASES)
+    assert {"positional_probe", "misattribution_probe"} <= cases_seen
+
+
+def test_probe_rows_never_enter_train_or_val():
+    exs = generate.generate(seed=17, size=300)
+    train, val = generate.split(exs, seed=17)
+    test = generate.test_set()
+    train = generate.drop_held_out(train, test)
+    val = generate.drop_held_out(val, test)
+    banned = {"positional_probe", "misattribution_probe"}
+    assert not banned & {ex.case for ex in train + val}
+    held = {ex.group for ex in test}
+    for ex in train + val:
+        assert not any(part in held for part in ex.group.split("+"))
+
+
+def test_test_set_is_deterministic():
+    assert [generate.to_row(x) for x in generate.test_set()] == \
+           [generate.to_row(y) for y in generate.test_set()]
+
+
+def test_every_probe_row_carries_a_decoy_that_is_not_the_answer():
+    for ex in generate.test_set():
+        if ex.case not in ("positional_probe", "misattribution_probe"):
+            continue
+        assert ex.meta["decoy_cause"]
+        assert ex.meta["decoy_cause"] != ex.meta["expected_cause"]
+        assert ex.meta["decoy_cause"] in ex.user

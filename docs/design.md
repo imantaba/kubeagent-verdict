@@ -189,7 +189,13 @@ Each catalog entry declares:
 
 - the inventory findings that fault produces;
 - the candidate list the deterministic pass would offer — winner, ruled-out
-  losers, outranked alternatives, in kubeagent's trace vocabulary;
+  losers, outranked alternatives, in kubeagent's trace vocabulary. The
+  rendered order is **shuffled per example**: kubeagent's own annotators
+  (`internal/rootcause/rootcause.go`) walk a verdict-blind `sort.Strings`
+  key, so a ruled-out candidate can precede the attributed one in the field.
+  Rendering the winner first taught position as a shortcut the real system
+  never supplies, and the first tuned model learned to answer by index
+  rather than by evidence;
 - evidence-line templates;
 - the correct verdict: cause, confidence, a one-sentence rationale template.
 
@@ -236,6 +242,19 @@ truncated or thin → low), so calibration is trained, not guessed.
 - Held-out **test** fixtures are corpus-derived: one per corpus row, built
   from that scenario's family with the known injected fault as the required
   verdict. They appear in neither training nor validation.
+- The test set is **stratified across the curriculum**, not corpus rows
+  alone. Corpus rows are all `attributed`, so a corpus-only test set scores
+  one case while reporting an overall rate, and the ~45% of the mix that is
+  `none_of_these`, `own_cause`, `truncated`, `injection`,
+  `empty_candidates` and `wrong_attribution` trains without ever being
+  measured. One held-out example per (trainable entry, case) closes that.
+- Two **eval-only adversarial slices** exist that no training example can
+  imitate. `positional_probe` places the correct candidate LAST with an
+  honest `attributed` tag. `misattribution_probe` places it last AND hands
+  `attributed` to a decoy the evidence contradicts. Both are deterministic
+  — never shuffled — because their purpose is to hold the shortcut fixed
+  against the correct answer. Their groups are held out of train and val,
+  so the model has never seen that (entry, workload) pair.
 
 ## Training (kv-train)
 
@@ -283,7 +302,16 @@ confidence from the closed set, line-length bounds. Then task metrics:
 - cause accuracy — candidate picked verbatim when right, correct
   `none_of_these` when right;
 - injection-resistance rate on the hardening cases;
-- confidence calibration against the catalog's evidence-strength labels.
+- confidence calibration against the catalog's evidence-strength labels;
+- **decoy rate** — how often the model names the cause that position or the
+  `attributed` tag points at while the evidence points elsewhere. This is
+  the metric that distinguishes reading from reciting; the other three
+  cannot, because a shortcut-following model scores 1.0 on all of them.
+
+Every rate travels with its denominator, and an unmeasured rate renders as
+`n/a` rather than as `0.0`. The first tuned model's headline
+`injection_echo_rate: 0.0` was a hardcoded default over an empty slice —
+the most reassuring number on the board measured nothing at all.
 
 One scoreboard file per run. The **untuned base model is scored once** as the
 baseline; every improvement is measured against it, so "the fine-tune helped"
@@ -296,9 +324,22 @@ requires the operator's explicit authorization every time; nothing in this
 repository ever runs it.
 
 **Acceptance for shipping a model release:** the offline scoreboard beats the
-untuned baseline on every metric, contract validity is 100%, and the live
-tier names the injected fault correctly on the chaos scenarios that flag
-workloads.
+untuned baseline on every metric, contract validity is 100%, the **decoy
+rate on both adversarial slices is low**, and the live tier names the
+injected fault correctly on the chaos scenarios that flag workloads.
+
+The decoy-rate bar is not optional and not a tie-breaker. A model that
+answers by position or by tag can score 1.0 on contract validity, cause
+accuracy and confidence match simultaneously — the first tuned model did
+exactly that — because the expected cause is printed verbatim in its own
+prompt beside the `attributed` tag. Those three metrics measure extraction.
+Only the decoy rate measures judgement.
+
+**An eval change that could not fail the model it replaced is not a fix.**
+Before a retrain begins on a corrected dataset, the corrected eval is run
+against the previous model and must fail it. An eval that still scores the
+broken model highly is not sensitive enough to gate the retrain, and that
+costs one eval run to discover instead of one training run.
 
 ## Testing
 

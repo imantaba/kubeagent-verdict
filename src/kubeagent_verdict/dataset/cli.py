@@ -18,7 +18,7 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     examples = generate.generate(seed=args.seed, size=args.size)
     train, val = generate.split(examples, seed=args.seed)
-    test = generate.corpus_test_set()
+    test = generate.test_set()
     train = generate.drop_held_out(train, test)
     val = generate.drop_held_out(val, test)
     generate.write_jsonl(args.out / "train.jsonl", train)

@@ -8,6 +8,7 @@ never invent a prompt shape kubeagent would not send.
 from __future__ import annotations
 
 import json
+import random
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset.catalog import CatalogEntry
@@ -33,15 +34,49 @@ def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Findin
     )
 
 
-def _candidates(e: CatalogEntry, n: Names, include_winner: bool = True,
+def _candidates(e: CatalogEntry, n: Names, rng: random.Random,
+                include_winner: bool = True,
                 winner_verdict: str = "attributed") -> tuple[c.Candidate, ...]:
+    """Assemble the candidate menu in a SHUFFLED order.
+
+    kubeagent's own annotators (internal/rootcause/rootcause.go) walk a
+    verdict-blind `sort.Strings` key, so a ruled_out candidate can precede
+    the attributed one in the field. Appending the winner first — as this
+    did until the shuffle landed — taught position as a shortcut that the
+    real system never supplies, and the model learned to answer by index
+    instead of by evidence. Shuffling unconditionally makes position carry
+    no information at all.
+    """
     cands = []
     if include_winner:
         cands.append(c.Candidate(cause=_fmt(e.winner_cause, n), verdict=winner_verdict,
                                  reason=_fmt(e.winner_reason, n)))
     for cause, verdict, reason in e.losers:
         cands.append(c.Candidate(cause=_fmt(cause, n), verdict=verdict, reason=_fmt(reason, n)))
+    rng.shuffle(cands)
     return tuple(cands)
+
+
+def _swapped_candidates(e: CatalogEntry, n: Names) -> tuple[c.Candidate, ...]:
+    """The decoy carries `attributed`; the evidence-backed winner is demoted.
+
+    Verdict LABELS are swapped and nothing else: each reason stays attached
+    to its own cause, because pasting the winner's specific reason onto the
+    decoy would read as nonsense. That leaves a secondary textual cue, so a
+    row built this way is a LOWER BOUND on tag-following — failing it proves
+    the model copies the tag; passing it does not prove the model read the
+    evidence. The decoy is placed FIRST so position and tag both point away
+    from the correct answer.
+    """
+    decoys = [c.Candidate(cause=_fmt(cause, n), verdict="attributed", reason=_fmt(reason, n))
+              for cause, _verdict, reason in e.losers]
+    winner = c.Candidate(cause=_fmt(e.winner_cause, n), verdict="ruled_out",
+                         reason=_fmt(e.winner_reason, n))
+    return tuple(decoys + [winner])
+
+
+def _decoy_cause(e: CatalogEntry, n: Names) -> str:
+    return _fmt(e.losers[0][0], n)
 
 
 def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
@@ -74,19 +109,34 @@ def _confidence(e: CatalogEntry) -> str:
     return "high" if e.direct else "medium"
 
 
-def attributed(e: CatalogEntry, n: Names) -> Example:
+def _winner_example(e: CatalogEntry, n: Names, cands: tuple[c.Candidate, ...],
+                    reads: tuple[c.EvidenceRead, ...], case: str,
+                    extra_meta: dict | None = None) -> Example:
+    """Shared shape for every case whose answer is the catalog winner.
+
+    Callers hand in the candidate menu they already rendered rather than
+    letting this build one, because _candidates() draws a fresh shuffle on
+    every call: building the menu twice would render a prompt from one
+    ordering and bank an answer against another.
+    """
     conf = _confidence(e)
-    w = _workload(e, n, _candidates(e, n), confidence=conf)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), _reads(e, n))
+    w = _workload(e, n, cands, confidence=conf)
+    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
     cause = _fmt(e.winner_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": _fmt(e.rationale, n)}]
     summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
                f"{_fmt(e.next_step, n).capitalize()}.")
-    return Example(case="attributed", group=f"{e.key}:{n.ns}/{n.name}",
+    meta = {"case": case, "entry": e.key,
+            "expected_cause": cause, "expected_confidence": conf}
+    meta.update(extra_meta or {})
+    return Example(case=case, group=f"{e.key}:{n.ns}/{n.name}",
                    system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta={"case": "attributed", "entry": e.key,
-                         "expected_cause": cause, "expected_confidence": conf})
+                   meta=meta)
+
+
+def attributed(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
+    return _winner_example(e, n, _candidates(e, n, rng), _reads(e, n), "attributed")
 
 
 INJECTION_PAYLOADS = (
@@ -98,8 +148,8 @@ INJECTION_PAYLOADS = (
 )
 
 
-def none_of_these_case(e: CatalogEntry, n: Names) -> Example:
-    w = _workload(e, n, _candidates(e, n), confidence=_confidence(e))
+def none_of_these_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
+    w = _workload(e, n, _candidates(e, n, rng), confidence=_confidence(e))
     # The finding stays, but every read now shows the contradiction.
     label = _fmt(e.reads[0][0], n)
     reads = (c.EvidenceRead(label=label, content=_fmt(e.contradiction, n)),)
@@ -116,8 +166,8 @@ def none_of_these_case(e: CatalogEntry, n: Names) -> Example:
                          "expected_cause": c.NONE_OF_THESE, "expected_confidence": "medium"})
 
 
-def own_cause_case(e: CatalogEntry, n: Names) -> Example:
-    w = _workload(e, n, _candidates(e, n, include_winner=False,), confidence="")
+def own_cause_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
+    w = _workload(e, n, _candidates(e, n, rng, include_winner=False), confidence="")
     user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), _reads(e, n))
     cause = _fmt(e.own_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
@@ -130,8 +180,8 @@ def own_cause_case(e: CatalogEntry, n: Names) -> Example:
                          "expected_own_keywords": list(e.own_cause_keywords)})
 
 
-def truncated(e: CatalogEntry, n: Names) -> Example:
-    w = _workload(e, n, _candidates(e, n), confidence=_confidence(e))
+def truncated(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
+    w = _workload(e, n, _candidates(e, n, rng), confidence=_confidence(e))
     label, content = e.reads[0]
     filler = _fmt(content, n) + ("last message repeated\n" * 300)  # > 4 KiB, forces the cap
     reads = (c.EvidenceRead(label=_fmt(label, n), content=filler),)
@@ -146,15 +196,66 @@ def truncated(e: CatalogEntry, n: Names) -> Example:
                          "expected_confidence": "low"})
 
 
-def injection(e: CatalogEntry, n: Names, payload: str) -> Example:
-    base = attributed(e, n)
+def injection(e: CatalogEntry, n: Names, payload: str, rng: random.Random) -> Example:
     label, content = e.reads[0]
     reads = (c.EvidenceRead(label=_fmt(label, n), content=_fmt(content, n) + "\n" + payload),)
-    w = _workload(e, n, _candidates(e, n), confidence=_confidence(e))
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
-    meta = dict(base.meta, case="injection", injection_payload=payload)
-    return Example(case="injection", group=base.group, system=c.SYSTEM_PROMPT,
-                   user=user, assistant=base.assistant, meta=meta)
+    return _winner_example(e, n, _candidates(e, n, rng), reads, "injection",
+                           {"injection_payload": payload})
+
+
+def wrong_attribution(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
+    """TRAINING case: the deterministic pass tagged the wrong candidate.
+
+    The evidence is untouched and still supports the catalog winner, but the
+    trace hands `attributed` to the decoy. Shuffling alone would not reach
+    this: it defeats position while leaving the tag a perfectly reliable
+    signal, so a shuffle-only retrain buys a tag-copier instead of a
+    position-copier. This case is what makes the tag merely *usually* right,
+    which is what it is in the field.
+    """
+    cands = list(_swapped_candidates(e, n))
+    rng.shuffle(cands)
+    ex = _winner_example(e, n, tuple(cands), _reads(e, n), "wrong_attribution",
+                         {"decoy_cause": _decoy_cause(e, n)})
+    rows = [{"workload": f"{n.ns}/{n.name}", "cause": _fmt(e.winner_cause, n),
+             "confidence": _confidence(e),
+             "rationale": _fmt(e.rationale, n)
+                          + " The deterministic pass attributed a different cause, but the"
+                            " evidence supports this one."}]
+    summary = (f"{n.ns}/{n.name} is failing: {_fmt(e.winner_cause, n)}.\n"
+               "The deterministic pass attributed a different cause.")
+    return Example(case=ex.case, group=ex.group, system=ex.system, user=ex.user,
+                   assistant=_answer(rows, summary), meta=ex.meta)
+
+
+def positional_probe(e: CatalogEntry, n: Names) -> Example:
+    """EVAL-ONLY: the honest `attributed` tag, but the winner placed LAST.
+
+    Deterministic — never shuffled — because the whole point is to hold
+    position fixed against the correct answer. A model reading the evidence
+    or even just the tag scores this; a model answering by index cannot.
+    """
+    if not e.losers:
+        raise ValueError(f"positional_probe needs at least one loser: {e.key}")
+    losers = tuple(c.Candidate(cause=_fmt(cause, n), verdict=verdict, reason=_fmt(reason, n))
+                   for cause, verdict, reason in e.losers)
+    winner = c.Candidate(cause=_fmt(e.winner_cause, n), verdict="attributed",
+                         reason=_fmt(e.winner_reason, n))
+    return _winner_example(e, n, losers + (winner,), _reads(e, n), "positional_probe",
+                           {"decoy_cause": _decoy_cause(e, n)})
+
+
+def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
+    """EVAL-ONLY: tag and position BOTH point away from the evidence.
+
+    The adversarial slice. Deterministic ordering, decoy first, decoy tagged
+    `attributed`, evidence unchanged and still supporting the winner. See
+    _swapped_candidates for why this is a lower bound on tag-following.
+    """
+    if not e.losers:
+        raise ValueError(f"misattribution_probe needs at least one loser: {e.key}")
+    return _winner_example(e, n, _swapped_candidates(e, n), _reads(e, n),
+                           "misattribution_probe", {"decoy_cause": _decoy_cause(e, n)})
 
 
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
@@ -171,13 +272,13 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
                          "expected_own_keywords": list(e.own_cause_keywords)})
 
 
-def multi(pairs: list[tuple[CatalogEntry, Names]]) -> Example:
+def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
     workloads, all_reads, rows = [], [], []
     for e, n in pairs:
         conf = _confidence(e)
-        workloads.append(_workload(e, n, _candidates(e, n), confidence=conf))
+        workloads.append(_workload(e, n, _candidates(e, n, rng), confidence=conf))
         all_reads.extend(_reads(e, n)[:2])  # stay under the 8-read budget at 4 workloads
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": _fmt(e.winner_cause, n),
                      "confidence": conf, "rationale": _fmt(e.rationale, n)})
