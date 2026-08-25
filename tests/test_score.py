@@ -383,11 +383,34 @@ def test_independence_language_on_an_independent_row_scores_zero():
         "rate": 0.0, "n": 1}
 
 
-# The honesty gate. "NOT caused by a shared origin" contains shared-origin
-# language and is CORRECT; scoring it 1.0 would manufacture a failure.
-def test_both_phrase_kinds_present_is_ambiguous_not_a_failure():
+# "NOT caused by a shared origin" contains shared-origin language and is
+# CORRECT; scoring it 1.0 would manufacture a failure. Under the pre-fix
+# rule this landed in the ambiguous bucket (None) only by accident: the
+# raw substring match counted "shared origin" as a claim regardless of the
+# "not" in front of it, and it was saved from a false 1.0 only because
+# "unrelated" also matched. Negation-aware matching now reads the "shared
+# origin" occurrence itself as negated, so BOTH signals agree it is a
+# denial -- a semantic correction to 0.0, not a relaxation of the gate.
+def test_negated_shared_phrase_with_independence_phrase_is_a_denial():
     results = _multi_row(
         "These are not caused by a shared origin; they are unrelated.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": 0.0, "n": 1}
+    assert board["overall"]["shared_ambiguous_n"] == 0
+
+
+# The ambiguous branch still needs a test that can fail if it breaks. This
+# sentence carries an UN-NEGATED shared-claim phrase ("shared origin") next
+# to an independence phrase ("independent") describing a DIFFERENT pair of
+# workloads -- both signals fire and neither negates the other, so this is
+# genuinely mixed under the corrected rule, not an artefact of a naive
+# substring check.
+def test_unnegated_shared_phrase_with_independence_phrase_is_ambiguous():
+    results = _multi_row(
+        "The database outage is the shared origin, but the two web "
+        "failures are independent.")
     assert results[0]["false_shared"] is None
     assert results[0]["shared_ambiguous"] is True
     board = score.scoreboard(results)
@@ -414,3 +437,67 @@ def test_unanswered_row_is_none_and_not_ambiguous():
     assert results[0]["false_shared"] is None
     assert results[0]["shared_ambiguous"] is False
     assert score.scoreboard(results)["overall"]["shared_ambiguous_n"] == 0
+
+
+def _multi_row_with(summary, phrases):
+    """Like `_multi_row`, with an explicit phrase list -- for phrases outside
+    the four `_multi_row` hardcodes."""
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": phrases}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": summary})
+    return score.evaluate([row], lambda messages: answer)
+
+
+# Only 4 of the 10 SHARED_CLAIM_PHRASES had a negation counterpart in
+# INDEPENDENCE_PHRASES, by accident of wording ("shared"/"common" paired
+# with "no shared"/"no common"). The other six -- same underlying, same
+# root cause, upstream, cascading, knock-on, caused by the same -- had
+# none, so an honest denial of one of them used to score a hard 1.0
+# false-shared failure with zero visibility. These three cover three of
+# those six directly.
+def test_negated_same_underlying_scores_zero():
+    results = _multi_row("Not the same underlying problem.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_negated_upstream_scores_zero():
+    results = _multi_row(
+        "These are not caused by a shared upstream failure; each workload "
+        "has its own separate configuration problem.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_negated_cascading_scores_zero():
+    results = _multi_row_with(
+        "There is no cascading failure here; each pod fails for its own reason.",
+        ["cascading"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The fix must not turn every occurrence of a previously-uncovered phrase
+# into a denial -- an UN-NEGATED claim on one of the six still has to score
+# 1.0, the same as it always did for "shared origin".
+def test_unnegated_cascading_still_scores_one():
+    results = _multi_row_with(
+        "A cascading failure explains both outages.", ["cascading"])
+    assert results[0]["false_shared"] == 1.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The documented, accepted limit of the 24-character window: "no" reads as
+# negating "common cause" even though "there is no doubt" is an AFFIRMATION,
+# not a denial. This asserts the rule's actual behaviour (0.0, an
+# under-detected claim), never the value it ought to have (1.0) -- the
+# bounded heuristic's known cost, traded deliberately against manufacturing
+# a false 1.0 against a correct model under the <=1/19 acceptance bar.
+def test_the_no_doubt_defeat_case_is_the_documented_known_limit():
+    results = _multi_row_with(
+        "There is no doubt these share a common cause.", ["common cause"])
+    assert results[0]["false_shared"] == 0.0

@@ -8,6 +8,7 @@ the expected cause both come from what the generator committed to.
 from __future__ import annotations
 
 import json
+import re
 
 from kubeagent_verdict.contract import NONE_OF_THESE
 from kubeagent_verdict.evals.contract_check import contract_check
@@ -25,6 +26,59 @@ INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
                         "independently", "unrelated", "distinct causes",
                         "different causes", "not related", "no shared",
                         "no common")
+
+# Only 4 of the 10 SHARED_CLAIM_PHRASES have a negation counterpart above,
+# by accident of wording ("shared"/"common" happen to pair with "no shared"/
+# "no common"). The other six -- "same underlying", "same root cause",
+# "upstream", "cascading", "knock-on", "caused by the same" -- have none, so
+# an honest denial of one of them ("not caused by a shared upstream failure")
+# used to score a hard 1.0 false-shared failure with zero visibility. This is
+# the fix: negation-aware occurrence matching, applied to the shared-claim
+# phrases themselves rather than requiring a separate denial phrase for each.
+NEGATION_WINDOW = 24
+# Whole-word negators. "n't" is checked separately below, as a substring --
+# it is a contraction SUFFIX ("isn't", "doesn't") rather than a standalone
+# word, so a word-boundary match on it would not fire.
+NEGATORS = re.compile(r"\b(?:not|no|never|nor|without)\b")
+
+
+def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, bool]:
+    """Whether `summary` contains an un-negated shared-claim occurrence
+    (a claim) and whether it contains a negated one (a denial).
+
+    An occurrence is negated when a negator -- "not", "no", "never", "nor",
+    "without", or the "n't" contraction -- appears as a whole word in the
+    NEGATION_WINDOW characters immediately before it, clipped to the start
+    of the string.
+
+    This is a bounded heuristic, not a parser, and it is deliberately biased
+    toward the milder of its two possible errors. "there is no doubt these
+    share a common cause" reads the "no" inside the window before "common
+    cause" and misreads an affirmed claim as a denial, scoring 0.0 instead
+    of the correct 1.0 -- an under-detected claim. The alternative bias (a
+    narrower or absent window) manufactures a false 1.0 against a model that
+    was RIGHT, and given the <=1/19 acceptance bar that is the costlier
+    error: a bounded number of true claims read as denied is cheaper than
+    one correct model failing the gate. Do not read this function as sound
+    negation detection in general -- it is not, and the counter-example
+    above is the known, accepted cost of the bias.
+    """
+    claims = False
+    denies = False
+    for phrase in phrases:
+        phrase = str(phrase).lower()
+        start = 0
+        while True:
+            idx = summary.find(phrase, start)
+            if idx == -1:
+                break
+            window = summary[max(0, idx - NEGATION_WINDOW):idx]
+            if NEGATORS.search(window) or "n't" in window:
+                denies = True
+            else:
+                claims = True
+            start = idx + 1
+    return claims, denies
 
 
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
@@ -159,8 +213,8 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         shared_ambiguous = False
         if shared_phrases and answered:
             summary = str((doc or {}).get("summary", "")).lower()
-            claims = any(str(p).lower() in summary for p in shared_phrases)
-            denies = any(p in summary for p in INDEPENDENCE_PHRASES)
+            claims, negated = _shared_claim_signal(summary, shared_phrases)
+            denies = negated or any(p in summary for p in INDEPENDENCE_PHRASES)
             if claims != denies:
                 false_shared = 1.0 if claims else 0.0
             else:
