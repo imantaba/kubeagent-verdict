@@ -14,3 +14,6 @@ models/
 artifacts/
 *.gguf
 *.egg-info/
+# Subagent-driven-development scratch: per-plan ledger, task briefs, implementer
+# reports and review packages. Recoverable from git log, never part of it.
+.superpowers/
