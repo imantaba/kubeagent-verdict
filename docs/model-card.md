@@ -256,6 +256,30 @@ score in the table below should be read as evidence that it does. Fixing
 this requires holding whole catalog entries out of training and
 retraining — work this release does not contain.
 
+**Added after v0.1.0: one slice now introduces unfamiliar fault shapes,
+and the shipped model fails it.** `shared_origin_probe` does not draw from
+the catalog at all. Its six scenarios live in `dataset/propagation.py`,
+none of their cause strings appear anywhere in training, and its group keys
+are namespaced so it removes no training row. It is therefore the first
+slice in this eval where a per-entry lookup table has nothing to look up.
+
+That does not repair the limitation above — it confirms it from the other
+side. v0.1.0 scores **0.4333 cause accuracy** on the slice against 0.9959
+on the corpus test set, and calls the workloads independent on **10 of 10**
+rows. A model that had learned to read evidence would not drop by that much
+when the evidence stops matching a memorised entry. The measurement now
+exists and fails; teaching the correction is separate work, still not done.
+
+The slice's own limits are worth stating with it. Ten rows is a small
+sample, and the six scenarios are hand-written rather than observed on a
+cluster, so a pass on it would be evidence of generalisation across *these
+six shapes*, not across correlated failures in general. It is also the only
+slice that can fail on the summary alone, which is why
+`separate_reasons_rate` is a scoreboard column and not folded into
+`cause_accuracy`: a row can have every verdict right and still be wrong
+about whether the workloads share a cause, and averaging the two would hide
+exactly the half-learned state this slice exists to see.
+
 ### `cause` is a closed-set selection score, not free-text accuracy
 
 A rate cannot tell you which of those two things it is, so this was
@@ -334,9 +358,16 @@ the scoreboard can see, so it is a candidate to cut.
 The shipped GGUF was trained on a dataset generated at commit `8bd9d28`.
 Three later commits changed the generator, so `kv-dataset --seed 17
 --size 5500` on this tree produces a **different, corrected** dataset —
-4155/432/243 train/val/test against the 4312/451/205 the weights were
+4155/432/253 train/val/test against the 4312/451/205 the weights were
 trained on. Running the shipped pipeline end to end reproduces the
 method, not these weights.
+
+Ten of those 253 test rows are `shared_origin_probe`, appended after
+v0.1.0 was scored. It is why the test set no longer reads 243; train and
+val are unchanged at 4155/432, because the slice's group keys are
+namespaced and `drop_held_out` removes exactly the same 913 rows with and
+without it. Every scoreboard in this file below was measured on the
+243-row set and is left as measured.
 
 The practical consequence is contamination of two eval slices, measured
 rather than estimated (regenerate `8bd9d28`'s train+val in a worktree and

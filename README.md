@@ -67,9 +67,11 @@ corpus snapshot in `data/corpus/` — kubeagent `chaos-matrix` run id
 `32548862821`, dated 2026-08-22. **The shipped weights were trained on a
 dataset generated at commit `8bd9d28`, before three generator fixes
 landed**, so re-running that command on this tree produces a different,
-corrected dataset (4155/432/243 against the 4312/451/205 the weights saw).
+corrected dataset (4155/432/253 against the 4312/451/205 the weights saw).
 The consequence is measured, not estimated, and is the contamination
-disclosed below.
+disclosed below. The test set's last 10 rows are `shared_origin_probe`,
+added after v0.1.0 was scored; it took nothing from train or val, which are
+unchanged at 4155/432.
 
 | | released model | untuned base |
 |---|---|---|
@@ -106,6 +108,41 @@ scoreboard" and "Known limitations". In short, and each argued there:
   which capped two slices at 0.5789 for every model. Commit `70460e9`
   fixes it and negative-controls the fix; the runs were re-scored by
   replaying their recorded outputs, not re-run.
+
+### The shared-origin probe — added after v0.1.0
+
+The table above is a historical record of the 243-row test set and is left
+as it was measured. The test set is now 253 rows: `shared_origin_probe` was
+added afterwards, and v0.1.0 was scored against it separately.
+
+The slice puts 2–4 flagged workloads in one prompt, all downstream of a
+single broken component, so the correct answer names the same shared cause
+on every row. Nothing like it is in the training data — every multi-workload
+example there draws its constituents from distinct catalog entries and
+summarises them as "N workloads are failing for separate reasons," 825 rows
+of it with no counterexample anywhere. The slice adds no training rows and
+removes none: its group keys are namespaced, so `drop_held_out` cuts exactly
+the same 913 rows with and without it.
+
+| `shared_origin_probe`, v0.1.0 | |
+|---|---|
+| contract validity | 1.0 (10) |
+| cause accuracy | 0.4333 (10) |
+| decoy rate | 0.8 (10) |
+| separate-reasons rate | **1.0** (10) |
+| confidence carried | 0.5667 (10) |
+| overconfidence on wrong causes | 0.4583 (8) |
+
+Read the separate-reasons rate first: on 10 of 10 rows the model called the
+workloads independent. It is a separate axis from cause accuracy because the
+two fail apart — one row names the correct shared cause on both verdicts,
+refuses the decoy, and still opens its summary with "2 workloads are failing
+for separate reasons." Contract validity is 1.0 throughout, so this is a
+reasoning failure and not a parsing one.
+
+This is a negative control, not a regression. The slice was written to fail
+the shipped model: an eval change that could not fail the model it replaced
+is not a fix. Teaching the correction is separate work and has not been done.
 
 ## License
 
