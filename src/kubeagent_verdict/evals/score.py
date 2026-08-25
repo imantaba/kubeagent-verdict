@@ -80,25 +80,37 @@ def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, 
     backslash-b-anchored alternation cannot match "not" inside "cannot" or
     "no" inside "none" no matter how many other words the alternation lists.
 
-    Two known, accepted defeats of this heuristic, kept as documented limits
-    rather than "fixed", because neither is a missing word:
+    Two known, accepted CLASSES of defeat, kept as documented limits rather
+    than "fixed", because neither is a missing word. Each bullet names a
+    class and gives an example of it; the examples are illustrations, not an
+    enumeration of every sentence that defeats the heuristic:
 
-    - Filler word, false negative: "there is no doubt these share a common
-      cause" reads the "no" inside the window before "common cause" and
-      misreads an affirmed claim as a denial, scoring 0.0 instead of the
-      correct 1.0.
+    - Wrong-scope negator, false negative: "there is no doubt these share a
+      common cause" reads the "no" inside the window before "common cause"
+      and misreads an affirmed claim as a denial, scoring 0.0 instead of the
+      correct 1.0. The window has no grammar, so ANY negator whose scope is
+      a different predicate lands the same way: "this cannot be ruled out: a
+      shared origin ties these together" and "none other than a shared root
+      cause explains this outage" are the same class with different words,
+      and adding "cannot" and "none" to the vocabulary created those two
+      instances rather than fixing them. The sentence above is one
+      illustration of the class, not the only member of it.
     - Double negation, false negative: "this is not without a shared
       upstream trigger" is semantically a CLAIM (two negatives), but each
       negator independently marks its occurrence as denied, so it also
       scores 0.0 instead of the correct 1.0. This is a different pattern
-      from the filler-word case above -- a full semantic flip rather than a
-      stray word -- and no window size or vocabulary addition fixes it,
-      because the function does not compose negations; it only detects
-      their presence.
+      from the wrong-scope case above -- a full semantic flip rather than a
+      negator pointed elsewhere -- and no window size or vocabulary addition
+      fixes it, because the function does not compose negations; it only
+      detects their presence.
 
     Do not read this function as sound negation detection in general -- it
-    is not, and the two counter-examples above are the known, accepted cost
-    of the bias.
+    is not, and the two CLASSES above are the known, accepted cost of the
+    bias. Both err in the same direction -- a true claim read as denied,
+    never a denial read as a claim -- so neither can manufacture a false 1.0
+    against the acceptance bar. That is a property of these two classes
+    only, not of the heuristic: a negator MISSING from the vocabulary errs
+    the other way, as the paragraph above says.
     """
     claims = False
     denies = False

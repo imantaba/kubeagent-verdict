@@ -503,6 +503,32 @@ def test_the_no_doubt_defeat_case_is_the_documented_known_limit():
     assert results[0]["false_shared"] == 0.0
 
 
+# The SAME class as "no doubt" above, reached with the two words the negator
+# fix added. These two sentences did not defeat the heuristic before
+# "cannot" and "none" joined NEGATORS -- adding them created these
+# instances rather than fixing them, which is why the docstring now names
+# the bullet a CLASS and calls its example an illustration rather than an
+# enumeration. Pinned so that a later attempt to make the window
+# grammar-aware fails here and the docstring gets re-declared on purpose,
+# the same golden-file discipline DECLARED in tests/test_evidence_overlap.py
+# uses. As above, this asserts the rule's actual behaviour (0.0), never the
+# value it ought to have (1.0).
+def test_the_wrong_scope_negator_class_extends_to_cannot():
+    results = _multi_row_with(
+        "This cannot be ruled out: a shared origin ties these together.",
+        ["shared origin"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_the_wrong_scope_negator_class_extends_to_none():
+    results = _multi_row_with(
+        "None other than a shared root cause explains this outage.",
+        ["shared root cause"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
 # A DIFFERENT documented, accepted limit from the "no doubt" case above: a
 # full semantic flip via double negation, rather than a stray filler word.
 # "not without a shared upstream trigger" is semantically a CLAIM (two
