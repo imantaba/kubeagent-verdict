@@ -155,6 +155,20 @@ written — cannot be misread as long as you read the comment next to it.
 - **Every rate in this table travels with its denominator**, shown beside
   it as `(n)`. A rate of `n/a` means nothing was measured on that slice —
   never read it as zero, and never read it as a pass.
+- **A `0.0` over a real denominator is not automatically a pass either,
+  and in the baseline column it is not one anywhere.** The untuned base
+  model reads `0.0` on every decoy slice and `0.0` on *both* halves of the
+  length pair, with denominators in the tens. Read as a leaderboard that
+  makes it look perfect on decoy resistance and perfectly balanced on the
+  length cue — better, on three of the four release deciders, than any
+  model that actually answers. It is neither. Its cause accuracy is
+  **0.0576**: it almost never emits a valid candidate name at all, and a
+  model that cannot name the right cause cannot name the decoy either. The
+  zeros are the arithmetic shadow of that one number, not a property worth
+  having. The general rule: **read `decoy`, `length helps` and `length
+  misleads` only after `cause`**, because all three are conditioned on the
+  model having answered, and a model that answers nothing scores perfectly
+  on all of them.
 
 ## Known limitations
 
