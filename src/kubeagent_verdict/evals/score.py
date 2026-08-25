@@ -36,32 +36,69 @@ INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
 # the fix: negation-aware occurrence matching, applied to the shared-claim
 # phrases themselves rather than requiring a separate denial phrase for each.
 NEGATION_WINDOW = 24
-# Whole-word negators. "n't" is checked separately below, as a substring --
-# it is a contraction SUFFIX ("isn't", "doesn't") rather than a standalone
-# word, so a word-boundary match on it would not fire.
-NEGATORS = re.compile(r"\b(?:not|no|never|nor|without)\b")
+# The negator vocabulary. This is a CLOSED list -- English negation cannot
+# be enumerated -- so it is necessarily incomplete by construction; the
+# milder-error bias documented on `_shared_claim_signal` only holds WITHIN
+# this list, never in general.
+#
+# "cannot", "neither" and "none" were the first miss, found by measurement,
+# and the mechanism behind the miss is generalisable rather than particular
+# to those three words: `\bnot\b` cannot match inside "cannot" because
+# there is no word boundary between "can" and "not", and `\bno\b` cannot
+# match inside "none" for the same reason -- a negator with no INTERNAL
+# word boundary is invisible to a `\b`-anchored alternation, no matter how
+# many words the alternation lists. The next miss will be found the same
+# way, not by this list becoming exhaustive.
+#
+# "n't" is checked separately below, as a substring -- it is a contraction
+# SUFFIX ("isn't", "doesn't") rather than a standalone word, so a
+# word-boundary match on it would not fire either.
+NEGATORS = re.compile(
+    r"\b(?:not|no|never|nor|without|cannot|neither|none)\b")
 
 
 def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, bool]:
     """Whether `summary` contains an un-negated shared-claim occurrence
     (a claim) and whether it contains a negated one (a denial).
 
-    An occurrence is negated when a negator -- "not", "no", "never", "nor",
-    "without", or the "n't" contraction -- appears as a whole word in the
-    NEGATION_WINDOW characters immediately before it, clipped to the start
-    of the string.
+    An occurrence is negated when a negator -- any word in NEGATORS, or the
+    "n't" contraction -- appears as a whole word in the NEGATION_WINDOW
+    characters immediately before it, clipped to the start of the string.
 
-    This is a bounded heuristic, not a parser, and it is deliberately biased
-    toward the milder of its two possible errors. "there is no doubt these
-    share a common cause" reads the "no" inside the window before "common
-    cause" and misreads an affirmed claim as a denial, scoring 0.0 instead
-    of the correct 1.0 -- an under-detected claim. The alternative bias (a
-    narrower or absent window) manufactures a false 1.0 against a model that
-    was RIGHT, and given the <=1/19 acceptance bar that is the costlier
-    error: a bounded number of true claims read as denied is cheaper than
-    one correct model failing the gate. Do not read this function as sound
-    negation detection in general -- it is not, and the counter-example
-    above is the known, accepted cost of the bias.
+    This is a bounded heuristic, not a parser. It is deliberately biased
+    toward the milder of its two possible errors, but that bias holds ONLY
+    within the closed NEGATORS vocabulary above -- never in general, because
+    a negator this function does not know about denies nothing here and
+    scores a false 1.0 instead. The alternative bias (a narrower or absent
+    window) manufactures a false 1.0 against a model that was RIGHT, and
+    given the <=1/19 acceptance bar that is the costlier error within the
+    vocabulary: a bounded number of true claims read as denied is cheaper
+    than one correct model failing the gate. Outside the vocabulary the bias
+    does not apply at all -- see NEGATORS' own comment for the mechanism,
+    which is why "cannot" and "none" were missed before they were added:
+    each is a single word with no internal word boundary, so a
+    backslash-b-anchored alternation cannot match "not" inside "cannot" or
+    "no" inside "none" no matter how many other words the alternation lists.
+
+    Two known, accepted defeats of this heuristic, kept as documented limits
+    rather than "fixed", because neither is a missing word:
+
+    - Filler word, false negative: "there is no doubt these share a common
+      cause" reads the "no" inside the window before "common cause" and
+      misreads an affirmed claim as a denial, scoring 0.0 instead of the
+      correct 1.0.
+    - Double negation, false negative: "this is not without a shared
+      upstream trigger" is semantically a CLAIM (two negatives), but each
+      negator independently marks its occurrence as denied, so it also
+      scores 0.0 instead of the correct 1.0. This is a different pattern
+      from the filler-word case above -- a full semantic flip rather than a
+      stray word -- and no window size or vocabulary addition fixes it,
+      because the function does not compose negations; it only detects
+      their presence.
+
+    Do not read this function as sound negation detection in general -- it
+    is not, and the two counter-examples above are the known, accepted cost
+    of the bias.
     """
     claims = False
     denies = False

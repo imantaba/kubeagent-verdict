@@ -501,3 +501,75 @@ def test_the_no_doubt_defeat_case_is_the_documented_known_limit():
     results = _multi_row_with(
         "There is no doubt these share a common cause.", ["common cause"])
     assert results[0]["false_shared"] == 0.0
+
+
+# A DIFFERENT documented, accepted limit from the "no doubt" case above: a
+# full semantic flip via double negation, rather than a stray filler word.
+# "not without a shared upstream trigger" is semantically a CLAIM (two
+# negatives cancel), but the function does not compose negations -- it only
+# detects a negator's presence -- so "not" and "without" each independently
+# mark the "upstream" occurrence as denied. This asserts the rule's actual
+# behaviour (0.0, an under-detected claim), never the value it ought to have
+# (1.0): the same bounded-heuristic cost as the filler-word case, traded
+# deliberately against manufacturing a false 1.0 against a correct model.
+def test_the_double_negation_defeat_case_is_the_documented_known_limit():
+    results = _multi_row_with(
+        "This is not without a shared upstream trigger.", ["upstream"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The negator vocabulary is a closed list (see NEGATORS' own comment in
+# score.py), and a test that merely iterated NEGATORS.pattern would pass
+# vacuously if a word were later deleted from it -- the table and the
+# assertion would shrink together, so nothing could ever fail. This
+# declares the vocabulary independently in the test module, the same
+# discipline DECLARED in tests/test_evidence_overlap.py uses: checked
+# bidirectionally against what the regex actually contains, so a word added
+# to NEGATORS without a matching sentence here fails too, and a sentence
+# left behind after a word is removed fails as well.
+#
+# Each sentence isolates its negator: the shared-claim phrase is one of the
+# six with no INDEPENDENCE_PHRASES counterpart ("upstream", "cascading",
+# "same underlying", "knock-on", "common cause", "shared origin", "common
+# root cause" -- the last three checked to contain no "no shared"/"no
+# common" substring either), so a 0.0 here can only come from NEGATORS
+# actually matching that word, not from the independence-phrase fallback.
+NEGATOR_SENTENCES = {
+    "not": ("This is not an upstream cause of the failure.", "upstream"),
+    "no": ("There is no cascading effect between them.", "cascading"),
+    "never": ("They never share the same underlying issue.", "same underlying"),
+    "nor": ("It happened for its own reason, nor is there a knock-on effect.",
+            "knock-on"),
+    "without": ("This happened without any cascading failure elsewhere.",
+                "cascading"),
+    "cannot": ("They cannot share a common cause.", "common cause"),
+    "neither": ("Neither failure has a shared origin.", "shared origin"),
+    "none": ("None of these share a common root cause.", "common root cause"),
+}
+
+
+def _negator_words() -> set[str]:
+    """The literal alternation words inside NEGATORS' own compiled pattern,
+    parsed rather than hand-copied, so this stays honest against the actual
+    set the code matches instead of a second list that can silently drift."""
+    pattern = score.NEGATORS.pattern
+    prefix, suffix = r"\b(?:", r")\b"
+    assert pattern.startswith(prefix) and pattern.endswith(suffix), (
+        f"unexpected NEGATORS pattern shape: {pattern!r}")
+    return set(pattern[len(prefix):-len(suffix)].split("|"))
+
+
+def test_negator_sentence_table_matches_negators_bidirectionally():
+    assert set(NEGATOR_SENTENCES) == _negator_words(), (
+        "NEGATOR_SENTENCES (this test module) and NEGATORS (score.py) have "
+        "drifted apart -- add or remove a table entry to match the regex, "
+        "in whichever direction moved")
+
+
+def test_every_declared_negator_denies_its_own_sentence():
+    for word, (sentence, phrase) in NEGATOR_SENTENCES.items():
+        results = _multi_row_with(sentence, [phrase])
+        assert results[0]["false_shared"] == 0.0, (
+            f"negator {word!r} did not deny its own sentence: {sentence!r}")
+        assert results[0]["shared_ambiguous"] is False
