@@ -354,6 +354,14 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         raise ValueError("multi_misattribution_probe takes 2-4 workloads")
     if not all(e.losers for e, _n in pairs):
         raise ValueError("multi_misattribution_probe needs a loser in every entry")
+    # A collision merges the two answer rows, so the example silently stops
+    # being a multi-workload probe. The caller used to skip such a pair,
+    # which shrank the slice and every rate divided by it. Raising here
+    # gives every caller the check, including future ones.
+    seen = [(n.ns, n.name) for _e, n in pairs]
+    if len(set(seen)) != len(seen):
+        raise ValueError(
+            f"multi_misattribution_probe needs distinct workloads: {sorted(seen)}")
     workloads, all_reads, rows, decoys = [], [], [], []
     for e, n in pairs:
         conf = _confidence(e)
