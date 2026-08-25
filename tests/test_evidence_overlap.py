@@ -1,0 +1,129 @@
+"""The duplication guard: evidence text shared between eval and training.
+
+Group keys cannot see this shape of contamination -- two rows with different
+identities and byte-identical evidence. That is contradiction_probe's
+structural confound, and until now it was prose in a docstring
+(cases.py:282-300). This makes it a machine-checked fact.
+
+Two design decisions, both forced by measurement rather than assumed:
+
+PER-READ, NOT PER-BLOCK. Whole-block raw hashing finds 2 of 86 rows, because
+_fmt substitutes each row's freshly drawn namespace, name, pod and image, so
+two rows from the same template are never byte-identical. A multi row's
+BLOCK matches only on a coincidental entry pair; its individual READS are
+plain attributed reads and are reused wholesale.
+
+IDENTITY-MASKED, NOT RAW. Masking the row's own ns and name, then collapsing
+the derived pod form, is what takes positional_probe from 6/25 to 23/25.
+Without the pod mask the guard still fires, but detects only reads that
+happen not to mention a pod -- a signal shaped by which template mentions
+which field, not by what is shared.
+
+Exact hashing after masking, never similarity. There is no repo precedent
+for a similarity metric and a similarity threshold is a number nobody can
+defend. Masked-exact needs no threshold and is a set lookup.
+
+The counts below are PINNED, not bounded. A pinned count detects sharing
+disappearing as well as appearing -- so when contradiction_probe's confound
+is closed, 17/19 becomes 0/19, this fails, and the entry gets deleted
+deliberately rather than remembered. Same discipline as a golden file: a
+curriculum change that moves these fails the test and the new numbers get
+re-declared on purpose.
+"""
+
+import hashlib
+import re
+
+from kubeagent_verdict.dataset import generate
+
+# The release configuration. These counts are deterministic at exactly this
+# seed and size and mean nothing at any other.
+SEED, SIZE = 17, 5500
+
+# contract.section() writes "== BEGIN <name> ==\n<body>\n== END <name> ==\n\n";
+# render_evidence() writes one "== <label> ==\n<content>\n\n" per read inside it.
+BEGIN = "== BEGIN evidence ==\n"
+END = "\n== END evidence =="
+READ_DELIM = re.compile(r"(?m)^== .* ==$\n")
+
+# names.draw() derives the pod from the workload name as <name>-<suffix>, so
+# after the name is masked the pod reads <NAME>-<suffix>. Collapsing it is
+# load-bearing: without it positional_probe reads 6/25 instead of 23/25.
+POD = re.compile(r"<NAME>-[a-z0-9]{3,}(?:-[a-z0-9]{3,})?")
+
+# slice -> (reads reused from train/val, total reads). Every entry is a
+# measured fact with a reason; see the module docstring and the design spec.
+DECLARED = {
+    # Reuses attributed's reads by design -- the candidate menu is the only
+    # perturbation, which IS the whole measurement. Costs nothing.
+    "positional_probe": (23, 25),
+    "misattribution_probe": (24, 25),
+    # Same, in the multi shape: _reads(e, n)[:2] per constituent.
+    "multi_misattribution_probe": (47, 50),
+    # THIS ROW IS THE POINT OF THE INSTRUMENT. It reuses none_of_these_case's
+    # read text verbatim, and none_of_these is a fixed 15% of every curriculum
+    # via CASE_MIX -- which is why this slice cannot catch a model reciting an
+    # entry-lookup table. Negative control v4 measured the known-broken first
+    # tune at 1.0 cause / 0.0 decoy here. When that confound is closed this
+    # becomes 0/19 and this entry must be deleted, not updated.
+    "contradiction_probe": (17, 19),
+    # THIS ROW IS THE POINT OF THE ALLOWLIST. Its rows come from
+    # dataset.propagation, not the catalog, so it shares nothing -- which is
+    # what shows the guard discriminates rather than rubber-stamping.
+    "shared_origin_probe": (0, 34),
+}
+
+
+def _reads(ex) -> list[str]:
+    """Split a rendered evidence block into its individual reads."""
+    user = ex.user
+    start = user.find(BEGIN)
+    end = user.find(END, start)
+    assert start >= 0 and end > start, (
+        f"a {ex.case} row has no delimited evidence block; the guard refuses "
+        f"to score a shape it cannot read")
+    body = user[start + len(BEGIN):end]
+    return [part for part in READ_DELIM.split(body) if part.strip()]
+
+
+def _mask(text: str, ex) -> str:
+    """Blank the row's own identity so two rows from one template collide.
+
+    A catalog group is `entry.key:ns/name`; a shared_origin_probe group is
+    `propagation:<scenario>:ns/name`. rsplit takes the last field in both.
+    """
+    for part in ex.group.split("+"):
+        if ":" not in part or "/" not in part:
+            continue
+        ns, _, name = part.rsplit(":", 1)[1].partition("/")
+        if ns:
+            text = text.replace(ns, "<NS>")
+        if name:
+            text = text.replace(name, "<NAME>")
+    return POD.sub("<POD>", text)
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_eval_only_evidence_reuse_matches_the_declared_allowlist():
+    exs = generate.generate(seed=SEED, size=SIZE)
+    train, val = generate.split(exs, seed=SEED)
+    test = generate.test_set()
+    # What actually TRAINS -- post-filter, not the raw split.
+    kept = generate.drop_held_out(train, test) + generate.drop_held_out(val, test)
+    trained = {_digest(_mask(read, ex)) for ex in kept for read in _reads(ex)}
+
+    measured = {}
+    for case in DECLARED:
+        pairs = [(ex, read) for ex in test if ex.case == case
+                 for read in _reads(ex)]
+        assert pairs, f"{case} produced no reads; the slice is missing"
+        hits = sum(1 for ex, read in pairs if _digest(_mask(read, ex)) in trained)
+        measured[case] = (hits, len(pairs))
+
+    assert measured == DECLARED, (
+        "declared evidence reuse moved. This is a golden-file-shaped failure: "
+        "re-measure, understand WHY it moved, and re-declare on purpose. "
+        "A count going DOWN is as meaningful as one going up.")
