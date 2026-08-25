@@ -11,9 +11,10 @@ regression would have shipped green -- which is how the original leak
 shipped. This is that recomputation.
 
 The split-on-both-sides rule is not incidental. Reading either side unsplit
-re-derives the blind spot baf173e fixed; tests/test_generate.py:112-114
-records that mistake letting a test assert the buggy rule against itself and
-pass while 103 train rows leaked.
+re-derives the blind spot baf173e fixed; the comment in
+tests/test_generate.py above `held = {part for ex in test ...}` records that
+mistake letting a test assert the buggy rule against itself and pass while
+103 train rows leaked.
 """
 
 import collections
