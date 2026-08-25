@@ -130,8 +130,11 @@ def _fake(user: str) -> generate.Example:
 
 
 # `_reads` carries two refusals, and BOTH are unreachable on today's tree --
-# every one of the 4840 generated rows renders a delimited, non-empty
-# evidence block. Unreachable is exactly why they need tests: deleting
+# measured over every row the guard can reach, 4587 kept + 253 test = 4840,
+# all of which render a delimited, non-empty evidence block. That is the
+# superset: the allowlist test below actually calls `_reads` on 4673 of them,
+# because it reads only the five DECLARED slices out of the test set.
+# Unreachable is exactly why they need tests: deleting
 # either assert changes no other test's outcome, so without these two the
 # guards are the vacuous shape this whole branch exists to prevent. They
 # assert the REFUSAL, not a value, because a refusal is the entire
@@ -155,10 +158,10 @@ def test_reads_splits_a_well_formed_block_into_its_reads():
 
     The allowlist test below catches that perturbation too, so this is not
     the only net. It is the cheap, local one: it fails in milliseconds and
-    names `_reads`, where the allowlist test fails after generating 4840
-    rows and names a count. It also pins the split's exact shape -- the
-    trailing blank line belongs to the read before it -- which the allowlist
-    test only sees through a hash."""
+    names `_reads`, where the allowlist test fails only after generating the
+    whole 5500-row corpus and splitting it, and then names a count. It also
+    pins the split's exact shape -- the trailing blank line belongs to the
+    read before it -- which the allowlist test only sees through a hash."""
     body = "== pod ==\nfirst read\n\n== events ==\nsecond read\n"
     assert _reads(_fake(f"{BEGIN}{body}{END}")) == [
         "first read\n\n", "second read\n"]
