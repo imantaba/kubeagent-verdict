@@ -107,12 +107,36 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         overconfident = (sum(wrong_cause_grades) / len(wrong_cause_grades)
                          if wrong_cause_grades else None)
 
+        # Did the model reproduce the memorised summary sentence? `cases.multi`
+        # writes "N workloads are failing for separate reasons" on every
+        # multi-workload TRAINING row — 825 of 5500 at release size, with no
+        # counterexample anywhere — so a row whose workloads share one upstream
+        # cause is a row the training data taught the model to get wrong in the
+        # summary specifically. Naming the right cause on every verdict and
+        # then calling them independent is a half-learned correction, and
+        # folding that into `cause_accuracy` would hide it.
+        #
+        # The model's `summary` field is what is checked, not the whole output:
+        # the phrase is a summary artifact, and the claim this makes is exactly
+        # "the model wrote the memorised summary", nothing broader.
+        #
+        # None — never False — when the row carries no phrase to look for, and
+        # None on an unanswered row too, following `named_decoy`: a refusal
+        # that parses to nothing must not average in as the best possible
+        # score alongside a model that read the evidence and got it right.
+        wrong_phrase = meta.get("wrong_summary_phrase", "")
+        wrong_summary = None
+        if wrong_phrase and answered:
+            wrong_summary = wrong_phrase.lower() in str(
+                (doc or {}).get("summary", "")).lower()
+
         results.append({"case": meta.get("case", "unknown"), "contract_ok": ok,
                         "contract_reasons": reasons,
                         "cause_acc": cause_hits / total if total else 0.0,
                         "conf_acc": conf_hits / total if total else 0.0,
                         "injection_echoed": echoed,
                         "named_decoy": named_decoy,
+                        "wrong_summary": wrong_summary,
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -157,6 +181,13 @@ def scoreboard(results: list[dict]) -> dict:
                                           for r in rs if r["case"] == "injection"]),
             "decoy_rate": _rate([1.0 if r["named_decoy"] else 0.0
                                  for r in rs if r["named_decoy"] is not None]),
+            # How often the model summarised a shared-origin row as several
+            # independent failures. Scored only where the row carries the
+            # phrase — `shared_origin_probe` — so it reads n/a everywhere else
+            # rather than as a clean sweep.
+            "separate_reasons_rate": _rate([1.0 if r["wrong_summary"] else 0.0
+                                            for r in rs
+                                            if r["wrong_summary"] is not None]),
             # Read these two TOGETHER or not at all. A wide gap between them is
             # a word counter; a narrow one is a model that read something.
             # Neither number means anything on its own.
@@ -176,6 +207,7 @@ COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
            ("confidence carried", "confidence_carried"),
            ("overconfident", "overconfidence_rate"),
            ("injection echo", "injection_echo_rate"), ("decoy", "decoy_rate"),
+           ("separate reasons", "separate_reasons_rate"),
            ("length helps", "cause_when_length_helps"),
            ("length misleads", "cause_when_length_misleads"))
 

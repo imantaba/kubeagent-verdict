@@ -166,7 +166,8 @@ def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
             assert ex.case not in seen, f"{ex.case} rows are interleaved, not appended"
             seen.append(ex.case)
             order.append(ex.case)
-    assert order == ["multi_misattribution_probe", "contradiction_probe"]
+    assert order == ["multi_misattribution_probe", "contradiction_probe",
+                     "shared_origin_probe"]
 
 
 def test_contradiction_probe_is_appended_last_one_row_per_entry():
@@ -176,8 +177,15 @@ def test_contradiction_probe_is_appended_last_one_row_per_entry():
     tail = [ex for ex in probes if ex.case == "contradiction_probe"]
     assert len(tail) == len(trainable)
     # Appended, never interleaved: every earlier probe row keeps its position, so
-    # a scoreboard banked against the previous test file still lines up.
-    assert [ex.case for ex in probes[-len(tail):]] == ["contradiction_probe"] * len(tail)
+    # a scoreboard banked against the previous test file still lines up. The run
+    # is no longer the LAST rows in the file — `shared_origin_probe` was appended
+    # after it — so what is asserted is that the run is contiguous and that
+    # nothing but the shared-origin block follows it. A slice appended after this
+    # one is allowed by construction; a row interleaved INTO this one is not.
+    cases = [ex.case for ex in probes]
+    first = cases.index("contradiction_probe")
+    assert cases[first:first + len(tail)] == ["contradiction_probe"] * len(tail)
+    assert set(cases[first + len(tail):]) == {"shared_origin_probe"}
     for ex in tail:
         assert ex.meta["expected_cause"] == c.NONE_OF_THESE
         assert ex.meta["decoy_cause"] in ex.user

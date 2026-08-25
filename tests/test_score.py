@@ -271,3 +271,80 @@ def test_multi_decoy_is_clean_when_the_model_names_neither():
     board = _multi_decoy_board(["real one", "real two"])
     assert board["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
     assert board["overall"]["cause_accuracy"]["rate"] == 1.0
+
+
+# `cases.multi` writes "N workloads are failing for separate reasons" on every
+# multi-workload TRAINING row — 825 of 5500 at release size, with no
+# counterexample anywhere in the curriculum — so a row whose workloads share ONE
+# upstream cause is a row the training data taught the model to get wrong in the
+# summary specifically. Naming the right cause on every verdict and then calling
+# them independent is a half-learned correction, and folding it into
+# `cause_accuracy` would hide it.
+SHARED_PHRASE = "failing for separate reasons"
+
+
+def _shared_origin_board(summary, rows=None, phrase=SHARED_PHRASE):
+    shared = "coredns is not resolving in-cluster names"
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api and shop/web"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": w, "cause": shared, "confidence": "high", "rationale": "r"}
+            for w in ("shop/api", "shop/web")], "summary": "one upstream cause"})}],
+        "meta": {"case": "shared_origin_probe", "wrong_summary_phrase": phrase}}
+    if rows is None:
+        rows = [{"workload": w, "cause": shared, "confidence": "high", "rationale": "r"}
+                for w in ("shop/api", "shop/web")]
+    answer = json.dumps({"verdicts": rows, "summary": summary})
+    return score.scoreboard(score.evaluate([row], lambda messages: answer))
+
+
+def test_separate_reasons_is_caught_even_when_every_cause_is_right():
+    board = _shared_origin_board("2 workloads are failing for separate reasons.")
+    assert board["overall"]["separate_reasons_rate"] == {"rate": 1.0, "n": 1}
+    # The half-learned correction: every verdict right, the summary still wrong.
+    assert board["overall"]["cause_accuracy"]["rate"] == 1.0
+
+
+def test_separate_reasons_is_zero_when_the_model_names_one_origin():
+    board = _shared_origin_board("2 workloads share one upstream cause: coredns.")
+    assert board["overall"]["separate_reasons_rate"] == {"rate": 0.0, "n": 1}
+
+
+# Matching is case-insensitive: the phrase is what was memorised, not its casing.
+def test_separate_reasons_matches_regardless_of_case():
+    board = _shared_origin_board("Two workloads are Failing For Separate Reasons here.")
+    assert board["overall"]["separate_reasons_rate"] == {"rate": 1.0, "n": 1}
+
+
+# The model's `summary` field is what is read, not the whole output. The claim
+# this metric makes is exactly "the model wrote the memorised summary" — a
+# rationale that happens to contain the words is a different thing, and folding
+# it in would trade a falsifiable measurement for a fuzzy one.
+def test_separate_reasons_reads_the_summary_not_the_rationale():
+    rows = [{"workload": "shop/api", "cause": "coredns is not resolving in-cluster names",
+             "confidence": "high",
+             "rationale": "these are not failing for separate reasons"},
+            {"workload": "shop/web", "cause": "coredns is not resolving in-cluster names",
+             "confidence": "high", "rationale": "r"}]
+    board = _shared_origin_board("one shared upstream cause", rows=rows)
+    assert board["overall"]["separate_reasons_rate"] == {"rate": 0.0, "n": 1}
+
+
+def test_separate_reasons_is_unmeasured_on_rows_that_carry_no_phrase():
+    board = score.scoreboard(score.evaluate(
+        [ROW], lambda messages: ROW["messages"][2]["content"]))
+    assert board["overall"]["separate_reasons_rate"] == {"rate": None, "n": 0}
+
+
+# Same discipline as `named_decoy`: a refusal that parses to no verdict row must
+# not average in as `separate_reasons_rate 0.0` — the best possible score,
+# indistinguishable from a model that read the evidence and got it right.
+def test_separate_reasons_is_unmeasured_when_the_model_refuses():
+    board = _shared_origin_board("2 workloads are failing for separate reasons.", rows=[])
+    assert board["overall"]["separate_reasons_rate"] == {"rate": None, "n": 0}
+
+
+def test_markdown_names_the_separate_reasons_column():
+    md = score.render_markdown(_shared_origin_board("one shared cause"))
+    assert "separate reasons" in md.lower()

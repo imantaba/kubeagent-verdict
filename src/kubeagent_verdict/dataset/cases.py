@@ -7,10 +7,13 @@ never invent a prompt shape kubeagent would not send.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import random
 
 from kubeagent_verdict import contract as c
+from kubeagent_verdict.dataset import names as names_mod
+from kubeagent_verdict.dataset import propagation as prop
 from kubeagent_verdict.dataset.catalog import CatalogEntry
 from kubeagent_verdict.dataset.generate import Example
 from kubeagent_verdict.dataset.names import Names
@@ -369,6 +372,149 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                    meta={"case": "multi_misattribution_probe",
                          "expected": {r["workload"]: r["cause"] for r in rows},
                          "decoy_causes": decoys})
+
+
+def _draw_in(rng: random.Random, ns: str | None) -> Names:
+    """Draw a name set, optionally pinned to one namespace.
+
+    The pod suffix and the image path both embed the namespace, so pinning
+    `ns` after the draw means redrawing those two rather than leaving an
+    example whose image says `shop` and whose workload says `payments`.
+    """
+    n = names_mod.draw(rng)
+    if ns is None:
+        return n
+    return dataclasses.replace(
+        n, ns=ns, pod=names_mod.pod_name(rng, n.name),
+        image=f"registry.example.com/{ns}/{n.name}:{n.image.rsplit(':', 1)[1]}")
+
+
+def _propagation_names(p: prop.Propagation, rng: random.Random,
+                       count: int) -> tuple[list[Names], str | None]:
+    """One name set per victim, all agreeing on whatever the origin pins.
+
+    A node-scoped origin is only coherent if every victim really is on that
+    node, and a namespace-scoped one only if every victim really is in that
+    namespace — otherwise the row asserts a blast radius its own inventory
+    contradicts. `scope_value` is what the answer string names.
+    """
+    scope_value = None
+    if p.scope_field == "ns":
+        scope_value = rng.choice(names_mod.NAMESPACES)
+    elif p.scope_field == "node":
+        scope_value = rng.choice(names_mod.NODES)
+
+    drawn: list[Names] = []
+    seen: set[tuple[str, str]] = set()
+    for _ in range(count):
+        while True:
+            n = _draw_in(rng, scope_value if p.scope_field == "ns" else None)
+            if p.scope_field == "node":
+                n = dataclasses.replace(n, node=scope_value)
+            if (n.ns, n.name) not in seen:
+                break
+        seen.add((n.ns, n.name))
+        drawn.append(n)
+    return drawn, scope_value
+
+
+def _victim_finding(v: prop.Victim, n: Names) -> c.Finding:
+    return c.Finding(
+        issue=v.issue, reason=_fmt(v.reason, n), evidence=_fmt(v.evidence, n),
+        log_cause=_fmt(v.log_cause, n) if v.log_cause else "",
+        next_step=_fmt(v.next_step, n), command=_fmt(v.command, n),
+    )
+
+
+def shared_origin_probe(p: prop.Propagation, rng: random.Random,
+                        victims: int | None = None) -> Example:
+    """EVAL-ONLY: several flagged workloads, one upstream cause.
+
+    Every other multi-workload row in this repo — training and eval alike —
+    is built by `multi`, which samples DISTINCT catalog entries and summarises
+    them as "N workloads are failing for separate reasons." At release size
+    that is 825 of 5500 training rows with no counterexample anywhere, so the
+    model was trained to assert independence in exactly the prompt shape
+    `--investigate` sends. This row is the counterexample.
+
+    Four shortcuts are closed by construction, because each one would score
+    the slice without reading the evidence:
+
+    * the tag — the local decoy carries `attributed`, the shared cause carries
+      `outranked`, as in `misattribution_probe`;
+    * the position — the menu is deterministic and never shuffled, decoy
+      first, shared cause last;
+    * "name the string common to every menu" — a second common cause, the
+      scenario's `distractor`, sits on all N menus too and is refuted by the
+      evidence. Its effect lands in `cause_acc`; it is deliberately NOT in
+      `decoy_causes`, which measures tag-following only;
+    * "copy the bracketed confidence" — the per-workload `[confidence: X]` in
+      the prompt is the deterministic pass's grade for its own wrong local
+      attribution and varies within a row, while the expected answer is one
+      scenario-level grade.
+
+    What it cannot do is separate a model that reasons from one that has
+    memorised these six scenarios — the same limit every probe here has. That
+    holds only while the scenarios stay out of training; the day they are
+    trained on, this slice needs held-out origins.
+    """
+    count = len(p.victims) if victims is None else victims
+    if not 2 <= count <= len(p.victims):
+        raise ValueError(f"{p.key}: cannot render {count} of {len(p.victims)} victims")
+    if 1 + count > c.MAX_TOOL_CALLS:
+        raise ValueError(f"{p.key}: {count} victims plus the origin read exceeds the budget")
+
+    drawn, scope_value = _propagation_names(p, rng, count)
+    # The pinned field is identical across `drawn`, so formatting the shared
+    # strings against any one of them yields the one answer every row repeats.
+    anchor = drawn[0]
+    shared_cause = _fmt(p.shared_cause, anchor)
+    shared_reason = _fmt(p.shared_reason, anchor)
+    distractor_cause = _fmt(p.distractor_cause, anchor)
+    distractor_reason = _fmt(p.distractor_reason, anchor)
+
+    workloads, rows, decoys = [], [], []
+    # The origin read leads: the evidence for the one cause is stated once,
+    # not restated per victim, which is how a real gather would present it.
+    reads = [c.EvidenceRead(label=_fmt(p.origin_read[0], anchor),
+                            content=_fmt(p.origin_read[1], anchor))]
+    for v, n in zip(p.victims[:count], drawn):
+        decoy = _fmt(v.local_cause, n)
+        decoys.append(decoy)
+        menu = (
+            c.Candidate(cause=decoy, verdict="attributed", reason=_fmt(v.local_reason, n)),
+            c.Candidate(cause=distractor_cause, verdict=p.distractor_verdict,
+                        reason=distractor_reason),
+            c.Candidate(cause=shared_cause, verdict=p.shared_verdict, reason=shared_reason),
+        )
+        workloads.append(c.Workload(
+            namespace=n.ns, name=n.name, kind=v.workload_kind, ready=0, desired=2,
+            status=v.status, restarts=n.restarts, findings=(_victim_finding(v, n),),
+            candidates=menu, confidence=v.pass_confidence,
+            network_policies=tuple(_fmt(x, n) for x in v.network_policies)))
+        reads.append(c.EvidenceRead(label=_fmt(v.read[0], n), content=_fmt(v.read[1], n)))
+        rows.append({"workload": f"{n.ns}/{n.name}", "cause": shared_cause,
+                     "confidence": p.confidence, "rationale": _fmt(p.rationale, n)})
+
+    user = c.build_user_message(None, None, "", (), tuple(workloads), tuple(reads))
+    lines = [f"{count} workloads share one upstream cause: {_fmt(p.origin, anchor)}.",
+             f"Root cause: {shared_cause}.",
+             _fmt(p.remedy, anchor)]
+    group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
+    return Example(
+        case="shared_origin_probe", group=group, system=c.SYSTEM_PROMPT, user=user,
+        assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+        meta={"case": "shared_origin_probe", "origin": p.key,
+              "blast_radius": p.blast_radius, "scope_value": scope_value,
+              "expected": {r["workload"]: r["cause"] for r in rows},
+              "expected_confidence": p.confidence,
+              "decoy_causes": decoys, "distractor_cause": distractor_cause,
+              # The memorised sentence this slice exists to measure. `score`
+              # reports it as `separate_reasons_rate` — a model that names the
+              # shared cause on every row and then summarises the workloads as
+              # independent has half-learned the correction, and averaging that
+              # into `cause_accuracy` would hide it.
+              "wrong_summary_phrase": prop.SEPARATE_REASONS})
 
 
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:

@@ -8,8 +8,13 @@ from urllib.parse import urlsplit, urlunsplit
 from kubeagent_verdict.evals import client, score
 
 # The slices a short run exists to look at. Everything else can only pass.
+# `shared_origin_probe` sits beside the other multi-workload slice: both put
+# several flagged workloads in one prompt, and it is the only slice that can
+# fail on the summary alone, so a short run that dropped it could not see the
+# axis it was added to measure.
 PROBES_FIRST = ("contradiction_probe", "positional_probe", "misattribution_probe",
-                "multi_misattribution_probe", "wrong_attribution")
+                "multi_misattribution_probe", "shared_origin_probe",
+                "wrong_attribution")
 
 
 def _case(row: dict) -> str:

@@ -263,6 +263,44 @@ def probe_sets() -> list[Example]:
             continue
         out.append(cases.contradiction_probe(
             entry, names.draw(_entry_rng("contradiction-probe", entry.key))))
+
+    # APPENDED again, same comparability rule. Every slice above perturbs the
+    # candidate menu of an otherwise ordinary row; this one changes what the
+    # row is ABOUT. `multi` — training and eval alike — samples distinct
+    # catalog entries and summarises them as "N workloads are failing for
+    # separate reasons", 825 of 5500 rows at release size with no
+    # counterexample anywhere in the curriculum. So the model was trained to
+    # assert independence in exactly the shape `--investigate` sends it, and
+    # nothing here could measure that until now.
+    #
+    # These rows come from `dataset.propagation`, not from the catalog, so they
+    # share no group namespace with any training row: every group is prefixed
+    # `propagation:`, `drop_held_out` drops nothing, and no training example is
+    # lost to the slice.
+    out.extend(shared_origin_probes())
+    return out
+
+
+def shared_origin_probes() -> list[Example]:
+    """EVAL-ONLY: one row per propagation scenario, plus narrower subsets.
+
+    Full-width rows come first and subset rows after, so dropping the subsets
+    later would leave the first six at their original indices. A subset exists
+    only where a scenario has a victim to spare: it renders the same origin at
+    two workloads instead of three or four, which is what tells a two-workload
+    failure apart from a genuinely wide one when the scoreboard is read by
+    victim count.
+    """
+    from kubeagent_verdict.dataset import cases, propagation
+
+    out: list[Example] = []
+    for p in propagation.all_scenarios():
+        out.append(cases.shared_origin_probe(p, _entry_rng("shared-origin", p.key)))
+    for p in propagation.all_scenarios():
+        if len(p.victims) < 3:
+            continue
+        out.append(cases.shared_origin_probe(
+            p, _entry_rng("shared-origin-pair", p.key), victims=2))
     return out
 
 
