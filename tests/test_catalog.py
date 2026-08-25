@@ -45,6 +45,31 @@ def test_trainable_entries_are_complete():
             assert cause and reason, e.key
 
 
+def test_own_cause_keywords_are_satisfied_by_their_own_cause():
+    """The answer key must be able to score its own reference answer.
+
+    `evals/score.py` grades the `own_cause` and `empty_candidates` slices with
+    `all(k in cause for k in own_cause_keywords)`. A keyword the entry's own
+    `own_cause` text does not contain makes that conjunction unsatisfiable: the
+    ground truth itself scores zero, and so does every model, however good. A
+    rate built from such a row measures the catalog, not the model.
+    """
+    broken = {}
+    for e in catalog.trainable():
+        cause = e.own_cause.format(**SAMPLE).lower()
+        missing = [k for k in e.own_cause_keywords if k.lower() not in cause]
+        if missing:
+            broken[e.key] = (missing, cause)
+    assert not broken, "keywords absent from their own expected cause: " + "; ".join(
+        f"{k}: {m} not in {c!r}" for k, (m, c) in sorted(broken.items()))
+
+
+def test_own_cause_keywords_are_discriminating():
+    """Two keywords minimum, so the check cannot pass on one common word."""
+    for e in catalog.trainable():
+        assert len(e.own_cause_keywords) >= 2, e.key
+
+
 def test_untrainable_entries_say_why():
     for e in catalog.all_entries():
         if not e.trains:

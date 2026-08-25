@@ -165,7 +165,7 @@ ENTRIES = [
                       "  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: "
                       "500 (x9)\n",
         own_cause="a NetworkPolicy now blocks traffic to the pod's probe port",
-        own_cause_keywords=("networkpolicy", "deny"),
+        own_cause_keywords=("networkpolicy", "traffic"),
         network_policies=("default-deny",),
     ),
     CatalogEntry(
@@ -201,7 +201,7 @@ ENTRIES = [
         contradiction="events for kube-system/{pod}:\n"
                       "  Killing: Stopping container coredns (node {node} shutting down) (x1)\n",
         own_cause="the Corefile has a syntax or plugin error that crashes CoreDNS on startup",
-        own_cause_keywords=("corefile", "parse"),
+        own_cause_keywords=("corefile", "coredns"),
         grounding=("kube-system/coredns",),
         degraded=False,
     ),

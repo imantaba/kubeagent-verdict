@@ -36,7 +36,7 @@ ENTRIES = [
                       "8s         Normal  Killing  Stopping container {container} "
                       "(node {node} shutting down)\n",
         own_cause="the application answers its readiness endpoint with errors",
-        own_cause_keywords=("readiness", "500"),
+        own_cause_keywords=("application", "readiness"),
         service_issue=("NoReadyEndpoints", "service has 0 ready endpoints"),
     ),
     CatalogEntry(
@@ -72,7 +72,7 @@ ENTRIES = [
                       "  Failed: Error: StartError: OCI runtime create failed: runc did not "
                       "terminate successfully (x3)\n",
         own_cause="the container's entrypoint names a path that does not exist in the image",
-        own_cause_keywords=("entrypoint", "exec"),
+        own_cause_keywords=("names", "path"),
     ),
     CatalogEntry(
         key="create-container-config-error",
@@ -250,7 +250,7 @@ ENTRIES = [
                       "  Pulled: Successfully pulled image "
                       '"registry.example.com/shop/migrate:v0.9.0" (x1)\n',
         own_cause="the init container's image tag does not exist in the registry",
-        own_cause_keywords=("tag", "backoff"),
+        own_cause_keywords=("registry", "tag"),
     ),
     CatalogEntry(
         key="init-oomkilled",
@@ -325,7 +325,7 @@ ENTRIES = [
                       "  Unhealthy: Liveness probe failed: HTTP probe failed with statuscode: "
                       "503 (x{restarts})\n",
         own_cause="the container panics intermittently, most often under load",
-        own_cause_keywords=("panic", "restart"),
+        own_cause_keywords=("intermittently", "panics"),
     ),
     CatalogEntry(
         key="volume-attach-error",
@@ -364,7 +364,7 @@ ENTRIES = [
                       "  FailedAttachVolume: rpc error: code = Internal desc = CSI driver not "
                       "responding (x8)\n",
         own_cause="the PVC is still attached to the node the previous pod ran on",
-        own_cause_keywords=("multi-attach", "volume"),
+        own_cause_keywords=("attached", "previous"),
     ),
     CatalogEntry(
         key="volume-mount-error",
@@ -401,6 +401,6 @@ ENTRIES = [
                       '  FailedMount: MountVolume.SetUp failed for volume "config": configmap '
                       '"app-config" not found (x5)\n',
         own_cause="the PVC's underlying volume is unhealthy or unreachable on the pod's node",
-        own_cause_keywords=("mount", "timeout"),
+        own_cause_keywords=("unreachable", "underlying"),
     ),
 ]
