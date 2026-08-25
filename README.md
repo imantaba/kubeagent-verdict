@@ -62,6 +62,15 @@ v0.1.0, over the 243-row corpus-derived test set at temperature 0, with
 the untuned Qwen3-0.6B base as the floor. The full per-slice tables are in
 `docs/model-card.md`.
 
+Dataset: `kv-dataset --seed 17 --size 5500`, derived from the chaos
+corpus snapshot in `data/corpus/` — kubeagent `chaos-matrix` run id
+`32548862821`, dated 2026-08-22. **The shipped weights were trained on a
+dataset generated at commit `8bd9d28`, before three generator fixes
+landed**, so re-running that command on this tree produces a different,
+corrected dataset (4155/432/243 against the 4312/451/205 the weights saw).
+The consequence is measured, not estimated, and is the contamination
+disclosed below.
+
 | | released model | untuned base |
 |---|---|---|
 | contract validity | **1.0** (243) | 0.5514 (243) |
