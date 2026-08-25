@@ -105,8 +105,11 @@ and produces no training data.)
 
 The scoreboard table looks like a leaderboard. It is closer to a set of
 diagnostic instruments, several of which are easy to misread in the
-reassuring direction, and one of which — the case that got this document
-written — cannot be misread as long as you read the comment next to it.
+reassuring direction. `overconfident` was written as the one exception —
+the instrument the prompt cannot hand the model for free — and on this
+release's run it turned out to have no denominator at all. Read every
+bullet below before reading a number; each names a specific way its
+metric lies.
 
 - **`contract`** is whether the model's raw output parses as exactly one
   JSON object with the exact required keys, exactly one verdict row per
@@ -132,6 +135,18 @@ written — cannot be misread as long as you read the comment next to it.
   fraction it still graded `high`. A model that answers by copying the
   bracketed grade scores worst here exactly when it is most confidently
   wrong, which is the failure mode `confidence carried` cannot see.
+  **On this release's run it is not measured at all.** A rate conditioned
+  on errors goes blind exactly when a model stops making them: the tuned
+  model got two causes wrong in 243 rows, both of them inside
+  `multi_misattribution_probe`, the slice withdrawn below as
+  contaminated. On every uncontaminated slice the denominator is zero.
+  The `1.0 (2)` printed in the table is therefore neither a pass nor a
+  fail — it is two rows from a slice whose number is not evidence. An
+  earlier draft of this file recorded `0.1111 (18)` here and called it a
+  pass; that denominator was manufactured by the broken answer key
+  described below, which forced 16 rows to count as errors that no
+  answer could have got right. Correcting the key removed this decider's
+  ability to pass.
 - **`decoy` reads `n/a` on any slice that carries no decoy** — that is
   correct, not a gap, because nothing was set up to trap the model there.
   It is also unmeasured, not a pass, on any row the model did not answer
@@ -169,6 +184,32 @@ written — cannot be misread as long as you read the comment next to it.
   misleads` only after `cause`**, because all three are conditioned on the
   model having answered, and a model that answers nothing scores perfectly
   on all of them.
+- **The `own_cause` and `empty_candidates` numbers below come from a
+  corrected answer key, and the correction is part of the record.** Those
+  two slices are the only ones graded by keyword rather than by string
+  equality: the answer is free prose, so `score.py` asks whether every
+  keyword the catalog entry declares appears in it. Eight of the nineteen
+  entries declared a keyword that does not appear in their **own**
+  reference answer — the keywords were written in Kubernetes' error
+  vocabulary (`deny`, `parse`, `exec`, `backoff`, `multi-attach`,
+  `timeout`) and the reference cause was written as prose, and nothing
+  checked that the two agreed. The conjunction was unsatisfiable on those
+  rows: the ground truth itself scored zero, and so did every model ever
+  run against it. `11/19 = 0.5789` was the ceiling, which is why this
+  project's known-broken first tune and its corrected retrain produced
+  bit-identical numbers on both slices — the number was measuring the
+  catalog, not the model. Commit `70460e9` fixes the eight entries by a
+  rule that is a pure function of the catalog (the two rarest content
+  words of the entry's own rendered cause, so no keyword can have been
+  chosen because some particular model emitted it) and adds two tests
+  that fail the suite if a keyword ever again goes missing from its own
+  answer. Every run was then re-scored by replaying its own recorded
+  outputs in order — the 243 prompts are byte-identical before and after,
+  so no inference was re-run, and the replay refuses unless the case
+  sequence matches. **The correction was negative-controlled:** the
+  untuned baseline reads `0.0 (19)` on both corrected slices and `0.0576
+  (243)` overall, exactly as before. A key that could not still fail a
+  bad model would not have been a fix.
 
 ## Known limitations
 
@@ -189,18 +230,69 @@ the model trained on and never introduce an unfamiliar entry.
 said such a model would fail on `none_of_these`, `own_cause` and
 `empty_candidates`. That was tested rather than assumed, and it is wrong:
 scored against this project's known-broken first tune — a model that
-follows the `attributed` tag 79% of the time — those three slices read
-**1.0, 0.5789 and 0.5789**. A fourth slice, `contradiction_probe`, was
-built specifically to close the gap and measured **1.0 cause / 0.0 decoy**
-on the same broken model, because it reuses the read text of
-`none_of_these`, which is 15% of the curriculum: a trained trigger for a
-trained answer template, reproduced verbatim.
+follows the `attributed` tag 79% of the time — `none_of_these` read
+**1.0**. A fourth slice, `contradiction_probe`, was built specifically to
+close the gap and measured **1.0 cause / 0.0 decoy** on the same broken
+model, because it reuses the read text of `none_of_these`, which is 15%
+of the curriculum: a trained trigger for a trained answer template,
+reproduced verbatim.
+
+That same experiment recorded **0.5789** for the broken tune on
+`own_cause` and `empty_candidates`, and this file used to cite the pair
+as part of the argument. It has been withdrawn: `0.5789` was the broken
+answer key's ceiling — `11/19`, the eleven entries whose keywords their
+own reference answer happened to contain — not a measurement of that
+model or of any other. The broken tune cannot be re-scored against the
+corrected key, because it ran against a 205-row test set from an earlier
+commit and the replay refuses a row-count mismatch rather than guessing
+an alignment. So its true score on those two slices is **unknown**, and
+the paragraph's conclusion now rests only on the two slices the key bug
+never touched, both of which are graded by string equality:
+`none_of_these` and `contradiction_probe`. They are enough to carry it.
 
 So the honest statement is that **this eval cannot distinguish a model
 that reads the evidence from one that recites per-entry answers**, and no
 score in the table below should be read as evidence that it does. Fixing
 this requires holding whole catalog entries out of training and
 retraining — work this release does not contain.
+
+### `cause` is a closed-set selection score, not free-text accuracy
+
+A rate cannot tell you which of those two things it is, so this was
+measured directly rather than argued about. On all **224** test rows that
+carry a single reference cause, the tuned model reproduces that reference
+string **verbatim, character for character — 224/224, 100%**. The untuned
+base model manages 19/224 (8.5%). The catalog has nineteen trainable
+entries and one fixed cause phrase each; the model trained on thousands
+of examples from the same generator. So `cause accuracy 0.9959` is the
+rate at which it picks the right one of nineteen memorised phrases. It
+is **not** a measurement of free-text root-cause accuracy, and the two
+read identically in the table.
+
+Splitting the rows by whether the phrase was copyable out of the prompt
+separates recall from selection:
+
+| rows | slices | reference cause present in the prompt |
+|---|---|---|
+| 148 | `attributed`, `injection`, `misattribution_probe`, `positional_probe`, `truncated`, `wrong_attribution` | yes — on a candidate line |
+| 57 | `own_cause`, `empty_candidates`, `contradiction_probe` | no — absent from the prompt entirely |
+| 19 | `none_of_these` | n/a — the expected answer is the contract's sentinel |
+
+Both readings ship, and neither cancels the other:
+
+- **In the model's favour.** On the 57 rows where the reference cause
+  appears nowhere in the question, it produced that cause verbatim
+  **57/57**; on the 38 of those that are not withdrawn for contamination
+  (`own_cause` and `empty_candidates`), **38/38**. The untuned baseline
+  scores 7/57. Mapping evidence to a cause with no candidate to copy is
+  precisely what `--investigate`'s local verdict mode asks for on a
+  workload the deterministic pass could not attribute.
+- **Against it.** The phrase it recalls comes from a closed nineteen-entry
+  catalog it trained on, and the eval is in-distribution by construction —
+  same generator, deduplicated at workload-identity level only. Nothing
+  here measures what the model does when the true cause is not one of the
+  nineteen. Expect it to name the nearest catalog phrase rather than say
+  it does not know.
 
 ### The released weights and the released code do not match
 
@@ -274,5 +366,91 @@ release — is in `docs/design.md`. Training and release mechanics are in
 
 ## Scoreboard
 
-Filled in by the release process from `out/eval/scoreboard.md`, appended
-below this line as-is — read it only alongside the caveats above.
+Both tables were scored by `kv-eval`'s grader over the same 243-row,
+corpus-derived test set. The released model's run was served by a local
+`llama-server` at temperature 0; the baseline's serving details are not
+recorded in its output file — see the provenance note below. Both are
+re-scored against the corrected answer key described in "How to read the
+scoreboard": the model outputs are each run's own, replayed in order, and
+no inference was re-run.
+
+Provenance, since a scoreboard that does not say what it scored is not
+evidence. The released model's run carries a machine-written `run` block:
+`model kubeagent-verdict-0.6b-q8_0.gguf`, `endpoint
+http://127.0.0.1:8080/v1`, `rows_scored 243` of `rows_available 243`,
+`limited false`. **The baseline run has no such block** — it was recorded
+before `kv-eval` began writing one, so nothing in its output file names
+the model or the endpoint it used, and the right-hand column below rests
+on a weaker record than the left. What is machine-checkable about it: it
+holds 243 rows in the same case order as the test set, and its output
+text differs from the released model's on **243 of 243** rows, so it is
+certainly a different model. That it is the untuned `Qwen3-0.6B` is the
+operator's account of the run, not something the file proves. Treat the
+baseline column as a floor whose identity is attested rather than
+demonstrated, and re-run it with today's `kv-eval` if that distinction
+matters to you.
+
+**Released model** — `dist/kubeagent-verdict-0.6b-q8_0.gguf`, sha256
+`7f3d84ad3a38ab094225cdfae1c20844e9cf086486c9bea5bd3996c52d4d5e0a`:
+
+| slice | n | contract | cause | confidence carried | overconfident | injection echo | decoy | length helps | length misleads |
+|---|---|---|---|---|---|---|---|---|---|
+| overall | 243 | 1.0 (243) | 0.9959 (243) | 1.0 (243) | 1.0 (2) | 0.0 (19) | 0.0211 (95) | 1.0 (45) | 1.0 (12) |
+| attributed | 53 | 1.0 (53) | 1.0 (53) | 1.0 (53) | n/a | n/a | n/a | n/a | n/a |
+| contradiction_probe | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | 0.0 (19) | n/a | n/a |
+| empty_candidates | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | n/a | n/a | n/a |
+| injection | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | 0.0 (19) | n/a | n/a | n/a |
+| misattribution_probe | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | 0.0 (19) | 1.0 (15) | 1.0 (4) |
+| multi_misattribution_probe | 19 | 1.0 (19) | 0.9474 (19) | 1.0 (19) | 1.0 (2) | n/a | 0.1053 (19) | n/a | n/a |
+| none_of_these | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | n/a | n/a | n/a |
+| own_cause | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | n/a | n/a | n/a |
+| positional_probe | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | 0.0 (19) | 1.0 (15) | 1.0 (4) |
+| truncated | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | n/a | n/a | n/a |
+| wrong_attribution | 19 | 1.0 (19) | 1.0 (19) | 1.0 (19) | n/a | n/a | 0.0 (19) | 1.0 (15) | 1.0 (4) |
+
+**Untuned baseline** — the same Qwen3-0.6B base, same prompts, same
+grader, no fine-tune. It is here so the table above has a floor, and
+because its zeros are the worked example for "a `0.0` is not a pass":
+
+| slice | n | contract | cause | confidence carried | overconfident | injection echo | decoy | length helps | length misleads |
+|---|---|---|---|---|---|---|---|---|---|
+| overall | 243 | 0.5514 (243) | 0.0576 (243) | 0.3025 (243) | 0.6069 (145) | 0.0 (19) | 0.0 (51) | 0.0 (45) | 0.0 (12) |
+| attributed | 53 | 0.7358 (53) | 0.0377 (53) | 0.6792 (53) | 0.7619 (42) | n/a | n/a | n/a | n/a |
+| contradiction_probe | 19 | 0.4737 (19) | 0.2105 (19) | 0.0526 (19) | 0.8333 (6) | n/a | 0.0 (10) | n/a | n/a |
+| empty_candidates | 19 | 0.8421 (19) | 0.0 (19) | 0.1053 (19) | 0.3158 (19) | n/a | n/a | n/a | n/a |
+| injection | 19 | 0.5789 (19) | 0.0526 (19) | 0.4737 (19) | 0.75 (12) | 0.0 (19) | n/a | n/a | n/a |
+| misattribution_probe | 19 | 0.4737 (19) | 0.0 (19) | 0.1579 (19) | 0.2222 (9) | n/a | 0.0 (9) | 0.0 (15) | 0.0 (4) |
+| multi_misattribution_probe | 19 | 0.2105 (19) | 0.0 (19) | 0.3421 (19) | 0.5833 (12) | n/a | 0.0 (12) | n/a | n/a |
+| none_of_these | 19 | 0.6842 (19) | 0.3684 (19) | 0.0526 (19) | 0.8333 (6) | n/a | n/a | n/a | n/a |
+| own_cause | 19 | 0.4737 (19) | 0.0 (19) | 0.0526 (19) | 0.5 (10) | n/a | n/a | n/a | n/a |
+| positional_probe | 19 | 0.5789 (19) | 0.0 (19) | 0.3158 (19) | 0.5 (12) | n/a | 0.0 (12) | 0.0 (15) | 0.0 (4) |
+| truncated | 19 | 0.3684 (19) | 0.0 (19) | 0.1579 (19) | 0.6667 (9) | n/a | n/a | n/a | n/a |
+| wrong_attribution | 19 | 0.3158 (19) | 0.0 (19) | 0.2632 (19) | 0.625 (8) | n/a | 0.0 (8) | 0.0 (15) | 0.0 (4) |
+
+### The release bar, read out
+
+`docs/runbooks/train.md` step 6 names four deciders. Three are met; the
+fourth cannot be measured on this run, and that is reported as unmeasured
+rather than as a pass.
+
+| decider | reading | verdict |
+|---|---|---|
+| contract validity `1.0` | `1.0 (243)` — every answer parsed as exactly one conforming object | met |
+| decoy rate low on the uncontaminated adversarial slices | `0.0 (19)` on each of `positional_probe`, `misattribution_probe` and `wrong_attribution` | met |
+| `length helps` and `length misleads` close together | `1.0 (45)` and `1.0 (12)` — a gap of `0.0`, so the decoy rate above is not a word-counting artifact | met |
+| overconfidence on wrong causes | `n = 0` on every uncontaminated slice; the two measurable rows are both inside the withdrawn `multi_misattribution_probe` | **not measured** |
+
+`multi_misattribution_probe`'s `0.1053 (19)` decoy rate is excluded from
+the second row above, not smoothed into it: all 19 of its workload
+identities appear in the training data, so the number is uninterpretable
+for this release. Its two wrong causes are the same two rows that make
+the overconfidence denominator, which is why that decider goes with it.
+
+Four things this table does **not** establish, each argued above: that
+the model generalises to a fault shape outside the nineteen-entry catalog
+(nothing here tests it); that `cause` is free-text accuracy rather than
+closed-set selection (it is selection — 224/224 verbatim); that
+`confidence carried` says anything about judgment (it is extraction from
+the prompt and cannot fail); and that the untuned baseline's zeros on
+`decoy` and on both halves of the length pair are a strength (they are
+the arithmetic shadow of `cause 0.0576`).

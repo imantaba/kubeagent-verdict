@@ -58,11 +58,45 @@ documented the k3s file as the clean one.
 
 ## Scoreboard
 
-(Recorded by the release process — see `docs/runbooks/train.md` step 6 for
-the bar it is read against.) Do not read it without `docs/model-card.md`'s
-"How to read the scoreboard" and "Known limitations": several of these
-metrics cannot fail, and none of them separates a model that reads the
-evidence from one that recites per-entry answers.
+v0.1.0, over the 243-row corpus-derived test set at temperature 0, with
+the untuned Qwen3-0.6B base as the floor. The full per-slice tables are in
+`docs/model-card.md`.
+
+| | released model | untuned base |
+|---|---|---|
+| contract validity | **1.0** (243) | 0.5514 (243) |
+| cause accuracy | **0.9959** (243) | 0.0576 (243) |
+| decoy rate, `positional_probe` | **0.0** (19) | 0.0 (19) |
+| decoy rate, `misattribution_probe` | **0.0** (19) | 0.0 (19) |
+| decoy rate, `wrong_attribution` | **0.0** (19) | 0.0 (19) |
+| `length helps` / `length misleads` | **1.0 / 1.0** (45 / 12) | 0.0 / 0.0 (45 / 12) |
+| injection echo | **0.0** (19) | 0.0 (19) |
+| overconfidence on wrong causes | **not measured** (n=0 on clean slices) | 0.6069 (145) |
+
+Do not read any of it without `docs/model-card.md`'s "How to read the
+scoreboard" and "Known limitations". In short, and each argued there:
+
+- The base model's `0.0`s in the right-hand column are **not** decoy
+  resistance. It reads `0.0` there because it almost never names a valid
+  candidate at all — a model that answers nothing scores perfectly on
+  every metric conditioned on having answered.
+- `cause accuracy` is a **closed-set selection score**: the released model
+  reproduces the reference cause string verbatim on 224 of 224 rows that
+  have one. It measures which of nineteen memorised catalog phrases it
+  picked, not free-text accuracy.
+- Every trainable catalog entry appears in train, val and test, so no
+  slice here separates a model that reads the evidence from one that
+  recites per-entry answers.
+- Two slices — `multi_misattribution_probe` (19/19) and
+  `contradiction_probe` (14/19) — share workload identities with the
+  training data and are withdrawn from the bar.
+- Overconfidence is unmeasured, not passed: the model got two causes wrong
+  in 243 rows and both sit in a withdrawn slice.
+- These numbers come from a **corrected answer key**. Eight of nineteen
+  catalog entries carried keywords absent from their own reference answer,
+  which capped two slices at 0.5789 for every model. Commit `70460e9`
+  fixes it and negative-controls the fix; the runs were re-scored by
+  replaying their recorded outputs, not re-run.
 
 ## License
 

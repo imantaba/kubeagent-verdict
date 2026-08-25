@@ -484,9 +484,23 @@ An earlier draft of this section claimed the discriminator already existed
 block fixed while requiring an answer other than the stored `winner_cause`,
 and so cannot be passed by recitation. **That claim is retracted.** Scoring
 the known-broken first tune, which follows the `attributed` tag 79% of the
-time on `misattribution_probe`, gives `none_of_these` 1.0, `own_cause`
-0.5789 and `empty_candidates` 0.5789. A model proven not to read the
-evidence clears all three. They are not a discriminator.
+time on `misattribution_probe`, gives `none_of_these` 1.0. A model proven
+not to read the evidence clears it. It is not a discriminator.
+
+The same experiment recorded 0.5789 on `own_cause` and `empty_candidates`,
+and this section used to cite the pair as part of the retraction. **That
+citation is itself retracted, for a different reason.** Those two slices
+are graded by keyword rather than string equality, and until `70460e9`
+eight of the nineteen catalog entries declared a keyword that their own
+reference answer did not contain, making the grader's conjunction
+unsatisfiable on those rows. `0.5789` is `11/19` — the ceiling of a broken
+answer key, identical for every model that ever ran against it, and no
+evidence about this model or any other. The broken tune cannot be
+re-scored against the corrected key: it ran on a 205-row test set from an
+earlier commit, and the replay refuses a row-count mismatch rather than
+guessing an alignment. Its real score on those two slices is unknown. The
+retraction above stands on `none_of_these` alone, which the key bug never
+touched.
 
 A fourth slice, `contradiction_probe`, was then built specifically to be
 one, and negative control v4 scored the same broken model on it: **1.0

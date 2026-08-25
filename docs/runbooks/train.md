@@ -129,8 +129,13 @@ on a workstation — run the training step under `nohup` and watch
    memorised entry-to-cause lookup table. It was withdrawn because it does
    not do that. Scored against the known-broken first tune — a model that
    follows the `attributed` tag 79% of the time on `misattribution_probe` —
-   those three slices read 1.0, 0.5789 and 0.5789. It clears the bar it was
-   supposed to fail. A fourth slice built to replace it,
+   `none_of_these` read 1.0. It clears the bar it was supposed to fail.
+   (The same experiment read 0.5789 on `own_cause` and `empty_candidates`
+   and this runbook used to cite those two as well. Withdrawn: 0.5789 was
+   the pre-`70460e9` answer key's ceiling, 11/19, not a property of that
+   model — see `docs/model-card.md`. The broken tune cannot be re-scored,
+   since it ran against a 205-row test set, so its real score on those two
+   slices is unknown.) A fourth slice built to replace it,
    `contradiction_probe`, was measured the same way (negative control v4)
    and read 1.0 cause / 0.0 decoy, because it reuses the read text of
    `none_of_these`, which is 15% of the curriculum — a trained trigger, not
