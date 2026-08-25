@@ -543,6 +543,12 @@ def test_every_held_out_case_is_built():
 
     A name removed from held_out_case_set() while staying in HELD_OUT_CASES
     produces a smaller test set and no failure anywhere else.
+
+    What this proves is narrower than "the case is built": it reads every
+    string constant in the function, so a name kept only as a comparison
+    operand -- `elif case == "x": continue` -- still counts as named. That
+    shape is covered by the behavioural sibling below, not by this test, and
+    the assertion says "named" rather than "built" for that reason.
     """
     tree = _module()
     value = _module_assign(tree, "HELD_OUT_CASES")
@@ -558,7 +564,9 @@ def test_every_held_out_case_is_built():
     handled = {node.value for node in ast.walk(fn)
                if isinstance(node, ast.Constant) and isinstance(node.value, str)}
     missing = [case for case in declared if case not in handled]
-    assert not missing, f"declared in HELD_OUT_CASES but never built: {missing}"
+    assert not missing, (
+        f"declared in HELD_OUT_CASES but never named in held_out_case_set(): "
+        f"{missing}")
 
 
 def test_held_out_cases_all_reach_the_test_set():
@@ -593,14 +601,23 @@ Expected: **FAIL** — `eval-only cases in the training mix: ['positional_probe'
 
 ```bash
 # Perturbation: in held_out_case_set(), temporarily delete the
-# "wrong_attribution": cases.wrong_attribution entry from the builders dict
-# AND change the `else` arm to skip it, e.g.
-#     elif case == "wrong_attribution":
-#         continue
+# "wrong_attribution": cases.wrong_attribution entry from the builders dict,
+# and skip the case WITHOUT naming it -- dispatch on the dict itself:
+#     elif case in builders:
+#         ...
+# The name must leave the function body entirely. An
+# `elif case == "wrong_attribution": continue` does NOT work: the static half
+# reads every string constant in the function, so the literal left behind in
+# the comparison still counts as named and only the behavioural test fails.
 .venv/bin/pytest tests/test_generator_structure.py -q
 ```
 
-Expected: **FAIL** on `test_every_held_out_case_is_built` with `declared in HELD_OUT_CASES but never built: ['wrong_attribution']`, and on `test_held_out_cases_all_reach_the_test_set`. Revert and confirm green.
+Expected: **FAIL** on `test_every_held_out_case_is_built` with `declared in HELD_OUT_CASES but never named in held_out_case_set(): ['wrong_attribution']`, and on `test_held_out_cases_all_reach_the_test_set`. Revert and confirm green.
+
+That the two shapes fail differently is the point rather than a wrinkle: the
+static half proves a name is *mentioned*, the behavioural half proves rows
+*arrive*, and only the pair covers both a name that stops being built and a
+builder that stops producing. Neither alone is the guard.
 
 - [ ] **Step 5: Demonstrate the failure — the refusal**
 
