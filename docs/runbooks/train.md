@@ -64,6 +64,17 @@ on a workstation — run the training step under `nohup` and watch
    `dist/SHA256SUMS`. The chain ends with a llama-cli load-verify; if that
    fails, nothing in `dist/` is trustworthy.
 
+   This is the one step where the venv must be **activated**, not merely
+   used. `kv-export` shells out to `git` and `cmake` by bare name, and
+   `cmake` is pip-provided — it exists at `.venv/bin/cmake` and nowhere
+   else on a machine that never installed the system package. Running
+   `.venv/bin/kv-export` by absolute path, which is enough for every other
+   entry point here, leaves `.venv/bin` off `PATH` and the export dies on
+   `FileNotFoundError: 'cmake'`. It dies *late*: the merge and the f16
+   conversion both succeed first, so several minutes and a 1.2 GB
+   intermediate are spent before the failure appears. `source
+   .venv/bin/activate`, or prepend `.venv/bin` to `PATH`.
+
 5. **Serve and eval**:
 
        out/export/llama.cpp/build/bin/llama-server \
