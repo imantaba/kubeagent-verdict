@@ -83,6 +83,10 @@ def _reads(ex) -> list[str]:
         f"a {ex.case} row has no delimited evidence block; the guard refuses "
         f"to score a shape it cannot read")
     body = user[start + len(BEGIN):end]
+    assert body.strip() != "(none)", (
+        f"a {ex.case} row rendered an empty evidence block; the guard refuses "
+        f"to score it rather than hashing the literal '(none)', which would "
+        f"make every such row collide with every other regardless of content")
     return [part for part in READ_DELIM.split(body) if part.strip()]
 
 
@@ -91,6 +95,16 @@ def _mask(text: str, ex) -> str:
 
     A catalog group is `entry.key:ns/name`; a shared_origin_probe group is
     `propagation:<scenario>:ns/name`. rsplit takes the last field in both.
+
+    This is a TEXTUAL replace, not a field-aware one, and is deliberately
+    broader than "the row's own ns and name": the draw pools overlap, so a
+    row in namespace `web` also blanks a container named `web`, and a row
+    named `cache` blanks it inside the PVC `cache-0`. No direction is
+    claimed for that imprecision: each row is masked with its OWN identity,
+    so the mask is a different function per row and the effect on a given
+    comparison is not predictable in general. What holds is narrower: the
+    counts below were measured against exactly this behaviour, so they
+    include whatever collisions it causes, and any drift still fails loudly.
     """
     for part in ex.group.split("+"):
         if ":" not in part or "/" not in part:
