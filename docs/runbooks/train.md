@@ -129,7 +129,7 @@ on a workstation — run the training step under `nohup` and watch
      Do not borrow the number from a withdrawn slice to fill the gap, and do
      not read a small `n` as a pass — v0.1.0's earlier `0.1111 (18)` was
      called a pass and the 18 was manufactured by an answer-key bug (16 rows
-     no answer could satisfy; see `docs/model-card.md`).
+     no answer could satisfy; see `docs/model-card.md`);
    - **Does it distinguish shared origins from coincidence?** Read
      `separate reasons` and `false shared` **together, or not at all.**
      Alone, either is trivially gamed: a model that always answers
