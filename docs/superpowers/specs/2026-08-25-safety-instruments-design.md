@@ -110,35 +110,96 @@ Contamination has a second shape that group keys cannot see: two rows with diffe
 identities and byte-identical evidence text. That is `contradiction_probe`'s
 structural confound, and today it is prose in a docstring.
 
-**Method: declared allowlist over exact hashes.** For every rendered example, extract
-the evidence block from `ex.user` — the substring between `== BEGIN evidence ==` and
-`== END evidence ==`, the markers `contract.section()` writes (`contract.py:154-157`)
-— and take its SHA-256. Build the hash set of all train and val rows. For each
-eval-only slice, fail on any row whose evidence hash is in that set **unless** the
-`(slice, reason)` pair is in a declared allowlist.
+### What was measured first
 
-Exact hashing, not similarity. There is no repo precedent for a similarity metric
-(zero hits for `difflib`, `SequenceMatcher`, `levenshtein`, `jaccard`, `cosine`,
-`embedding`), and a similarity threshold is a number nobody can defend. Exact
-matching needs no threshold, is a set lookup, and stays stdlib-only.
+This section was originally specified as exact SHA-256 over the whole rendered
+evidence block, with no normalization. **That was measured and rejected.** At the
+release configuration (`--seed 17 --size 5500`), whole-block raw hashing finds:
 
-The allowlist is the deliverable, not the check. Each entry names why the sharing
-exists and what it costs:
+| slice | rows sharing a train/val evidence block |
+| --- | --- |
+| `contradiction_probe` | 2 / 19 |
+| `positional_probe` | 0 / 19 |
+| `misattribution_probe` | 0 / 19 |
+| `multi_misattribution_probe` | 0 / 19 |
+| `shared_origin_probe` | 0 / 10 |
 
-| Slice | Why it shares | What it costs |
+Two hits out of eighty-six. The guard would have shipped green and stayed green
+through almost any regression, because `_fmt` substitutes each row's freshly drawn
+namespace, workload name, pod name and image path into every read — so two rows built
+from the same template are never byte-identical. A guard that cannot see the sharing
+it was built to document is not a guard; it is a comment that runs.
+
+Two changes fix it, both measured:
+
+**Per-read, not per-block.** A `multi_misattribution_probe` row concatenates two
+entries' reads, so its *block* matches a training block only when a training `multi`
+row drew the same entry pair by coincidence. Its individual *reads* are plain
+`attributed` reads (`cases.py:363`, `all_reads.extend(_reads(e, n)[:2])`) and are
+reused wholesale. Per-read is also the unit `render_evidence` builds and the unit a
+memorising model would key on.
+
+**Identity-masked, not raw.** Mask the row's own namespace and workload name — both
+recoverable from `ex.group`, which is `entry.key:ns/name` joined on `+` — then
+collapse the derived pod form `<NAME>-<suffix>` to a placeholder.
+
+### The method
+
+For each example: split the evidence block into reads on `render_evidence`'s
+`== label ==` delimiters (`contract.py:183-190`), mask each read as above, SHA-256 it.
+Build the masked-read hash set over train and val. For each eval-only slice, count
+how many of its reads land in that set, and require the count to match a **declared
+allowlist entry**. No allowlist entry means the required count is zero.
+
+Exact hashing after masking, never similarity. There is no repo precedent for a
+similarity metric (zero hits for `difflib`, `SequenceMatcher`, `levenshtein`,
+`jaccard`, `cosine`, `embedding`), and a similarity threshold is a number nobody can
+defend. Masked-exact needs no threshold, is a set lookup, and stays stdlib-only.
+
+**The pod-suffix mask is load-bearing, and the spec records that rather than assuming
+it.** Measured at the release configuration, reads reused per slice:
+
+| slice | mask: ns + name + pod suffix | mask: ns + name only |
 | --- | --- | --- |
-| `positional_probe` | reuses `attributed`'s reads by design; the candidate menu is the only perturbation | none — the perturbation is the whole measurement |
-| `misattribution_probe` | same | none — same reason |
-| `contradiction_probe` | reuses `none_of_these_case`'s read text, and `none_of_these` is a fixed 15% of every curriculum | **this is why the slice cannot catch an entry-lookup table.** Negative control v4 measured the known-broken first tune at 1.0 cause / 0.0 decoy here |
+| `positional_probe` | 23 / 25 | 6 / 25 |
+| `misattribution_probe` | 24 / 25 | 6 / 25 |
+| `multi_misattribution_probe` | 47 / 50 | 12 / 50 |
+| `contradiction_probe` | 17 / 19 | 3 / 19 |
+| `shared_origin_probe` | **0 / 34** | **0 / 34** |
 
-The third row is the point: it converts `cases.py:282-300`'s prose retraction into a
-machine-checked fact. An undeclared new overlap fails the suite, and closing
-`contradiction_probe`'s confound will show up as an allowlist entry that can be
-deleted.
+Without the pod mask the guard still fires, but it detects only the reads that happen
+not to mention a pod — a signal shaped by which template mentions which field, not by
+what is actually shared. With it, the numbers say what the docstrings already claim.
 
-`shared_origin_probe` and `multi_misattribution_probe` get no entry. If either ever
-starts sharing evidence text with training data, that is a defect and the guard
-should say so.
+### The allowlist
+
+Pin the measured count per slice, not merely a boolean. A boolean allowlist can only
+detect sharing appearing; a pinned count also detects it **disappearing** — so when
+`contradiction_probe`'s confound is eventually closed, 17/19 becomes 0/19, the test
+fails, and the allowlist entry has to be deleted deliberately rather than remembered.
+
+| Slice | Declared | Why it shares | What it costs |
+| --- | --- | --- | --- |
+| `positional_probe` | 23 / 25 | reuses `attributed`'s reads by design; the candidate menu is the only perturbation | none — the perturbation is the whole measurement |
+| `misattribution_probe` | 24 / 25 | same | none — same reason |
+| `multi_misattribution_probe` | 47 / 50 | same, in the multi shape — `_reads(e, n)[:2]` per constituent | none — same reason |
+| `contradiction_probe` | 17 / 19 | reuses `none_of_these_case`'s read text, and `none_of_these` is a fixed 15% of every curriculum | **this is why the slice cannot catch an entry-lookup table.** Negative control v4 measured the known-broken first tune at 1.0 cause / 0.0 decoy here |
+| `shared_origin_probe` | **0 / 34** | — | nothing shared: its rows come from `dataset.propagation`, not the catalog |
+
+The fourth row is the point of the instrument: it converts `cases.py:282-300`'s prose
+retraction into a machine-checked fact.
+
+The fifth row is the point of the *allowlist*. `multi_misattribution_probe` was
+specified to get no entry, on the reasoning that any sharing there would be a defect.
+Measurement says otherwise — 47 of its 50 reads are reused, by exactly the same design
+as `positional_probe`'s. Had the guard shipped that way it would have failed on a
+correct tree. `shared_origin_probe` is the slice that genuinely shares nothing, and
+its zero is what shows the guard is discriminating rather than rubber-stamping every
+slice put in front of it.
+
+The counts are deterministic at `--seed 17 --size 5500`, which the test pins
+explicitly. A curriculum change that moves them fails the test and the new numbers get
+re-declared on purpose — the same discipline as a golden-output file.
 
 ## Instrument 4 — pin the denominators
 
@@ -305,7 +366,9 @@ perturbation, confirm green. Concretely —
 | 2, negative | add `("positional_probe", 5)` to `CASE_MIX` | the eval-only-name assertion |
 | 2, positive | drop a name from `held_out_case_set()` | the `HELD_OUT_CASES` coverage assertion |
 | 2, refusal | rewrite `CASE_MIX` as a computed value | refused by name, not silently skipped |
-| 3 | give `multi_misattribution_probe` a read verbatim from `attributed` | undeclared-overlap failure |
+| 3, appearing | give `shared_origin_probe` a read drawn from the catalog | its declared `0 / 34` breaks |
+| 3, disappearing | give `contradiction_probe` one novel read | its declared `17 / 19` breaks |
+| 3, masking | drop the pod-suffix mask | every declared count breaks at once |
 | 4, counts | drop one `with_losers` entry | `18 != 19` on the pinned table |
 | 4, raise | force both draws to the same name | the builder's `ValueError`, not a silent skip |
 
