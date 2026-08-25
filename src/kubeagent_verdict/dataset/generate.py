@@ -241,8 +241,10 @@ def probe_sets() -> list[Example]:
         other = with_losers[(i + 1) % len(with_losers)]
         first = names.draw(_entry_rng("multi-probe-a", entry.key))
         second = names.draw(_entry_rng("multi-probe-b", entry.key, other.key))
-        if (first.ns, first.name) == (second.ns, second.name):
-            continue  # a name collision would merge the two answer rows
+        # A collision used to `continue` here, which silently shrank the slice
+        # and the denominator every rate on it is divided by. The builder now
+        # raises instead, so a collision is a named failure rather than a
+        # missing row nobody counts.
         out.append(cases.multi_misattribution_probe(
             [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))
 

@@ -348,3 +348,254 @@ def test_separate_reasons_is_unmeasured_when_the_model_refuses():
 def test_markdown_names_the_separate_reasons_column():
     md = score.render_markdown(_shared_origin_board("one shared cause"))
     assert "separate reasons" in md.lower()
+
+
+def _multi_row(summary):
+    """A multi_misattribution_probe row answered with the given summary."""
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": ["shared origin", "common cause",
+                                            "same underlying", "upstream"]}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": summary})
+    return score.evaluate([row], lambda messages: answer)
+
+
+# separate_reasons_rate has no mirror: a model that answers "shared origin"
+# everywhere scores perfectly on it while being worse than what it replaced.
+# This is that mirror -- multi_misattribution_probe is the one slice where
+# independence is the CORRECT answer.
+def test_shared_origin_language_on_an_independent_row_scores_one():
+    results = _multi_row("These two failures have a shared origin upstream.")
+    assert results[0]["false_shared"] == 1.0
+    assert results[0]["shared_ambiguous"] is False
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": 1.0, "n": 1}
+
+
+def test_independence_language_on_an_independent_row_scores_zero():
+    results = _multi_row("2 workloads are failing for separate reasons.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+    assert score.scoreboard(results)["overall"]["false_shared_rate"] == {
+        "rate": 0.0, "n": 1}
+
+
+# "NOT caused by a shared origin" contains shared-origin language and is
+# CORRECT; scoring it 1.0 would manufacture a failure. Under the pre-fix
+# rule this landed in the ambiguous bucket (None) only by accident: the
+# raw substring match counted "shared origin" as a claim regardless of the
+# "not" in front of it, and it was saved from a false 1.0 only because
+# "unrelated" also matched. Negation-aware matching now reads the "shared
+# origin" occurrence itself as negated, so BOTH signals agree it is a
+# denial -- a semantic correction to 0.0, not a relaxation of the gate.
+def test_negated_shared_phrase_with_independence_phrase_is_a_denial():
+    results = _multi_row(
+        "These are not caused by a shared origin; they are unrelated.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": 0.0, "n": 1}
+    assert board["overall"]["shared_ambiguous_n"] == 0
+
+
+# The ambiguous branch still needs a test that can fail if it breaks. This
+# sentence carries an UN-NEGATED shared-claim phrase ("shared origin") next
+# to an independence phrase ("independent") describing a DIFFERENT pair of
+# workloads -- both signals fire and neither negates the other, so this is
+# genuinely mixed under the corrected rule, not an artefact of a naive
+# substring check.
+def test_unnegated_shared_phrase_with_independence_phrase_is_ambiguous():
+    results = _multi_row(
+        "The database outage is the shared origin, but the two web "
+        "failures are independent.")
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is True
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": None, "n": 0}
+    assert board["overall"]["shared_ambiguous_n"] == 1
+
+
+def test_neither_phrase_kind_present_is_ambiguous_not_a_pass():
+    results = _multi_row("Two workloads are broken.")
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is True
+    assert score.scoreboard(results)["overall"]["shared_ambiguous_n"] == 1
+
+
+# An unanswered row is UNMEASURED, not ambiguous. Conflating the two would
+# make a broken model read as a vague phrase set.
+def test_unanswered_row_is_none_and_not_ambiguous():
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": ["shared origin"]}
+    answer = json.dumps({"verdicts": [], "summary": "a shared origin explains both"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is False
+    assert score.scoreboard(results)["overall"]["shared_ambiguous_n"] == 0
+
+
+def _multi_row_with(summary, phrases):
+    """Like `_multi_row`, with an explicit phrase list -- for phrases outside
+    the four `_multi_row` hardcodes."""
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": phrases}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": summary})
+    return score.evaluate([row], lambda messages: answer)
+
+
+# Only 4 of the 10 SHARED_CLAIM_PHRASES had a negation counterpart in
+# INDEPENDENCE_PHRASES, by accident of wording ("shared"/"common" paired
+# with "no shared"/"no common"). The other six -- same underlying, same
+# root cause, upstream, cascading, knock-on, caused by the same -- had
+# none, so an honest denial of one of them used to score a hard 1.0
+# false-shared failure with zero visibility. These three cover three of
+# those six directly.
+def test_negated_same_underlying_scores_zero():
+    results = _multi_row("Not the same underlying problem.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_negated_upstream_scores_zero():
+    results = _multi_row(
+        "These are not caused by a shared upstream failure; each workload "
+        "has its own separate configuration problem.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_negated_cascading_scores_zero():
+    results = _multi_row_with(
+        "There is no cascading failure here; each pod fails for its own reason.",
+        ["cascading"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The fix must not turn every occurrence of a previously-uncovered phrase
+# into a denial -- an UN-NEGATED claim on one of the six still has to score
+# 1.0, the same as it always did for "shared origin".
+def test_unnegated_cascading_still_scores_one():
+    results = _multi_row_with(
+        "A cascading failure explains both outages.", ["cascading"])
+    assert results[0]["false_shared"] == 1.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The documented, accepted limit of the 24-character window: "no" reads as
+# negating "common cause" even though "there is no doubt" is an AFFIRMATION,
+# not a denial. This asserts the rule's actual behaviour (0.0, an
+# under-detected claim), never the value it ought to have (1.0) -- the
+# bounded heuristic's known cost, traded deliberately against manufacturing
+# a false 1.0 against a correct model under the <=1/19 acceptance bar.
+def test_the_no_doubt_defeat_case_is_the_documented_known_limit():
+    results = _multi_row_with(
+        "There is no doubt these share a common cause.", ["common cause"])
+    assert results[0]["false_shared"] == 0.0
+
+
+# The SAME class as "no doubt" above, reached with the two words the negator
+# fix added. These two sentences did not defeat the heuristic before
+# "cannot" and "none" joined NEGATORS -- adding them created these
+# instances rather than fixing them, which is why the docstring now names
+# the bullet a CLASS and calls its example an illustration rather than an
+# enumeration. Pinned so that a later attempt to make the window
+# grammar-aware fails here and the docstring gets re-declared on purpose,
+# the same golden-file discipline DECLARED in tests/test_evidence_overlap.py
+# uses. As above, this asserts the rule's actual behaviour (0.0), never the
+# value it ought to have (1.0).
+def test_the_wrong_scope_negator_class_extends_to_cannot():
+    results = _multi_row_with(
+        "This cannot be ruled out: a shared origin ties these together.",
+        ["shared origin"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+def test_the_wrong_scope_negator_class_extends_to_none():
+    results = _multi_row_with(
+        "None other than a shared root cause explains this outage.",
+        ["shared root cause"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# A DIFFERENT documented, accepted limit from the "no doubt" case above: a
+# full semantic flip via double negation, rather than a stray filler word.
+# "not without a shared upstream trigger" is semantically a CLAIM (two
+# negatives cancel), but the function does not compose negations -- it only
+# detects a negator's presence -- so "not" and "without" each independently
+# mark the "upstream" occurrence as denied. This asserts the rule's actual
+# behaviour (0.0, an under-detected claim), never the value it ought to have
+# (1.0): the same bounded-heuristic cost as the filler-word case, traded
+# deliberately against manufacturing a false 1.0 against a correct model.
+def test_the_double_negation_defeat_case_is_the_documented_known_limit():
+    results = _multi_row_with(
+        "This is not without a shared upstream trigger.", ["upstream"])
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+
+
+# The negator vocabulary is a closed list (see NEGATORS' own comment in
+# score.py), and a test that merely iterated NEGATORS.pattern would pass
+# vacuously if a word were later deleted from it -- the table and the
+# assertion would shrink together, so nothing could ever fail. This
+# declares the vocabulary independently in the test module, the same
+# discipline DECLARED in tests/test_evidence_overlap.py uses: checked
+# bidirectionally against what the regex actually contains, so a word added
+# to NEGATORS without a matching sentence here fails too, and a sentence
+# left behind after a word is removed fails as well.
+#
+# Each sentence isolates its negator: the shared-claim phrase is one of the
+# six with no INDEPENDENCE_PHRASES counterpart ("upstream", "cascading",
+# "same underlying", "knock-on", "common cause", "shared origin", "common
+# root cause" -- the last three checked to contain no "no shared"/"no
+# common" substring either), so a 0.0 here can only come from NEGATORS
+# actually matching that word, not from the independence-phrase fallback.
+NEGATOR_SENTENCES = {
+    "not": ("This is not an upstream cause of the failure.", "upstream"),
+    "no": ("There is no cascading effect between them.", "cascading"),
+    "never": ("They never share the same underlying issue.", "same underlying"),
+    "nor": ("It happened for its own reason, nor is there a knock-on effect.",
+            "knock-on"),
+    "without": ("This happened without any cascading failure elsewhere.",
+                "cascading"),
+    "cannot": ("They cannot share a common cause.", "common cause"),
+    "neither": ("Neither failure has a shared origin.", "shared origin"),
+    "none": ("None of these share a common root cause.", "common root cause"),
+}
+
+
+def _negator_words() -> set[str]:
+    """The literal alternation words inside NEGATORS' own compiled pattern,
+    parsed rather than hand-copied, so this stays honest against the actual
+    set the code matches instead of a second list that can silently drift."""
+    pattern = score.NEGATORS.pattern
+    prefix, suffix = r"\b(?:", r")\b"
+    assert pattern.startswith(prefix) and pattern.endswith(suffix), (
+        f"unexpected NEGATORS pattern shape: {pattern!r}")
+    return set(pattern[len(prefix):-len(suffix)].split("|"))
+
+
+def test_negator_sentence_table_matches_negators_bidirectionally():
+    assert set(NEGATOR_SENTENCES) == _negator_words(), (
+        "NEGATOR_SENTENCES (this test module) and NEGATORS (score.py) have "
+        "drifted apart -- add or remove a table entry to match the regex, "
+        "in whichever direction moved")
+
+
+def test_every_declared_negator_denies_its_own_sentence():
+    for word, (sentence, phrase) in NEGATOR_SENTENCES.items():
+        results = _multi_row_with(sentence, [phrase])
+        assert results[0]["false_shared"] == 0.0, (
+            f"negator {word!r} did not deny its own sentence: {sentence!r}")
+        assert results[0]["shared_ambiguous"] is False

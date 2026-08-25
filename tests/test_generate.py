@@ -1,8 +1,12 @@
+import collections
 import json
+import random
 import re
 
+import pytest
+
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import generate
+from kubeagent_verdict.dataset import cases, catalog, generate, names
 
 BANNED = (
     re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),  # any dotted-quad IP
@@ -107,7 +111,7 @@ def test_probe_rows_never_enter_train_or_val():
     train = generate.drop_held_out(train, test)
     val = generate.drop_held_out(val, test)
     banned = {"positional_probe", "misattribution_probe", "contradiction_probe",
-              "multi_misattribution_probe"}
+              "multi_misattribution_probe", "shared_origin_probe"}
     assert not banned & {ex.case for ex in train + val}
     # SPLIT on the test side too. This read `{ex.group for ex in test}` and so
     # re-derived production's own blind spot — it asserted the buggy rule
@@ -252,3 +256,44 @@ def test_provenance_scan_reaches_every_catalog_entry():
             f"trainable entries; missing {sorted(trainable - by_case.get(case, set()))}"
         )
     assert set().union(*by_case.values()) == trainable
+
+
+def test_test_set_slice_counts_are_pinned():
+    """Every probe rate's denominator, pinned.
+
+    `multi_misattribution_probe` had 19 rows and nothing said so, while its
+    caller silently skipped a row on a name collision. A slice that quietly
+    shrinks turns a "<=1 of 19" release bar into "<=1 of 18" with the suite
+    green. The literals `253` and `19` appeared nowhere in `tests/` before
+    this test existed.
+    """
+    counts = collections.Counter(ex.case for ex in generate.test_set())
+    assert dict(counts) == {
+        "attributed": 53,
+        "contradiction_probe": 19,
+        "empty_candidates": 19,
+        "injection": 19,
+        "misattribution_probe": 19,
+        "multi_misattribution_probe": 19,
+        "none_of_these": 19,
+        "own_cause": 19,
+        "positional_probe": 19,
+        "shared_origin_probe": 10,
+        "truncated": 19,
+        "wrong_attribution": 19,
+    }
+    assert sum(counts.values()) == 253
+
+
+def test_multi_probe_builder_rejects_colliding_workloads():
+    """A name collision must raise, not silently drop the row.
+
+    Two pairs with the same (ns, name) render one merged answer row instead
+    of two, so the example silently stops testing what it was built to test.
+    The check lives in the builder, so every caller gets it — including any
+    future one that does not know to look.
+    """
+    entry = next(e for e in catalog.trainable() if e.losers)
+    n = names.draw(random.Random(0))
+    with pytest.raises(ValueError, match="distinct workloads"):
+        cases.multi_misattribution_probe([(entry, n), (entry, n)], random.Random(0))

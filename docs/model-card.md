@@ -280,6 +280,39 @@ slice that can fail on the summary alone, which is why
 about whether the workloads share a cause, and averaging the two would hide
 exactly the half-learned state this slice exists to see.
 
+**Added after v0.1.0: the honesty counterpart, and why v0.1.0 passes it
+without having learned anything.** `separate_reasons_rate` asks whether a
+summary calls the workloads independent. `false_shared_rate` asks the
+opposite question on the opposite slice: whether a summary claims a shared
+cause on rows that have none. v0.1.0 scores **0.0 on 19 rows** of
+`multi_misattribution_probe`, with **0 summaries** that could not be
+resolved either way. The release bar is **at most 1 of 19**, so the bar is
+met.
+
+It is met vacuously, and recording both numbers together is what shows
+that. The two rates are measured on different slices, but at v0.1.0 they
+read one constant behaviour: on all 29 rows where the question arises, this
+model denies a shared cause. On `multi_misattribution_probe`, where the
+workloads genuinely do not share one, that answer is correct and costs
+nothing — 0/19. On `shared_origin_probe`, where they do share one, the same
+answer is wrong on every row — 10/10. A model that never claims a shared
+cause cannot falsely claim one, so a perfect `false_shared_rate` here is a
+corollary of the failure above it, not independent evidence of honesty.
+
+That is what the bar is for, and it is why it is worth carrying at a value
+today's model passes trivially. `false_shared_rate` becomes informative
+exactly when `separate_reasons_rate` starts to fall: a model that learns to
+recognise correlated failures thereby gains the ability to claim a shared
+cause, and with it the ability to claim one that is not there. Reading the
+two together is the only way to distinguish a model that has learned the
+distinction from one that has swapped one constant answer for the other.
+
+Both numbers come from the shipped v0.1.0 GGUF against the local endpoint.
+The run's stored outputs were replayed through the current scorer rather
+than re-generated, so `scoreboard.json`'s `run` block carries a
+`rescored_from` key naming the run they came from — read that block before
+reading any number in the file.
+
 ### `cause` is a closed-set selection score, not free-text accuracy
 
 A rate cannot tell you which of those two things it is, so this was

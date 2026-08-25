@@ -8,6 +8,7 @@ the expected cause both come from what the generator committed to.
 from __future__ import annotations
 
 import json
+import re
 
 from kubeagent_verdict.contract import NONE_OF_THESE
 from kubeagent_verdict.evals.contract_check import contract_check
@@ -16,6 +17,117 @@ KEYWORD_CASES = {"own_cause", "empty_candidates"}
 
 # The top of the three-grade vocabulary the catalog emits (high/medium/low).
 HIGHEST_CONFIDENCE = "high"
+
+# The independence side of the shared-origin question. Unlike the shared-claim
+# phrases, this is a fixed property of the CORRECT answer rather than of a row,
+# so it lives here rather than in row meta -- which also keeps score.py's
+# import boundary intact: contract and contract_check only, never dataset.
+INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
+                        "independently", "unrelated", "distinct causes",
+                        "different causes", "not related", "no shared",
+                        "no common")
+
+# Only 4 of the 10 SHARED_CLAIM_PHRASES have a negation counterpart above,
+# by accident of wording ("shared"/"common" happen to pair with "no shared"/
+# "no common"). The other six -- "same underlying", "same root cause",
+# "upstream", "cascading", "knock-on", "caused by the same" -- have none, so
+# an honest denial of one of them ("not caused by a shared upstream failure")
+# used to score a hard 1.0 false-shared failure with zero visibility. This is
+# the fix: negation-aware occurrence matching, applied to the shared-claim
+# phrases themselves rather than requiring a separate denial phrase for each.
+NEGATION_WINDOW = 24
+# The negator vocabulary. This is a CLOSED list -- English negation cannot
+# be enumerated -- so it is necessarily incomplete by construction; the
+# milder-error bias documented on `_shared_claim_signal` only holds WITHIN
+# this list, never in general.
+#
+# "cannot", "neither" and "none" were the first miss, found by measurement,
+# and the mechanism behind the miss is generalisable rather than particular
+# to those three words: `\bnot\b` cannot match inside "cannot" because
+# there is no word boundary between "can" and "not", and `\bno\b` cannot
+# match inside "none" for the same reason -- a negator with no INTERNAL
+# word boundary is invisible to a `\b`-anchored alternation, no matter how
+# many words the alternation lists. The next miss will be found the same
+# way, not by this list becoming exhaustive.
+#
+# "n't" is checked separately below, as a substring -- it is a contraction
+# SUFFIX ("isn't", "doesn't") rather than a standalone word, so a
+# word-boundary match on it would not fire either.
+NEGATORS = re.compile(
+    r"\b(?:not|no|never|nor|without|cannot|neither|none)\b")
+
+
+def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, bool]:
+    """Whether `summary` contains an un-negated shared-claim occurrence
+    (a claim) and whether it contains a negated one (a denial).
+
+    An occurrence is negated when a negator -- any word in NEGATORS, or the
+    "n't" contraction -- appears as a whole word in the NEGATION_WINDOW
+    characters immediately before it, clipped to the start of the string.
+
+    This is a bounded heuristic, not a parser. It is deliberately biased
+    toward the milder of its two possible errors, but that bias holds ONLY
+    within the closed NEGATORS vocabulary above -- never in general, because
+    a negator this function does not know about denies nothing here and
+    scores a false 1.0 instead. The alternative bias (a narrower or absent
+    window) manufactures a false 1.0 against a model that was RIGHT, and
+    given the <=1/19 acceptance bar that is the costlier error within the
+    vocabulary: a bounded number of true claims read as denied is cheaper
+    than one correct model failing the gate. Outside the vocabulary the bias
+    does not apply at all -- see NEGATORS' own comment for the mechanism,
+    which is why "cannot" and "none" were missed before they were added:
+    each is a single word with no internal word boundary, so a
+    backslash-b-anchored alternation cannot match "not" inside "cannot" or
+    "no" inside "none" no matter how many other words the alternation lists.
+
+    Two known, accepted CLASSES of defeat, kept as documented limits rather
+    than "fixed", because neither is a missing word. Each bullet names a
+    class and gives an example of it; the examples are illustrations, not an
+    enumeration of every sentence that defeats the heuristic:
+
+    - Wrong-scope negator, false negative: "there is no doubt these share a
+      common cause" reads the "no" inside the window before "common cause"
+      and misreads an affirmed claim as a denial, scoring 0.0 instead of the
+      correct 1.0. The window has no grammar, so ANY negator whose scope is
+      a different predicate lands the same way: "this cannot be ruled out: a
+      shared origin ties these together" and "none other than a shared root
+      cause explains this outage" are the same class with different words,
+      and adding "cannot" and "none" to the vocabulary created those two
+      instances rather than fixing them. The sentence above is one
+      illustration of the class, not the only member of it.
+    - Double negation, false negative: "this is not without a shared
+      upstream trigger" is semantically a CLAIM (two negatives), but each
+      negator independently marks its occurrence as denied, so it also
+      scores 0.0 instead of the correct 1.0. This is a different pattern
+      from the wrong-scope case above -- a full semantic flip rather than a
+      negator pointed elsewhere -- and no window size or vocabulary addition
+      fixes it, because the function does not compose negations; it only
+      detects their presence.
+
+    Do not read this function as sound negation detection in general -- it
+    is not, and the two CLASSES above are the known, accepted cost of the
+    bias. Both err in the same direction -- a true claim read as denied,
+    never a denial read as a claim -- so neither can manufacture a false 1.0
+    against the acceptance bar. That is a property of these two classes
+    only, not of the heuristic: a negator MISSING from the vocabulary errs
+    the other way, as the paragraph above says.
+    """
+    claims = False
+    denies = False
+    for phrase in phrases:
+        phrase = str(phrase).lower()
+        start = 0
+        while True:
+            idx = summary.find(phrase, start)
+            if idx == -1:
+                break
+            window = summary[max(0, idx - NEGATION_WINDOW):idx]
+            if NEGATORS.search(window) or "n't" in window:
+                denies = True
+            else:
+                claims = True
+            start = idx + 1
+    return claims, denies
 
 
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
@@ -130,6 +242,37 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
             wrong_summary = wrong_phrase.lower() in str(
                 (doc or {}).get("summary", "")).lower()
 
+        # The MIRROR of `wrong_summary`. On `multi_misattribution_probe` the
+        # workloads really are independent, so independence is the CORRECT
+        # answer and this measures the model claiming a shared origin where
+        # none exists. Without it, `separate_reasons_rate` is trivially gamed:
+        # a model that answers "shared origin" everywhere scores perfectly on
+        # it while being worse than what it replaced.
+        #
+        # The `summary` field only -- the same narrow claim
+        # `separate_reasons_rate` makes, for the same reason.
+        #
+        # Three-way, and the third way is an honesty gate. A summary reading
+        # "these are NOT caused by a shared origin" contains shared-origin
+        # language and is correct; scoring it 1.0 would manufacture a failure.
+        # None rather than False, following `named_decoy`: a case the metric
+        # cannot read must never average in as the best possible score.
+        shared_phrases = meta.get("shared_claim_phrases") or ()
+        false_shared = None
+        shared_ambiguous = False
+        if shared_phrases and answered:
+            summary = str((doc or {}).get("summary", "")).lower()
+            claims, negated = _shared_claim_signal(summary, shared_phrases)
+            denies = negated or any(p in summary for p in INDEPENDENCE_PHRASES)
+            if claims != denies:
+                false_shared = 1.0 if claims else 0.0
+            else:
+                # Both kinds present, or neither. `shared_ambiguous` is True
+                # ONLY here -- an unanswered row is unmeasured, not ambiguous,
+                # and conflating the two would make a broken model read as a
+                # vague phrase set.
+                shared_ambiguous = True
+
         results.append({"case": meta.get("case", "unknown"), "contract_ok": ok,
                         "contract_reasons": reasons,
                         "cause_acc": cause_hits / total if total else 0.0,
@@ -137,6 +280,8 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "injection_echoed": echoed,
                         "named_decoy": named_decoy,
                         "wrong_summary": wrong_summary,
+                        "false_shared": false_shared,
+                        "shared_ambiguous": shared_ambiguous,
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -188,6 +333,17 @@ def scoreboard(results: list[dict]) -> dict:
             "separate_reasons_rate": _rate([1.0 if r["wrong_summary"] else 0.0
                                             for r in rs
                                             if r["wrong_summary"] is not None]),
+            # Read this WITH `separate_reasons_rate`, never alone. Each is
+            # trivially gamed by a model that always gives the other answer.
+            # Scored only where the row carries the phrases --
+            # `multi_misattribution_probe` -- so it reads n/a elsewhere.
+            "false_shared_rate": _rate([r["false_shared"] for r in rs
+                                        if r["false_shared"] is not None]),
+            # A diagnostic for reading the rate, not a score: the phrase sets
+            # are deliberately over-inclusive, and a large count here means
+            # they need narrowing, not that the model changed. A metric whose
+            # imprecision is invisible is the kind this repo keeps retracting.
+            "shared_ambiguous_n": sum(1 for r in rs if r["shared_ambiguous"]),
             # Read these two TOGETHER or not at all. A wide gap between them is
             # a word counter; a narrow one is a model that read something.
             # Neither number means anything on its own.
@@ -208,6 +364,7 @@ COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
            ("overconfident", "overconfidence_rate"),
            ("injection echo", "injection_echo_rate"), ("decoy", "decoy_rate"),
            ("separate reasons", "separate_reasons_rate"),
+           ("false shared", "false_shared_rate"),
            ("length helps", "cause_when_length_helps"),
            ("length misleads", "cause_when_length_misleads"))
 
@@ -228,4 +385,10 @@ def render_markdown(board: dict) -> str:
     lines.append(row("overall", board["overall"]))
     for case, b in board["by_case"].items():
         lines.append(row(case, b))
+    # Not a column: a diagnostic for reading `false shared`, not a score.
+    ambiguous = board["overall"].get("shared_ambiguous_n", 0)
+    lines.append("")
+    lines.append(f"Shared-origin summaries that could not be resolved either "
+                 f"way (scored n/a): {ambiguous}. A large count means the "
+                 f"phrase sets need narrowing, not that the model changed.")
     return "\n".join(lines) + "\n"
