@@ -294,6 +294,41 @@ Both readings ship, and neither cancels the other:
   nineteen. Expect it to name the nearest catalog phrase rather than say
   it does not know.
 
+**The training loss says the same thing from the other side, and said it
+before any eval ran.** The shipped run took 538 optimizer steps over 4312
+examples in two epochs (`out/adapter/train_log.json`). The loss is masked
+to assistant tokens, as recorded above, so it scores the answer and not
+the question:
+
+| decile | steps | mean loss | max |
+|---|---|---|---|
+| 1 | 0–52 | 0.327150 | 1.8574 |
+| 2 | 53–106 | 0.017894 | 0.0861 |
+| 3 | 107–160 | 0.005459 | 0.0242 |
+| 4 | 161–214 | 0.007168 | 0.0397 |
+| 5 | 215–268 | 0.002030 | 0.0121 |
+| 6 | 269–321 | 0.000329 | 0.0021 |
+| 7 | 322–375 | 0.000248 | 0.0040 |
+| 8 | 376–429 | 0.000062 | 0.0004 |
+| 9 | 430–483 | 0.000059 | 0.0005 |
+| 10 | 484–537 | 0.000046 | 0.0002 |
+
+It starts at 1.6993 and is under 0.02 by step 107 — the first fifth of
+training. Epoch 2 begins at step 269, and every decile of it sits between
+3.3e-4 and 4.6e-5. No step reaches exactly zero; the minimum is 9.2e-06.
+An objective that is solved this early is what memorising nineteen
+phrases looks like from the optimizer's side, and it is the same fact as
+224/224 verbatim reproduction, arrived at independently.
+
+Two things it does **not** say. A loss this low is not evidence the model
+is good — it is evidence the targets are easy, which is the finding, not
+a result. And the log records training loss only, with no held-out loss
+curve, so nothing here dates the onset of overfitting or bounds it;
+that limit is why the split above was measured on the test set instead of
+inferred from this table. One practical consequence for a future run:
+the second epoch bought a drop from 2.0e-3 to 4.6e-5 that no decider in
+the scoreboard can see, so it is a candidate to cut.
+
 ### The released weights and the released code do not match
 
 The shipped GGUF was trained on a dataset generated at commit `8bd9d28`.
