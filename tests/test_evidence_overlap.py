@@ -34,6 +34,8 @@ re-declared on purpose.
 import hashlib
 import re
 
+import pytest
+
 from kubeagent_verdict.dataset import generate
 
 # The release configuration. These counts are deterministic at exactly this
@@ -119,6 +121,47 @@ def _mask(text: str, ex) -> str:
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _fake(user: str) -> generate.Example:
+    """The smallest Example `_reads` will look at: it reads .user and .case."""
+    return generate.Example(case="fake_probe", group="fake:ns/name",
+                            system="", user=user, assistant="", meta={})
+
+
+# `_reads` carries two refusals, and BOTH are unreachable on today's tree --
+# every one of the 4840 generated rows renders a delimited, non-empty
+# evidence block. Unreachable is exactly why they need tests: deleting
+# either assert changes no other test's outcome, so without these two the
+# guards are the vacuous shape this whole branch exists to prevent. They
+# assert the REFUSAL, not a value, because a refusal is the entire
+# behaviour: hashing an undelimited row would silently score zero reads, and
+# hashing the literal "(none)" would make every empty row collide with every
+# other one regardless of content -- a 100% reuse count that means nothing.
+def test_reads_refuses_a_row_with_no_delimited_evidence_block():
+    with pytest.raises(AssertionError, match="no delimited evidence block"):
+        _reads(_fake("a user turn that never opens an evidence section"))
+
+
+def test_reads_refuses_an_empty_evidence_block_rather_than_hashing_none():
+    with pytest.raises(AssertionError, match="empty evidence block"):
+        _reads(_fake(f"{BEGIN}(none){END}"))
+
+
+def test_reads_splits_a_well_formed_block_into_its_reads():
+    """The positive control: the two refusals above reject bad input, not all
+    input. Measured -- replacing `_reads`' body with an unconditional raise
+    naming both refusal phrases passes BOTH tests above; this one fails.
+
+    The allowlist test below catches that perturbation too, so this is not
+    the only net. It is the cheap, local one: it fails in milliseconds and
+    names `_reads`, where the allowlist test fails after generating 4840
+    rows and names a count. It also pins the split's exact shape -- the
+    trailing blank line belongs to the read before it -- which the allowlist
+    test only sees through a hash."""
+    body = "== pod ==\nfirst read\n\n== events ==\nsecond read\n"
+    assert _reads(_fake(f"{BEGIN}{body}{END}")) == [
+        "first read\n\n", "second read\n"]
 
 
 def test_eval_only_evidence_reuse_matches_the_declared_allowlist():
