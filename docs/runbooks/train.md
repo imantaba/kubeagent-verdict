@@ -103,7 +103,7 @@ on a workstation — run the training step under `nohup` and watch
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
    model scored 1.0 on contract validity, cause accuracy and confidence
-   simultaneously by reading the `attributed` tag and nothing else. Four
+   simultaneously by reading the `attributed` tag and nothing else. Five
    things decide a release:
 
    - contract validity 1.0;
@@ -130,9 +130,21 @@ on a workstation — run the training step under `nohup` and watch
      not read a small `n` as a pass — v0.1.0's earlier `0.1111 (18)` was
      called a pass and the 18 was manufactured by an answer-key bug (16 rows
      no answer could satisfy; see `docs/model-card.md`).
+   - **Does it distinguish shared origins from coincidence?** Read
+     `separate reasons` and `false shared` **together, or not at all.**
+     Alone, either is trivially gamed: a model that always answers
+     "independent" scores 0 on `false_shared_rate`, and a model that always
+     answers "shared origin" scores 0 on `separate_reasons_rate`. The second
+     is the obvious failure mode of the obvious correction to the first, and
+     nothing measured it until now. **`false_shared_rate` must be ≤ 1 of
+     19** — the whole `multi_misattribution_probe` slice, whose count is
+     pinned by `tests/test_generate.py`. Check the ambiguous count printed
+     under the table beside it: a large one means the phrase sets need
+     narrowing, not that the model changed, and it shrinks the denominator
+     the ratio above is read against.
 
-   **What this bar does NOT decide, and a decider that was withdrawn.** A
-   fifth bullet used to stand first here: cause accuracy on `none_of_these`,
+   **What this bar does NOT decide, and a decider that was withdrawn.** An
+   earlier bullet used to stand first here: cause accuracy on `none_of_these`,
    `own_cause` and `empty_candidates` substantially above zero, on the
    grounds that only those slices require an answer other than the entry's
    stored winner cause, so only they can catch a model reciting a
