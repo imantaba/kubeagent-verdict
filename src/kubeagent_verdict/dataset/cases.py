@@ -18,6 +18,19 @@ from kubeagent_verdict.dataset.catalog import CatalogEntry
 from kubeagent_verdict.dataset.generate import Example
 from kubeagent_verdict.dataset.names import Names
 
+# Language that asserts a shared upstream origin. It travels with the row as
+# meta -- the error side, exactly as `wrong_summary_phrase` does -- so
+# `score.py` keys off the field's presence instead of special-casing a slice
+# name, and keeps importing nothing from `dataset`.
+#
+# Deliberately over-inclusive for now. A row matching both these and an
+# independence phrase scores None and is counted, so the cost of
+# over-inclusion is visible rather than silent, and the counts are how the
+# set gets narrowed later.
+SHARED_CLAIM_PHRASES = ("shared origin", "shared root cause", "common cause",
+                        "common root cause", "same underlying", "same root cause",
+                        "upstream", "cascading", "knock-on", "caused by the same")
+
 
 def _fmt(tpl: str, n: Names) -> str:
     return tpl.format(ns=n.ns, name=n.name, pod=n.pod, container=n.container,
@@ -379,7 +392,8 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                    user=user, assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
                    meta={"case": "multi_misattribution_probe",
                          "expected": {r["workload"]: r["cause"] for r in rows},
-                         "decoy_causes": decoys})
+                         "decoy_causes": decoys,
+                         "shared_claim_phrases": list(SHARED_CLAIM_PHRASES)})
 
 
 def _draw_in(rng: random.Random, ns: str | None) -> Names:

@@ -348,3 +348,69 @@ def test_separate_reasons_is_unmeasured_when_the_model_refuses():
 def test_markdown_names_the_separate_reasons_column():
     md = score.render_markdown(_shared_origin_board("one shared cause"))
     assert "separate reasons" in md.lower()
+
+
+def _multi_row(summary):
+    """A multi_misattribution_probe row answered with the given summary."""
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": ["shared origin", "common cause",
+                                            "same underlying", "upstream"]}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": summary})
+    return score.evaluate([row], lambda messages: answer)
+
+
+# separate_reasons_rate has no mirror: a model that answers "shared origin"
+# everywhere scores perfectly on it while being worse than what it replaced.
+# This is that mirror -- multi_misattribution_probe is the one slice where
+# independence is the CORRECT answer.
+def test_shared_origin_language_on_an_independent_row_scores_one():
+    results = _multi_row("These two failures have a shared origin upstream.")
+    assert results[0]["false_shared"] == 1.0
+    assert results[0]["shared_ambiguous"] is False
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": 1.0, "n": 1}
+
+
+def test_independence_language_on_an_independent_row_scores_zero():
+    results = _multi_row("2 workloads are failing for separate reasons.")
+    assert results[0]["false_shared"] == 0.0
+    assert results[0]["shared_ambiguous"] is False
+    assert score.scoreboard(results)["overall"]["false_shared_rate"] == {
+        "rate": 0.0, "n": 1}
+
+
+# The honesty gate. "NOT caused by a shared origin" contains shared-origin
+# language and is CORRECT; scoring it 1.0 would manufacture a failure.
+def test_both_phrase_kinds_present_is_ambiguous_not_a_failure():
+    results = _multi_row(
+        "These are not caused by a shared origin; they are unrelated.")
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is True
+    board = score.scoreboard(results)
+    assert board["overall"]["false_shared_rate"] == {"rate": None, "n": 0}
+    assert board["overall"]["shared_ambiguous_n"] == 1
+
+
+def test_neither_phrase_kind_present_is_ambiguous_not_a_pass():
+    results = _multi_row("Two workloads are broken.")
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is True
+    assert score.scoreboard(results)["overall"]["shared_ambiguous_n"] == 1
+
+
+# An unanswered row is UNMEASURED, not ambiguous. Conflating the two would
+# make a broken model read as a vague phrase set.
+def test_unanswered_row_is_none_and_not_ambiguous():
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "multi_misattribution_probe",
+                   "expected": {"shop/api": "memory limit too low for the workload"},
+                   "shared_claim_phrases": ["shared origin"]}
+    answer = json.dumps({"verdicts": [], "summary": "a shared origin explains both"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["false_shared"] is None
+    assert results[0]["shared_ambiguous"] is False
+    assert score.scoreboard(results)["overall"]["shared_ambiguous_n"] == 0

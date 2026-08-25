@@ -17,6 +17,15 @@ KEYWORD_CASES = {"own_cause", "empty_candidates"}
 # The top of the three-grade vocabulary the catalog emits (high/medium/low).
 HIGHEST_CONFIDENCE = "high"
 
+# The independence side of the shared-origin question. Unlike the shared-claim
+# phrases, this is a fixed property of the CORRECT answer rather than of a row,
+# so it lives here rather than in row meta -- which also keeps score.py's
+# import boundary intact: contract and contract_check only, never dataset.
+INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
+                        "independently", "unrelated", "distinct causes",
+                        "different causes", "not related", "no shared",
+                        "no common")
+
 
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
     results = []
@@ -130,6 +139,37 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
             wrong_summary = wrong_phrase.lower() in str(
                 (doc or {}).get("summary", "")).lower()
 
+        # The MIRROR of `wrong_summary`. On `multi_misattribution_probe` the
+        # workloads really are independent, so independence is the CORRECT
+        # answer and this measures the model claiming a shared origin where
+        # none exists. Without it, `separate_reasons_rate` is trivially gamed:
+        # a model that answers "shared origin" everywhere scores perfectly on
+        # it while being worse than what it replaced.
+        #
+        # The `summary` field only -- the same narrow claim
+        # `separate_reasons_rate` makes, for the same reason.
+        #
+        # Three-way, and the third way is an honesty gate. A summary reading
+        # "these are NOT caused by a shared origin" contains shared-origin
+        # language and is correct; scoring it 1.0 would manufacture a failure.
+        # None rather than False, following `named_decoy`: a case the metric
+        # cannot read must never average in as the best possible score.
+        shared_phrases = meta.get("shared_claim_phrases") or ()
+        false_shared = None
+        shared_ambiguous = False
+        if shared_phrases and answered:
+            summary = str((doc or {}).get("summary", "")).lower()
+            claims = any(str(p).lower() in summary for p in shared_phrases)
+            denies = any(p in summary for p in INDEPENDENCE_PHRASES)
+            if claims != denies:
+                false_shared = 1.0 if claims else 0.0
+            else:
+                # Both kinds present, or neither. `shared_ambiguous` is True
+                # ONLY here -- an unanswered row is unmeasured, not ambiguous,
+                # and conflating the two would make a broken model read as a
+                # vague phrase set.
+                shared_ambiguous = True
+
         results.append({"case": meta.get("case", "unknown"), "contract_ok": ok,
                         "contract_reasons": reasons,
                         "cause_acc": cause_hits / total if total else 0.0,
@@ -137,6 +177,8 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "injection_echoed": echoed,
                         "named_decoy": named_decoy,
                         "wrong_summary": wrong_summary,
+                        "false_shared": false_shared,
+                        "shared_ambiguous": shared_ambiguous,
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -188,6 +230,17 @@ def scoreboard(results: list[dict]) -> dict:
             "separate_reasons_rate": _rate([1.0 if r["wrong_summary"] else 0.0
                                             for r in rs
                                             if r["wrong_summary"] is not None]),
+            # Read this WITH `separate_reasons_rate`, never alone. Each is
+            # trivially gamed by a model that always gives the other answer.
+            # Scored only where the row carries the phrases --
+            # `multi_misattribution_probe` -- so it reads n/a elsewhere.
+            "false_shared_rate": _rate([r["false_shared"] for r in rs
+                                        if r["false_shared"] is not None]),
+            # A diagnostic for reading the rate, not a score: the phrase sets
+            # are deliberately over-inclusive, and a large count here means
+            # they need narrowing, not that the model changed. A metric whose
+            # imprecision is invisible is the kind this repo keeps retracting.
+            "shared_ambiguous_n": sum(1 for r in rs if r["shared_ambiguous"]),
             # Read these two TOGETHER or not at all. A wide gap between them is
             # a word counter; a narrow one is a model that read something.
             # Neither number means anything on its own.
@@ -208,6 +261,7 @@ COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
            ("overconfident", "overconfidence_rate"),
            ("injection echo", "injection_echo_rate"), ("decoy", "decoy_rate"),
            ("separate reasons", "separate_reasons_rate"),
+           ("false shared", "false_shared_rate"),
            ("length helps", "cause_when_length_helps"),
            ("length misleads", "cause_when_length_misleads"))
 
@@ -228,4 +282,10 @@ def render_markdown(board: dict) -> str:
     lines.append(row("overall", board["overall"]))
     for case, b in board["by_case"].items():
         lines.append(row(case, b))
+    # Not a column: a diagnostic for reading `false shared`, not a score.
+    ambiguous = board["overall"].get("shared_ambiguous_n", 0)
+    lines.append("")
+    lines.append(f"Shared-origin summaries that could not be resolved either "
+                 f"way (scored n/a): {ambiguous}. A large count means the "
+                 f"phrase sets need narrowing, not that the model changed.")
     return "\n".join(lines) + "\n"
