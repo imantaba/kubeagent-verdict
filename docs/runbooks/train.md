@@ -120,6 +120,16 @@ on a workstation — run the training step under `nohup` and watch
      without reading anything. A wide gap invalidates the decoy rate;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
+     **This one can go blind.** It is conditioned on errors, so a model that
+     stops making them leaves it with no denominator: for v0.1.0 the tuned
+     model got two causes wrong in 243 rows and both were inside a slice
+     withdrawn as contaminated, leaving `n = 0` everywhere it counted. Check
+     the denominator before reading the rate, and if it is zero on every
+     uncontaminated slice, write **not measured** in the release notes.
+     Do not borrow the number from a withdrawn slice to fill the gap, and do
+     not read a small `n` as a pass — v0.1.0's earlier `0.1111 (18)` was
+     called a pass and the 18 was manufactured by an answer-key bug (16 rows
+     no answer could satisfy; see `docs/model-card.md`).
 
    **What this bar does NOT decide, and a decider that was withdrawn.** A
    fifth bullet used to stand first here: cause accuracy on `none_of_these`,
