@@ -118,11 +118,11 @@ def test_two_seeds_produce_distinguishable_run_blocks(tmp_path):
 
 
 def test_the_hash_covers_fields_the_block_does_not_name(tmp_path):
-    """Two manifests agreeing on all four named fields still differ.
+    """Two manifests agreeing on all three named fields still differ.
 
-    The block names four scalars; the hash is over the whole file. That is
+    The block names three scalars; the hash is over the whole file. That is
     what lets the block stay a short list of paths-free scalars without the
-    guarantee narrowing to those four.
+    guarantee narrowing to those three.
     """
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
@@ -139,7 +139,7 @@ def test_the_hash_covers_fields_the_block_does_not_name(tmp_path):
 def test_the_dataset_block_carries_no_path(tmp_path):
     """`corpus_files` holds basenames today; nothing enforces that it always will.
 
-    The block names four scalars and never copies a manifest string, so a path
+    The block names three scalars and never copies a manifest string, so a path
     that appeared there could not reach the scoreboard even so. A file whose
     corpus list is absolute still hashes to something distinguishable.
     """

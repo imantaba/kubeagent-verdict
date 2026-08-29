@@ -427,13 +427,14 @@ def _rate(values: list[float]) -> dict:
 # close enough, so the bullet read as a gate and was a human eyeball check.
 #
 # TOLERANCE is read against the OVERALL 12-row `misleads` denominator at the
-# current corpus size, where one row is 0.083 -- so 0.15 admits two rows of
-# noise and refuses the third. That calibration is why `scoreboard` computes
-# the gate on the overall block alone: per case the denominator is 4
-# (`positional_probe`, `misattribution_probe` and `wrong_attribution` each
-# carry 15 helps against 4 misleads), where one flipped row is 0.25 and clears
-# the bar on its own. A per-case verdict would read MISSED for a single row of
-# noise, under a key name a reader would take for the release gate.
+# current corpus size, where one row is 0.083 -- so 0.15 admits one row of
+# noise and refuses the second, which lands at 0.167. That calibration is why
+# `scoreboard` computes the gate on the overall block alone: three of the
+# eleven cases carry length-keyed rows at all (`positional_probe`,
+# `misattribution_probe` and `wrong_attribution`, 15 helps against 4 misleads
+# each), and at a denominator of 4 one flipped row is 0.25 and clears the bar
+# on its own. A per-case verdict would read MISSED for a single row of noise,
+# under a key name a reader would take for the release gate.
 LENGTH_GAP_TOLERANCE = 0.15
 # FLOOR is the half a plain `abs(gap) <= TOLERANCE` threshold gets wrong. The
 # untuned baseline scored 0.0 on both slices: a gap of exactly 0.00, inside any
@@ -449,7 +450,9 @@ LENGTH_GAP_TOLERANCE = 0.15
 # Note what these rates can and cannot say. Both are cause accuracy over their
 # slice, so a row the model answered wrongly and a workload it omitted both
 # score 0.0: a low rate says the answers are not right, never WHY. No comment
-# or rendered string here may name a mechanism behind it.
+# or rendered string here may attribute an observed rate to a mechanism.
+# Naming what a mechanism WOULD score is a different statement and is allowed
+# -- it is how the floor and the sign are justified below.
 LENGTH_GAP_FLOOR = 0.5
 
 
@@ -462,7 +465,7 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     longer phrase in 15 of 19 catalog entries. A model that scores *better* on
     the misleading rows has ruled that shortcut out, so a negative gap passes.
     An `abs()` bar would instead fail it for scoring well on the harder slice,
-    where 12 rows make a 0.2 swing two rows of noise.
+    where the denominator is 12 and a single row is already a 0.083 swing.
 
     What a negative gap does NOT rule out, written down rather than implied:
     the mirror shortcut, always answering the SHORTER candidate. It is just as
@@ -470,8 +473,11 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     In its pure form it scores ~0.0 where length helps and lands under the
     floor, so it comes back `not measured` -- refused by the floor, not by the
     sign, and `not measured` is not a pass. Its partial form, at or above the
-    floor on `helps`, does pass this decider; overall cause accuracy is what
-    fails a model scoring a coin flip on 45 rows, not this bar.
+    floor on `helps`, does pass this decider, and no other codified decider
+    catches it either: overall cause accuracy carries no numeric bar, only
+    "beats the untuned baseline", which 0.0576 makes trivial. The residual is
+    read by eye off the printed `cause when length helps` column, which is why
+    both rates stay on the board beside the verdict.
 
     Returns `(None, None)` when either slice has no denominator, and
     `(gap, None)` when `helps` is below `LENGTH_GAP_FLOOR`: the number is still
@@ -535,9 +541,11 @@ def scoreboard(results: list[dict]) -> dict:
                                        if r["keyword_derivable"] is True),
             "keyword_graded_n": sum(1 for r in rs
                                     if r["keyword_derivable"] is not None),
-            # Read these two TOGETHER or not at all. A wide gap between them is
-            # a word counter; a narrow one is a model that read something.
-            # Neither number means anything on its own.
+            # Read these two TOGETHER or not at all. A wide gap is what a word
+            # counter produces; a narrow gap is not evidence of the opposite --
+            # the untuned baseline scored 0.0 on both, a gap of 0.00 from a
+            # model that read nothing, which is the case `LENGTH_GAP_FLOOR`
+            # exists to refuse. Neither number means anything on its own.
             "cause_when_length_helps": _rate([r["cause_acc"] for r in rs
                                               if r["length_helps"] is True]),
             "cause_when_length_misleads": _rate([r["cause_acc"] for r in rs

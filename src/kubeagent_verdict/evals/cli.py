@@ -36,9 +36,10 @@ def dataset_provenance(test: Path) -> dict | None:
     `main` and handed in.
 
     A retrain overwrites `out/dataset/test.jsonl` in place, and every other
-    field of the run block is a property of the serving side or a basename —
-    so without this, two scoreboards scored against two different datasets
-    carry an identical claim about what they scored.
+    field of the run block is a property of the serving side, a basename, or a
+    row count two same-sized test sets share — so without this, two scoreboards
+    scored against two different datasets carry an identical claim about what
+    they scored.
 
     TWO digests, because either alone leaves a gap. `manifest_sha256` covers
     the manifest's bytes, so a manifest that grows a key still changes the
@@ -48,8 +49,12 @@ def dataset_provenance(test: Path) -> dict | None:
     afterwards ties them, and the file the eval actually read is the test
     file: a hand-edited `test.jsonl` beside an untouched manifest would
     otherwise produce an identical, complete-looking block. `test_sha256`
-    covers the scored bytes themselves. Together they say which dataset was
-    generated AND which rows were read; neither says it alone.
+    covers the test file's bytes — not proof they are the scored bytes, since
+    `main` reads the file, runs the whole eval, and only then calls this, so a
+    file replaced mid-run hashes as its replacement. It catches the case that
+    motivates it: an edit made before the run rather than during it. Together
+    the two say which dataset was generated AND which rows the file held;
+    neither says it alone.
 
     Both are digests of files this process only reads, so what they can prove
     is limited to matching or not matching another run's. The three named

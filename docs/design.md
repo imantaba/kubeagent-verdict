@@ -409,8 +409,9 @@ confidence from the closed set, line-length bounds. Then task metrics:
   not shown enough for the difference to certify anything. The untuned
   baseline is the motivating case: 0.0 against 0.0 is a gap of zero that no
   unconditioned threshold could fail. The verdict is stored on the **overall** block alone —
-  0.15 is read against the 12-row `misleads` denominator, and per case that
-  denominator is 4 — while the two rates it derives from stay on every case
+  0.15 is read against the 12-row `misleads` denominator, and in the three
+  cases that carry length-keyed rows at all that denominator is 4 — while the
+  two rates it derives from stay on every case
   (`docs/runbooks/train.md` step 6). (The 57 rows
   that carry both a decoy and a non-`none_of_these` expected cause are the
   only ones the split can be computed over; the other 186 contribute to

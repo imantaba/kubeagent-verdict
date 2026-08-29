@@ -948,10 +948,11 @@ def test_markdown_says_not_measured_rather_than_met_when_below_the_floor():
 
 # The gate is stored on `overall` and nowhere else. `LENGTH_GAP_TOLERANCE` is
 # calibrated against the overall `misleads` denominator of 12, where one row is
-# 0.083 and the bar admits two rows of noise. Per case that denominator is 4 --
-# `positional_probe`, `misattribution_probe` and `wrong_attribution` each carry
-# 15 helps against 4 misleads -- where one flipped row is 0.25 and already
-# exceeds the bar. A per-case verdict would therefore read MISSED for a single
+# 0.083 and the bar admits one row of noise and refuses the second at 0.167.
+# Three of the eleven cases carry length-keyed rows at all --
+# `positional_probe`, `misattribution_probe` and `wrong_attribution`, 15 helps
+# against 4 misleads each -- and at a denominator of 4 one flipped row is 0.25
+# and already exceeds the bar. A per-case verdict would therefore read MISSED for a single
 # row of noise, under the same key name a reader would take for the release
 # gate. The two rates stay per case; only the derived verdict is withheld.
 def test_the_gate_is_stored_on_the_overall_block_only():

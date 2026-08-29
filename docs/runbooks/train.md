@@ -103,14 +103,25 @@ on a workstation — run the training step under `nohup` and watch
    Its `dataset` sub-block says **which** test set those rows came from:
    `seed`, `size`, `test_rows`, a SHA-256 over `out/dataset/manifest.json`,
    and a second SHA-256 over the `--test` file's own bytes. Every other field
-   of `run` is a property of the serving side, and `test_file` is a basename —
-   so before this block a retrain that overwrote `out/dataset/test.jsonl` in
-   place produced two scoreboards making byte-identical claims about what they
-   scored. **Compare the two `dataset` blocks before comparing any number
-   across them.** Differing hashes mean two different test sets and the
-   comparison is not a comparison; a `null` block means the `--test` file had
-   no manifest beside it, which is fine for a hand-made set and disqualifying
-   for a release argument.
+   of `run` is a property of the serving side, a basename, or a row count two
+   same-sized test sets share — so before this block a retrain that overwrote
+   `out/dataset/test.jsonl` in place produced two scoreboards making
+   byte-identical claims about what they scored. **Compare the two `dataset`
+   blocks before comparing any number across them.**
+
+   `test_sha256` is the one that decides whether a comparison is a comparison:
+   it is the hash of the file the rows were read from, so two runs agreeing on
+   it were judged against the same test set. `manifest_sha256` answers a
+   different question. `kv-dataset` builds `test.jsonl` from
+   `generate.test_set()`, which takes neither a seed nor a size, so a
+   `--seed 17` run and a `--seed 42` run write the same 253 test rows and two
+   different manifests. A differing `manifest_sha256` beside a matching
+   `test_sha256` therefore means **same rows, different dataset config** —
+   often exactly the comparison you want, not a reason to discard it. A
+   differing `test_sha256` is the disqualifying one. A `null` block means the
+   `--test` file had no manifest beside it, or had one that could not be read
+   or parsed — the three are indistinguishable here — which is fine for a
+   hand-made set and disqualifying for a release argument.
 
    Read both hashes, not one. `kv-dataset` writes the test file and the
    manifest as two separate writes and nothing afterwards ties them together,
@@ -141,8 +152,10 @@ on a workstation — run the training step under `nohup` and watch
      intersection described under "contamination" below;
    - **`length_gap` ≤ 0.15, and not at the floor.** The gap is
      `length helps` minus `length misleads`, printed under the overall table
-     as `Length gap (helps - misleads): <n> -- met | MISSED | not measured`
-     and stored as `length_gap` / `length_gap_ok` in `scoreboard.json`.
+     as `Length gap (helps - misleads): <n> -- <verdict>`, where the verdict
+     is `met (bar: <= 0.15)`, a `MISSED (bar: <= 0.15)` sentence, or a
+     `not measured` sentence naming which of the two abstentions fired; and
+     stored as `length_gap` / `length_gap_ok` in `scoreboard.json`.
      Apart, the model is counting words: the winning cause is the longer
      phrase in 15 of 19 catalog entries, so a word counter beats the decoy
      rate for free without reading anything. A wide gap invalidates the
@@ -168,14 +181,18 @@ on a workstation — run the training step under `nohup` and watch
      `MISSED` however extreme. In its pure form it scores ~0.0 on `helps`, so
      the floor catches it and it reads `not measured` — refused, but by the
      floor and not by the sign. Its partial form — around 0.5 on `helps`
-     against 1.0 on `misleads`, gap −0.5 — **passes this decider**, and
-     overall cause accuracy is the decider that fails a model scoring a coin
-     flip on 45 rows. Read the two together.
+     against 1.0 on `misleads`, gap −0.5 — **passes this decider**, and no
+     other codified decider catches it: overall cause accuracy carries no
+     numeric bar, only "beats the untuned baseline", and that baseline is
+     0.0576. Read `cause when length helps` off the printed table by eye — a
+     model sitting near 0.5 there has not earned the pass this bar just gave
+     it.
 
      The gate is computed on the **overall** block only. The two rates appear
      on every case, but 0.15 is calibrated against the overall 12-row
-     `misleads` denominator where one row is 0.083; per case that denominator
-     is 4, where one flipped row is 0.25 and clears the bar on its own. Judge
+     `misleads` denominator where one row is 0.083; in the three cases that
+     carry length-keyed rows at all that denominator is 4, where one flipped
+     row is 0.25 and clears the bar on its own. Judge
      a case by its two rates, never by arithmetic on them against this bar;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
