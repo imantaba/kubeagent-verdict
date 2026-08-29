@@ -12,6 +12,7 @@ import json
 import random
 
 from kubeagent_verdict import contract as c
+from kubeagent_verdict import remediation as rem
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import propagation as prop
 from kubeagent_verdict.dataset.catalog import CatalogEntry
@@ -38,15 +39,31 @@ def _fmt(tpl: str, n: Names) -> str:
                       pvc=n.pvc, restarts=n.restarts)
 
 
+def _suggestion(issue: str, n: Names) -> rem.Suggestion:
+    """The `suggested fix` line kubeagent would render for this finding.
+
+    Derived from the issue kind rather than authored per entry. The field is a
+    model *input*, so a catalog author's more helpful wording would not improve
+    the data — it would make the line mean one thing in training and another at
+    serve time. See src/kubeagent_verdict/remediation.py.
+
+    kubeagent names the init container on an Init:* finding, so the --previous
+    log command it builds addresses that container and not the app one.
+    """
+    container = n.init_container if issue.startswith("Init:") else n.container
+    return rem.suggest(issue, ns=n.ns, pod=n.pod, container=container)
+
+
 def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Finding:
     res = None
     if e.resources is not None:
         res = c.ContainerResources(mem_request=e.resources[0], mem_limit=e.resources[1],
                                    cpu_request=e.resources[2], cpu_limit=e.resources[3])
+    sug = _suggestion(e.issue, n)
     return c.Finding(
         issue=e.issue, reason=_fmt(e.reason, n), evidence=_fmt(e.evidence, n),
         log_cause=_fmt(e.log_cause, n) if (e.log_cause and with_log_cause) else "",
-        next_step=_fmt(e.next_step, n), command=_fmt(e.command, n), resources=res,
+        next_step=sug.next_step, command=sug.command, resources=res,
     )
 
 
@@ -142,7 +159,7 @@ def _winner_example(e: CatalogEntry, n: Names, cands: tuple[c.Candidate, ...],
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": _fmt(e.rationale, n)}]
     summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
-               f"{_fmt(e.next_step, n).capitalize()}.")
+               f"{_fmt(e.recommendation, n).capitalize()}.")
     meta = {"case": case, "entry": e.key,
             "expected_cause": cause, "expected_confidence": conf}
     meta.update(extra_meta or {})
@@ -441,10 +458,11 @@ def _propagation_names(p: prop.Propagation, rng: random.Random,
 
 
 def _victim_finding(v: prop.Victim, n: Names) -> c.Finding:
+    sug = _suggestion(v.issue, n)
     return c.Finding(
         issue=v.issue, reason=_fmt(v.reason, n), evidence=_fmt(v.evidence, n),
         log_cause=_fmt(v.log_cause, n) if v.log_cause else "",
-        next_step=_fmt(v.next_step, n), command=_fmt(v.command, n),
+        next_step=sug.next_step, command=sug.command,
     )
 
 

@@ -13,8 +13,7 @@ ENTRIES = [
         issue="OOMKilled",
         reason="container killed: out of memory",
         evidence="container {container} last terminated with reason OOMKilled, exit code 137",
-        next_step="raise the container's memory limit or fix the leak",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="raise the container's memory limit or fix the leak",
         resources=("64Mi", "64Mi", "100m", "250m"),
         winner_cause="memory limit too low for the workload",
         winner_reason="the container is repeatedly OOMKilled at its 64Mi limit",
@@ -48,8 +47,7 @@ ENTRIES = [
         issue="ImagePullBackOff",
         reason="Back-off pulling image",
         evidence='Failed to pull image "{image}": not found',
-        next_step="fix the image tag or push the missing image",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="fix the image tag or push the missing image",
         winner_cause="image tag not found in the registry",
         winner_reason="the pull error names the tag as missing",
         losers=(
@@ -101,8 +99,7 @@ ENTRIES = [
         reason="No node can schedule this pod",
         evidence="0/3 nodes are available: 1 node(s) were unschedulable, 1 node(s) had disk "
                  "pressure.",
-        next_step="uncordon the node or free disk space, then confirm DiskPressure clears",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="uncordon the node or free disk space, then confirm DiskPressure clears",
         winner_cause="node {node} is cordoned and under disk pressure",
         winner_reason="the node carries unschedulable=true and a DiskPressure condition",
         losers=(
@@ -141,8 +138,7 @@ ENTRIES = [
         issue="ProbeFailure",
         reason="the readiness probe keeps failing — the pod is kept out of Service endpoints",
         evidence='Readiness probe failed: Get "{pod}:8080/healthz": dial tcp: i/o timeout',
-        next_step="check whether a NetworkPolicy now blocks the probe's traffic",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check whether a NetworkPolicy now blocks the probe's traffic",
         winner_cause="a deny-all NetworkPolicy now selects the pod",
         winner_reason="the probe began timing out at the same moment the policy was created, "
                       "with no code change",
@@ -178,8 +174,7 @@ ENTRIES = [
         issue="CrashLoopBackOff",
         reason="Container repeatedly crashes after starting",
         evidence='container "coredns", restartCount=6',
-        next_step="check the Corefile for a syntax or plugin error",
-        command="kubectl -n kube-system describe pod {pod}",
+        recommendation="check the Corefile for a syntax or plugin error",
         winner_cause="a broken Corefile is crashing CoreDNS on startup",
         winner_reason="the previous-instance log shows a Corefile parse error, and both replicas "
                       "crash the same way on different nodes",
@@ -242,8 +237,7 @@ ENTRIES = [
         reason="the container image was resolved but the container could not be started",
         evidence='container "{container}": RunContainerError: failed to create containerd task: '
                  "context deadline exceeded",
-        next_step="check whether the container runtime on {node} is healthy",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check whether the container runtime on {node} is healthy",
         winner_cause="the container runtime is down on node {node}",
         winner_reason="the node reports NotReady and every pod scheduled to it fails the same way",
         losers=(
@@ -297,8 +291,7 @@ ENTRIES = [
         issue="Unschedulable",
         reason="No node can schedule this pod",
         evidence="0/3 nodes are available: 3 Insufficient memory.",
-        next_step="lower the Job's memory request or add a node that can fit it",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="lower the Job's memory request or add a node that can fit it",
         winner_cause="the Job's resource request is larger than any node's allocatable capacity",
         winner_reason="every node in the FailedScheduling message is rejected for Insufficient "
                       "memory, and none are cordoned",
@@ -332,8 +325,7 @@ ENTRIES = [
         reason="Container repeatedly crashes after starting",
         evidence='container "{container}", restartCount={restarts}',
         log_cause="log cause: bad command or entrypoint",
-        next_step="check the container's command and args against what the image expects to run",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check the container's command and args against what the image expects to run",
         winner_cause="the container exits immediately on startup",
         winner_reason="the previous-instance log shows an entrypoint failure, and the image "
                       "pulled successfully before the first attempt",

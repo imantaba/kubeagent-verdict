@@ -103,7 +103,7 @@ on a workstation — run the training step under `nohup` and watch
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
    model scored 1.0 on contract validity, cause accuracy and confidence
-   simultaneously by reading the `attributed` tag and nothing else. Five
+   simultaneously by reading the `attributed` tag and nothing else. Six
    things decide a release:
 
    - contract validity 1.0;
@@ -142,6 +142,43 @@ on a workstation — run the training step under `nohup` and watch
      under the table beside it: a large one means the phrase sets need
      narrowing, not that the model changed, and it shrinks the denominator
      the ratio above is read against.
+
+   - **Is the answer the prompt's own `suggested fix` line handed back?**
+     `suggestion echo` must be **0 of 253** — the whole test set. Every
+     finding in a scan prompt carries a `suggested fix (deterministic,
+     pre-reviewed — do not substitute): <text> | run: <cmd>` line, and that
+     text is a *symptom* restated generically by `internal/remediation.For`,
+     never a diagnosis. Returning it is the cheapest wrong answer available:
+     it is fluent, it is on-topic, and it is already in the context window.
+     The bar is zero rather than a tolerance because on this corpus a correct
+     answer is never a suggestion string — measured, 0 of 253 rows have a
+     stored winner cause that matches one — so every echo is a wrong answer
+     and costs cause accuracy too. Read the two together; alone this rate
+     only names the *mechanism* behind a cause miss, and a model can miss for
+     other reasons at 0.0 echo.
+
+     **This one can go vacuous, and it silently was.** The rate is `None`
+     when nothing was measured, but a *populated* 0 can still mean nothing:
+     the metric compares what the model said against the strings the prompt
+     offered, so it can only fire if those strings are the ones kubeagent
+     actually emits. Until `fc07804` they were not — the
+     catalog authored its own, more helpful, wording per entry, and the two
+     vocabularies were **disjoint**: 253 of 253 test prompts carried zero
+     strings `internal/remediation.For` can produce. Re-scoring v0.1.0's
+     recorded outputs against its own prompts returns `0.0 (253)`, which
+     looks like a clean pass and is not a measurement at all. So a 0 here is
+     a pass only when **`n` is 253 and `tests/test_dataset_suggestions.py`
+     is green** — that test is what makes the prompt vocabulary kubeagent's,
+     and without it the number is decoration.
+
+     Note where the failure was actually seen: **live, not on the eval.**
+     v0.1.0 scores 0.0 on the synthetic set and still handed back
+     kubeagent's suggestion, clipped at the em dash, on live chaos
+     scenarios — because at serve time the line finally carried strings the
+     model had never been trained against. This decider is therefore a
+     floor, not the detector. It fails a model that parrots on prompts it
+     has seen; a model that only parrots on unfamiliar wording still needs
+     a live run to catch.
 
    **What this bar does NOT decide, and a decider that was withdrawn.** An
    earlier bullet used to stand first here: cause accuracy on `none_of_these`,

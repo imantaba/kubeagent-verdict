@@ -139,7 +139,7 @@ def test_no_scenario_text_carries_a_banned_identifier_shape():
                           p.distractor_reason, p.rationale, p.remedy,
                           p.origin_read[0], p.origin_read[1]]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n{v.local_cause}\n"
-                            f"{v.local_reason}\n{v.next_step}\n{v.command}\n"
+                            f"{v.local_reason}\n"
                             f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"

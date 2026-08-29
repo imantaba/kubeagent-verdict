@@ -13,8 +13,7 @@ ENTRIES = [
         issue="ProbeFailure",
         reason="readiness probe failing",
         evidence="Readiness probe failed: HTTP probe failed with statuscode: 500",
-        next_step="check what the probe endpoint returns and why",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check what the probe endpoint returns and why",
         winner_cause="application failing its readiness probe",
         winner_reason="the probe returns HTTP 500 while the container keeps running",
         losers=(
@@ -50,8 +49,7 @@ ENTRIES = [
         reason="the container image was resolved but the container could not be started",
         evidence='container "{container}": StartError: exec: "/app/server": no such file or '
                  "directory",
-        next_step="check the image's command/entrypoint against what actually ships in the image",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check the image's command/entrypoint against what actually ships in the image",
         winner_cause="the image's command names an executable that does not exist in the image",
         winner_reason="the kubelet's own StartError names the missing executable path directly",
         losers=(
@@ -85,8 +83,7 @@ ENTRIES = [
         reason="a referenced ConfigMap or Secret is missing, or a required key is absent — the "
                "container cannot start",
         evidence="container {container}: couldn't find key API_TOKEN in ConfigMap {ns}/app-config",
-        next_step="add the missing key to the ConfigMap or fix the key name in the pod spec",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="add the missing key to the ConfigMap or fix the key name in the pod spec",
         winner_cause="the pod spec references a ConfigMap key that does not exist",
         winner_reason="the kubelet's waiting message names the exact missing key",
         losers=(
@@ -120,8 +117,7 @@ ENTRIES = [
         reason="an init container is crash-looping — the pod cannot start its main containers",
         evidence='init container "{init_container}" (1/2), restartCount={restarts}',
         log_cause="log cause: cannot reach a dependency — connection refused",
-        next_step="check what the init container is waiting for and why it cannot reach it",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check what the init container is waiting for and why it cannot reach it",
         winner_cause="the init container cannot reach the dependency it waits for",
         winner_reason="the previous-instance log classifies as a refused connection on every "
                       "restart",
@@ -156,8 +152,7 @@ ENTRIES = [
         reason="an init container's ConfigMap or Secret is missing, or a required key is "
                "absent — the pod cannot start",
         evidence="init container {init_container} (1/2): secret migration-creds not found",
-        next_step="create the missing Secret or fix its name in the init container's spec",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="create the missing Secret or fix its name in the init container's spec",
         winner_cause="a Secret the init container references does not exist",
         winner_reason="the kubelet's waiting message names the missing Secret directly",
         losers=(
@@ -191,8 +186,7 @@ ENTRIES = [
         reason="an init container's image cannot be pulled — the pod cannot start",
         evidence='init container "{init_container}": Failed to pull image '
                  '"registry.example.com/shop/migrate:v0.9.0": not found',
-        next_step="fix the init image's tag or push the missing image",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="fix the init image's tag or push the missing image",
         winner_cause="the init image's tag does not exist in the registry",
         winner_reason="the pull error names the init image's tag as missing, and the main image "
                       "pulls fine",
@@ -227,8 +221,7 @@ ENTRIES = [
         reason="an init container's image cannot be pulled — the pod cannot start",
         evidence='init container "{init_container}": Back-off pulling image '
                  '"registry.example.com/shop/migrate:v0.9.0"',
-        next_step="fix the init image's tag or push the missing image",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="fix the init image's tag or push the missing image",
         winner_cause="the init image's tag does not exist in the registry",
         winner_reason="the kubelet has been backing off the same pull error since the first "
                       "attempt",
@@ -263,9 +256,8 @@ ENTRIES = [
         reason="an init container was killed for exceeding its memory limit — the pod cannot "
                "start",
         evidence='init container "{init_container}" (1/2), exitCode=137',
-        next_step="raise the init container's memory limit or stream the migration instead of "
+        recommendation="raise the init container's memory limit or stream the migration instead of "
                   "loading it whole",
-        command="kubectl -n {ns} describe pod {pod}",
         resources=("32Mi", "32Mi", "50m", "100m"),
         winner_cause="the init container's memory limit is too small for the migration it runs",
         winner_reason="the init container is OOMKilled at its 32Mi limit on every attempt",
@@ -301,8 +293,7 @@ ENTRIES = [
         reason="Container keeps exiting with an error and restarting",
         evidence="container {container}, {restarts} restarts, last exit 1 (Error), 90s ago",
         log_cause="log cause: application panic (code bug)",
-        next_step="check the previous log for the panic and what request triggered it",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check the previous log for the panic and what request triggered it",
         winner_cause="the container panics intermittently under load",
         winner_reason="the previous-instance log carries a panic trace, and the restarts "
                       "cluster around the pod's busiest periods",
@@ -338,9 +329,8 @@ ENTRIES = [
         reason="the volume is attached to another node (Multi-Attach) — the pod cannot mount it",
         evidence="Multi-Attach error for volume {pvc} Volume is already exclusively attached to "
                  "one node and can't be attached to another",
-        next_step="wait for the old node's attachment to release, or force-detach if that node "
+        recommendation="wait for the old node's attachment to release, or force-detach if that node "
                   "is gone",
-        command="kubectl -n {ns} describe pod {pod}",
         winner_cause="the PVC is still attached to the node the previous pod ran on",
         winner_reason="the FailedAttachVolume event names Multi-Attach, and the PVC describes "
                       "as still Bound to the old node's attachment",
@@ -377,8 +367,7 @@ ENTRIES = [
         reason="a volume the pod needs could not be mounted — the pod cannot start",
         evidence="Unable to attach or mount volumes: unmounted volumes=[data], timed out "
                  "waiting for the condition",
-        next_step="check the CSI driver and the underlying volume's health on {node}",
-        command="kubectl -n {ns} describe pod {pod}",
+        recommendation="check the CSI driver and the underlying volume's health on {node}",
         winner_cause="the PVC's underlying volume is unhealthy on node {node}",
         winner_reason="the mount times out repeatedly while the PVC itself describes as Bound",
         losers=(
