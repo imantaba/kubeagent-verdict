@@ -153,11 +153,14 @@ on a workstation — run the training step under `nohup` and watch
      high on `helps`, low on `misleads` — so a model that scores *better* on
      the harder slice passes rather than failing for being good. And it
      **abstains** when `length helps` is below 0.5, reporting `not measured`
-     with `length_gap_ok: null`. A gap between two floor rates certifies
-     nothing: the untuned baseline reads 0.0 and 0.0, gap 0.00, which an
-     unconditioned threshold passes exactly as it passes v0.1.0's 1.0 and
-     1.0. An abstention is not a pass — write **not measured** in the release
-     notes, the same rule as `overconfidence rate` below.
+     with `length_gap_ok: null`. The floor bounds that one rate; `length
+     misleads` may read anything beside it. A model failing the slice a word
+     counter would ace has not shown enough for the difference to certify
+     anything — the untuned baseline is the motivating case, reading 0.0 and
+     0.0 for a gap of 0.00 that an unconditioned threshold passes exactly as
+     it passes v0.1.0's 1.0 and 1.0. An abstention is not a pass — write
+     **not measured** in the release notes, the same rule as `overconfidence
+     rate` below.
 
      What the sign leaves open, so you read the number knowing it: the
      **mirror** shortcut, always answering the shorter candidate. It is as

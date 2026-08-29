@@ -60,8 +60,10 @@ def dataset_provenance(test: Path) -> dict | None:
     A `--test` file with no manifest beside it is a hand-made test set, not an
     error: the answer is `None`, and so is an unreadable or unparseable
     manifest. An unreadable test file leaves `test_sha256` as `None` inside an
-    otherwise complete block — `main` has already read that file, so it cannot
-    happen there, and provenance must not be the thing that raises.
+    otherwise complete block. That is not merely defensive: `main` reads the
+    test file, then runs the whole eval over the network, and only then calls
+    this — so the file has had the length of a scoring run to be moved,
+    replaced or made unreadable. Provenance must not be the thing that raises.
     """
     try:
         raw = (test.parent / "manifest.json").read_bytes()

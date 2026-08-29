@@ -438,9 +438,13 @@ LENGTH_GAP_TOLERANCE = 0.15
 # FLOOR is the half a plain `abs(gap) <= TOLERANCE` threshold gets wrong. The
 # untuned baseline scored 0.0 on both slices: a gap of exactly 0.00, inside any
 # sane tolerance, produced by a model that got every cause wrong. A gate that
-# calls that "met" could not fail the model it exists to judge. Below the floor
-# the difference between two near-zero rates carries no information either way,
-# so the verdict is None -- printed as "not measured".
+# calls that "met" could not fail the model it exists to judge. Note what the
+# floor does and does not bound: it tests `helps` ALONE, so `misleads` may read
+# anything beside it -- the mirror shortcut lands here at 0.0 against 1.0. What
+# makes the comparison uninformative is that a model failing the slice a word
+# counter would ace has not shown enough for the difference to mean anything,
+# not that both numbers are small. The verdict is None -- printed as
+# "not measured".
 #
 # Note what these rates can and cannot say. Both are cause accuracy over their
 # slice, so a row the model answered wrongly and a workload it omitted both
@@ -600,10 +604,12 @@ def render_markdown(board: dict) -> str:
         verdict = ("not measured -- one of the two slices has no rows, so there "
                    "is nothing to compare.")
     else:
-        verdict = (f"not measured -- `length helps` is below {LENGTH_GAP_FLOOR}, "
-                   f"so the difference between two near-zero rates certifies "
-                   f"nothing. Not a pass: read it as unmeasured in the release "
-                   f"notes.")
+        verdict = (f"not measured -- `length helps` is below {LENGTH_GAP_FLOOR} "
+                   f"(the floor bounds that rate alone; `length misleads` may "
+                   f"read anything beside it), so a model failing the slice a "
+                   f"word counter would ace has not shown enough for the "
+                   f"difference to certify anything. Not a pass: read it as "
+                   f"unmeasured in the release notes.")
     lines.append("")
     lines.append(f"Length gap (helps - misleads): {shown} -- {verdict}")
     # Not a column: a diagnostic for reading `false shared`, not a score.
