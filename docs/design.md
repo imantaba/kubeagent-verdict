@@ -405,7 +405,10 @@ confidence from the closed set, line-length bounds. Then task metrics:
   together is now mechanical rather than a habit: `score.length_gap` computes
   the signed `helps - misleads` difference against a 0.15 bar and abstains
   when `helps` is below 0.5, because two floor rates have a gap of zero and
-  certify nothing (`docs/runbooks/train.md` step 6). (The 57 rows
+  certify nothing. The verdict is stored on the **overall** block alone —
+  0.15 is read against the 12-row `misleads` denominator, and per case that
+  denominator is 4 — while the two rates it derives from stay on every case
+  (`docs/runbooks/train.md` step 6). (The 57 rows
   that carry both a decoy and a non-`none_of_these` expected cause are the
   only ones the split can be computed over; the other 186 contribute to
   neither number.)

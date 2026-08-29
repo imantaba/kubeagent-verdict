@@ -536,7 +536,7 @@ rather than as a pass.
 |---|---|---|
 | contract validity `1.0` | `1.0 (243)` — every answer parsed as exactly one conforming object | met |
 | decoy rate low on the uncontaminated adversarial slices | `0.0 (19)` on each of `positional_probe`, `misattribution_probe` and `wrong_attribution` | met |
-| `length helps` and `length misleads` close together | `1.0 (45)` and `1.0 (12)` — a gap of `0.0`, so the decoy rate above is not a word-counting artifact | met |
+| `length_gap` ≤ 0.15, and not at the floor | `1.0 (45)` and `1.0 (12)` — a signed gap of `0.0`, with `helps` above the 0.5 floor, so the decoy rate above is not a word-counting artifact | met |
 | overconfidence on wrong causes | `n = 0` on every uncontaminated slice; the two measurable rows are both inside the withdrawn `multi_misattribution_probe` | **not measured** |
 
 `multi_misattribution_probe`'s `0.1053 (19)` decoy rate is excluded from

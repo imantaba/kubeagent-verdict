@@ -101,15 +101,29 @@ on a workstation — run the training step under `nohup` and watch
    carry a home directory or a credential into a file you might paste.
 
    Its `dataset` sub-block says **which** test set those rows came from:
-   `seed`, `size`, `test_rows`, and a SHA-256 over `out/dataset/manifest.json`.
-   Every other field of `run` is a property of the serving side, and
-   `test_file` is a basename — so before this block a retrain that overwrote
-   `out/dataset/test.jsonl` in place produced two scoreboards making
-   byte-identical claims about what they scored. **Compare the two `dataset`
-   blocks before comparing any number across them.** Differing hashes mean
-   two different test sets and the comparison is not a comparison; a `null`
-   block means the `--test` file had no manifest beside it, which is fine for
-   a hand-made set and disqualifying for a release argument.
+   `seed`, `size`, `test_rows`, a SHA-256 over `out/dataset/manifest.json`,
+   and a second SHA-256 over the `--test` file's own bytes. Every other field
+   of `run` is a property of the serving side, and `test_file` is a basename —
+   so before this block a retrain that overwrote `out/dataset/test.jsonl` in
+   place produced two scoreboards making byte-identical claims about what they
+   scored. **Compare the two `dataset` blocks before comparing any number
+   across them.** Differing hashes mean two different test sets and the
+   comparison is not a comparison; a `null` block means the `--test` file had
+   no manifest beside it, which is fine for a hand-made set and disqualifying
+   for a release argument.
+
+   Read both hashes, not one. `kv-dataset` writes the test file and the
+   manifest as two separate writes and nothing afterwards ties them together,
+   so a hand-edited `test.jsonl` beside an untouched manifest matches on
+   `manifest_sha256` and differs on `test_sha256` — that pair means the rows
+   were scored against a file the manifest no longer describes. Then check one
+   number across the two blocks: `dataset.test_rows` is what the generator
+   wrote, `run.rows_available` is what the eval read, and they must be equal
+   on an unlimited run. They are computed by different code from different
+   files, so a mismatch is the cheapest available signal that the two are no
+   longer the same set of rows. `test_sha256: null` inside an otherwise
+   populated block means the file could not be re-read after scoring — treat
+   it as no answer, not a pass.
 
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
@@ -143,7 +157,23 @@ on a workstation — run the training step under `nohup` and watch
      nothing: the untuned baseline reads 0.0 and 0.0, gap 0.00, which an
      unconditioned threshold passes exactly as it passes v0.1.0's 1.0 and
      1.0. An abstention is not a pass — write **not measured** in the release
-     notes, the same rule as `overconfidence rate` below;
+     notes, the same rule as `overconfidence rate` below.
+
+     What the sign leaves open, so you read the number knowing it: the
+     **mirror** shortcut, always answering the shorter candidate. It is as
+     evidence-free as word counting, and no negative gap can ever read
+     `MISSED` however extreme. In its pure form it scores ~0.0 on `helps`, so
+     the floor catches it and it reads `not measured` — refused, but by the
+     floor and not by the sign. Its partial form — around 0.5 on `helps`
+     against 1.0 on `misleads`, gap −0.5 — **passes this decider**, and
+     overall cause accuracy is the decider that fails a model scoring a coin
+     flip on 45 rows. Read the two together.
+
+     The gate is computed on the **overall** block only. The two rates appear
+     on every case, but 0.15 is calibrated against the overall 12-row
+     `misleads` denominator where one row is 0.083; per case that denominator
+     is 4, where one flipped row is 0.25 and clears the bar on its own. Judge
+     a case by its two rates, never by arithmetic on them against this bar;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
      **This one can go blind.** It is conditioned on errors, so a model that

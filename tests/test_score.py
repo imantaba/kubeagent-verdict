@@ -944,3 +944,59 @@ def test_markdown_says_not_measured_rather_than_met_when_below_the_floor():
     md = score.render_markdown(board)
     assert "not measured" in md
     assert "met" not in md.replace("not measured", "")
+
+
+# The gate is stored on `overall` and nowhere else. `LENGTH_GAP_TOLERANCE` is
+# calibrated against the overall `misleads` denominator of 12, where one row is
+# 0.083 and the bar admits two rows of noise. Per case that denominator is 4 --
+# `positional_probe`, `misattribution_probe` and `wrong_attribution` each carry
+# 15 helps against 4 misleads -- where one flipped row is 0.25 and already
+# exceeds the bar. A per-case verdict would therefore read MISSED for a single
+# row of noise, under the same key name a reader would take for the release
+# gate. The two rates stay per case; only the derived verdict is withheld.
+def test_the_gate_is_stored_on_the_overall_block_only():
+    a_row, a_ans = _length_row("positional_probe", "memory limit too low for the workload",
+                               "node pressure", "memory limit too low for the workload")
+    b_row, b_ans = _length_row("positional_probe", "bad image tag",
+                               "the registry is unreachable from this node",
+                               "the registry is unreachable from this node")
+    answers = {json.dumps(a_row["messages"][:2]): a_ans,
+               json.dumps(b_row["messages"][:2]): b_ans}
+    board = score.scoreboard(score.evaluate(
+        [a_row, b_row], lambda messages: answers[json.dumps(messages)]))
+    assert "length_gap" in board["overall"] and "length_gap_ok" in board["overall"]
+    assert board["by_case"]
+    for case, b in board["by_case"].items():
+        assert "length_gap" not in b, case
+        assert "length_gap_ok" not in b, case
+        # The inputs stay, so a case is still readable by hand.
+        assert "cause_when_length_helps" in b
+        assert "cause_when_length_misleads" in b
+
+
+def test_a_mirror_image_length_bias_is_refused_by_the_floor_not_the_sign():
+    """Always answering the SHORTER candidate — the forward counter's mirror.
+
+    It wins every misleading row and loses every helping one, so it is exactly
+    as evidence-free as the word counter this decider is named for. The signed
+    rule alone would call it met, and can never say MISSED for any negative
+    gap however extreme. What refuses it is the floor, not the sign — and the
+    answer is `not measured`, which the runbook does not treat as a pass.
+    """
+    gap, ok = score.length_gap({"rate": 0.0, "n": 45}, {"rate": 1.0, "n": 12})
+    assert gap == -1.0
+    assert ok is None
+    assert gap <= score.LENGTH_GAP_TOLERANCE  # the sign rule alone would pass it
+
+
+def test_a_partial_length_bias_at_the_floor_passes_and_that_is_the_residual():
+    """The gap this decider does NOT close, pinned so it stays deliberate.
+
+    Half-reverse: a coin flip where length helps, perfect where it misleads.
+    `helps` is at the floor, so the gate judges rather than abstaining, and no
+    negative gap can be MISSED — it reads met. Forward word-counting really is
+    ruled out here; a partial reverse bias is not. Overall cause accuracy is
+    the decider that fails a model scoring 0.5 on 45 rows, not this one.
+    """
+    assert score.length_gap({"rate": 0.5, "n": 45},
+                            {"rate": 1.0, "n": 12}) == (-0.5, True)

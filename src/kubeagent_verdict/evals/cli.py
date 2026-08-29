@@ -40,17 +40,28 @@ def dataset_provenance(test: Path) -> dict | None:
     so without this, two scoreboards scored against two different datasets
     carry an identical claim about what they scored.
 
-    The digest is over the manifest's bytes, which is what makes this a
-    complete answer rather than a summary of four fields: a manifest that
-    grows a key still changes the hash, with no audit of the new key against
-    the leak denylist. The three named values are integers or absent — a
-    string is dropped rather than copied — so this block cannot carry a
-    filesystem path however the manifest is written. The corpus file list is
-    never copied at all.
+    TWO digests, because either alone leaves a gap. `manifest_sha256` covers
+    the manifest's bytes, so a manifest that grows a key still changes the
+    hash with no audit of the new key against the leak denylist — a stronger
+    answer than a summary of the three named fields. But `kv-dataset` writes
+    `test.jsonl` and `manifest.json` as two separate writes and nothing
+    afterwards ties them, and the file the eval actually read is the test
+    file: a hand-edited `test.jsonl` beside an untouched manifest would
+    otherwise produce an identical, complete-looking block. `test_sha256`
+    covers the scored bytes themselves. Together they say which dataset was
+    generated AND which rows were read; neither says it alone.
+
+    Both are digests of files this process only reads, so what they can prove
+    is limited to matching or not matching another run's. The three named
+    values are integers or absent — a string is dropped rather than copied —
+    so this block cannot carry a filesystem path however the manifest is
+    written. The corpus file list is never copied at all.
 
     A `--test` file with no manifest beside it is a hand-made test set, not an
     error: the answer is `None`, and so is an unreadable or unparseable
-    manifest. This block records provenance; it must not be able to fail a run.
+    manifest. An unreadable test file leaves `test_sha256` as `None` inside an
+    otherwise complete block — `main` has already read that file, so it cannot
+    happen there, and provenance must not be the thing that raises.
     """
     try:
         raw = (test.parent / "manifest.json").read_bytes()
@@ -62,11 +73,16 @@ def dataset_provenance(test: Path) -> dict | None:
         return None
     if not isinstance(m, dict):
         return None
+    try:
+        test_sha = hashlib.sha256(test.read_bytes()).hexdigest()
+    except OSError:
+        test_sha = None
     return {
         "seed": _int(m.get("seed")),
         "size": _int(m.get("size")),
         "test_rows": _int(m.get("test")),
         "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+        "test_sha256": test_sha,
     }
 
 

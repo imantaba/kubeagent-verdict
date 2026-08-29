@@ -18,8 +18,13 @@ ENDPOINT = "http://127.0.0.1:8080/v1"
 def _manifest(dirpath: Path, **fields) -> Path:
     """Write a manifest.json beside a test.jsonl; return the test path.
 
-    The defaults are out/dataset/manifest.json's real shape, so a test that
-    overrides one field varies exactly what it says it varies.
+    The five scalar defaults are out/dataset/manifest.json's real values, so a
+    test that overrides one field varies exactly what it says it varies. The
+    shape is deliberately NOT the real manifest's: that carries eight
+    top-level keys, and `case_counts` and `test_case_counts` are absent here,
+    while `corpus_files` lists one file rather than four. Nothing under test
+    reads any of the three, and a test needing a key this omits passes it
+    through **fields.
     """
     m = {"seed": 17, "size": 5500, "train": 4155, "val": 432, "test": 253,
          "corpus_files": ["chaos-corpus-v1.34-kind.jsonl"]}
@@ -199,3 +204,39 @@ def test_a_boolean_is_not_a_count(tmp_path):
     d = dataset_provenance(_bare(tmp_path, '{"seed": true, "size": 5500}'))
     assert d["seed"] is None
     assert d["size"] == 5500
+
+
+def test_the_block_identifies_the_test_file_itself(tmp_path):
+    """The manifest hash alone cannot say what was scored.
+
+    `kv-dataset` writes `test.jsonl` and `manifest.json` in one invocation, so
+    they normally travel together — but nothing after that enforces it, and the
+    file the eval actually read is `test.jsonl`.
+    """
+    import hashlib
+    test = _manifest(tmp_path)
+    test.write_text('{"row": 1}\n', encoding="utf-8")
+    assert dataset_provenance(test)["test_sha256"] == \
+        hashlib.sha256(test.read_bytes()).hexdigest()
+
+
+def test_an_edited_test_file_beside_an_untouched_manifest_is_visible(tmp_path):
+    """The gap a manifest-only hash leaves open: same manifest, other rows."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    ta, tb = _manifest(a), _manifest(b)
+    ta.write_text('{"row": 1}\n', encoding="utf-8")
+    tb.write_text('{"row": 1}\n{"row": 2}\n', encoding="utf-8")
+    da, db = dataset_provenance(ta), dataset_provenance(tb)
+    assert da["manifest_sha256"] == db["manifest_sha256"]
+    assert da["test_sha256"] != db["test_sha256"]
+
+
+def test_an_unreadable_test_file_is_not_an_error(tmp_path):
+    """`main` reads it first, so this cannot happen there. Provenance still
+    must not be the thing that raises."""
+    (tmp_path / "manifest.json").write_text('{"seed": 17}', encoding="utf-8")
+    d = dataset_provenance(tmp_path / "does-not-exist.jsonl")
+    assert d["test_sha256"] is None
+    assert d["seed"] == 17

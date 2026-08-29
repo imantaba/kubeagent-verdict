@@ -426,16 +426,26 @@ def _rate(values: list[float]) -> dict:
 # release, but nothing computed the difference and nothing said how close is
 # close enough, so the bullet read as a gate and was a human eyeball check.
 #
-# TOLERANCE is read against a 12-row `misleads` denominator at the current
-# corpus size, where one row is 0.083 -- so 0.15 admits two rows of noise and
-# refuses the third.
+# TOLERANCE is read against the OVERALL 12-row `misleads` denominator at the
+# current corpus size, where one row is 0.083 -- so 0.15 admits two rows of
+# noise and refuses the third. That calibration is why `scoreboard` computes
+# the gate on the overall block alone: per case the denominator is 4
+# (`positional_probe`, `misattribution_probe` and `wrong_attribution` each
+# carry 15 helps against 4 misleads), where one flipped row is 0.25 and clears
+# the bar on its own. A per-case verdict would read MISSED for a single row of
+# noise, under a key name a reader would take for the release gate.
 LENGTH_GAP_TOLERANCE = 0.15
 # FLOOR is the half a plain `abs(gap) <= TOLERANCE` threshold gets wrong. The
 # untuned baseline scored 0.0 on both slices: a gap of exactly 0.00, inside any
 # sane tolerance, produced by a model that got every cause wrong. A gate that
 # calls that "met" could not fail the model it exists to judge. Below the floor
-# the model is not answering these rows at all, so the comparison carries no
-# information either way and the verdict is None -- printed as "not measured".
+# the difference between two near-zero rates carries no information either way,
+# so the verdict is None -- printed as "not measured".
+#
+# Note what these rates can and cannot say. Both are cause accuracy over their
+# slice, so a row the model answered wrongly and a workload it omitted both
+# score 0.0: a low rate says the answers are not right, never WHY. No comment
+# or rendered string here may name a mechanism behind it.
 LENGTH_GAP_FLOOR = 0.5
 
 
@@ -446,7 +456,18 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     counter, and a word counter scores HIGH where length points at the true
     cause and LOW where it points at the decoy -- the winning cause is the
     longer phrase in 15 of 19 catalog entries. A model that scores *better* on
-    the misleading rows is not counting words, so a negative gap passes.
+    the misleading rows has ruled that shortcut out, so a negative gap passes.
+    An `abs()` bar would instead fail it for scoring well on the harder slice,
+    where 12 rows make a 0.2 swing two rows of noise.
+
+    What a negative gap does NOT rule out, written down rather than implied:
+    the mirror shortcut, always answering the SHORTER candidate. It is just as
+    evidence-free, and no negative gap can ever be MISSED here however extreme.
+    In its pure form it scores ~0.0 where length helps and lands under the
+    floor, so it comes back `not measured` -- refused by the floor, not by the
+    sign, and `not measured` is not a pass. Its partial form, at or above the
+    floor on `helps`, does pass this decider; overall cause accuracy is what
+    fails a model scoring a coin flip on 45 rows, not this bar.
 
     Returns `(None, None)` when either slice has no denominator, and
     `(gap, None)` when `helps` is below `LENGTH_GAP_FLOOR`: the number is still
@@ -518,15 +539,19 @@ def scoreboard(results: list[dict]) -> dict:
             "cause_when_length_misleads": _rate([r["cause_acc"] for r in rs
                                                  if r["length_helps"] is False]),
         }
-        # Derived, not measured: both inputs are already on the board. Kept as
-        # stored fields anyway, so a scoreboard read months later carries the
-        # verdict and not just the two numbers a reader has to compare by eye.
-        b["length_gap"], b["length_gap_ok"] = length_gap(
-            b["cause_when_length_helps"], b["cause_when_length_misleads"])
         return b
 
     cases = sorted({r["case"] for r in results})
-    return {"overall": block(results),
+    overall = block(results)
+    # Derived, not measured: both inputs are already on the board. Stored
+    # anyway, so a scoreboard read months later carries the verdict and not
+    # just two numbers a reader has to compare by eye. OVERALL ONLY -- see
+    # `LENGTH_GAP_TOLERANCE` for why a per-case verdict would be noise wearing
+    # the release gate's key name. The two rates it derives from are on every
+    # block, so a case stays readable by hand.
+    overall["length_gap"], overall["length_gap_ok"] = length_gap(
+        overall["cause_when_length_helps"], overall["cause_when_length_misleads"])
+    return {"overall": overall,
             "by_case": {case: block([r for r in results if r["case"] == case])
                         for case in cases}}
 
@@ -576,8 +601,9 @@ def render_markdown(board: dict) -> str:
                    "is nothing to compare.")
     else:
         verdict = (f"not measured -- `length helps` is below {LENGTH_GAP_FLOOR}, "
-                   f"so the model is not answering these rows at all and the "
-                   f"difference between two floor rates certifies nothing.")
+                   f"so the difference between two near-zero rates certifies "
+                   f"nothing. Not a pass: read it as unmeasured in the release "
+                   f"notes.")
     lines.append("")
     lines.append(f"Length gap (helps - misleads): {shown} -- {verdict}")
     # Not a column: a diagnostic for reading `false shared`, not a score.
