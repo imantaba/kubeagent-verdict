@@ -778,3 +778,24 @@ def test_exposure_footnote_prints_even_when_nothing_is_keyword_graded():
     md = score.render_markdown(score.scoreboard(
         score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])))
     assert "Keyword-graded rows whose keywords all appear in the prompt already: 0 of 0" in md
+
+
+def test_exposure_is_broken_out_per_case_not_just_overall():
+    """`by_case` is written verbatim into `scoreboard.json` by the eval CLI,
+    and every other assertion here reads `overall` -- where `block`'s `rs` and
+    the enclosing `scoreboard`'s `results` are the same list, so a slip
+    between the two names is invisible from `overall` alone. This is the only
+    assertion that can see the difference: a case with no keyword-graded row
+    must read 0 of 0, not the whole run's numbers."""
+    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"],
+                         case="own_cause"),
+            _keyword_row("the container exited", ["memory", "limit"],
+                         case="empty_candidates"),
+            ROW]  # `attributed`, graded by exact match -- measured on neither axis
+    by_case = score.scoreboard(score.evaluate(rows, lambda m: _answer()))["by_case"]
+    assert by_case["own_cause"]["keyword_derivable_n"] == 1
+    assert by_case["own_cause"]["keyword_graded_n"] == 1
+    assert by_case["empty_candidates"]["keyword_derivable_n"] == 0
+    assert by_case["empty_candidates"]["keyword_graded_n"] == 1
+    assert by_case["attributed"]["keyword_derivable_n"] == 0
+    assert by_case["attributed"]["keyword_graded_n"] == 0
