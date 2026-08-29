@@ -828,3 +828,119 @@ def test_the_keyword_graded_population_is_the_measured_population():
         graded_by_keyword = r["cause_acc"] == 1.0
         assert graded_by_keyword == (r["keyword_derivable"] is not None), case
         assert graded_by_keyword == (case in score.KEYWORD_CASES), case
+
+
+# --- the length-gap decider -------------------------------------------------
+#
+# `docs/runbooks/train.md` step 6 names "`length helps` and `length misleads`
+# close together" as one of six release deciders, but nothing computed the
+# difference and no constant said how close is close enough, so the bullet was
+# a human eyeball check wearing a gate's clothes. These tests pin the gate.
+#
+# The gap is SIGNED on purpose. A word counter scores HIGH where length points
+# at the true cause and LOW where it points at the decoy, so only
+# `helps - misleads` large and POSITIVE is the failure. A model that does
+# better on the misleading rows is not counting words.
+#
+# The floor is the other half, and it is the half a naive `abs(gap) <= x`
+# threshold gets wrong: the untuned baseline in `out/eval-baseline-v2` scored
+# 0.0 on both slices -- a gap of exactly 0.00 -- while getting every cause
+# wrong. A gate that reads that as "met" could not fail the model it exists to
+# judge. Below the floor the gap is still printed and still decides nothing.
+
+
+def test_length_gap_fails_a_word_counter():
+    gap, ok = score.length_gap({"rate": 1.0, "n": 45}, {"rate": 0.3333, "n": 12})
+    assert gap == 0.6667
+    assert ok is False
+
+
+def test_length_gap_passes_a_reader():
+    """v0.1.0's own shape: 1.0 (45) and 1.0 (12), a gap of exactly zero."""
+    gap, ok = score.length_gap({"rate": 1.0, "n": 45}, {"rate": 1.0, "n": 12})
+    assert gap == 0.0
+    assert ok is True
+
+
+def test_length_gap_abstains_on_the_untuned_baseline_shape():
+    """The regression this gate exists to not have.
+
+    `out/eval-baseline-v2` -- the untuned model, every cause wrong -- scored
+    0.0 (45) and 0.0 (12). The difference is 0.00, inside any tolerance a
+    reasonable person would pick. It must read "not measured", never "met".
+    """
+    gap, ok = score.length_gap({"rate": 0.0, "n": 45}, {"rate": 0.0, "n": 12})
+    assert gap == 0.0
+    assert ok is None
+
+
+def test_length_gap_abstains_without_a_denominator():
+    assert score.length_gap({"rate": None, "n": 0}, {"rate": 1.0, "n": 12}) == (None, None)
+    assert score.length_gap({"rate": 1.0, "n": 45}, {"rate": None, "n": 0}) == (None, None)
+
+
+def test_length_gap_is_signed_so_the_harder_slice_scoring_higher_passes():
+    gap, ok = score.length_gap({"rate": 0.8, "n": 45}, {"rate": 1.0, "n": 12})
+    assert gap == -0.2
+    assert ok is True
+
+
+def test_length_gap_tolerance_boundary_is_inclusive():
+    _, at = score.length_gap({"rate": 1.0, "n": 45}, {"rate": 0.85, "n": 12})
+    _, over = score.length_gap({"rate": 1.0, "n": 45}, {"rate": 0.84, "n": 12})
+    assert at is True
+    assert over is False
+
+
+def test_length_gap_floor_boundary_decides_at_the_floor_and_abstains_below():
+    _, at = score.length_gap({"rate": 0.5, "n": 45}, {"rate": 0.5, "n": 12})
+    _, below = score.length_gap({"rate": 0.49, "n": 45}, {"rate": 0.49, "n": 12})
+    assert at is True
+    assert below is None
+
+
+def test_scoreboard_carries_the_gap_and_its_verdict():
+    a_row, a_ans = _length_row("positional_probe", "memory limit too low for the workload",
+                               "node pressure", "memory limit too low for the workload")
+    b_row, b_ans = _length_row("positional_probe", "bad image tag",
+                               "the registry is unreachable from this node",
+                               "the registry is unreachable from this node")
+    answers = {json.dumps(a_row["messages"][:2]): a_ans,
+               json.dumps(b_row["messages"][:2]): b_ans}
+    board = score.scoreboard(score.evaluate(
+        [a_row, b_row], lambda messages: answers[json.dumps(messages)]))
+    # helps 1.0 (1), misleads 0.0 (1) -- the word counter, caught.
+    assert board["overall"]["length_gap"] == 1.0
+    assert board["overall"]["length_gap_ok"] is False
+
+
+def test_scoreboard_gap_is_none_where_the_slices_are_empty():
+    board = score.scoreboard(score.evaluate(
+        [ROW], lambda messages: ROW["messages"][2]["content"]))
+    assert board["overall"]["length_gap"] is None
+    assert board["overall"]["length_gap_ok"] is None
+
+
+def test_markdown_prints_the_gap_and_names_the_bar():
+    a_row, a_ans = _length_row("positional_probe", "memory limit too low for the workload",
+                               "node pressure", "memory limit too low for the workload")
+    b_row, b_ans = _length_row("positional_probe", "bad image tag",
+                               "the registry is unreachable from this node",
+                               "the registry is unreachable from this node")
+    answers = {json.dumps(a_row["messages"][:2]): a_ans,
+               json.dumps(b_row["messages"][:2]): b_ans}
+    md = score.render_markdown(score.scoreboard(score.evaluate(
+        [a_row, b_row], lambda messages: answers[json.dumps(messages)])))
+    assert "Length gap" in md
+    assert "MISSED" in md
+    assert str(score.LENGTH_GAP_TOLERANCE) in md
+
+
+def test_markdown_says_not_measured_rather_than_met_when_below_the_floor():
+    board = score.scoreboard(score.evaluate(
+        [ROW], lambda messages: ROW["messages"][2]["content"]))
+    board["overall"]["length_gap"] = 0.0
+    board["overall"]["length_gap_ok"] = None
+    md = score.render_markdown(board)
+    assert "not measured" in md
+    assert "met" not in md.replace("not measured", "")
