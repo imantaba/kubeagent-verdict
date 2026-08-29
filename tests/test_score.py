@@ -599,3 +599,53 @@ def test_every_declared_negator_denies_its_own_sentence():
         assert results[0]["false_shared"] == 0.0, (
             f"negator {word!r} did not deny its own sentence: {sentence!r}")
         assert results[0]["shared_ambiguous"] is False
+
+
+# ------------------------------------------------- suggestion echo
+
+SUGGESTION_LINE = ("      suggested fix (deterministic, pre-reviewed — do not "
+                   "substitute): the probe keeps failing — check the probe config "
+                   "and the app's health endpoint | run: kubectl -n shop describe pod p\n")
+
+
+def _echo_row(cause):
+    row = json.loads(json.dumps(ROW))
+    row["messages"][1]["content"] = "user shop/api\n" + SUGGESTION_LINE
+    row["messages"][2]["content"] = json.dumps({
+        "verdicts": [{"workload": "shop/api", "cause": "a deny-all NetworkPolicy selects the pod",
+                      "confidence": "high", "rationale": "r"}], "summary": "s"})
+    row["meta"]["expected_cause"] = "a deny-all NetworkPolicy selects the pod"
+    answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": cause,
+                                       "confidence": "high", "rationale": "r"}],
+                         "summary": "s"})
+    return row, answer
+
+
+def test_verdict_that_parrots_the_suggestion_clause_is_counted():
+    """The failure this metric exists for: kubeagent's own suggestion, handed
+    back as the diagnosis. The observed model returned the clause before the
+    em dash verbatim on four of four live scenarios."""
+    row, answer = _echo_row("the probe keeps failing")
+    board = score.scoreboard(score.evaluate([row], lambda m: answer))
+    assert board["overall"]["suggestion_echo_rate"]["rate"] == 1.0
+
+
+def test_full_suggestion_string_also_counts_as_an_echo():
+    row, answer = _echo_row(
+        "the probe keeps failing — check the probe config and the app's health endpoint")
+    board = score.scoreboard(score.evaluate([row], lambda m: answer))
+    assert board["overall"]["suggestion_echo_rate"]["rate"] == 1.0
+
+
+def test_a_real_diagnosis_is_not_an_echo():
+    row, answer = _echo_row("a deny-all NetworkPolicy selects the pod")
+    board = score.scoreboard(score.evaluate([row], lambda m: answer))
+    assert board["overall"]["suggestion_echo_rate"]["rate"] == 0.0
+
+
+def test_a_prompt_with_no_suggestion_line_is_not_measured():
+    """A rate must never average in a row it could not measure — the repo's
+    `_rate` contract. Without a suggestion in the prompt there is nothing to
+    echo, so the row is absent rather than a free pass."""
+    results = score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])
+    assert score.scoreboard(results)["overall"]["suggestion_echo_rate"]["n"] == 0

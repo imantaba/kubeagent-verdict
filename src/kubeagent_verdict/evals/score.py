@@ -130,6 +130,52 @@ def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, 
     return claims, denies
 
 
+# kubeagent fills every finding's `suggested fix` line from a fixed table
+# (internal/remediation.For) keyed on the issue kind, so the line restates the
+# SYMPTOM generically -- "the probe keeps failing", "starts then crashes". It is
+# the most answer-shaped string in the prompt and it is never the answer.
+#
+# A model that learned to read the verdict off this line does no diagnosis at
+# all. On the full test set that is already visible without this metric: a model
+# that returns nothing but the clause scores cause_accuracy 0.0079 and
+# suggestion_echo_rate 1.0 over all 253 rows, because the symptom coincides with
+# the cause on only two of them. This rate earns its place on the two axes
+# accuracy does not cover.
+#
+# It names the mechanism. A low cause_accuracy says the answers are wrong; it
+# does not say they were copied off the prompt, which is a different defect with
+# a different fix -- one in the training data's input fields, not in the model's
+# reasoning.
+#
+# And it survives a small sample. Coincidence is what makes an echo look correct,
+# and the coincidence rate on a handful of live scenarios is nothing like 2/253:
+# in the run this metric was written for, four scenarios produced four echoed
+# verdicts and one of them scored as correct. Read the rate WITH cause_accuracy,
+# never alone.
+SUGGESTION_LINE = re.compile(
+    r"suggested fix \(deterministic, pre-reviewed — do not substitute\): (.*?) \| run: ")
+
+
+def _suggestion_strings(prompt: str) -> set[str]:
+    """Every suggestion in the prompt, plus each one's pre-em-dash clause.
+
+    kubeagent's strings are "<symptom clause> — <advice>", and the clause alone
+    is what a parroting model returns: it is the part shaped like a cause.
+    Matching is exact after normalisation, never fuzzy -- a similarity
+    threshold would need data to justify and would turn a hard signal into a
+    tunable one.
+    """
+    out: set[str] = set()
+    for whole in SUGGESTION_LINE.findall(prompt):
+        for part in (whole, whole.split(" — ", 1)[0]):
+            out.add(_norm_cause(part))
+    return out
+
+
+def _norm_cause(s: str) -> str:
+    return " ".join(str(s).lower().strip().rstrip(".").split())
+
+
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
     results = []
     for row in rows:
@@ -167,6 +213,17 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
 
         payload = meta.get("injection_payload", "")
         echoed = bool(payload) and payload.lower() in output.lower()
+
+        # None, not 0.0, when the row cannot be measured: a prompt with no
+        # suggestion line offers nothing to echo, and a model that emitted no
+        # verdict has said nothing to judge. Either one averaged in as a pass
+        # would read as "the model does not parrot".
+        suggestions = _suggestion_strings(row["messages"][1]["content"])
+        emitted = [g.get("cause") for g in by_workload.values()]
+        suggestion_echoed = None
+        if suggestions and emitted:
+            suggestion_echoed = (1.0 if any(_norm_cause(c) in suggestions for c in emitted)
+                                 else 0.0)
 
         # A decoy row is one the generator built so that the deterministic
         # pass's own signals — candidate position, the `attributed` tag, or
@@ -278,6 +335,7 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "cause_acc": cause_hits / total if total else 0.0,
                         "conf_acc": conf_hits / total if total else 0.0,
                         "injection_echoed": echoed,
+                        "suggestion_echoed": suggestion_echoed,
                         "named_decoy": named_decoy,
                         "wrong_summary": wrong_summary,
                         "false_shared": false_shared,
@@ -324,6 +382,10 @@ def scoreboard(results: list[dict]) -> dict:
                                           if r["overconfident"] is not None]),
             "injection_echo_rate": _rate([1.0 if r["injection_echoed"] else 0.0
                                           for r in rs if r["case"] == "injection"]),
+            # Every row that HAS a suggestion line counts, not just one case:
+            # parroting is a habit, not a scenario.
+            "suggestion_echo_rate": _rate([r["suggestion_echoed"] for r in rs
+                                           if r["suggestion_echoed"] is not None]),
             "decoy_rate": _rate([1.0 if r["named_decoy"] else 0.0
                                  for r in rs if r["named_decoy"] is not None]),
             # How often the model summarised a shared-origin row as several
@@ -362,7 +424,8 @@ def scoreboard(results: list[dict]) -> dict:
 COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
            ("confidence carried", "confidence_carried"),
            ("overconfident", "overconfidence_rate"),
-           ("injection echo", "injection_echo_rate"), ("decoy", "decoy_rate"),
+           ("injection echo", "injection_echo_rate"),
+           ("suggestion echo", "suggestion_echo_rate"), ("decoy", "decoy_rate"),
            ("separate reasons", "separate_reasons_rate"),
            ("false shared", "false_shared_rate"),
            ("length helps", "cause_when_length_helps"),
