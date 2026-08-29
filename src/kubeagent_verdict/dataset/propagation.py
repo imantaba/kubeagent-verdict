@@ -129,10 +129,10 @@ _COREDNS = Propagation(
     confidence="high",
     origin_read=(
         "describe kube-system/coredns (Deployment)",
-        "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
-        "Pods:      coredns-7d8f9c4b5-2xk4m   0/1  CrashLoopBackOff  9 restarts\n"
-        "           coredns-7d8f9c4b5-qp7rt   0/1  CrashLoopBackOff  9 restarts\n"
-        "Last log:  Corefile:8 - Error during parsing: unknown directive 'foward'",
+        ("Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+         "Pods:      coredns-7d8f9c4b5-2xk4m   0/1  CrashLoopBackOff  9 restarts\n"
+         "           coredns-7d8f9c4b5-qp7rt   0/1  CrashLoopBackOff  9 restarts\n"
+         "Last log:  Corefile:8 - Error during parsing: unknown directive 'foward'"),
     ),
     victims=(
         Victim(
@@ -145,8 +145,8 @@ _COREDNS = Propagation(
             local_cause="the database service name is misspelled in the workload's configuration",
             local_reason="the container exits immediately after a failed lookup",
             read=("get_log_causes {ns}/{pod}",
-                  "classified cause: name resolution failed for "
-                  "postgres.data.svc.cluster.local (3 of 3 sampled restarts)"),
+                  ("classified cause: name resolution failed for "
+                   "postgres.data.svc.cluster.local (3 of 3 sampled restarts)")),
             pass_confidence="high",
         ),
         Victim(
@@ -158,9 +158,9 @@ _COREDNS = Propagation(
             local_cause="the readiness probe timeout is too short for this workload",
             local_reason="every probe attempt ends at its deadline",
             read=("get_events {ns}/{name}",
-                  "Warning  Unhealthy  12x  kubelet  Readiness probe failed: "
-                  "checking dependency: lookup sessions.auth.svc.cluster.local: "
-                  "server misbehaving"),
+                  ("Warning  Unhealthy  12x  kubelet  Readiness probe failed: "
+                   "checking dependency: lookup sessions.auth.svc.cluster.local: "
+                   "server misbehaving")),
             pass_confidence="medium",
         ),
         Victim(
@@ -173,8 +173,8 @@ _COREDNS = Propagation(
             local_cause="the headless Service for the StatefulSet was deleted",
             local_reason="peer discovery by name is failing for every replica",
             read=("get_related service {ns}/{name}",
-                  "type: ClusterIP (headless)\nselector: app={name}\n"
-                  "ready endpoints: 0 of 3"),
+                  ("type: ClusterIP (headless)\nselector: app={name}\n"
+                   "ready endpoints: 0 of 3")),
             pass_confidence="high",
         ),
     ),
@@ -197,12 +197,12 @@ _NODE_LOST = Propagation(
     confidence="high",
     origin_read=(
         "describe node {node}",
-        "Conditions:\n"
-        "  Ready            Unknown   NodeStatusUnknown   Kubelet stopped posting node status.\n"
-        "  MemoryPressure   Unknown   NodeStatusUnknown\n"
-        "  DiskPressure     Unknown   NodeStatusUnknown\n"
-        "Taints:  node.kubernetes.io/unreachable:NoExecute\n"
-        "         node.kubernetes.io/unreachable:NoSchedule",
+        ("Conditions:\n"
+         "  Ready            Unknown   NodeStatusUnknown   Kubelet stopped posting node status.\n"
+         "  MemoryPressure   Unknown   NodeStatusUnknown\n"
+         "  DiskPressure     Unknown   NodeStatusUnknown\n"
+         "Taints:  node.kubernetes.io/unreachable:NoExecute\n"
+         "         node.kubernetes.io/unreachable:NoSchedule"),
     ),
     victims=(
         Victim(
@@ -214,8 +214,8 @@ _NODE_LOST = Propagation(
             local_cause="the pod requests more CPU than any remaining node has free",
             local_reason="the scheduler reports Insufficient cpu on both healthy nodes",
             read=("get_events {ns}/{name}",
-                  "Warning  FailedScheduling  kubelet  0/3 nodes are available: "
-                  "1 node(s) were unschedulable, 2 Insufficient cpu."),
+                  ("Warning  FailedScheduling  kubelet  0/3 nodes are available: "
+                   "1 node(s) were unschedulable, 2 Insufficient cpu.")),
             pass_confidence="high",
         ),
         Victim(
@@ -227,8 +227,8 @@ _NODE_LOST = Propagation(
             local_cause="a second pod already holds the ReadWriteOnce claim {pvc}",
             local_reason="the volume reports an exclusive attachment elsewhere",
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
-                  "Status: Bound\nAccess Modes: RWO\n"
-                  "Attached to node: {node}  (node is not Ready)"),
+                  ("Status: Bound\nAccess Modes: RWO\n"
+                   "Attached to node: {node}  (node is not Ready)")),
             pass_confidence="medium",
         ),
     ),
@@ -250,10 +250,10 @@ _STORAGE = Propagation(
     confidence="high",
     origin_read=(
         "get_related storageclass standard",
-        "provisioner: example.com/local-path\n"
-        "controller local-path-storage/local-path-provisioner: 0/1 ready, "
-        "CrashLoopBackOff\n"
-        "PersistentVolumes bound in the last 20m: 0",
+        ("provisioner: example.com/local-path\n"
+         "controller local-path-storage/local-path-provisioner: 0/1 ready, "
+         "CrashLoopBackOff\n"
+         "PersistentVolumes bound in the last 20m: 0"),
     ),
     victims=(
         Victim(
@@ -266,9 +266,9 @@ _STORAGE = Propagation(
             local_cause="the StatefulSet asks for a storage class that does not exist",
             local_reason="the claim never leaves Pending",
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
-                  "Status: Pending\nStorageClass: standard\n"
-                  "Events: Normal  ExternalProvisioning  waiting for a volume to be "
-                  "created by the external provisioner"),
+                  ("Status: Pending\nStorageClass: standard\n"
+                   "Events: Normal  ExternalProvisioning  waiting for a volume to be "
+                   "created by the external provisioner")),
             pass_confidence="high",
         ),
         Victim(
@@ -281,9 +281,9 @@ _STORAGE = Propagation(
             local_cause="the Job requests a volume larger than the cluster can provide",
             local_reason="no node advertises enough free storage for the claim",
             read=("get_events {ns}/{name}",
-                  "Normal  WaitForFirstConsumer  persistentvolume-controller  "
-                  "waiting for first consumer to be created before binding\n"
-                  "Normal  ExternalProvisioning  waiting for a volume to be created"),
+                  ("Normal  WaitForFirstConsumer  persistentvolume-controller  "
+                   "waiting for first consumer to be created before binding\n"
+                   "Normal  ExternalProvisioning  waiting for a volume to be created")),
             pass_confidence="medium",
         ),
         Victim(
@@ -295,9 +295,9 @@ _STORAGE = Propagation(
             local_cause="the filesystem on {pvc} is corrupt and will not mount",
             local_reason="the mount times out rather than failing outright",
             read=("describe {ns}/{pod} (Pod)",
-                  "Events: Warning  FailedMount  kubelet  Unable to attach or mount "
-                  "volumes: unmounted volumes=[{pvc}], timed out waiting for the "
-                  "condition"),
+                  ("Events: Warning  FailedMount  kubelet  Unable to attach or mount "
+                   "volumes: unmounted volumes=[{pvc}], timed out waiting for the "
+                   "condition")),
             pass_confidence="high",
         ),
     ),
@@ -319,10 +319,10 @@ _REGISTRY = Propagation(
     confidence="high",
     origin_read=(
         "get_events (cluster-wide, reason=Failed)",
-        "12 pods across 5 namespaces report the same error:\n"
-        "  Failed to pull image: rpc error: code = Unknown desc = failed to resolve "
-        "reference: dial tcp: i/o timeout\n"
-        "distinct registry hosts in the failing set: 1",
+        ("12 pods across 5 namespaces report the same error:\n"
+         "  Failed to pull image: rpc error: code = Unknown desc = failed to resolve "
+         "reference: dial tcp: i/o timeout\n"
+         "distinct registry hosts in the failing set: 1"),
     ),
     victims=(
         Victim(
@@ -334,8 +334,8 @@ _REGISTRY = Propagation(
             local_cause="the image tag {image} does not exist in the registry",
             local_reason="the pull is retried and backed off repeatedly",
             read=("describe {ns}/{pod} (Pod)",
-                  "Events: Warning  Failed  kubelet  Failed to pull image {image}: "
-                  "dial tcp: i/o timeout"),
+                  ("Events: Warning  Failed  kubelet  Failed to pull image {image}: "
+                   "dial tcp: i/o timeout")),
             pass_confidence="high",
         ),
         Victim(
@@ -347,9 +347,9 @@ _REGISTRY = Propagation(
             local_cause="the image pull secret in this namespace is missing or wrong",
             local_reason="the pull fails before the image layers are fetched",
             read=("get_events {ns}/{name}",
-                  "Warning  Failed  kubelet  Error: ErrImagePull\n"
-                  "Warning  Failed  kubelet  failed to resolve reference: dial tcp: "
-                  "i/o timeout"),
+                  ("Warning  Failed  kubelet  Error: ErrImagePull\n"
+                   "Warning  Failed  kubelet  failed to resolve reference: dial tcp: "
+                   "i/o timeout")),
             pass_confidence="medium",
         ),
         Victim(
@@ -361,9 +361,9 @@ _REGISTRY = Propagation(
             local_cause="the init container image name has a typo",
             local_reason="the init container never starts",
             read=("describe {ns}/{pod} (Pod)",
-                  "Init Containers:\n  {init_container}:\n    State: Waiting\n"
-                  "    Reason: ImagePullBackOff\n"
-                  "  Warning  Failed  kubelet  dial tcp: i/o timeout"),
+                  ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
+                   "    Reason: ImagePullBackOff\n"
+                   "  Warning  Failed  kubelet  dial tcp: i/o timeout")),
             pass_confidence="high",
         ),
     ),
@@ -385,11 +385,11 @@ _DISK_PRESSURE = Propagation(
     confidence="high",
     origin_read=(
         "describe node {node}",
-        "Conditions:\n"
-        "  DiskPressure   True   KubeletHasDiskPressure   kubelet has disk pressure\n"
-        "  Ready          True   KubeletReady\n"
-        "Taints:  node.kubernetes.io/disk-pressure:NoSchedule\n"
-        "Allocated resources:\n  cpu     1200m (30%)\n  memory  2Gi (41%)",
+        ("Conditions:\n"
+         "  DiskPressure   True   KubeletHasDiskPressure   kubelet has disk pressure\n"
+         "  Ready          True   KubeletReady\n"
+         "Taints:  node.kubernetes.io/disk-pressure:NoSchedule\n"
+         "Allocated resources:\n  cpu     1200m (30%)\n  memory  2Gi (41%)"),
     ),
     victims=(
         Victim(
@@ -401,9 +401,9 @@ _DISK_PRESSURE = Propagation(
             local_cause="the pod is missing a toleration for a tainted node",
             local_reason="the scheduler names an untolerated taint",
             read=("get_events {ns}/{name}",
-                  "Warning  FailedScheduling  default-scheduler  0/3 nodes are "
-                  "available: 1 node(s) had untolerated taint "
-                  "node.kubernetes.io/disk-pressure, 2 Insufficient cpu."),
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                   "available: 1 node(s) had untolerated taint "
+                   "node.kubernetes.io/disk-pressure, 2 Insufficient cpu.")),
             pass_confidence="high",
         ),
         Victim(
@@ -416,8 +416,8 @@ _DISK_PRESSURE = Propagation(
             local_cause="the workload's emptyDir volume has no size limit and filled up",
             local_reason="the container cannot write its writable layer",
             read=("describe {ns}/{pod} (Pod)",
-                  "Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
-                  "create containerd task: no space left on device"),
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                   "create containerd task: no space left on device")),
             pass_confidence="medium",
         ),
         Victim(
@@ -431,8 +431,8 @@ _DISK_PRESSURE = Propagation(
                         "setting",
             local_reason="the agent dies while writing its checkpoint",
             read=("get_log_causes {ns}/{pod}",
-                  "classified cause: write failed, device full (3 of 3 sampled "
-                  "restarts)"),
+                  ("classified cause: write failed, device full (3 of 3 sampled "
+                   "restarts)")),
             pass_confidence="high",
         ),
     ),
@@ -453,10 +453,10 @@ _NETPOL = Propagation(
     confidence="medium",
     origin_read=(
         "get_related networkpolicy {ns}/default-deny",
-        "podSelector: empty (selects every pod in the namespace)\n"
-        "policyTypes: Ingress, Egress\n"
-        "egress: [] (no rules — all egress denied)\n"
-        "pods selected: 6 of 6",
+        ("podSelector: empty (selects every pod in the namespace)\n"
+         "policyTypes: Ingress, Egress\n"
+         "egress: [] (no rules — all egress denied)\n"
+         "pods selected: 6 of 6"),
     ),
     victims=(
         Victim(
@@ -469,8 +469,8 @@ _NETPOL = Propagation(
             local_cause="the payments API the workload depends on is down",
             local_reason="every outbound connection ends in a timeout",
             read=("get_log_causes {ns}/{pod}",
-                  "classified cause: outbound connection timed out (3 of 3 sampled "
-                  "restarts)"),
+                  ("classified cause: outbound connection timed out (3 of 3 sampled "
+                   "restarts)")),
             pass_confidence="high",
             network_policies=("default-deny",),
         ),
@@ -483,8 +483,8 @@ _NETPOL = Propagation(
             local_cause="the readiness endpoint for this workload returns an error",
             local_reason="the probe consistently reports the pod not ready",
             read=("get_events {ns}/{name}",
-                  "Warning  Unhealthy  9x  kubelet  Readiness probe failed: "
-                  "upstream check timed out"),
+                  ("Warning  Unhealthy  9x  kubelet  Readiness probe failed: "
+                   "upstream check timed out")),
             pass_confidence="medium",
             network_policies=("default-deny",),
         ),
