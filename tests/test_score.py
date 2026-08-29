@@ -649,3 +649,132 @@ def test_a_prompt_with_no_suggestion_line_is_not_measured():
     echo, so the row is absent rather than a free pass."""
     results = score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])
     assert score.scoreboard(results)["overall"]["suggestion_echo_rate"]["n"] == 0
+
+
+# ------------------------------------------------- keyword exposure (D6, option C)
+#
+# The `own_cause` and `empty_candidates` slices are graded by keyword
+# containment, the loosest rule on the board. `keyword_derivable` measures how
+# much of that looseness the CORPUS already hands over: a row whose every
+# expected keyword is printed in the prompt cannot separate a model that read
+# the evidence from one that restated it.
+#
+# It measures the corpus, not the model. Every test below therefore holds the
+# row fixed and varies nothing about the answer, except the one that varies
+# ONLY the answer and asserts the count does not move.
+
+
+def _keyword_row(prompt, keywords, case="own_cause"):
+    row = json.loads(json.dumps(ROW))
+    row["messages"][1]["content"] = prompt
+    row["meta"] = {"case": case, "expected_cause": "container killed at its memory limit",
+                   "expected_confidence": "high", "expected_own_keywords": list(keywords)}
+    return row
+
+
+def _answer(cause="the memory limit is too small"):
+    return json.dumps({"verdicts": [{"workload": "shop/api", "cause": cause,
+                                     "confidence": "high", "rationale": "r"}],
+                       "summary": "s"})
+
+
+def test_keyword_row_whose_terms_are_absent_from_the_prompt_is_not_derivable():
+    row = _keyword_row("the container exited", ["memory", "limit"])
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_derivable"] is False
+    board = score.scoreboard(results)
+    assert board["overall"]["keyword_derivable_n"] == 0
+    assert board["overall"]["keyword_graded_n"] == 1
+
+
+def test_keyword_row_whose_terms_are_all_in_the_prompt_is_derivable():
+    row = _keyword_row("the memory limit was exceeded", ["memory", "limit"])
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_derivable"] is True
+    board = score.scoreboard(results)
+    assert board["overall"]["keyword_derivable_n"] == 1
+    assert board["overall"]["keyword_graded_n"] == 1
+
+
+def test_partial_keyword_presence_is_not_derivable():
+    """`all`, not `any` -- the same conjunction the grader uses. A row where
+    one of two keywords is on screen still requires the model to supply the
+    other, so it is not derivable."""
+    row = _keyword_row("the memory was exhausted", ["memory", "limit"])
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_derivable"] is False
+    assert score.scoreboard(results)["overall"]["keyword_derivable_n"] == 0
+
+
+def test_keyword_matching_is_case_folded_like_the_grader():
+    """The grader lowercases both sides (`k.lower() in cause.lower()`). This
+    must use the same normalisation, or it would report a keyword as absent
+    that the grader would accept off the prompt."""
+    row = _keyword_row("Memory LIMIT exceeded", ["memory", "limit"])
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_derivable"] is True
+
+
+def test_non_keyword_graded_row_is_none_and_out_of_the_denominator():
+    """`attributed` is graded by exact match, so the exposure is meaningless
+    for it. None, never False -- a row that cannot be measured must not sit in
+    the denominator, the same contract `_rate` states."""
+    results = score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])
+    assert results[0]["keyword_derivable"] is None
+    board = score.scoreboard(results)
+    assert board["overall"]["keyword_derivable_n"] == 0
+    assert board["overall"]["keyword_graded_n"] == 0
+
+
+def test_keyword_case_without_a_keyword_set_is_not_measured():
+    """The condition mirrors the grader's exactly -- `case in KEYWORD_CASES
+    AND expected_own_keywords`. A row missing the set is graded by exact match
+    despite its case name, so it is not keyword-graded and not measured."""
+    row = json.loads(json.dumps(ROW))
+    row["meta"] = {"case": "own_cause", "expected_cause": "x", "expected_confidence": "high"}
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_derivable"] is None
+    assert score.scoreboard(results)["overall"]["keyword_graded_n"] == 0
+
+
+def test_both_keyword_cases_are_measured():
+    """Both members of KEYWORD_CASES, so narrowing the set to one silently
+    halves the denominator instead of failing."""
+    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"], case=c)
+            for c in sorted(score.KEYWORD_CASES)]
+    board = score.scoreboard(score.evaluate(rows, lambda m: _answer()))
+    assert board["overall"]["keyword_graded_n"] == len(score.KEYWORD_CASES) == 2
+    assert board["overall"]["keyword_derivable_n"] == 2
+
+
+def test_exposure_does_not_move_with_the_model_answer():
+    """The discriminating test for option C: this measures the CORPUS. A row
+    the model refused, answered wrongly, or answered perfectly reports the
+    same exposure, because the model's output is not an input to it."""
+    row = _keyword_row("the memory limit was exceeded", ["memory", "limit"])
+    for answer in (_answer(), _answer("something else entirely"),
+                   json.dumps({"verdicts": [], "summary": "s"}), "not json at all"):
+        results = score.evaluate([row], lambda m, a=answer: a)
+        assert results[0]["keyword_derivable"] is True, answer
+        assert score.scoreboard(results)["overall"]["keyword_derivable_n"] == 1, answer
+
+
+def test_exposure_is_a_footnote_not_a_column():
+    """It measures the corpus, not the model, so it must never sit in a row of
+    model scores -- a reader scanning the table would read it as one."""
+    assert all(key != "keyword_derivable_n" for _name, key in score.COLUMNS)
+    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"]),
+            _keyword_row("the container exited", ["memory", "limit"])]
+    md = score.render_markdown(score.scoreboard(score.evaluate(rows, lambda m: _answer())))
+    table, _blank, *footnotes = [ln for ln in md.splitlines()]
+    assert "keyword" not in table.lower()
+    note = "\n".join(footnotes)
+    assert "Keyword-graded rows whose keywords all appear in the prompt already: 1 of 2" in note
+
+
+def test_exposure_footnote_prints_even_when_nothing_is_keyword_graded():
+    """Zero of zero is a fact about the corpus, not an absence. A footnote that
+    disappears reads as "not measured" to whoever is checking the release bar."""
+    md = score.render_markdown(score.scoreboard(
+        score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])))
+    assert "Keyword-graded rows whose keywords all appear in the prompt already: 0 of 0" in md

@@ -176,11 +176,51 @@ def _norm_cause(s: str) -> str:
     return " ".join(str(s).lower().strip().rstrip(".").split())
 
 
+# The `own_cause` and `empty_candidates` slices are graded by keyword
+# containment rather than exact match, which is the right rule for slices whose
+# answer is not a menu selection and also the loosest rule on the board. This
+# measures how much of that looseness the CORPUS hands over for free: on a row
+# where every expected keyword is already printed in the prompt, a cause string
+# assembled from words on screen grades as correct, so the slice cannot separate
+# "read the evidence and concluded" from "restated the evidence".
+#
+# It is a diagnostic, not a score, and the distinction is load-bearing. It
+# measures the corpus rather than the model — the model's output is not an input
+# to it — so it can never fail a release on its own, it never enters COLUMNS,
+# and it moves only when the corpus moves. Its presence is not a claim that a
+# model exploited the looseness; it is a claim that the looseness is there to
+# exploit, printed where whoever reads the release bar will see it.
+#
+# The real fix is a keyword the prompt does not contain, on every keyword row.
+# That rewrites 38 answer keys and makes every historical score on those two
+# slices incomparable, so it waits for evidence a model is actually clearing the
+# slice while failing elsewhere. This number is what would supply that evidence.
+def _keyword_derivable(meta: dict, prompt: str) -> bool | None:
+    """Whether the prompt already contains every keyword the grader looks for.
+
+    None — never False — when the row is not keyword-graded. The exposure is a
+    property of keyword grading; a row graded by exact match has none, and
+    counting it as `False` would pad the denominator with 215 rows the question
+    was never asked of.
+
+    The condition mirrors `evaluate`'s grading branch exactly (case in
+    KEYWORD_CASES AND a non-empty keyword set), so the two cannot drift into
+    measuring different populations, and the matching is the grader's own
+    normalisation: lowercase substring containment, `all` and not `any`.
+    Anything looser would report an exposure the grader would not accept.
+    """
+    if meta.get("case") not in KEYWORD_CASES or not meta.get("expected_own_keywords"):
+        return None
+    low = prompt.lower()
+    return all(str(k).lower() in low for k in meta["expected_own_keywords"])
+
+
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
     results = []
     for row in rows:
         expected = json.loads(row["messages"][2]["content"])
         flagged = {r["workload"] for r in expected["verdicts"]}
+        prompt = row["messages"][1]["content"]
         output = chat_fn(row["messages"][:2])
         ok, reasons, doc = contract_check(output, flagged)
 
@@ -218,7 +258,7 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         # suggestion line offers nothing to echo, and a model that emitted no
         # verdict has said nothing to judge. Either one averaged in as a pass
         # would read as "the model does not parrot".
-        suggestions = _suggestion_strings(row["messages"][1]["content"])
+        suggestions = _suggestion_strings(prompt)
         emitted = [g.get("cause") for g in by_workload.values()]
         suggestion_echoed = None
         if suggestions and emitted:
@@ -340,6 +380,7 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "wrong_summary": wrong_summary,
                         "false_shared": false_shared,
                         "shared_ambiguous": shared_ambiguous,
+                        "keyword_derivable": _keyword_derivable(meta, prompt),
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -406,6 +447,14 @@ def scoreboard(results: list[dict]) -> dict:
             # they need narrowing, not that the model changed. A metric whose
             # imprecision is invisible is the kind this repo keeps retracting.
             "shared_ambiguous_n": sum(1 for r in rs if r["shared_ambiguous"]),
+            # The keyword slices' exposure, and NOT a rate: `_rate` returns a
+            # number that reads as a model score, and this one is a property of
+            # the corpus. Numerator and denominator travel separately for the
+            # same reason a rate travels with its `n` — "20" alone says nothing.
+            "keyword_derivable_n": sum(1 for r in rs
+                                       if r["keyword_derivable"] is True),
+            "keyword_graded_n": sum(1 for r in rs
+                                    if r["keyword_derivable"] is not None),
             # Read these two TOGETHER or not at all. A wide gap between them is
             # a word counter; a narrow one is a model that read something.
             # Neither number means anything on its own.
@@ -454,4 +503,14 @@ def render_markdown(board: dict) -> str:
     lines.append(f"Shared-origin summaries that could not be resolved either "
                  f"way (scored n/a): {ambiguous}. A large count means the "
                  f"phrase sets need narrowing, not that the model changed.")
+    # Also not a column: the keyword slices measure the corpus's looseness, not
+    # the model's judgement. Printed unconditionally — "0 of 0" is a fact about
+    # the slice being empty, and a footnote that vanishes reads as "not
+    # measured" to whoever is checking the release bar.
+    derivable = board["overall"].get("keyword_derivable_n", 0)
+    graded = board["overall"].get("keyword_graded_n", 0)
+    lines.append("")
+    lines.append(f"Keyword-graded rows whose keywords all appear in the prompt "
+                 f"already: {derivable} of {graded}. A high share means the "
+                 f"slice cannot separate reading the evidence from restating it.")
     return "\n".join(lines) + "\n"
