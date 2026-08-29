@@ -1,5 +1,6 @@
 import json
 
+from kubeagent_verdict.dataset import generate
 from kubeagent_verdict.evals import score
 
 ROW = {
@@ -799,3 +800,30 @@ def test_exposure_is_broken_out_per_case_not_just_overall():
     assert by_case["empty_candidates"]["keyword_graded_n"] == 1
     assert by_case["attributed"]["keyword_derivable_n"] == 0
     assert by_case["attributed"]["keyword_graded_n"] == 0
+
+
+def test_the_keyword_graded_population_is_the_measured_population():
+    """The grader's population and the footnote's denominator are one
+    predicate, and this is what keeps them one.
+
+    `_is_keyword_graded` is what makes the claim structurally true; a test is
+    what keeps it true when someone edits a call site rather than the
+    predicate. The probe answers every row with a cause that contains both
+    expected keywords and is never the expected cause, so `cause_acc == 1.0`
+    exactly when the row was graded by keyword containment -- compared, row by
+    row, against whether the row was measured at all.
+
+    The case names come from the corpus, plus one the corpus does not carry:
+    widening the grader to an existing case and widening it to a new one are
+    different edits, and both have to fail here.
+    """
+    corpus_cases = {generate.to_row(ex)["meta"].get("case")
+                    for ex in generate.test_set()}
+    cases = sorted(corpus_cases) + ["a_case_the_corpus_does_not_contain"]
+    assert score.KEYWORD_CASES <= corpus_cases
+    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"], case=c)
+            for c in cases]
+    for case, r in zip(cases, score.evaluate(rows, lambda m: _answer())):
+        graded_by_keyword = r["cause_acc"] == 1.0
+        assert graded_by_keyword == (r["keyword_derivable"] is not None), case
+        assert graded_by_keyword == (case in score.KEYWORD_CASES), case

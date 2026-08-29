@@ -195,6 +195,21 @@ def _norm_cause(s: str) -> str:
 # That rewrites 38 answer keys and makes every historical score on those two
 # slices incomparable, so it waits for evidence a model is actually clearing the
 # slice while failing elsewhere. This number is what would supply that evidence.
+def _is_keyword_graded(meta: dict) -> bool:
+    """Whether this row is graded by keyword containment rather than exact match.
+
+    The ONE definition of that population. `evaluate` calls it to choose the
+    grading rule and `_keyword_derivable` calls it to choose whom to measure,
+    so the diagnostic's denominator IS the grader's population rather than a
+    second hand-written copy of the same condition -- which is what a claim
+    that the two cannot drift has to rest on. A shared predicate makes it true
+    structurally; `test_the_keyword_graded_population_is_the_measured_population`
+    keeps it true when a call site is edited instead of the predicate.
+    """
+    return bool(meta.get("case") in KEYWORD_CASES
+                and meta.get("expected_own_keywords"))
+
+
 def _keyword_derivable(meta: dict, prompt: str) -> bool | None:
     """Whether the prompt already contains every keyword the grader looks for.
 
@@ -203,13 +218,14 @@ def _keyword_derivable(meta: dict, prompt: str) -> bool | None:
     counting it as `False` would pad the denominator with 215 rows the question
     was never asked of.
 
-    The condition mirrors `evaluate`'s grading branch exactly (case in
-    KEYWORD_CASES AND a non-empty keyword set), so the two cannot drift into
-    measuring different populations, and the matching is the grader's own
-    normalisation: lowercase substring containment, `all` and not `any`.
-    Anything looser would report an exposure the grader would not accept.
+    Whom to measure comes from `_is_keyword_graded` -- the same predicate
+    `evaluate` grades by, not a second copy of its condition -- so the two
+    cannot drift into measuring different populations. The matching is the
+    grader's own normalisation: lowercase substring containment, `all` and not
+    `any`. Anything looser would report an exposure the grader would not
+    accept.
     """
-    if meta.get("case") not in KEYWORD_CASES or not meta.get("expected_own_keywords"):
+    if not _is_keyword_graded(meta):
         return None
     low = prompt.lower()
     return all(str(k).lower() in low for k in meta["expected_own_keywords"])
@@ -237,7 +253,7 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
             got = by_workload.get(exp["workload"])
             if not got:
                 continue
-            if meta.get("case") in KEYWORD_CASES and meta.get("expected_own_keywords"):
+            if _is_keyword_graded(meta):
                 kws = [k.lower() for k in meta["expected_own_keywords"]]
                 matched = all(k in str(got.get("cause", "")).lower() for k in kws)
             else:
