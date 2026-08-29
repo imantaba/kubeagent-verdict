@@ -7,6 +7,7 @@ import pytest
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import cases, catalog, generate, names
+from kubeagent_verdict.evals import score
 
 BANNED = (
     re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),  # any dotted-quad IP
@@ -283,6 +284,39 @@ def test_test_set_slice_counts_are_pinned():
         "wrong_attribution": 19,
     }
     assert sum(counts.values()) == 253
+
+
+def test_keyword_slice_exposure_is_pinned():
+    """How much of the keyword slices' answer the prompt already gives away.
+
+    `own_cause` and `empty_candidates` are graded by keyword containment, so a
+    row whose every expected keyword is already printed in the prompt grades a
+    restatement as a diagnosis. This is the corpus-side number the scoreboard's
+    footnote prints; it measures the CORPUS, not the model, and it moves only
+    when a prompt's evidence wording or a keyword set moves.
+
+    Pinned per case as well as in total: a corpus edit that raised the exposure
+    of one slice while lowering the other's would slide past a total-only
+    assertion. `20 of 38` is what the implementation measures today, and it
+    matches the count taken independently when option C was decided. It is a
+    measurement, not a target — a change here is a real change in how much the
+    slices give away, and the number is updated deliberately with the reason,
+    never tuned back to 20.
+    """
+    by_case = collections.Counter()
+    graded = collections.Counter()
+    for ex in generate.test_set():
+        row = generate.to_row(ex)
+        derivable = score._keyword_derivable(row["meta"], row["messages"][1]["content"])
+        if derivable is None:
+            continue
+        graded[ex.case] += 1
+        by_case[ex.case] += 1 if derivable else 0
+
+    assert dict(graded) == {"own_cause": 19, "empty_candidates": 19}
+    assert dict(by_case) == {"own_cause": 10, "empty_candidates": 10}
+    assert sum(graded.values()) == 38
+    assert sum(by_case.values()) == 20
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():
