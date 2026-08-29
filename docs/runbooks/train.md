@@ -100,6 +100,17 @@ on a workstation — run the training step under `nohup` and watch
    to its basename and the endpoint drops any userinfo, so neither field can
    carry a home directory or a credential into a file you might paste.
 
+   Its `dataset` sub-block says **which** test set those rows came from:
+   `seed`, `size`, `test_rows`, and a SHA-256 over `out/dataset/manifest.json`.
+   Every other field of `run` is a property of the serving side, and
+   `test_file` is a basename — so before this block a retrain that overwrote
+   `out/dataset/test.jsonl` in place produced two scoreboards making
+   byte-identical claims about what they scored. **Compare the two `dataset`
+   blocks before comparing any number across them.** Differing hashes mean
+   two different test sets and the comparison is not a comparison; a `null`
+   block means the `--test` file had no manifest beside it, which is fine for
+   a hand-made set and disqualifying for a release argument.
+
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
    model scored 1.0 on contract validity, cause accuracy and confidence
@@ -114,10 +125,25 @@ on a workstation — run the training step under `nohup` and watch
      a gap. **A slice whose identities are in the training data does not
      count toward this bullet** — check that before reading it, with the
      intersection described under "contamination" below;
-   - **`length helps` and `length misleads` close together.** Apart, the
-     model is counting words: the winning cause is the longer phrase in 15
-     of 19 catalog entries, so a word counter beats the decoy rate for free
-     without reading anything. A wide gap invalidates the decoy rate;
+   - **`length_gap` ≤ 0.15, and not at the floor.** The gap is
+     `length helps` minus `length misleads`, printed under the overall table
+     as `Length gap (helps - misleads): <n> -- met | MISSED | not measured`
+     and stored as `length_gap` / `length_gap_ok` in `scoreboard.json`.
+     Apart, the model is counting words: the winning cause is the longer
+     phrase in 15 of 19 catalog entries, so a word counter beats the decoy
+     rate for free without reading anything. A wide gap invalidates the
+     decoy rate.
+
+     Two properties of the gate matter more than the number. It is
+     **signed**, not `abs()`: the failure it exists to catch is asymmetric —
+     high on `helps`, low on `misleads` — so a model that scores *better* on
+     the harder slice passes rather than failing for being good. And it
+     **abstains** when `length helps` is below 0.5, reporting `not measured`
+     with `length_gap_ok: null`. A gap between two floor rates certifies
+     nothing: the untuned baseline reads 0.0 and 0.0, gap 0.00, which an
+     unconditioned threshold passes exactly as it passes v0.1.0's 1.0 and
+     1.0. An abstention is not a pass — write **not measured** in the release
+     notes, the same rule as `overconfidence rate` below;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
      **This one can go blind.** It is conditioned on errors, so a model that
