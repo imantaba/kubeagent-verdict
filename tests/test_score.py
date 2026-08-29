@@ -728,9 +728,10 @@ def test_non_keyword_graded_row_is_none_and_out_of_the_denominator():
 
 
 def test_keyword_case_without_a_keyword_set_is_not_measured():
-    """The condition mirrors the grader's exactly -- `case in KEYWORD_CASES
-    AND expected_own_keywords`. A row missing the set is graded by exact match
-    despite its case name, so it is not keyword-graded and not measured."""
+    """`_is_keyword_graded` is the grader's own condition -- `case in
+    KEYWORD_CASES` AND `expected_own_keywords`. A row missing the set is
+    graded by exact match despite its case name, so it is not keyword-graded
+    and not measured."""
     row = json.loads(json.dumps(ROW))
     row["meta"] = {"case": "own_cause", "expected_cause": "x", "expected_confidence": "high"}
     results = score.evaluate([row], lambda m: _answer())
