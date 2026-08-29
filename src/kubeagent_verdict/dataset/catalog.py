@@ -30,8 +30,7 @@ class CatalogEntry:
     reason: str = ""
     evidence: str = ""
     log_cause: str = ""
-    next_step: str = ""
-    command: str = ""
+    recommendation: str = ""  # closes the ANSWER's summary; never a prompt field
     resources: tuple[str, str, str, str] | None = None  # mem req, mem limit, cpu req, cpu limit
     winner_cause: str = ""
     winner_reason: str = ""

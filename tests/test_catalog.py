@@ -36,7 +36,7 @@ def test_28_entries_unique_keys():
 
 def test_trainable_entries_are_complete():
     for e in catalog.trainable():
-        assert e.issue and e.reason and e.evidence and e.next_step and e.command, e.key
+        assert e.issue and e.reason and e.evidence and e.recommendation, e.key
         assert e.winner_cause and e.winner_reason and e.rationale, e.key
         assert e.reads, e.key
         assert e.contradiction and e.own_cause and e.own_cause_keywords, e.key
@@ -86,7 +86,7 @@ def test_read_labels_match_kubeagent_shapes():
 
 def test_templates_resolve_with_sample_names():
     for e in catalog.trainable():
-        for tpl in (e.evidence, e.log_cause, e.next_step, e.command, e.winner_cause,
+        for tpl in (e.evidence, e.log_cause, e.recommendation, e.winner_cause,
                     e.winner_reason, e.rationale, e.contradiction, e.own_cause):
             tpl.format(**SAMPLE)
         for cause, _v, reason in e.losers:

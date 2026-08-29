@@ -159,7 +159,7 @@ def _winner_example(e: CatalogEntry, n: Names, cands: tuple[c.Candidate, ...],
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": _fmt(e.rationale, n)}]
     summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
-               f"{_fmt(e.next_step, n).capitalize()}.")
+               f"{_fmt(e.recommendation, n).capitalize()}.")
     meta = {"case": case, "entry": e.key,
             "expected_cause": cause, "expected_confidence": conf}
     meta.update(extra_meta or {})
