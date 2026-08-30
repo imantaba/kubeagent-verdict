@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
@@ -21,8 +22,80 @@ def _case(row: dict) -> str:
     return row.get("meta", {}).get("case", "unknown")
 
 
+def _int(value) -> int | None:
+    """An integer, or nothing. `True` is an `int` in Python; a flag is not a count."""
+    return value if type(value) is int else None
+
+
+def dataset_provenance(test: Path) -> dict | None:
+    """Which dataset the `--test` file came from, read from its manifest.
+
+    The one impure function here besides `main`: it reads `manifest.json` from
+    the directory holding the test file. `provenance` below stays a pure
+    function of its arguments, so this is called at the one call site in
+    `main` and handed in.
+
+    A retrain overwrites `out/dataset/test.jsonl` in place, and every other
+    field of the run block is a property of the serving side, a basename, or a
+    row count two same-sized test sets share — so without this, two scoreboards
+    scored against two different datasets carry an identical claim about what
+    they scored.
+
+    TWO digests, because either alone leaves a gap. `manifest_sha256` covers
+    the manifest's bytes, so a manifest that grows a key still changes the
+    hash with no audit of the new key against the leak denylist — a stronger
+    answer than a summary of the three named fields. But `kv-dataset` writes
+    `test.jsonl` and `manifest.json` as two separate writes and nothing
+    afterwards ties them, and the file the eval actually read is the test
+    file: a hand-edited `test.jsonl` beside an untouched manifest would
+    otherwise produce an identical, complete-looking block. `test_sha256`
+    covers the test file's bytes — not proof they are the scored bytes, since
+    `main` reads the file, runs the whole eval, and only then calls this, so a
+    file replaced mid-run hashes as its replacement. It catches the case that
+    motivates it: an edit made before the run rather than during it. Together
+    the two say which dataset was generated AND which rows the file held;
+    neither says it alone.
+
+    Both are digests of files this process only reads, so what they can prove
+    is limited to matching or not matching another run's. The three named
+    values are integers or absent — a string is dropped rather than copied —
+    so this block cannot carry a filesystem path however the manifest is
+    written. The corpus file list is never copied at all.
+
+    A `--test` file with no manifest beside it is a hand-made test set, not an
+    error: the answer is `None`, and so is an unreadable or unparseable
+    manifest. An unreadable test file leaves `test_sha256` as `None` inside an
+    otherwise complete block. That is not merely defensive: `main` reads the
+    test file, then runs the whole eval over the network, and only then calls
+    this — so the file has had the length of a scoring run to be moved,
+    replaced or made unreadable. Provenance must not be the thing that raises.
+    """
+    try:
+        raw = (test.parent / "manifest.json").read_bytes()
+    except OSError:
+        return None
+    try:
+        m = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(m, dict):
+        return None
+    try:
+        test_sha = hashlib.sha256(test.read_bytes()).hexdigest()
+    except OSError:
+        test_sha = None
+    return {
+        "seed": _int(m.get("seed")),
+        "size": _int(m.get("size")),
+        "test_rows": _int(m.get("test")),
+        "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+        "test_sha256": test_sha,
+    }
+
+
 def provenance(model: str, endpoint: str, test: Path,
-               scored: int, available: int) -> dict:
+               scored: int, available: int,
+               dataset: dict | None = None) -> dict:
     """What this scoreboard scored — so two of them can never be confused.
 
     A release is argued from two scoreboards read side by side, tuned against
@@ -37,6 +110,10 @@ def provenance(model: str, endpoint: str, test: Path,
     leak shapes the provenance denylist exists to catch, and the endpoint
     drops any `user:password@` userinfo. Neither reduction loses identity —
     a GGUF basename and a scheme/host/port/path are what distinguish two runs.
+
+    `dataset` is `dataset_provenance`'s answer, or `None` when the test file
+    has no manifest beside it. Passing it in rather than reading it here keeps
+    this function pure.
     """
     parts = urlsplit(endpoint)
     host = parts.hostname or ""
@@ -49,6 +126,7 @@ def provenance(model: str, endpoint: str, test: Path,
         "rows_scored": scored,
         "rows_available": available,
         "limited": scored != available,
+        "dataset": dataset,
     }
 
 
@@ -111,7 +189,8 @@ def main() -> None:
         rows, lambda messages: client.chat(args.endpoint, args.model, messages))
     board = score.scoreboard(results)
     board["run"] = provenance(args.model, args.endpoint, args.test,
-                              len(rows), available)
+                              len(rows), available,
+                              dataset=dataset_provenance(args.test))
     args.out.mkdir(parents=True, exist_ok=True)
     with open(args.out / "results.jsonl", "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in results)

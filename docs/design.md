@@ -401,7 +401,18 @@ confidence from the closed set, line-length bounds. Then task metrics:
   misleads; a model that read the evidence scores alike on both. A tie is a
   coin flip, so it counts as misleading. On the 243-row test set the split
   is 45 rows where length helps against 12 where it misleads — read the two
-  numbers together or not at all; neither means anything alone. (The 57 rows
+  numbers together or not at all; neither means anything alone. Reading them
+  together is now mechanical rather than a habit: `score.length_gap` computes
+  the signed `helps - misleads` difference against a 0.15 bar and abstains
+  when `helps` is below 0.5 — that rate alone, whatever `misleads` reads
+  beside it — because a model failing the slice a word counter would ace has
+  not shown enough for the difference to certify anything. The untuned
+  baseline is the motivating case: 0.0 against 0.0 is a gap of zero that no
+  unconditioned threshold could fail. The verdict is stored on the **overall** block alone —
+  0.15 is read against the 12-row `misleads` denominator, and in the three
+  cases that carry length-keyed rows at all that denominator is 4 — while the
+  two rates it derives from stay on every case
+  (`docs/runbooks/train.md` step 6). (The 57 rows
   that carry both a decoy and a non-`none_of_these` expected cause are the
   only ones the split can be computed over; the other 186 contribute to
   neither number.)
