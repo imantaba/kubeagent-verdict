@@ -112,8 +112,10 @@ scoreboard" and "Known limitations". In short, and each argued there:
 ### The shared-origin probe — added after v0.1.0
 
 The table above is a historical record of the 243-row test set and is left
-as it was measured. The test set is now 253 rows: `shared_origin_probe` was
-added afterwards, and v0.1.0 was scored against it separately.
+as it was measured. The test set is now 263 rows: `shared_origin_probe` added
+ten afterwards, and `shared_origin_decoy_probe` ten more after that. Each
+addition was strictly appended, so the rows any earlier run was scored on kept
+their bytes and their positions; v0.1.0 was scored against the probe separately.
 
 The slice puts 2–4 flagged workloads in one prompt, all downstream of a
 single broken component, so the correct answer names the same shared cause
@@ -131,6 +133,16 @@ the shape from `propagation.trainable_scenarios()`, a pool sharing no key and
 no graded answer string with the six this slice draws from. A pass here is
 still evidence of generalisation, but it now rests on that disjointness
 rather than on the shape being absent from training altogether.
+
+The slice has since gained a twin, `shared_origin_decoy_probe`: the same ten
+scenarios rendered from the same seeds with the cluster-wide component
+**healthy**, where the correct answer really is separate causes. Same
+workloads, same candidate menus in the same order, same evidence labels — only
+the reads differ. The pair is what makes `separate_reasons_rate` and
+`false_shared_rate` readable together, because no habit can win both halves.
+The twin is not evidence about the models below: a model that answers
+"separate causes" to everything scores 1.0 on it, which is exactly what these
+two did.
 
 | `shared_origin_probe`, v0.1.0 | |
 |---|---|

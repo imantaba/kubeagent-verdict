@@ -114,7 +114,7 @@ on a workstation — run the training step under `nohup` and watch
    it were judged against the same test set. `manifest_sha256` answers a
    different question. `kv-dataset` builds `test.jsonl` from
    `generate.test_set()`, which takes neither a seed nor a size, so a
-   `--seed 17` run and a `--seed 42` run write the same 253 test rows and two
+   `--seed 17` run and a `--seed 42` run write the same 263 test rows and two
    different manifests. A differing `manifest_sha256` beside a matching
    `test_sha256` therefore means **same rows, different dataset config** —
    often exactly the comparison you want, not a reason to discard it. A
@@ -133,9 +133,19 @@ on a workstation — run the training step under `nohup` and watch
    per row, so `results.jsonl` line *i* is `test.jsonl` line *i*, and each old
    run's per-row identity can be reconstructed from what it *did* store and
    compared position for position against the test file scored today. The
-   control matched all 253 positions; the baseline's 243 are exactly today's
+   control matched all 253 positions; the baseline's 243 are exactly those
    253 minus the ten `shared_origin_probe` rows added afterwards, with zero
    positional mismatches.
+
+   Those counts are the file as it stood when that check was run. `test.jsonl`
+   has since grown to **263** rows, by appending the ten
+   `shared_origin_decoy_probe` rows and nothing else: the first 253 lines are
+   byte-identical, so the check re-runs unchanged against the file's prefix and
+   both older runs stay qualified. That is the only reason an append is
+   tolerated at all — `test_set()` builds the exam by concatenation, never by
+   interleaving, and `tests/test_generate.py` pins both the per-slice counts and
+   the order. A change that renumbers an existing row invalidates every banked
+   scoreboard and is a different decision from this one.
 
    That check is not a weaker substitute for the hash — it is stronger. The
    hash is computed after scoring (`cli.py` reads the file, runs the whole
@@ -235,21 +245,40 @@ on a workstation — run the training step under `nohup` and watch
      answers "shared origin" scores 0 on `separate_reasons_rate`. The second
      is the obvious failure mode of the obvious correction to the first, and
      nothing measured it until now. **`false_shared_rate` must be ≤ 1 of
-     19** — the whole `multi_misattribution_probe` slice, whose count is
-     pinned by `tests/test_generate.py`. Check the ambiguous count printed
+     19** on `multi_misattribution_probe` **and ≤ 1 of 10 on
+     `shared_origin_decoy_probe`**; both counts are pinned by
+     `tests/test_generate.py`. The second slice is the one that matters. It is
+     `shared_origin_probe` rendered from the same ten scenarios and the same
+     seeds with the cluster-wide read *healthy*: identical workloads, identical
+     candidate menus in identical order, identical evidence labels, and the
+     correct answer is separate causes. Nothing that keys on a label, a
+     position, or a tag can pass both halves of the pair, which is what the
+     pair is for. Read the halves on their own slices — a scoreboard that
+     reports `false shared` only on 19 rows is a run against the pre-append
+     253-row exam, and decider 5 is then measured on the weaker denominator it
+     had before. Check the ambiguous count printed
      under the table beside it: a large one means the phrase sets need
      narrowing, not that the model changed, and it shrinks the denominator
      the ratio above is read against.
 
+     One limit, so it is not read as more than it is: the decoy slice **could
+     not have failed the 0830 model**, which answered "separate reasons" to
+     every shared-origin question and would score 1.0 on it. It is a trap for a
+     model corrected toward "shared", not evidence about one that was never
+     tempted. Its `confidence carried` is weak for a second reason — a decoy
+     row's correct confidences are the ones already printed in the prompt.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
-     `suggestion echo` must be **0 of 253** — the whole test set. Every
+     `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
+     for a run scored against the exam as it stood before the
+     `shared_origin_decoy_probe` append. Every
      finding in a scan prompt carries a `suggested fix (deterministic,
      pre-reviewed — do not substitute): <text> | run: <cmd>` line, and that
      text is a *symptom* restated generically by `internal/remediation.For`,
      never a diagnosis. Returning it is the cheapest wrong answer available:
      it is fluent, it is on-topic, and it is already in the context window.
      The bar is zero rather than a tolerance because on this corpus a correct
-     answer is never a suggestion string — measured, 0 of 253 rows have a
+     answer is never a suggestion string — measured, 0 of 263 rows have a
      stored winner cause that matches one — so every echo is a wrong answer
      and costs cause accuracy too. Read the two together; alone this rate
      only names the *mechanism* behind a cause miss, and a model can miss for
@@ -265,9 +294,12 @@ on a workstation — run the training step under `nohup` and watch
      strings `internal/remediation.For` can produce. Re-scoring v0.1.0's
      recorded outputs against its own prompts returns `0.0 (253)`, which
      looks like a clean pass and is not a measurement at all. So a 0 here is
-     a pass only when **`n` is 253 and `tests/test_dataset_suggestions.py`
-     is green** — that test is what makes the prompt vocabulary kubeagent's,
-     and without it the number is decoration.
+     a pass only when **`n` is the full row count of the exam that was scored
+     (263 today, 253 before the append) and
+     `tests/test_dataset_suggestions.py` is green** — that test renders
+     `generate.test_set()` in full, so it covers the appended rows without
+     amendment, and it is what makes the prompt vocabulary kubeagent's.
+     Without it the number is decoration.
 
      Note where the failure was actually seen: **live, not on the eval.**
      v0.1.0 scores 0.0 on the synthetic set and still handed back

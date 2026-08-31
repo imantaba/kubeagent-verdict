@@ -313,6 +313,17 @@ def probe_sets() -> list[Example]:
     # `propagation:`, `drop_held_out` drops nothing, and no training example is
     # lost to the slice.
     out.extend(shared_origin_probes())
+
+    # APPENDED once more, same comparability rule, and the counter-example the
+    # slice above cannot supply on its own. Seven of its ten rows carry an
+    # origin read label that appears on no other row in the exam, and on every
+    # one of them the answer is a shared cause — so "a cluster-wide read is
+    # present, therefore one shared cause" scored the whole slice without
+    # reading a byte of it. These rows put the SAME labels under the opposite
+    # answer, drawn from the same salts so each is a minimal contrast with its
+    # twin. Groups are `propagation:` too, so `drop_held_out` still drops
+    # nothing and the training set does not move.
+    out.extend(shared_origin_decoy_probes())
     return out
 
 
@@ -335,6 +346,29 @@ def shared_origin_probes() -> list[Example]:
         if len(p.victims) < 3:
             continue
         out.append(cases.shared_origin_probe(
+            p, _entry_rng("shared-origin-pair", p.key), victims=2))
+    return out
+
+
+def shared_origin_decoy_probes() -> list[Example]:
+    """EVAL-ONLY: `shared_origin_probes` with the origin reading healthy.
+
+    Same scenarios, same order, same widths — and the SAME two rng salts, which
+    is what makes each row a minimal contrast with its twin rather than a
+    second question about the same cluster. Identical names give identical
+    inventories, identical candidate menus and identical read labels in
+    identical order; only the read contents differ, and with them the answer.
+    """
+    from kubeagent_verdict.dataset import cases, propagation
+
+    out: list[Example] = []
+    for p in propagation.all_scenarios():
+        out.append(cases.shared_origin_decoy_probe(
+            p, _entry_rng("shared-origin", p.key)))
+    for p in propagation.all_scenarios():
+        if len(p.victims) < 3:
+            continue
+        out.append(cases.shared_origin_decoy_probe(
             p, _entry_rng("shared-origin-pair", p.key), victims=2))
     return out
 

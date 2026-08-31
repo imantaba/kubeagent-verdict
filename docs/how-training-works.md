@@ -97,7 +97,7 @@ The generator then splits everything into three piles:
 
 - **train** — 4,232 questions. The model studies these.
 - **validation** — 435 questions. Held back during development.
-- **test** — 253 questions. **The exam.** The model must never see these.
+- **test** — 263 questions. **The exam.** The model must never see these.
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -166,10 +166,10 @@ check fails, nothing produced is trusted.
 
 ### Step 4: the exam (`kv-eval`)
 
-We serve the finished model locally and ask it all 253 test questions, then
+We serve the finished model locally and ask it all 263 test questions, then
 score every answer automatically.
 
-The 253 questions are not one exam — they are twelve, and several are traps
+The 263 questions are not one exam — they are thirteen, and several are traps
 built specifically to catch a model that is cheating rather than reasoning:
 
 | Slice | Rows | What it catches |
@@ -178,6 +178,7 @@ built specifically to catch a model that is cheating rather than reasoning:
 | `misattribution_probe` | 19 | A model that always trusts the `attributed` **tag**. The tag is deliberately on a wrong candidate. |
 | `multi_misattribution_probe` | 19 | The same trap, but with two workloads at once. |
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. |
+| `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. |
 | `contradiction_probe` | 19 | Evidence that contradicts itself. |
 | the other 7 slices | 167 | Ordinary competence across the nine question types |
 
@@ -203,7 +204,10 @@ because each one caught a real cheat that had already fooled us:
    independent ones) and `false_shared_rate` (it wrongly blamed one cause for
    genuinely unrelated failures). Either one alone is trivially cheatable, and
    the cheat for one is the failure mode of the other. **They must be read
-   together.**
+   together.** The two now have a matched pair of slices to be measured on:
+   `shared_origin_probe` for the first, `shared_origin_decoy_probe` for the
+   second, built from the same ten scenarios so that no answering habit can win
+   both.
 6. **Suggestion echo = 0.** Every prompt contains kubeagent's own generic
    "suggested fix" line. Handing that back is the cheapest wrong answer
    available — fluent, on-topic, and already in the context. Zero tolerance.
@@ -363,6 +367,11 @@ the code and got the same value, `f565e61b…`, 253 rows. **The exam did not
 move.** That is what makes the old score and the new score comparable at all,
 and it is the difference between a fix and moving the goalposts.
 
+(The exam has since grown to 263 questions, deliberately and by *appending* ten
+new ones — the last section of this part explains why, and why appending is not
+the same as moving. The run described here is still scored against the frozen
+253, whose bytes the append did not touch.)
+
 ### What this fix does not do
 
 Two things are worth writing down plainly, because both are easy to miss and
@@ -403,8 +412,10 @@ a satisfied one: making the trained pile genuinely even means generating more
 counter-examples, and that changes the training questions, so it waits until
 the run in flight has been scored.
 
-**Two — the exam still cannot catch this particular shortcut.** This is the
-more important one, and it is a limitation of the test, not of the training.
+**Two — the exam, as it stood, could not catch this particular shortcut.** This
+is the more important one, and it is a limitation of the test, not of the
+training. It has since been closed; the closure is described at the end of this
+section, and the numbers below are about the 253-question exam as it was.
 
 The exam has ten shared-origin questions. Seven of them show a cluster-wide
 read whose label appears in **none** of the other 243 questions — a CoreDNS
@@ -420,14 +431,36 @@ up in 29 questions whose correct answer is "separate causes". Only those three
 force the model to actually look. Three questions is not a test.
 
 This does not undermine the fix — the training data now teaches the right
-thing, and that is what we changed. It means the **scoreboard** cannot yet tell
+thing, and that is what we changed. It means the **scoreboard** could not tell
 "learned to read the evidence" apart from "learned which label goes with which
 answer". Closing it needs exam questions where a distinctive cluster-wide read
 is present and the correct answer is still "separate causes" — the same
-counter-example shape, on the exam side. That is a change to the exam file, so
-it cannot ride the run that is in flight: it would move the goalposts
-mid-measurement, which is the one thing Part 2 says we do not do. It is the
-next piece of work after this run is scored.
+counter-example shape, on the exam side.
+
+**That change has since been made, and it is why the exam is now 263 questions
+rather than 253.** The new slice, `shared_origin_decoy_probe`, is built from the
+same ten scenarios as `shared_origin_probe` and rendered from the same random
+seeds, so the two are a matched pair: the same workloads, the same candidate
+lists in the same order, the same evidence labels. The only thing that differs
+is what the reads *say* — in the new slice the cluster-wide thing is healthy,
+and each workload really is broken for its own local reason. The label a model
+might have been keying on is now present in both worlds, so keying on it scores
+100% on one slice and 0% on the other. The shortcut buys nothing.
+
+Two honest limits on that, written down for the same reason as everything else
+in this section. First, the new slice **could not have failed the model this
+part is about** — a model that answers "separate causes" to everything aces it.
+It is a trap for the model trained *next*, and what it buys is that the pair is
+uncheatable in both directions from here on. Second, a decoy question's correct
+confidence values are the ones already printed in the prompt, so the
+"confidence carried" measure is weaker on this slice than elsewhere and should
+not be read as evidence of judgement there.
+
+The exam file was **appended to, never rewritten.** Its first 253 lines are
+byte-identical to the file the run in flight is being scored against, and the
+training and validation files regenerate unchanged, byte for byte. So this did
+not move the goalposts mid-measurement: the run in flight is still judged on
+its own frozen 253, and the 263-question exam is what the next model faces.
 
 ---
 
@@ -475,11 +508,27 @@ Written now, before the score exists, so it cannot be rationalised afterwards:
   say "shared" to everything. It is the exact mirror failure decider 5 exists to
   catch, which is why those two numbers are never read apart.
 
+These three are the bar for the run in flight, and they are judged on the
+frozen 253-question exam — the `false_shared_rate` bar above is 19 rows of
+`multi_misattribution_probe`, because that is the only place the measure had a
+denominator when this was written. They are left exactly as written; a
+pre-registered bar that gets edited once the score exists is not a bar.
+
+For the run **after** this one, the same measure gets a second and much harder
+denominator: the ten `shared_origin_decoy_probe` questions, where the tempting
+"one shared cause" answer is present, plausible, and wrong. The bar there is
+tighter for a reason — those ten are the mirror image of the ten the model is
+currently failing, so passing both is the only result that can be read as
+having learned to look.
+
 ### Where this currently stands
 
-- Curriculum change: **done**, merged, 287 tests green.
+- Curriculum change: **done**, merged, 287 tests green at the time.
 - Dataset regenerated and verified byte-identical on the training machine:
   **done**.
+- Exam extension (`shared_origin_decoy_probe`, +10 questions): **done**, 303
+  tests green, appended so the frozen 253 the run in flight is judged on did
+  not move a byte. It applies to the *next* run, not this one.
 - Training run: **in progress** on a CPU-only box, ~529 nudges, several hours,
   silent by design.
 - Export to a `.gguf`: **not started**, and deliberately gated — it needs

@@ -73,6 +73,17 @@ DECLARED = {
     # dataset.propagation, not the catalog, so it shares nothing -- which is
     # what shows the guard discriminates rather than rubber-stamping.
     "shared_origin_probe": (0, 34),
+    # Its healthy-origin twin, and declared rather than left out on purpose:
+    # an undeclared slice is not measured at all, so the guard's coverage
+    # would silently lag the exam every time the exam grows. Same structural
+    # reason for the zero -- the rows come from dataset.propagation, whose
+    # eval scenarios never enter the training pile. It does share 6 of its 34
+    # reads with `shared_origin_probe` itself, by construction: five of the
+    # sixteen eval victims carry evidence that reads the same whether the
+    # origin is broken or not, and those are rendered verbatim in both worlds.
+    # That is sharing WITHIN the exam, which this instrument does not measure
+    # and does not need to -- neither slice is anything the model studied.
+    "shared_origin_decoy_probe": (0, 34),
 }
 
 
@@ -130,10 +141,10 @@ def _fake(user: str) -> generate.Example:
 
 
 # `_reads` carries two refusals, and BOTH are unreachable on today's tree --
-# measured over every row the guard can reach, 4587 kept + 253 test = 4840,
+# measured over every row the guard can reach, 4667 kept + 263 test = 4930,
 # all of which render a delimited, non-empty evidence block. That is the
-# superset: the allowlist test below actually calls `_reads` on 4673 of them,
-# because it reads only the five DECLARED slices out of the test set.
+# superset: the allowlist test below actually calls `_reads` on 4753 of them,
+# because it reads only the six DECLARED slices out of the test set.
 # Unreachable is exactly why they need tests: deleting
 # either assert changes no other test's outcome, so without these two the
 # guards are the vacuous shape this whole branch exists to prevent. They

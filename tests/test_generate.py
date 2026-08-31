@@ -177,7 +177,7 @@ def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
             seen.append(ex.case)
             order.append(ex.case)
     assert order == ["multi_misattribution_probe", "contradiction_probe",
-                     "shared_origin_probe"]
+                     "shared_origin_probe", "shared_origin_decoy_probe"]
 
 
 def test_contradiction_probe_is_appended_last_one_row_per_entry():
@@ -188,14 +188,15 @@ def test_contradiction_probe_is_appended_last_one_row_per_entry():
     assert len(tail) == len(trainable)
     # Appended, never interleaved: every earlier probe row keeps its position, so
     # a scoreboard banked against the previous test file still lines up. The run
-    # is no longer the LAST rows in the file — `shared_origin_probe` was appended
-    # after it — so what is asserted is that the run is contiguous and that
-    # nothing but the shared-origin block follows it. A slice appended after this
-    # one is allowed by construction; a row interleaved INTO this one is not.
+    # is no longer the LAST rows in the file — the two shared-origin slices were
+    # appended after it — so what is asserted is that the run is contiguous and
+    # that nothing but those blocks follows it. A slice appended after this one
+    # is allowed by construction; a row interleaved INTO this one is not.
     cases = [ex.case for ex in probes]
     first = cases.index("contradiction_probe")
     assert cases[first:first + len(tail)] == ["contradiction_probe"] * len(tail)
-    assert set(cases[first + len(tail):]) == {"shared_origin_probe"}
+    assert set(cases[first + len(tail):]) == {"shared_origin_probe",
+                                              "shared_origin_decoy_probe"}
     for ex in tail:
         assert ex.meta["expected_cause"] == c.NONE_OF_THESE
         assert ex.meta["decoy_cause"] in ex.user
@@ -270,8 +271,13 @@ def test_test_set_slice_counts_are_pinned():
     `multi_misattribution_probe` had 19 rows and nothing said so, while its
     caller silently skipped a row on a name collision. A slice that quietly
     shrinks turns a "<=1 of 19" release bar into "<=1 of 18" with the suite
-    green. The literals `253` and `19` appeared nowhere in `tests/` before
+    green. The literals `263` and `19` appeared nowhere in `tests/` before
     this test existed.
+
+    The total moves only when a slice is deliberately APPENDED, and every
+    append leaves the earlier rows at their original indices — which is what
+    lets a scoreboard banked against the shorter file still line up row for
+    row over the slices it shares.
     """
     counts = collections.Counter(ex.case for ex in generate.test_set())
     assert dict(counts) == {
@@ -284,11 +290,12 @@ def test_test_set_slice_counts_are_pinned():
         "none_of_these": 19,
         "own_cause": 19,
         "positional_probe": 19,
+        "shared_origin_decoy_probe": 10,
         "shared_origin_probe": 10,
         "truncated": 19,
         "wrong_attribution": 19,
     }
-    assert sum(counts.values()) == 253
+    assert sum(counts.values()) == 263
 
 
 def test_keyword_slice_exposure_is_pinned():

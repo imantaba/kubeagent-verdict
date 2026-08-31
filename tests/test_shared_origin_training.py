@@ -280,8 +280,17 @@ def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
 
 # ------------------------------------------------------ the eval must not move
 
-def test_the_eval_set_is_still_two_hundred_and_fifty_three_rows():
-    assert len(generate.test_set()) == 253
+def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
+    """253 until `shared_origin_decoy_probe` appended its ten.
+
+    This test exists so the TRAINING half of the shared-origin work cannot
+    move the exam by accident — a curriculum change that grows the test set
+    invalidates every banked scoreboard silently. It does not forbid moving
+    the exam on purpose; the decoy slice did that, in its own commit, with
+    `tests/test_shared_origin_decoy_probe.py` proving the training set stayed
+    byte-identical across the change.
+    """
+    assert len(generate.test_set()) == 263
 
 
 def test_no_eval_row_comes_from_the_trainable_pool():

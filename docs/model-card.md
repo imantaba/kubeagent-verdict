@@ -389,18 +389,22 @@ the scoreboard can see, so it is a candidate to cut.
 ### The released weights and the released code do not match
 
 The shipped GGUF was trained on a dataset generated at commit `8bd9d28`.
-Three later commits changed the generator, so `kv-dataset --seed 17
+Later commits changed the generator, so `kv-dataset --seed 17
 --size 5500` on this tree produces a **different, corrected** dataset —
-4155/432/253 train/val/test against the 4312/451/205 the weights were
+4232/435/263 train/val/test against the 4312/451/205 the weights were
 trained on. Running the shipped pipeline end to end reproduces the
 method, not these weights.
 
-Ten of those 253 test rows are `shared_origin_probe`, appended after
-v0.1.0 was scored. It is why the test set no longer reads 243; train and
-val are unchanged at 4155/432, because the slice's group keys are
-namespaced and `drop_held_out` removes exactly the same 913 rows with and
-without it. Every scoreboard in this file below was measured on the
-243-row set and is left as measured.
+Twenty of those 263 test rows were appended after v0.1.0 was scored: ten
+`shared_origin_probe`, then ten `shared_origin_decoy_probe`, its
+healthy-origin twin. That is why the test set no longer reads 243. Neither
+append moved train or val — both slices' group keys are namespaced, so
+`drop_held_out` removes exactly the same rows with and without them — and
+both were strictly appended, so every row an earlier run was scored on kept
+its bytes and its position. Train and val read 4232/435 rather than the
+4155/432 this paragraph used to quote for an unrelated reason: the
+curriculum change that added shared-origin *training* rows. Every scoreboard
+in this file below was measured on the 243-row set and is left as measured.
 
 The practical consequence is contamination of two eval slices, measured
 rather than estimated (regenerate `8bd9d28`'s train+val in a worktree and

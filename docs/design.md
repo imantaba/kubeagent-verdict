@@ -300,9 +300,37 @@ paragraph closes on the training side: seven of the ten `shared_origin_probe`
 rows carry a read label appearing in none of the other 243 test rows, so
 answering "one shared cause" on those four labels and "separate causes"
 everywhere else passes BOTH halves of decider 5 while reading no evidence at
-all. Closing it needs probe rows where a distinctive cluster-scoped read is
-present and the answer is still separate causes — an exam-side change, which
-moves the test set and therefore cannot ride a training run already in flight.
+all. That is now closed too, from the exam side, by `shared_origin_decoy_probe`
+— ten rows rendering the same six scenarios with the origin read showing the
+component HEALTHY, drawn from the same rng salts as their twins so each pair is
+a minimal contrast: identical inventory, identical candidate menus, identical
+read labels in identical order, and only the read contents different. Every
+origin read label in the exam now appears under both answers, so matching one
+predicts nothing. The menu is not re-tagged, which is the point: the local
+cause keeps `attributed` and the shared cause keeps `outranked` on BOTH halves,
+so "trust the attributed tag" sweeps the decoy slice and scores zero on its
+twin, and "take the outranked candidate" does exactly the reverse. Swapping the
+tags would have let one heuristic win both.
+
+Two limits are recorded rather than described away. The slice could not have
+failed the model it was written for — the 0830 model answered independence on
+all ten twin rows, which is the decoy slice's correct answer — so it is not
+offered as a fix on its own; it is the second half of a pair, and the pair
+could always fail 0830. And `confidence_carried` is copyable here in a way it
+is not on the twin, because the expected grade is the deterministic pass's own
+per-workload grade printed in the prompt: when the local attribution is right,
+so is its grade, and inventing a different one to defeat the copy would be
+inventing evidence. A related staleness is deliberate. In the healthy world the
+shared candidate's `reason` still asserts the broken fact — it is the
+deterministic pass's claim and the read contradicts it — and resolving that in
+favour of the read is precisely the skill the slice measures.
+
+Being an exam-side change, it moves the test set: 253 rows to 263. It is
+strictly APPENDED, so the first 253 lines of `test.jsonl` are byte-identical
+and a scoreboard banked against the shorter file still lines up row for row.
+The training set does not move at all — every new group is `propagation:`-
+prefixed and collides with nothing, so `drop_held_out` drops the same rows and
+`train.jsonl` and `val.jsonl` regenerate byte-identical across the change.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1
