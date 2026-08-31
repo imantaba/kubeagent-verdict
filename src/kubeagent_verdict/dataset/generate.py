@@ -42,15 +42,25 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
         f.writelines(json.dumps(to_row(ex), ensure_ascii=False) + "\n" for ex in examples)
 
 
+# `multi` gave up four points to `shared_origin` rather than the mix growing:
+# `false_shared_rate` is the other half of the same release decider, and a model
+# that learns to claim a shared origin everywhere has traded one failure for its
+# mirror. `multi` stays the larger of the two, asserted by test.
 CASE_MIX = (("attributed", 30), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 15), ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
-            ("wrong_attribution", 10))
+            ("multi", 11), ("shared_origin", 4), ("truncated", 5), ("injection", 10),
+            ("empty_candidates", 5), ("wrong_attribution", 10))
 
 # The held-out test set draws one example per (trainable entry, case) for each
 # of these. `multi` is excluded deliberately: its group is a "+"-join of two to
 # four constituent groups, so holding one out drops every training example that
 # shares ANY constituent — a disproportionate bite out of the training set for
 # a case the single-workload slices already cover.
+# `shared_origin` is excluded for a second reason on top of `multi`'s: its
+# examples come from `propagation.trainable_scenarios()`, and `held_out_case_set`
+# mints its rows from the TRAINING pool. Listing it here would put trainable
+# origins into the test set -- the leak the split exists to prevent, arriving by
+# the other door. The eval's shared-origin rows come from `probe_sets` and draw
+# only from `all_scenarios()`.
 HELD_OUT_CASES = ("none_of_these", "own_cause", "truncated", "injection",
                   "empty_candidates", "wrong_attribution")
 
@@ -62,7 +72,7 @@ def counts_for(size: int) -> dict[str, int]:
 
 
 def generate(seed: int, size: int) -> list[Example]:
-    from kubeagent_verdict.dataset import cases, catalog, names
+    from kubeagent_verdict.dataset import cases, catalog, names, propagation
 
     rng = random.Random(seed)
     entries = catalog.trainable()
@@ -71,6 +81,8 @@ def generate(seed: int, size: int) -> list[Example]:
 
     def rotate(i: int):
         return entries[i % len(entries)]
+
+    train_scen = propagation.trainable_scenarios()
 
     for i in range(counts["attributed"]):
         out.append(cases.attributed(rotate(i), names.draw(rng), rng))
@@ -88,7 +100,19 @@ def generate(seed: int, size: int) -> list[Example]:
                 n = names.draw(rng)
             seen.add((n.ns, n.name))
             pairs.append((e, n))
-        out.append(cases.multi(pairs, rng))
+        # Every third `multi` row carries a healthy origin read, rotating over
+        # the trainable pool so every label that heads a `shared_origin` row
+        # also heads an independent one. The rate is what makes the two classes
+        # near-evenly matched among origin-read rows (11 / 3 vs 4) rather than
+        # the read's presence being a 9:1 prior for one answer.
+        healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
+        out.append(cases.multi(pairs, rng, healthy_origin=healthy))
+    for i in range(counts["shared_origin"]):
+        p = train_scen[i % len(train_scen)]
+        # Vary the width the way `probe_sets` does: a row that always renders
+        # every victim teaches the count, not the reasoning.
+        victims = 2 + (i // len(train_scen)) % (len(p.victims) - 1)
+        out.append(cases.shared_origin(p, rng, victims=victims))
     for i in range(counts["truncated"]):
         out.append(cases.truncated(rotate(i), names.draw(rng), rng))
     for i in range(counts["injection"]):

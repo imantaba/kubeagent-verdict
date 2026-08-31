@@ -256,7 +256,8 @@ The case mix is what adjudication means, in approximate proportions:
 | Candidate attributed, evidence supports it | ~30% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
-| Multi-workload prompts (2–4 flagged, mixed causes) | ~15% | One verdict row per listed workload, no extras |
+| Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
+| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~4% | Naming the SAME cause on every row when the evidence says one thing broke |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -269,6 +270,20 @@ version of this table said `attributed` was ~40% and omitted
 tag-copying, which is the shortcut this whole section is about. It was
 wrong from the commit that introduced the case until a pre-publication
 audit recomputed it.
+
+`shared_origin` took its four points from `multi` rather than from the mix
+growing, and that is a deliberate cost. The two are the same release decider's
+two halves: `separate_reasons_rate` fails when the model can never see a shared
+origin, and `false_shared_rate` fails when it claims one everywhere. `multi`
+stays the larger of the two.
+
+Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
+from the six the `shared_origin_probe` eval slice draws from — disjoint in key
+and in graded answer string, since `drop_held_out` compares group identity and
+never reads the text. Separately, a third of `multi`'s rows now carry the same
+origin read with the component shown HEALTHY. Without that, no `multi` row had
+a cluster-scoped read at all, so "an origin read is present" answered the whole
+slice without reading a word of its evidence.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1

@@ -57,17 +57,22 @@ def test_to_row_schema():
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
     assert counts == {"attributed": 300, "none_of_these": 150, "own_cause": 100,
-                      "multi": 150, "truncated": 50, "injection": 100,
-                      "empty_candidates": 50, "wrong_attribution": 100}
+                      "multi": 110, "shared_origin": 40, "truncated": 50,
+                      "injection": 100, "empty_candidates": 50,
+                      "wrong_attribution": 100}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
 
 
 def test_case_mix_present_in_generated_set():
+    """Every case the mix DECLARES must actually be emitted.
+
+    Derived from `CASE_MIX` rather than repeating it: the literal lives in
+    `test_counts_for_follows_the_mix` above, and repeating it here made this
+    test a second copy of that one. Read off the mix it catches the failure it
+    is for -- a case given a percentage that `generate` has no branch to build.
+    """
     exs = generate.generate(seed=17, size=200)
-    seen = {ex.case for ex in exs}
-    assert seen == {"attributed", "none_of_these", "own_cause", "multi",
-                    "truncated", "injection", "empty_candidates",
-                    "wrong_attribution"}
+    assert {ex.case for ex in exs} == {case for case, _pct in generate.CASE_MIX}
 
 
 def test_split_never_straddles_a_group():

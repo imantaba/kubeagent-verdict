@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import random
+from typing import NamedTuple
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
@@ -466,38 +467,29 @@ def _victim_finding(v: prop.Victim, n: Names) -> c.Finding:
     )
 
 
-def shared_origin_probe(p: prop.Propagation, rng: random.Random,
-                        victims: int | None = None) -> Example:
-    """EVAL-ONLY: several flagged workloads, one upstream cause.
+class _SharedOrigin(NamedTuple):
+    """Everything both shared-origin builders need, rendered once.
 
-    Every other multi-workload row in this repo — training and eval alike —
-    is built by `multi`, which samples DISTINCT catalog entries and summarises
-    them as "N workloads are failing for separate reasons." At release size
-    that is 825 of 5500 training rows with no counterexample anywhere, so the
-    model was trained to assert independence in exactly the prompt shape
-    `--investigate` sends. This row is the counterexample.
-
-    Four shortcuts are closed by construction, because each one would score
-    the slice without reading the evidence:
-
-    * the tag — the local decoy carries `attributed`, the shared cause carries
-      `outranked`, as in `misattribution_probe`;
-    * the position — the menu is deterministic and never shuffled, decoy
-      first, shared cause last;
-    * "name the string common to every menu" — a second common cause, the
-      scenario's `distractor`, sits on all N menus too and is refuted by the
-      evidence. Its effect lands in `cause_acc`; it is deliberately NOT in
-      `decoy_causes`, which measures tag-following only;
-    * "copy the bracketed confidence" — the per-workload `[confidence: X]` in
-      the prompt is the deterministic pass's grade for its own wrong local
-      attribution and varies within a row, while the expected answer is one
-      scenario-level grade.
-
-    What it cannot do is separate a model that reasons from one that has
-    memorised these six scenarios — the same limit every probe here has. That
-    holds only while the scenarios stay out of training; the day they are
-    trained on, this slice needs held-out origins.
+    `shared_origin_probe` (eval) and `shared_origin` (training) must render
+    the SAME prompt shape from different scenarios -- if they diverged even in
+    read order, the probe would measure the divergence rather than the skill.
+    They differ only in the case name and the meta the scorer reads.
     """
+
+    drawn: list[Names]
+    scope_value: str | None
+    anchor: Names
+    shared_cause: str
+    distractor_cause: str
+    decoys: list[str]
+    user: str
+    summary: str
+    group: str
+    rows: list[dict]
+
+
+def _render_shared_origin(p: prop.Propagation, rng: random.Random,
+                          victims: int | None) -> _SharedOrigin:
     count = len(p.victims) if victims is None else victims
     if not 2 <= count <= len(p.victims):
         raise ValueError(f"{p.key}: cannot render {count} of {len(p.victims)} victims")
@@ -541,26 +533,112 @@ def shared_origin_probe(p: prop.Propagation, rng: random.Random,
              f"Root cause: {shared_cause}.",
              _fmt(p.remedy, anchor)]
     group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
+    return _SharedOrigin(drawn=drawn, scope_value=scope_value, anchor=anchor,
+                         shared_cause=shared_cause, distractor_cause=distractor_cause,
+                         decoys=decoys, user=user,
+                         summary="\n".join(lines[:c.MAX_SUMMARY_LINES]),
+                         group=group, rows=rows)
+
+
+def shared_origin(p: prop.Propagation, rng: random.Random,
+                  victims: int | None = None) -> Example:
+    """TRAINING: the counterexample `multi` never gave the model.
+
+    Same shape as `shared_origin_probe` and deliberately so, drawn from
+    `propagation.trainable_scenarios()` -- a pool disjoint from the eval six in
+    key AND in graded answer string, so a pass on the probe still cannot be
+    explained by having seen the probe.
+
+    `origin_read_label` travels as meta because the negative case needs it:
+    `multi` puts the SAME label on a third of its rows with content showing the
+    component healthy, and the two sets are asserted equal. It is the RAW
+    template, not the formatted label -- `describe node {node}` renders
+    differently per row, and a set of formatted labels would never match.
+    """
+    r = _render_shared_origin(p, rng, victims)
     return Example(
-        case="shared_origin_probe", group=group, system=c.SYSTEM_PROMPT, user=user,
-        assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
-        meta={"case": "shared_origin_probe", "origin": p.key,
-              "blast_radius": p.blast_radius, "scope_value": scope_value,
-              "expected": {r["workload"]: r["cause"] for r in rows},
+        case="shared_origin", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
+        assistant=_answer(r.rows, r.summary),
+        meta={"case": "shared_origin", "origin": p.key,
+              "expected": {row["workload"]: row["cause"] for row in r.rows},
               "expected_confidence": p.confidence,
-              "decoy_causes": decoys, "distractor_cause": distractor_cause,
+              "origin_read_label": p.origin_read[0]})
+
+
+def shared_origin_probe(p: prop.Propagation, rng: random.Random,
+                        victims: int | None = None) -> Example:
+    """EVAL-ONLY: several flagged workloads, one upstream cause.
+
+    Every other multi-workload row in this repo — training and eval alike —
+    is built by `multi`, which samples DISTINCT catalog entries and summarises
+    them as "N workloads are failing for separate reasons." At release size
+    that is 825 of 5500 training rows with no counterexample anywhere, so the
+    model was trained to assert independence in exactly the prompt shape
+    `--investigate` sends. This row is the counterexample.
+
+    Four shortcuts are closed by construction, because each one would score
+    the slice without reading the evidence:
+
+    * the tag — the local decoy carries `attributed`, the shared cause carries
+      `outranked`, as in `misattribution_probe`;
+    * the position — the menu is deterministic and never shuffled, decoy
+      first, shared cause last;
+    * "name the string common to every menu" — a second common cause, the
+      scenario's `distractor`, sits on all N menus too and is refuted by the
+      evidence. Its effect lands in `cause_acc`; it is deliberately NOT in
+      `decoy_causes`, which measures tag-following only;
+    * "copy the bracketed confidence" — the per-workload `[confidence: X]` in
+      the prompt is the deterministic pass's grade for its own wrong local
+      attribution and varies within a row, while the expected answer is one
+      scenario-level grade.
+
+    What it cannot do is separate a model that reasons from one that has
+    memorised these six scenarios — the same limit every probe here has. That
+    holds only while the scenarios stay out of training. Training DOES teach
+    this shape now, from `propagation.trainable_scenarios()`; what keeps the
+    sentence true is that the two pools share no key and no graded answer
+    string, asserted by `tests/test_shared_origin_training.py`.
+    """
+    r = _render_shared_origin(p, rng, victims)
+    return Example(
+        case="shared_origin_probe", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
+        assistant=_answer(r.rows, r.summary),
+        meta={"case": "shared_origin_probe", "origin": p.key,
+              "blast_radius": p.blast_radius, "scope_value": r.scope_value,
+              "expected": {row["workload"]: row["cause"] for row in r.rows},
+              "expected_confidence": p.confidence,
+              "decoy_causes": r.decoys, "distractor_cause": r.distractor_cause,
               # The memorised sentence this slice exists to measure. `score`
-              # reports it as `separate_reasons_rate` — a model that names the
+              # reports it as `separate_reasons_rate` -- a model that names the
               # shared cause on every row and then summarises the workloads as
               # independent has half-learned the correction, and averaging that
               # into `cause_accuracy` would hide it.
               "wrong_summary_phrase": prop.SEPARATE_REASONS})
 
 
-def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:
+def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
+          healthy_origin: prop.Propagation | None = None) -> Example:
+    """Several workloads, several independent causes.
+
+    `healthy_origin` is the negative half of the shared-origin curriculum.
+    Before it, `_reads(e, n)[:2]` made every read workload-local, so a
+    cluster-scoped read at the head of the list appeared only in
+    `shared_origin` rows -- the answer was legible from the prompt's SHAPE.
+    Passing a trainable scenario here prepends the SAME origin read with the
+    content showing that component healthy, and "separate reasons" stays the
+    right answer. Only the read's content separates the two classes.
+    """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
     workloads, all_reads, rows = [], [], []
+    if healthy_origin is not None:
+        # Formatted against the first workload's names, as the positive case
+        # formats against its anchor. A cluster-scoped read names nothing
+        # workload-specific; a node- or namespace-scoped one names this row's.
+        h = pairs[0][1]
+        all_reads.append(c.EvidenceRead(
+            label=_fmt(healthy_origin.origin_read[0], h),
+            content=_fmt(healthy_origin.healthy_origin_content, h)))
     for e, n in pairs:
         conf = _confidence(e)
         workloads.append(_workload(e, n, _candidates(e, n, rng), confidence=conf))
@@ -575,4 +653,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Exampl
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,
                    assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
                    meta={"case": "multi",
-                         "expected": {r["workload"]: r["cause"] for r in rows}})
+                         "expected": {r["workload"]: r["cause"] for r in rows},
+                         **({} if healthy_origin is None else {
+                             "origin_read_label": healthy_origin.origin_read[0],
+                             "origin_healthy": True})})
