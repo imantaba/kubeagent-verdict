@@ -285,6 +285,25 @@ origin read with the component shown HEALTHY. Without that, no `multi` row had
 a cluster-scoped read at all, so "an origin read is present" answered the whole
 slice without reading a word of its evidence.
 
+Two residuals survive that fix and are recorded here rather than described
+away. First, the counterweight is lighter in the pile the optimizer reads than
+in the one the generator emits: `drop_held_out` removes about a third of the
+`multi` counter-examples and none of the `shared_origin` rows, because a
+`multi` group is a `+`-join of two to four catalog entries and dies if any one
+of them collides with an exam group, while a `shared_origin` group comes from
+the train-only pool the exam never touches. The emitted ~48/52 therefore
+reaches the optimizer as ~62/38 — a large improvement on the 100/0 that
+preceded it, and not a coin flip. Both splits are asserted separately, one on
+the generator's raw output and one on the kept pile, so neither can be claimed
+by measuring the other. Second, the eval cannot yet detect the shortcut this
+paragraph closes on the training side: seven of the ten `shared_origin_probe`
+rows carry a read label appearing in none of the other 243 test rows, so
+answering "one shared cause" on those four labels and "separate causes"
+everywhere else passes BOTH halves of decider 5 while reading no evidence at
+all. Closing it needs probe rows where a distinctive cluster-scoped read is
+present and the answer is still separate causes — an exam-side change, which
+moves the test set and therefore cannot ride a training run already in flight.
+
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1
 allows up to `MAX_VERDICT_ROWS` (10, mirroring kubeagent's

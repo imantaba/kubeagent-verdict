@@ -26,6 +26,15 @@ a reason that is not the skill. The counterweight is a negative case: `multi`
 rows carrying the SAME origin read label with content showing the component
 HEALTHY, where "separate reasons" is still the right answer. Same shape, both
 answers, so only the evidence separates them.
+
+Two residuals, asserted below rather than claimed away. The counterweight is
+lighter than the generator makes it look: `drop_held_out` removes about a
+third of the `multi` counter-examples and none of the `shared_origin` rows,
+so the emitted ~48/52 reaches the optimizer as ~62/38. And the exam cannot
+detect this shortcut even now — seven of the ten `shared_origin_probe` rows
+carry a read label that appears in none of the other 243, so label-matching
+alone passes both halves of decider 5. Fixing that is an exam-side change and
+does not belong in this module.
 """
 
 import re
@@ -42,6 +51,26 @@ SEED = 17
 @pytest.fixture(scope="module")
 def rows():
     return generate.generate(seed=SEED, size=SIZE)
+
+
+@pytest.fixture(scope="module")
+def kept(rows):
+    """What the model actually reads: train+val AFTER `drop_held_out` runs.
+
+    `rows` is the generator's raw output, and every DISTRIBUTIONAL claim in
+    this module has to be made about this pile instead, because the filter
+    does not remove rows evenly. A `multi` row is a `+`-join of two to four
+    catalog-entry groups and dies if ANY one of them collides with an exam
+    group; a `shared_origin` row is built from the train-only propagation
+    pool the exam never touches. So `multi` loses about a third of its
+    origin-read rows here and `shared_origin` loses none.
+
+    Per-row invariants stay on `rows`: it is a superset of this pile, so
+    checking it is the stronger check, not the weaker one.
+    """
+    train, val = generate.split(rows, seed=SEED)
+    test = generate.test_set()
+    return generate.drop_held_out(train, test) + generate.drop_held_out(val, test)
 
 
 def _by_case(rows, case):
@@ -140,14 +169,19 @@ def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
         assert e.meta["origin"] in train, e.meta["origin"]
 
 
-def test_multi_survives_as_the_majority_of_multi_workload_rows(rows):
+def test_multi_survives_as_the_majority_of_multi_workload_rows(kept):
     """Decider 5 has two halves and this change can only break the other one.
 
     `false_shared_rate` is 0.0 today. If shared origins stop being the
     minority answer the model swings to claiming them everywhere, and the
     scoreboard trades one failure for its mirror.
+
+    Measured on the kept pile, not the generator's output: `drop_held_out`
+    takes `multi` rows and no `shared_origin` rows, so a mix that looks
+    safely majority-`multi` as emitted is not necessarily majority-`multi`
+    by the time it reaches the optimizer.
     """
-    assert len(_by_case(rows, "multi")) > len(_by_case(rows, "shared_origin"))
+    assert len(_by_case(kept, "multi")) > len(_by_case(kept, "shared_origin"))
 
 
 # ------------------------------------------------- the structural-cue killer
@@ -157,25 +191,57 @@ def _origin_labels(rows, case):
             if e.case == case and "origin_read_label" in e.meta}
 
 
-def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(rows):
+def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(kept):
     """The cue test. Every trainable origin read must appear under BOTH answers.
 
     If these two sets differ, some read label is a free giveaway: seeing it
-    settles the answer without reading its content.
+    settles the answer without reading its content. Asserted on the kept
+    pile, because a label the filter removes every instance of is a giveaway
+    in the data the model reads however even the generator's output looked.
     """
-    shared = _origin_labels(rows, "shared_origin")
-    independent = _origin_labels(rows, "multi")
+    shared = _origin_labels(kept, "shared_origin")
+    independent = _origin_labels(kept, "multi")
     assert shared, "no shared_origin row carries an origin read"
     assert independent, "no multi row carries an origin read — the cue is alive"
     assert shared == independent
 
 
-def test_the_two_classes_are_near_evenly_matched_among_origin_read_rows(rows):
-    """A 9:1 split is a prior, not a cue kill. Keep it close to a coin flip."""
+def _independent_share(rows):
     shared = len(_by_case(rows, "shared_origin"))
     independent = len([e for e in _by_case(rows, "multi")
                        if "origin_read_label" in e.meta])
-    assert 0.4 <= independent / (shared + independent) <= 0.6
+    return independent / (shared + independent)
+
+
+def test_the_generator_emits_the_two_classes_near_evenly(rows):
+    """What the EMITTER controls: the every-third-`multi`-row rate.
+
+    This is the generator's own responsibility and it is a coin flip here.
+    It is deliberately not the same claim as the one below — the filter runs
+    after this and does not take from both classes equally.
+    """
+    assert 0.4 <= _independent_share(rows) <= 0.6
+
+
+def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
+    """What the MODEL reads, which is the number that decides what it learns.
+
+    A 9:1 split is a prior, not a cue kill. This is the assertion the module
+    docstring's argument actually depends on, and the one that was missing:
+    the emitted split is ~48/52 but `drop_held_out` takes about a third of
+    the counter-examples and none of the positives, so the pile the
+    optimizer sees leans ~62/38 toward the shared answer.
+
+    The floor is therefore 0.30, not 0.40, and that is a narrowed claim
+    rather than a satisfied one. It still fails loudly at the state this
+    module was written to end — 1.00/0.00, no counter-examples at all — and
+    it fails if the filter ever gets hungrier. Closing the gap the rest of
+    the way means emitting more counter-examples, which moves dataset bytes;
+    until then the lean is written down here, in `generate.py`, and in
+    `docs/design.md` rather than described as a coin flip.
+    """
+    share = _independent_share(kept)
+    assert 0.30 <= share <= 0.60, f"kept-pile independent share {share:.3f}"
 
 
 def test_a_negative_multi_row_shows_the_component_healthy(rows):

@@ -102,9 +102,18 @@ def generate(seed: int, size: int) -> list[Example]:
             pairs.append((e, n))
         # Every third `multi` row carries a healthy origin read, rotating over
         # the trainable pool so every label that heads a `shared_origin` row
-        # also heads an independent one. The rate is what makes the two classes
+        # also heads an independent one. AS EMITTED that makes the two classes
         # near-evenly matched among origin-read rows (11 / 3 vs 4) rather than
-        # the read's presence being a 9:1 prior for one answer.
+        # the read's presence being a 9:1 prior for one answer. It does not
+        # survive intact: `drop_held_out` takes about a third of these
+        # counter-examples and none of the `shared_origin` rows, because a
+        # `multi` group is a `+`-join of two to four catalog entries and dies
+        # if any one of them collides with an exam group while a
+        # `shared_origin` group comes from the train-only pool the exam never
+        # touches. So the pile the optimizer reads leans ~62/38 toward the
+        # shared answer. Both splits are asserted, separately, in
+        # tests/test_shared_origin_training.py -- neither stands in for the
+        # other.
         healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
         out.append(cases.multi(pairs, rng, healthy_origin=healthy))
     for i in range(counts["shared_origin"]):

@@ -388,12 +388,20 @@ same ratio:
 | a shared ConfigMap | 55 | 33 |
 | a shared Secret | 55 | 32 |
 
-So no single read is a giveaway. But 62 / 38 is a lean, not a coin flip, and
-the automated check we wrote to guard this counts the questions **before** the
-safety filter runs, where the split is 48 / 52 and passes. The check is
-measuring the pile we generate, not the pile the model reads. It is a real
-gap between what we wrote down and what we enforce, and it is on the list to
-close.
+So no single read is a giveaway. But 62 / 38 is a lean, not a coin flip — and
+the automated check that was supposed to guard this counted the questions
+**before** the safety filter ran, where the split is 48 / 52 and passes. It
+was measuring the pile we generate, not the pile the model reads.
+
+That check has now been split in two, because they were always two different
+claims. One measures what the generator emits and still demands a coin flip,
+since that part is entirely under our control. The other measures the pile
+that actually reaches the model and demands only that the smaller side stay
+above 30% — which is what is true today, and which still fails loudly at the
+0% this whole change exists to end. The second number is a narrowed claim, not
+a satisfied one: making the trained pile genuinely even means generating more
+counter-examples, and that changes the training questions, so it waits until
+the run in flight has been scored.
 
 **Two — the exam still cannot catch this particular shortcut.** This is the
 more important one, and it is a limitation of the test, not of the training.
