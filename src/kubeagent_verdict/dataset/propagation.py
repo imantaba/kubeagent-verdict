@@ -14,10 +14,14 @@ the released model was trained *against* cross-workload attribution, in the
 exact prompt shape `--investigate`'s local verdict mode sends: up to ten
 flagged workloads and one summary.
 
-This module is the counterexample as data, and it is EVAL-ONLY. Nothing here
-is generated into train or val. The measurement has to exist and has to fail
-before any attempt is made to teach the correction — an eval change that could
-not fail the model it replaced is not a fix.
+This module is the counterexample as data. `_SCENARIOS` — the six reached by
+`all_scenarios()` — is EVAL-ONLY and stays that way; `_TRAINING_SCENARIOS`,
+reached by `trainable_scenarios()`, is a disjoint pool added afterwards and is
+the only part training ever sees. The order matters and was kept: the
+measurement had to exist and had to FAIL before any attempt was made to teach
+the correction — an eval change that could not fail the model it replaced is
+not a fix. It failed on 2026-08-30, `separate_reasons_rate` 1.0 on all ten
+probe rows, and the trainable pool is the answer to that.
 
 Each scenario is one ORIGIN and two to four VICTIMS. A victim renders as an
 ordinary flagged workload with an ordinary pod-level symptom and an ordinary,
@@ -43,10 +47,14 @@ attribution — while the expected answer is one scenario-level grade for the
 shared cause. Copying now produces a disagreement instead of a pass.
 
 What this slice CANNOT detect: the same limit every probe in this repo has.
-Its scenarios are not in training at all today, so a pass here is evidence the
-model generalises to a shape it never saw — but once these scenarios are ever
-trained on, a pass stops meaning that, and the slice needs held-out origins
-the way `contradiction_probe` needed held-out entries.
+A pass is evidence of generalisation only while the probe's own six scenarios
+stay out of training — the day one of them is trained on, a pass stops meaning
+that. Training now teaches this shape, so the guarantee rests entirely on the
+two pools being disjoint, and disjoint in the graded ANSWER STRING as well as
+in the key: `drop_held_out` compares group identity and never reads the text,
+so two scenarios could carry different keys, the same `shared_cause`, and a
+clean contamination report over a model that had memorised the answer.
+`tests/test_shared_origin_training.py` asserts both halves.
 
 Two real propagation families are deliberately ABSENT: a blocking admission
 webhook and an exhausted ResourceQuota. Both stop the pod from being created
@@ -107,6 +115,11 @@ class Propagation:
     confidence: str  # the expected grade for the shared attribution
     origin_read: tuple[str, str]
     victims: tuple[Victim, ...]
+    # The SAME origin read, showing the component healthy. Trainable scenarios
+    # must carry one; the eval six never render it. It is what a `multi` row
+    # puts at the head of its reads so that "an origin read is present" stops
+    # being a free answer -- see `cases.multi`.
+    healthy_origin_content: str = ""
     shared_verdict: str = "outranked"
     distractor_verdict: str = "ruled_out"
     notes: str = field(default="")
@@ -466,3 +479,277 @@ def all_scenarios() -> tuple[Propagation, ...]:
 
 def by_key() -> dict[str, Propagation]:
     return {p.key: p for p in _SCENARIOS}
+
+
+# ------------------------------------------------------- the trainable pool
+#
+# The six scenarios above stay EVAL-ONLY. These are what training sees, and
+# they exist because of the sentence in this module's docstring: once the eval
+# scenarios are trained on, a pass on the probe stops being evidence of
+# generalisation and becomes evidence of memory. `catalog` already solved this
+# shape -- 19 trainable entries, 9 held out -- and this is the same split
+# applied to propagation. Nothing here shares a key, a `shared_cause` or a
+# `distractor_cause` with the eval six; `tests/test_shared_origin_training.py`
+# fails the suite if that ever stops being true.
+#
+# Every one also carries `healthy_origin_content`: the same read, same label,
+# showing the component fine. `multi` puts that at the head of its reads on a
+# third of its rows, which is the only reason a model cannot answer this whole
+# slice by noticing that a cluster-scoped read exists.
+
+_T_CA = Propagation(
+    key="internal-ca-expired",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the cluster's internal certificate authority expired",
+    shared_cause="the internal certificate authority expired, so every mutual-TLS "
+                 "connection between workloads is refused",
+    shared_reason="the shared trust bundle's issuing certificate passed its notAfter "
+                  "date two hours ago",
+    distractor_cause="the workloads' service account tokens were rotated without a reload",
+    distractor_reason="every container still presents a token the API server accepts",
+    rationale="the workload's failure is a refused TLS handshake, which is what an "
+              "expired issuer does to every connection in the cluster",
+    remedy="Reissue the internal CA and roll the trust bundle; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related secret shared-trust-bundle (cluster-wide)",
+        ("notAfter: expired 2h ago\n"
+         "issuer: cluster-internal-ca\n"
+         "workloads mounting this bundle: 14 across 6 namespaces"),
+    ),
+    healthy_origin_content=(
+        "notAfter: 288 days remaining\n"
+        "issuer: cluster-internal-ca\n"
+        "workloads mounting this bundle: 14 across 6 namespaces"
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="tls: failed to verify certificate: certificate has expired",
+            local_cause="the workload's own client certificate was never renewed",
+            local_reason="the container exits during its first outbound call",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: TLS certificate verification failed "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 8 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="the readiness probe points at a port the container stopped serving",
+            local_reason="every probe attempt is refused rather than timing out",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
+                   "remote error: tls: bad certificate")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="x509: certificate has expired or is not yet valid",
+            local_cause="the peer trust store mounted by {name} was replaced with a bad file",
+            local_reason="the replicas refuse each other's certificates",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: peer certificate rejected as expired "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_KUBE_PROXY = Propagation(
+    key="kube-proxy-degraded",
+    blast_radius="node",
+    scope_field="node",
+    origin="kube-proxy on one node stopped programming Service routes",
+    shared_cause="kube-proxy on node {node} stopped programming Service routes, so "
+                 "pods scheduled there reach no Service",
+    shared_reason="{node} has applied no Service route update for eleven minutes while "
+                  "its peers are current",
+    distractor_cause="the Services these workloads call have no ready endpoints",
+    distractor_reason="every Service named in the failing calls reports its full "
+                      "complement of ready endpoints",
+    rationale="the workload cannot reach a Service from {node}, which is true of "
+              "everything scheduled there right now",
+    remedy="Restart kube-proxy on {node}; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("last Service route sync: 11m ago (peer nodes: 4s ago)\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "kube-proxy pod on this node: 1/1 Running, 0 restarts"),
+    ),
+    healthy_origin_content=(
+        "last Service route sync: 3s ago (peer nodes: 4s ago)\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "kube-proxy pod on this node: 1/1 Running, 0 restarts"
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="connection refused dialing the checkout Service address",
+            local_cause="the upstream the workload calls is refusing connections",
+            local_reason="every outbound call is refused immediately",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection refused to a Service address "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 14 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="the agent's readiness threshold is set too aggressively",
+            local_reason="the probe never reports the pod ready",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  14x  kubelet  Readiness probe failed: "
+                   "dependency check could not reach its Service")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_CONFIGMAP = Propagation(
+    key="shared-configmap-deleted",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the ConfigMap every workload in one namespace mounts was deleted",
+    shared_cause="the shared ConfigMap in {ns} was deleted, so no pod there can build "
+                 "its container environment",
+    shared_reason="every pod in {ns} references a ConfigMap the API server no longer has",
+    distractor_cause="the namespace {ns} is being torn down",
+    distractor_reason="{ns} is Active and its other objects are untouched",
+    rationale="the workload cannot start because the ConfigMap it mounts is gone, "
+              "which is true of every pod in {ns}",
+    remedy="Restore the shared ConfigMap in {ns}; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related configmap {ns}/app-settings",
+        ("Error from server (NotFound): the ConfigMap app-settings does not exist\n"
+         "namespace {ns}: Active\n"
+         "pods in {ns} referencing it: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "Name: app-settings, 7 keys\n"
+        "namespace {ns}: Active\n"
+        "pods in {ns} referencing it: 6 of 6"
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CreateContainerConfigError",
+            issue="CreateContainerConfigError",
+            reason="container {container} cannot build its environment",
+            evidence="configmap app-settings not found",
+            local_cause="the key {container} reads was removed from its own ConfigMap",
+            local_reason="the container never starts and reports a missing key",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Error: configmap "
+                   "\"app-settings\" not found")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CreateContainerConfigError",
+            issue="Init:CreateContainerConfigError",
+            reason="init container {init_container} cannot build its environment",
+            evidence="configmap app-settings not found",
+            local_cause="the init container references a ConfigMap key that was renamed",
+            local_reason="the init container fails before the main container runs",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
+                   "    Reason: CreateContainerConfigError")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CreateContainerConfigError",
+            issue="CreateContainerConfigError",
+            reason="container {container} cannot build its environment",
+            evidence="configmap app-settings not found",
+            local_cause="the StatefulSet was rolled to a revision that mounts a new ConfigMap",
+            local_reason="only the newest replicas fail to start",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: configmap \"app-settings\" "
+                   "not found")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_SCALED_TO_ZERO = Propagation(
+    key="shared-dependency-scaled-to-zero",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="a shared platform service was scaled to zero replicas",
+    shared_cause="the shared session service was scaled to zero replicas, so every "
+                 "workload that calls it fails",
+    shared_reason="the session Deployment declares zero desired replicas and has no pods",
+    distractor_cause="an upstream gateway is rate limiting the callers",
+    distractor_reason="no sampled log line from any caller carries a rate-limit response",
+    rationale="the workload depends on a service that currently has nothing running, "
+              "which is true of every caller in the cluster",
+    remedy="Scale the session service back up; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe platform/session (Deployment)",
+        ("Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
+         "Pods:      none\n"
+         "Last scale event: 34m ago, 4 replicas to 0"),
+    ),
+    healthy_origin_content=(
+        "Replicas:  4 desired | 4 updated | 4 total | 4 available\n"
+        "Pods:      4 Running, 0 restarts\n"
+        "Last scale event: none in the last 24h"
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="no healthy upstream for the session dependency",
+            local_cause="the workload's retry budget is too small for a slow dependency",
+            local_reason="the container gives up after its first attempt",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: no healthy upstream for a dependency "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 6 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="the workload's readiness check was made stricter in the last roll",
+            local_reason="the probe fails on a dependency check it did not used to make",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  6x  kubelet  Readiness probe failed: "
+                   "dependency session has no endpoints")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times without crashing",
+            evidence="the container exits cleanly and is restarted",
+            local_cause="the workload exits zero when it finds no work queued",
+            local_reason="each restart follows a clean exit rather than a crash",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Last State: Terminated, Exit Code: 0, Reason: Completed\n"
+                   "Restart Count: {restarts}")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO)
+
+
+def trainable_scenarios() -> tuple[Propagation, ...]:
+    """The origins training may see. Disjoint from `all_scenarios()` by test."""
+    return _TRAINING_SCENARIOS

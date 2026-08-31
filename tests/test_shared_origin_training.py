@@ -1,0 +1,243 @@
+"""Teaching shared-origin reasoning without teaching the test.
+
+`propagation.py` shipped its six scenarios as EVAL-ONLY and said why: the
+measurement had to exist and had to fail before any attempt was made to teach
+the correction. It has now failed — on all ten `shared_origin_probe` rows the
+0830 model answered "N workloads are failing for separate reasons" and picked
+a different local decoy for every workload. The same docstring named the
+condition a correction has to meet:
+
+    once these scenarios are ever trained on, a pass stops meaning that, and
+    the slice needs held-out origins the way `contradiction_probe` needed
+    held-out entries.
+
+So training gets its OWN origins and the six eval scenarios stay eval-only —
+the catalog's 19-trainable / 9-held-out split, applied to propagation. The
+eval set does not move, which is what keeps the 0830 scoreboard comparable.
+
+That closes the obvious shortcut. This module exists mostly for the second,
+which is not obvious: `multi` builds its reads per constituent
+(`_reads(e, n)[:2]`), so before this change a cluster-scoped read at the head
+of the list appeared in shared-origin rows and NOWHERE else. Train the
+positive case alone and "an origin read is present" separates the two classes
+perfectly — the model would pass the probe on the prompt's shape without
+reading a word of the evidence, and every rate on the slice would improve for
+a reason that is not the skill. The counterweight is a negative case: `multi`
+rows carrying the SAME origin read label with content showing the component
+HEALTHY, where "separate reasons" is still the right answer. Same shape, both
+answers, so only the evidence separates them.
+"""
+
+import re
+
+import pytest
+
+from kubeagent_verdict import vocab
+from kubeagent_verdict.dataset import generate, propagation
+
+SIZE = 800
+SEED = 17
+
+
+@pytest.fixture(scope="module")
+def rows():
+    return generate.generate(seed=SEED, size=SIZE)
+
+
+def _by_case(rows, case):
+    return [e for e in rows if e.case == case]
+
+
+# ------------------------------------------------- the held-out origin split
+
+def test_a_trainable_scenario_pool_exists():
+    assert propagation.trainable_scenarios()
+
+
+def test_no_trainable_origin_is_an_eval_origin():
+    """The whole point. A shared key would make the probe a memory test."""
+    train = {p.key for p in propagation.trainable_scenarios()}
+    held = {p.key for p in propagation.all_scenarios()}
+    assert train & held == set()
+
+
+def test_no_trainable_scenario_reuses_an_eval_answer_string():
+    """Disjoint keys are not enough — the probe grades the cause STRING.
+
+    Two scenarios could carry different keys and the same `shared_cause`, and
+    then the model has seen the graded answer verbatim while `drop_held_out`
+    reports a clean split, because it keys on group identity and never looks
+    at the text.
+    """
+    held = {p.shared_cause for p in propagation.all_scenarios()}
+    held |= {p.distractor_cause for p in propagation.all_scenarios()}
+    for p in propagation.trainable_scenarios():
+        assert p.shared_cause not in held, p.key
+        assert p.distractor_cause not in held, p.key
+
+
+def test_every_trainable_scenario_carries_a_healthy_origin_read():
+    """The negative case's raw material: the same read, component healthy."""
+    for p in propagation.trainable_scenarios():
+        assert p.healthy_origin_content.strip(), p.key
+
+
+def test_trainable_scenarios_obey_every_rule_the_eval_table_obeys():
+    for p in propagation.trainable_scenarios():
+        assert p.blast_radius in propagation.BLAST_RADII, p.key
+        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", p.key), p.key
+        assert 2 <= len(p.victims) <= 4, p.key
+        assert p.shared_verdict != "attributed", p.key
+        assert p.confidence in ("high", "medium", "low"), p.key
+        for v in p.victims:
+            assert v.issue in vocab.ISSUE_KINDS, f"{p.key}: {v.issue}"
+            assert v.pass_confidence in ("high", "medium", "low"), p.key
+        locals_ = [v.local_cause for v in p.victims]
+        assert len(set(locals_)) == len(locals_), f"{p.key}: duplicate decoys"
+
+
+def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
+    banned = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
+              re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
+              re.compile(r"@"))
+    for p in propagation.trainable_scenarios():
+        blob = "\n".join([p.origin, p.shared_cause, p.shared_reason,
+                          p.distractor_cause, p.distractor_reason, p.rationale,
+                          p.remedy, p.origin_read[0], p.origin_read[1],
+                          p.healthy_origin_content]
+                         + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n"
+                            f"{v.local_cause}\n{v.local_reason}\n"
+                            f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
+        for pat in banned:
+            assert not pat.search(blob), f"{p.key}: {pat.pattern}"
+
+
+# ---------------------------------------------------------- the curriculum mix
+
+def test_the_case_mix_names_shared_origin_and_still_sums_to_one_hundred():
+    mix = dict(generate.CASE_MIX)
+    assert "shared_origin" in mix
+    assert sum(pct for _case, pct in generate.CASE_MIX) == 100
+
+
+def test_shared_origin_is_not_a_held_out_case():
+    """`held_out_case_set` builds eval rows per case from TRAINING scenarios.
+
+    Listing `shared_origin` there would mint test rows out of the trainable
+    pool — the leak this whole split exists to prevent, arriving by the other
+    door.
+    """
+    assert "shared_origin" not in generate.HELD_OUT_CASES
+
+
+def test_generate_emits_shared_origin_rows(rows):
+    assert _by_case(rows, "shared_origin")
+
+
+def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
+    train = {p.key for p in propagation.trainable_scenarios()}
+    for e in _by_case(rows, "shared_origin"):
+        assert e.meta["origin"] in train, e.meta["origin"]
+
+
+def test_multi_survives_as_the_majority_of_multi_workload_rows(rows):
+    """Decider 5 has two halves and this change can only break the other one.
+
+    `false_shared_rate` is 0.0 today. If shared origins stop being the
+    minority answer the model swings to claiming them everywhere, and the
+    scoreboard trades one failure for its mirror.
+    """
+    assert len(_by_case(rows, "multi")) > len(_by_case(rows, "shared_origin"))
+
+
+# ------------------------------------------------- the structural-cue killer
+
+def _origin_labels(rows, case):
+    return {e.meta["origin_read_label"] for e in rows
+            if e.case == case and "origin_read_label" in e.meta}
+
+
+def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(rows):
+    """The cue test. Every trainable origin read must appear under BOTH answers.
+
+    If these two sets differ, some read label is a free giveaway: seeing it
+    settles the answer without reading its content.
+    """
+    shared = _origin_labels(rows, "shared_origin")
+    independent = _origin_labels(rows, "multi")
+    assert shared, "no shared_origin row carries an origin read"
+    assert independent, "no multi row carries an origin read — the cue is alive"
+    assert shared == independent
+
+
+def test_the_two_classes_are_near_evenly_matched_among_origin_read_rows(rows):
+    """A 9:1 split is a prior, not a cue kill. Keep it close to a coin flip."""
+    shared = len(_by_case(rows, "shared_origin"))
+    independent = len([e for e in _by_case(rows, "multi")
+                       if "origin_read_label" in e.meta])
+    assert 0.4 <= independent / (shared + independent) <= 0.6
+
+
+def test_a_negative_multi_row_shows_the_component_healthy(rows):
+    """Same label, opposite content — otherwise the label is still the answer."""
+    healthy = {p.origin_read[0]: p.healthy_origin_content
+               for p in propagation.trainable_scenarios()}
+    broken = {p.origin_read[1] for p in propagation.trainable_scenarios()}
+    seen = 0
+    for e in _by_case(rows, "multi"):
+        if "origin_read_label" not in e.meta:
+            continue
+        seen += 1
+        assert e.meta["origin_healthy"] is True
+        content = healthy[e.meta["origin_read_label"]]
+        assert content.split("\n")[0] in e.user
+        for b in broken:
+            assert b.split("\n")[0] not in e.user
+    assert seen
+
+
+def test_a_negative_multi_row_still_says_separate_reasons(rows):
+    for e in _by_case(rows, "multi"):
+        assert propagation.SEPARATE_REASONS in e.assistant
+
+
+def test_a_shared_origin_training_row_never_says_separate_reasons(rows):
+    for e in _by_case(rows, "shared_origin"):
+        assert propagation.SEPARATE_REASONS not in e.assistant
+
+
+def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
+    for e in _by_case(rows, "shared_origin"):
+        causes = set(e.meta["expected"].values())
+        assert len(causes) == 1, e.meta["origin"]
+
+
+# ------------------------------------------------------ the eval must not move
+
+def test_the_eval_set_is_still_two_hundred_and_fifty_three_rows():
+    assert len(generate.test_set()) == 253
+
+
+def test_no_eval_row_comes_from_the_trainable_pool():
+    train = {p.key for p in propagation.trainable_scenarios()}
+    for e in generate.test_set():
+        assert e.meta.get("origin") not in train
+        for part in e.group.split("+"):
+            assert not any(f"propagation:{k}:" in part for k in train), part
+
+
+def test_the_probe_still_draws_only_held_out_origins():
+    held = {p.key for p in propagation.all_scenarios()}
+    probes = [e for e in generate.test_set() if e.case == "shared_origin_probe"]
+    assert len(probes) == 10
+    for e in probes:
+        assert e.meta["origin"] in held
+
+
+def test_training_still_contaminates_nothing(rows):
+    test = generate.test_set()
+    train, val = generate.split(rows, seed=SEED)
+    kept = generate.drop_held_out(train, test) + generate.drop_held_out(val, test)
+    held = {part for e in test for part in e.group.split("+")}
+    for e in kept:
+        assert not any(part in held for part in e.group.split("+")), e.group

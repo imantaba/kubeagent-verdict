@@ -121,7 +121,29 @@ on a workstation — run the training step under `nohup` and watch
    differing `test_sha256` is the disqualifying one. A `null` block means the
    `--test` file had no manifest beside it, or had one that could not be read
    or parsed — the three are indistinguishable here — which is fine for a
-   hand-made set and disqualifying for a release argument.
+   hand-made set and leaves a release argument with nothing to check *in the
+   run directory*.
+
+   That is weaker than "disqualifying", which is what this paragraph used to
+   say, and the correction is worth writing down because the stronger claim
+   would have thrown away two usable runs. Every run recorded before `e9262fd`
+   stores `dataset: null`, including the v0.1.0 baseline and the
+   negative-control re-score. Both were qualified afterwards without the hash:
+   `score.evaluate` walks the test rows in file order and appends one result
+   per row, so `results.jsonl` line *i* is `test.jsonl` line *i*, and each old
+   run's per-row identity can be reconstructed from what it *did* store and
+   compared position for position against the test file scored today. The
+   control matched all 253 positions; the baseline's 243 are exactly today's
+   253 minus the ten `shared_origin_probe` rows added afterwards, with zero
+   positional mismatches.
+
+   That check is not a weaker substitute for the hash — it is stronger. The
+   hash is computed after scoring (`cli.py` reads the file, runs the whole
+   eval, then hashes), so it describes the file at the end of the run rather
+   than the bytes that were scored. The positional check describes what was
+   actually scored. Read the rule as: a `null` block means the cheap check is
+   unavailable and the run needs the expensive one, not that the run is
+   unusable.
 
    Read both hashes, not one. `kv-dataset` writes the test file and the
    manifest as two separate writes and nothing afterwards ties them together,

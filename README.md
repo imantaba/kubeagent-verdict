@@ -117,12 +117,20 @@ added afterwards, and v0.1.0 was scored against it separately.
 
 The slice puts 2–4 flagged workloads in one prompt, all downstream of a
 single broken component, so the correct answer names the same shared cause
-on every row. Nothing like it is in the training data — every multi-workload
-example there draws its constituents from distinct catalog entries and
-summarises them as "N workloads are failing for separate reasons," 825 rows
-of it with no counterexample anywhere. The slice adds no training rows and
-removes none: its group keys are namespaced, so `drop_held_out` cuts exactly
-the same 913 rows with and without it.
+on every row. When it was added, nothing like it was in the training data —
+every multi-workload example there drew its constituents from distinct
+catalog entries and summarised them as "N workloads are failing for separate
+reasons," 825 rows of it with no counterexample anywhere. It added no
+training rows and removed none: its group keys are namespaced, so
+`drop_held_out` cut exactly the same 913 rows with and without it.
+
+That is no longer true of the training data, and the numbers below are from
+before it changed. The slice measured what it was built to measure — twice,
+on two models, at `separate_reasons_rate` 1.0 — and the dataset now teaches
+the shape from `propagation.trainable_scenarios()`, a pool sharing no key and
+no graded answer string with the six this slice draws from. A pass here is
+still evidence of generalisation, but it now rests on that disjointness
+rather than on the shape being absent from training altogether.
 
 | `shared_origin_probe`, v0.1.0 | |
 |---|---|
