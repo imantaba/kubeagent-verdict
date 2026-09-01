@@ -125,6 +125,32 @@ on a workstation — run the training step under `nohup` and watch
    leaves an empty pidfile beside a healthy process. Recover the real pid with
    `ps -eo pid,cmd | grep "[k]v-train"` and write it back.
 
+   **A full run is long enough that host stability is part of the plan, and
+   `kv-train` has no checkpointing.** The adapter is written exactly once, by
+   `model.save_pretrained` after the last epoch, so a run that dies at 99%
+   produces nothing at all — not a partial adapter, not a resumable state.
+   Measured the hard way: a run reached 12h19m and was lost whole to a hard
+   power loss on the training box, with `out/adapter/` never created.
+
+   Tell a power loss from a crash before assuming either. A crash inside
+   `kv-train` appends a traceback to `out/train.out`, because stdout and
+   stderr are redirected there. A power loss appends nothing, and leaves its
+   evidence in the system log instead:
+
+       journalctl --list-boots | tail -3          # a new boot you did not ask for
+       journalctl -b -1 --no-pager | tail -20     # previous boot ends mid-stride,
+                                                  # with no shutdown sequence
+       journalctl -b 0 --no-pager | grep -iE "recovering journal|Dirty bit"
+
+   `Dirty bit is set. Fs was not properly unmounted and some data may be
+   corrupt` is the confirmation, and it is also an instruction: **re-verify
+   the dataset before relaunching.** The training inputs sat on that
+   filesystem while it went down, and a silently corrupted `train.jsonl`
+   would train a model nobody could account for. Compare all four files
+   against the machine they were generated on:
+
+       sha256sum out/dataset/{train,val,test}.jsonl out/dataset/manifest.json
+
    And when polling that pid from another machine, **an ssh failure is not
    evidence the process ended**. `! ssh host "kill -0 $PID"` cannot distinguish
    exit 1 (pid gone) from exit 255 (could not connect), so one unreachable
