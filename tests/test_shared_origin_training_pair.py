@@ -206,9 +206,19 @@ def test_no_trainable_local_cause_speaks_the_language_of_a_shared_claim():
     always drew it: every one of its decoy rows carried the collision.
 
     Scoped to the TRAINING scenarios on purpose. The exam's six origins are
-    frozen and this test must never be the reason their bytes move; the
-    eval-side collision that remains -- a distractor a model can only reach
-    by being wrong -- is recorded in the runbook, not fixed here.
+    frozen and this test must never be the reason their bytes move -- and it
+    would have nothing to say about them in any case: measured across all
+    six, no eval scenario writes shared-claim language into a victim's own
+    cause. An earlier version of this docstring claimed an "eval-side
+    collision recorded in the runbook"; there is no such collision and it
+    was never in the runbook.
+
+    What does remain is in the training half and is not this defect.
+    `shared-dependency-scaled-to-zero` says "upstream" twice, and both are
+    correct: once as a decoy menu candidate, which a model reaches only by
+    being wrong, and once as a victim's `log_cause`, which is evidence text
+    a read may legitimately carry. Neither reaches a summary -- which is
+    what the answer-level test below measures, and why that test exists.
     """
     from kubeagent_verdict.dataset.cases import SHARED_CLAIM_PHRASES
 
@@ -222,3 +232,69 @@ def test_no_trainable_local_cause_speaks_the_language_of_a_shared_claim():
     assert offenders == [], (
         "a trainable victim's local cause carries shared-claim language: "
         + "; ".join(f"{k} victim[{i}] says {p!r} in {c!r}" for k, i, p, c in offenders))
+
+
+def _denying_rows(kept):
+    """Training rows whose rendered answer denies a shared origin."""
+    from kubeagent_verdict.evals.score import INDEPENDENCE_PHRASES
+
+    out = []
+    for e in kept:
+        summary = str(json.loads(e.assistant).get("summary", "")).lower()
+        if any(p in summary for p in INDEPENDENCE_PHRASES):
+            out.append((e, summary))
+    return out
+
+
+def test_no_trainable_answer_both_denies_sharing_and_speaks_its_language(kept):
+    """The invariant the `local_cause` test above only approximates.
+
+    That one guards a field. This one guards the thing the field feeds: the
+    rendered answer. `evals.score` decides `false_shared` and `shared_verdict`
+    by reading the summary for both vocabularies at once -- a summary carrying
+    words from each is `shared_ambiguous`, scored neither right nor wrong. A
+    training row in that shape teaches the model to produce answers the grader
+    cannot read, and no field-level check catches it, because a summary is
+    built from several fields and any of them can be the one that collides.
+
+    Guarding the field and guarding the answer are not the same guarantee, and
+    the gap between them is not hypothetical: `log_cause` carries "upstream"
+    in `shared-dependency-scaled-to-zero` today. That is correct and stays --
+    it is *evidence* text, and a read may well mention an upstream while the
+    right answer is still "separate reasons". Only a collision that reaches the
+    summary is a defect, which is precisely the line a field-level test cannot
+    draw.
+    """
+    denying = _denying_rows(kept)
+
+    # A denominator, asserted rather than assumed: an empty `denying` list
+    # would make the assertion below pass while measuring nothing, which is
+    # the failure mode this suite keeps finding in its own guards.
+    #
+    # The guard is an equality, not a threshold. Every decoy row denies a
+    # shared origin -- that is what the case IS -- so the honest floor is
+    # "all of them". A count would need re-tuning whenever SIZE moves, and
+    # a red test could be made green by lowering it; an equality cannot be
+    # lowered, only deleted. If `INDEPENDENCE_PHRASES` stops matching what
+    # the decoy half writes, this fails here and names it, rather than
+    # silently shrinking the set the check below runs over.
+    decoys = [e for e in kept if e.case == DECOY]
+    assert decoys, f"no {DECOY} rows in the kept pile -- the mix has moved"
+    denied = {id(e) for e, _ in denying}
+    missed = [e for e in decoys if id(e) not in denied]
+    assert missed == [], (
+        f"{len(missed)} of {len(decoys)} {DECOY} rows do not read as denying "
+        "a shared origin; the decoy half's wording and INDEPENDENCE_PHRASES "
+        "have drifted apart, so this check now measures less than it claims")
+
+    from kubeagent_verdict.dataset.cases import SHARED_CLAIM_PHRASES
+
+    offenders = [
+        (e.case, e.group, [p for p in SHARED_CLAIM_PHRASES if p in summary], summary)
+        for e, summary in denying
+        if any(p in summary for p in SHARED_CLAIM_PHRASES)
+    ]
+    assert offenders == [], (
+        f"{len(offenders)} of {len(denying)} denying answers also speak "
+        "shared-claim language, so the grader reads them as ambiguous: "
+        + "; ".join(f"{c} ({g}) says {p}" for c, g, p, _ in offenders[:5]))
