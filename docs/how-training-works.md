@@ -545,21 +545,62 @@ tighter for a reason — those ten are the mirror image of the ten the model is
 currently failing, so passing both is the only result that can be read as
 having learned to look.
 
+### What that run produced — and why it did not ship
+
+The run finished, exported cleanly, and was scored on the frozen 253. Against
+the bar written above, in its letter:
+
+- `separate_reasons_rate` on the ten shared-origin questions: **1.0 → 0.5**.
+- `false_shared_rate`: **1 of 19** — exactly the stated ceiling.
+- Nothing else regressed, and most things improved: `cause` 0.9572 → 0.9783,
+  `suggestion echo` to 0.0, the length gap met and not at the floor.
+
+By the letter of those three conditions, that is a pass. **The model was still
+refused.**
+
+What refused it is the ten `shared_origin_decoy_probe` questions — the mirror
+set, pre-registered one paragraph above as the harder denominator for exactly
+this run. On them the same model reads `false_shared` **0.4** and names the
+planted decoy on **7 of 10**.
+
+Joining the two slices question-by-question settles it. The ten shared-origin
+questions and their ten mirrors are the same scenarios with one thing changed —
+what the cluster-wide read says — and the model gave **nine of ten pairs the
+same verdict in both worlds**. Its answer was a function of which scenario it
+was looking at, not of what the evidence said.
+
+A middling 0.5 is what a per-scenario constant looks like from one side. It is
+indistinguishable from half-skill until the halves are joined, which is why that
+join is now a release decider in its own right rather than something a reader is
+trusted to do in their head — and why the *curriculum* had to change too, not
+just the exam. Every shared-origin lesson in the old textbook could be answered
+without reading the origin at all: the lessons where the answer was "one shared
+cause" showed victims whose symptoms already agreed with each other, and the
+only counter-examples showed unrelated victims drawn from elsewhere. The two
+kinds of lesson differed in more than the read, so matching the symptoms was
+enough to tell them apart.
+
 ### Where this currently stands
 
-- Curriculum change: **done**, merged, 287 tests green at the time.
-- Dataset regenerated and verified byte-identical on the training machine:
+- Exam extension (`shared_origin_decoy_probe`, +10 questions): **done** — and it
+  is what refused the model above.
+- The paired join, promoted to a decider of its own: **done**. It reads **0.1**
+  on the refused model.
+- Curriculum rewritten so a shared-origin lesson cannot be answered without
+  reading the origin — each one now ships as a matched pair, one half with the
+  shared read broken and one with it healthy, identical in every other byte:
   **done**.
-- Exam extension (`shared_origin_decoy_probe`, +10 questions): **done**, 303
-  tests green, appended so the frozen 253 the run in flight is judged on did
-  not move a byte. It applies to the *next* run, not this one.
-- Training run: **in progress** on a CPU-only box, ~529 nudges, several hours,
-  silent by design.
-- Export to a `.gguf`: **not started**, and deliberately gated — it needs
-  separate authorisation because it is what overwrites a shipped artifact.
-- Scoring against the six deciders: **not started**, needs the export first.
-- Publishing: nothing is published, and no claim about this model should be
-  made anywhere until the exam is scored.
+- Dataset regenerated and verified byte-identical on the training machine, with
+  the frozen 253 proven not to have moved: **done**.
+- Negative control: **done, and it failed the previous model** — 0.1 on the
+  paired decider. That is the point of the control: it shows the exam got
+  harder, not softer.
+- Training run: **in progress**, same recipe, one variable changed.
+- Export to a `.gguf`: **not started**, and still gated behind separate
+  authorisation, because it is what overwrites a shipped artifact.
+- Scoring against the deciders: **not started**, needs the export first.
+- Publishing: nothing is published, and no claim about any of these models
+  should be made anywhere until an exam is scored.
 
 ---
 
