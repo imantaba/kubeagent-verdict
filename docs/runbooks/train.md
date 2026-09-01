@@ -79,9 +79,35 @@ on a workstation — run the training step under `nohup` and watch
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
 
-   Progress: `python -c "import json; print(len(json.load(open('out/adapter/train_log.json'))['losses']))"`
-   once it exists; before that, `tail out/train.out`. A smoke run first is
-   cheap and catches config errors: `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+   A smoke run first is cheap and catches config errors:
+   `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+
+   **There is no progress signal during the run.** Two lines here used to say
+   otherwise and were wrong in the same way. `train_log.json` cannot be
+   watched "once it exists", because `train.py` creates its output directory
+   *after* the epoch loop (`out_dir.mkdir` at train.py:66, loop at :49) — it
+   exists only when the run is already over. And `out/train.out` stops growing
+   the moment the weight load finishes and then stays byte-identical for the
+   whole run, so tailing it after the first minute tells you nothing. Neither
+   is a progress indicator; both were listed as one.
+
+   What does distinguish working from hung is a CPU-time delta:
+
+       ssh host 'a=$(ps -o times= -p PID); sleep 15; b=$(ps -o times= -p PID); echo $((b-a))'
+
+   A healthy run on this box returns ~200 CPU-seconds per 15 wall-seconds,
+   i.e. ~14 cores busy. `ps -o pcpu=` reads the other way and is worth a
+   glance too: it is a *lifetime* average, so a process that quietly stopped
+   working shows a falling one, while a healthy run holds steady — this run
+   sat at 1335–1336% across eight hours.
+
+   **Budget hours, and do not guess.** 4292 rows x 2 epochs at grad_accum 16
+   is ~536 optimizer steps, and that had not finished at 8h on this hardware.
+   The two previous full runs left only loose upper bounds — 17h and 24h
+   between dataset-written and adapter-written — and both include idle time
+   between generating the dataset and launching, so neither is a duration.
+   There is no trustworthy figure to quote yet; record the real one the first
+   time a run is watched end to end.
 
    **Set `HF_HUB_OFFLINE=1`.** `kv-train` contacts the Hugging Face Hub for the
    base model even when it is already in `~/.cache/huggingface`, and a hub
