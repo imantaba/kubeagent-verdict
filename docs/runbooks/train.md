@@ -348,6 +348,17 @@ on a workstation — run the training step under `nohup` and watch
      score, and a decider that printed a number there would be reporting one
      it could not have measured.
 
+     There is a second way to get that n/a, and it looks like diligence.
+     `paired_contrast` builds its pairs from **one** `results` list, so the
+     two halves must be scored in the **same run**. Scoring the frozen 253
+     and the ten decoy rows as two `kv-eval` invocations — the obvious way
+     to read the halves "separately" — puts each twin in a different results
+     file, and every pair reports `unpaired`. Score
+     `out/dataset/test.jsonl` whole, all 263 rows, exactly as step 2 writes
+     it: the scoreboard already prints one row per slice, so the halves are
+     still read separately, and the pair is still joined. `unpaired: 10`
+     under the table is the tell that this happened.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
      `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
      for a run scored against the exam as it stood before the
