@@ -605,6 +605,43 @@ def shared_origin(p: prop.Propagation, rng: random.Random,
               "origin_read_label": p.origin_read[0]})
 
 
+def shared_origin_decoy(p: prop.Propagation, rng: random.Random,
+                        victims: int | None = None) -> Example:
+    """TRAINING: `shared_origin` with the origin READING HEALTHY.
+
+    The counter-example `multi` could not be. A `multi` row with a healthy
+    origin read closes one shortcut -- "an origin read is present, therefore
+    one shared cause" -- and leaves a better one open, because its victims are
+    `rng.sample(entries)`: arbitrary catalog entries whose local symptoms have
+    nothing to do with the read. A `shared_origin` row's victims are the
+    scenario's OWN, and their symptoms cohere with the origin. So the two
+    classes differed in the victims as well as in the read, and "do these
+    symptoms look like they share a cause" separated them without reading the
+    origin at all.
+
+    This row is the same scenario as its twin, rendered from the same salt with
+    the origin healthy: identical workloads, identical candidate menus carrying
+    identical tags in identical order, identical read labels in identical
+    order. Only the read contents differ, and the correct answer flips with
+    them -- each workload's own local cause, under the ordinary "N workloads
+    are failing for separate reasons" summary. Every trainable scenario is now
+    taught under both answers, so nothing about the scenario predicts the
+    label.
+
+    It carries no `expected_confidence`, and that is not an omission. On the
+    shared half every victim inherits the origin's grade, so one grade
+    describes the row; here each workload keeps the deterministic pass's own
+    per-workload grade, exactly as `shared_origin_decoy_probe` does.
+    """
+    r = _render_shared_origin(p, rng, victims, healthy=True)
+    return Example(
+        case="shared_origin_decoy", group=r.group, system=c.SYSTEM_PROMPT,
+        user=r.user, assistant=_answer(r.rows, r.summary),
+        meta={"case": "shared_origin_decoy", "origin": p.key,
+              "expected": {row["workload"]: row["cause"] for row in r.rows},
+              "origin_read_label": p.origin_read[0]})
+
+
 def shared_origin_probe(p: prop.Propagation, rng: random.Random,
                         victims: int | None = None) -> Example:
     """EVAL-ONLY: several flagged workloads, one upstream cause.

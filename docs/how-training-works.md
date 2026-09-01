@@ -81,7 +81,7 @@ proportions, and each kind teaches one specific skill:
 
 | Question type | Share | The skill it teaches |
 |---|---|---|
-| `attributed` | 30% | The obvious candidate is right — pick it, word for word |
+| `attributed` | 26% | The obvious candidate is right — pick it, word for word |
 | `none_of_these` | 15% | Sometimes *every* offered candidate is wrong. Say so. |
 | `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
 | `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
@@ -90,8 +90,11 @@ proportions, and each kind teaches one specific skill:
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
 | `empty_candidates` | 5% | Nothing is actually wrong. Do not invent a problem. |
 | `shared_origin` | 4% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
+| `shared_origin_decoy` | 4% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
 
-That last row is new. It is the whole subject of Part 2.
+Those last two rows are new, and they are one row really: every
+`shared_origin` question is generated together with its `shared_origin_decoy`
+twin. They are the whole subject of Part 2.
 
 The generator then splits everything into three piles:
 
@@ -323,25 +326,40 @@ read** the shared-origin questions carry — with the component shown **healthy*
 Same read label. Same position. Healthy contents. And the correct answer on
 those questions is still "separate reasons."
 
-Now "is there a cluster-wide read?" no longer settles the answer. Among the
-questions that have one, the training pile holds 220 shared against 133
-separate — a **62 / 38 lean**, where before the change it was 100 / 0. Guessing
-from the cue alone now buys 62%, not 100%; the rest has to come from *reading
-whether the shared component is actually broken*, which is the skill we wanted.
+Now "is there a cluster-wide read?" no longer settles the answer. But this
+change alone closed the obvious shortcut and left a better one open, so it is
+worth seeing what it did not do before reading the number it produced.
 
-Be precise about that number, because it is weaker than the one we designed
-for. The generator emits the two classes close to even — 220 against 202, a
-48 / 52 split. The `drop_held_out` safety filter then removes about a third of
-the counter-examples and **none** of the positives, because a `multi` question
-is built from two to four ordinary catalog entries (any one of which may
-collide with an exam question and take the whole row with it), while a
-`shared_origin` question is built from the private train-only pool, which the
-exam never touches. Even balance going in, 62 / 38 coming out. See "What this
-fix does not do" below.
+A `multi` question's failing workloads are drawn at random from the ordinary
+catalog: their individual symptoms have nothing to do with the cluster-wide
+read sitting above them. A shared-origin question's workloads are the
+scenario's own, and their symptoms fit the origin — a DNS outage makes
+everything fail *the same way*. So the two kinds of question differed in the
+**workloads** as well as in the read, and "do these symptoms look like they
+share a cause?" told them apart without reading the origin at all. That is a
+better shortcut than the one we removed, and a healthy-read `multi` question
+does not touch it.
 
-**Change 3 — we paid for it out of `multi`, not by growing the mix.**
+**Change 2b — the same question, asked in both worlds.**
 
-`multi` went 15% → 11%; `shared_origin` took the 4%.
+Every shared-origin question is now generated **twice**, from the same random
+seed: once with the shared component broken, once with it healthy. Same
+workloads, same names, same candidate answers in the same order, same reads
+with the same labels in the same order. The *only* difference is what the
+origin read says — and the correct answer flips with it.
+
+That is the whole fix. Symptom coherence cannot separate the two classes
+because the symptoms are byte-identical. Scenario identity cannot, because
+every scenario is now taught under both answers. The safety filter keeps each
+pair together (both halves carry the same group key), so the balanced core
+survives it exactly: **169 against 169.**
+
+**Change 3 — we paid for it out of the mix, not by growing it.**
+
+`multi` went 15% → 11% and `shared_origin` took the 4%. The paired twin's own
+4% came out of `attributed` (30% → 26%), which is the filler type and absorbs
+the rounding remainder anyway — so `multi` and `shared_origin` kept the
+balance they were deliberately set to.
 
 This was deliberate and it has a cost. Decider 5 has two halves that pull in
 opposite directions: teach too little shared-origin and the model calls
@@ -377,40 +395,46 @@ the same as moving. The run described here is still scored against the frozen
 Two things are worth writing down plainly, because both are easy to miss and
 both would let us claim more than we have earned.
 
-**One — the counter-examples are thinner than intended.** The goal was that
-"was there a cluster-wide read?" should be a coin flip: useless as a shortcut.
-The generator does produce them near evenly — 220 shared against 202 separate,
-a 48 / 52 split. But the safety filter that keeps exam questions out of the
-training pile removes about a third of the counter-examples and none of the
-shared ones, for the structural reason described above, and what the model
-actually reads is **220 shared against 133 separate — a 62 / 38 lean.**
+**One — there is still a lean, and it now runs the other way.** Among the
+questions that carry a cluster-wide read, the pile the model reads holds
+**169 shared against 275 separate — 38 / 62.** Before the pairing it was
+62 / 38 toward *shared*; before any of this work it was 100 / 0.
 
-That is still an enormous improvement on the 100 / 0 it saw before, and the
-lean is spread evenly rather than hiding in one place. Every one of the four
-cluster-wide reads used in training appears on both answers, at roughly the
-same ratio:
+The direction matters less than what the lean is no longer tangled up with.
+The paired half is exactly even — 169 against 169 — and it is even *by
+construction*, not by luck: the two halves are generated from one seed, so
+they cannot drift apart. The entire residual comes from the older
+healthy-read `multi` questions, which have no paired twin. Those are kept
+rather than balanced away, because a healthy read over unrelated workloads is
+a genuinely different counter-example, not a worse copy of the paired one.
+
+The lean is spread evenly rather than hiding in one place. Every one of the
+four cluster-wide reads used in training appears on both answers, at close to
+the same ratio:
 
 | the cluster-wide read shown | answer: one shared cause | answer: separate causes |
 |---|---|---|
-| a node's condition | 55 | 33 |
-| a shared Deployment | 55 | 35 |
-| a shared ConfigMap | 55 | 33 |
-| a shared Secret | 55 | 32 |
+| a node's condition | 42 | 66 |
+| a shared Deployment | 42 | 67 |
+| a shared ConfigMap | 42 | 70 |
+| a shared Secret | 43 | 72 |
 
-So no single read is a giveaway. But 62 / 38 is a lean, not a coin flip — and
-the automated check that was supposed to guard this counted the questions
-**before** the safety filter ran, where the split is 48 / 52 and passes. It
-was measuring the pile we generate, not the pile the model reads.
+So no single read is a giveaway, and no single *scenario* is either.
 
-That check has now been split in two, because they were always two different
-claims. One measures what the generator emits and still demands a coin flip,
-since that part is entirely under our control. The other measures the pile
-that actually reaches the model and demands only that the smaller side stay
-above 30% — which is what is true today, and which still fails loudly at the
-0% this whole change exists to end. The second number is a narrowed claim, not
-a satisfied one: making the trained pile genuinely even means generating more
-counter-examples, and that changes the training questions, so it waits until
-the run in flight has been scored.
+The automated check that was supposed to guard this had two faults, and both
+are now fixed. It counted the questions **before** the safety filter ran,
+where the split looked healthy — it was measuring the pile we generate, not
+the pile the model reads. That was split into two checks, one per claim. Then
+the second check went stale in a quieter way: it counted only the old
+`multi` counter-examples, so when the paired half arrived it kept reporting
+0.386 for a pile that had moved to 0.619 — passing, and blind to the 169
+questions the change was about. A check that cannot see the thing it guards
+is not a check. It now counts both.
+
+The earlier version of this section said that making the pile genuinely even
+"means generating more counter-examples, and that changes the training
+questions, so it waits until the run in flight has been scored." That run was
+scored, it failed, and this is the change that was waiting.
 
 **Two — the exam, as it stood, could not catch this particular shortcut.** This
 is the more important one, and it is a limitation of the test, not of the

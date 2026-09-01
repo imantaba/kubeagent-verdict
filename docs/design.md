@@ -253,11 +253,12 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~30% | Pick the candidate **verbatim**; calibrate confidence |
+| Candidate attributed, evidence supports it | ~26% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
 | `shared_origin` — 2–4 flagged, all downstream of one broken component | ~4% | Naming the SAME cause on every row when the evidence says one thing broke |
+| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~4% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -285,17 +286,35 @@ origin read with the component shown HEALTHY. Without that, no `multi` row had
 a cluster-scoped read at all, so "an origin read is present" answered the whole
 slice without reading a word of its evidence.
 
-Two residuals survive that fix and are recorded here rather than described
-away. First, the counterweight is lighter in the pile the optimizer reads than
-in the one the generator emits: `drop_held_out` removes about a third of the
-`multi` counter-examples and none of the `shared_origin` rows, because a
-`multi` group is a `+`-join of two to four catalog entries and dies if any one
-of them collides with an exam group, while a `shared_origin` group comes from
-the train-only pool the exam never touches. The emitted ~48/52 therefore
-reaches the optimizer as ~62/38 — a large improvement on the 100/0 that
-preceded it, and not a coin flip. Both splits are asserted separately, one on
-the generator's raw output and one on the kept pile, so neither can be claimed
-by measuring the other. Second, the eval cannot yet detect the shortcut this
+Two residuals survived that fix. The first has since been paid, and what it
+cost is worth recording, because the counter-example that closed the obvious
+shortcut left a better one open. A `multi` row's victims are
+`rng.sample(entries)` — arbitrary catalog entries whose local symptoms have
+nothing to do with the origin read — while a `shared_origin` row's victims are
+the scenario's own, and their symptoms cohere with it. So the two classes
+differed in the VICTIMS as well as in the read, and "do these symptoms look
+like they share a cause" separated them without reading the origin at all.
+Symptom coherence is a better shortcut than the one the counter-example
+removed, and a healthy-read `multi` row does not touch it.
+
+`shared_origin_decoy` closes it on the training side, the same way
+`shared_origin_decoy_probe` closes the exam side: every `shared_origin` row is
+now emitted with a twin from the SAME rng salt, rendering the same scenario
+with the origin read showing the component healthy. The pair is a minimal
+contrast — identical inventory, identical candidate menus carrying identical
+tags in identical order, identical read labels in identical order — so the
+victims are held byte-identical and symptom coherence cannot separate the
+classes. Every trainable scenario is taught under both answers, and nothing
+about the scenario predicts the label. `drop_held_out` takes pairs whole,
+since both halves share a group key, so the 169/169 core survives the filter
+exactly. The residual lean is now the surviving `multi` negatives, which have
+no positive twin: the kept pile reads ~0.62 toward the INDEPENDENT answer,
+the opposite direction from the ~62/38 toward shared recorded before, and no
+longer confounded with anything the model can read off the victims. Those
+negatives are kept rather than balanced away — a healthy read over arbitrary
+victims is a different counter-example, not a worse copy of the paired one.
+Both splits are asserted separately, one on the generator's raw output and one
+on the kept pile, so neither can be claimed by measuring the other. Second, the eval cannot yet detect the shortcut this
 paragraph closes on the training side: seven of the ten `shared_origin_probe`
 rows carry a read label appearing in none of the other 243 test rows, so
 answering "one shared cause" on those four labels and "separate causes"
@@ -370,7 +389,7 @@ truncated or thin → low), so calibration is trained, not guessed.
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
-- The third closes a hole the first two could not see. `multi` is ~15% of
+- The third closes a hole the first two could not see. `multi` is ~11% of
   the curriculum and had no test row at all, and `cases.multi()` never
   swaps a tag — so across all 1,600 constituent workloads it contributes to
   train and val at `--seed 17 --size 5500` (2,478 before `drop_held_out`),

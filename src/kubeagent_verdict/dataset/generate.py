@@ -46,8 +46,17 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # `false_shared_rate` is the other half of the same release decider, and a model
 # that learns to claim a shared origin everywhere has traded one failure for its
 # mirror. `multi` stays the larger of the two, asserted by test.
-CASE_MIX = (("attributed", 30), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 11), ("shared_origin", 4), ("truncated", 5), ("injection", 10),
+# `shared_origin` and `shared_origin_decoy` MUST hold equal shares. They are
+# not two cases but two halves of one: every row of the first is emitted with a
+# twin from the same salt, differing only in what the origin read says. An
+# unequal share would mean some scenarios appear under a single answer, and
+# scenario identity would predict the label again for exactly those -- which is
+# the shortcut the pairing exists to remove. The budget for the second half
+# came out of `attributed`, which is the filler case and absorbs the remainder
+# anyway; `multi` and `shared_origin` keep the 11/4 they were set to.
+CASE_MIX = (("attributed", 26), ("none_of_these", 15), ("own_cause", 10),
+            ("multi", 11), ("shared_origin", 4), ("shared_origin_decoy", 4),
+            ("truncated", 5), ("injection", 10),
             ("empty_candidates", 5), ("wrong_attribution", 10))
 
 # The held-out test set draws one example per (trainable entry, case) for each
@@ -102,18 +111,29 @@ def generate(seed: int, size: int) -> list[Example]:
             pairs.append((e, n))
         # Every third `multi` row carries a healthy origin read, rotating over
         # the trainable pool so every label that heads a `shared_origin` row
-        # also heads an independent one. AS EMITTED that makes the two classes
-        # near-evenly matched among origin-read rows (11 / 3 vs 4) rather than
-        # the read's presence being a 9:1 prior for one answer. It does not
-        # survive intact: `drop_held_out` takes about a third of these
-        # counter-examples and none of the `shared_origin` rows, because a
+        # also heads an independent one. This was the ONLY counter-example
+        # until the `shared_origin_decoy` pairing below, and on its own it
+        # closed the weaker shortcut while leaving a better one open: its
+        # victims are `rng.sample(entries)`, arbitrary catalog entries whose
+        # symptoms have nothing to do with the read, where a `shared_origin`
+        # row's victims are the scenario's own and cohere with it. So the two
+        # classes differed in the VICTIMS as well as in the read, and symptom
+        # coherence separated them without reading the origin at all. The
+        # pairing closes that; these rows stay because a healthy read over
+        # arbitrary victims is a different counter-example, not a worse copy
+        # of the same one.
+        #
+        # They also have no positive twin, so they are the whole of the
+        # residual lean: the paired core is exactly 169/169 and the kept pile
+        # reads ~0.62 toward the INDEPENDENT answer. That is the opposite
+        # direction from the ~62/38 toward SHARED this comment used to
+        # record, and it is un-confounded now, which is the part that
+        # mattered. `drop_held_out` still takes about a third of these (a
         # `multi` group is a `+`-join of two to four catalog entries and dies
-        # if any one of them collides with an exam group while a
-        # `shared_origin` group comes from the train-only pool the exam never
-        # touches. So the pile the optimizer reads leans ~62/38 toward the
-        # shared answer. Both splits are asserted, separately, in
-        # tests/test_shared_origin_training.py -- neither stands in for the
-        # other.
+        # if any one collides with an exam group) but takes pairs whole,
+        # since both halves of a pair share one group. Both splits are
+        # asserted, separately, in tests/test_shared_origin_training.py --
+        # neither stands in for the other.
         healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
         out.append(cases.multi(pairs, rng, healthy_origin=healthy))
     for i in range(counts["shared_origin"]):
@@ -121,7 +141,22 @@ def generate(seed: int, size: int) -> list[Example]:
         # Vary the width the way `probe_sets` does: a row that always renders
         # every victim teaches the count, not the reasoning.
         victims = 2 + (i // len(train_scen)) % (len(p.victims) - 1)
-        out.append(cases.shared_origin(p, rng, victims=victims))
+        # ONE salt, drawn once and spent twice. Two `random.Random` objects
+        # built from the same seed replay the same stream, so the twins draw
+        # the same names and render the same inventory, the same candidate
+        # menus with the same tags in the same order, and the same read labels
+        # in the same order. Only the read CONTENTS differ, and the answer
+        # flips with them -- which is the whole point: the pair is a minimal
+        # contrast in the curriculum, the same instrument the exam uses.
+        #
+        # This loop emits both halves, so it runs `counts["shared_origin"]`
+        # times and not once per row. `counts["shared_origin_decoy"]` is spent
+        # here too, by the twin; the two entries hold equal shares, so the
+        # budget still sums to `size`.
+        salt = rng.getrandbits(64)
+        out.append(cases.shared_origin(p, random.Random(salt), victims=victims))
+        out.append(cases.shared_origin_decoy(
+            p, random.Random(salt), victims=victims))
     for i in range(counts["truncated"]):
         out.append(cases.truncated(rotate(i), names.draw(rng), rng))
     for i in range(counts["injection"]):

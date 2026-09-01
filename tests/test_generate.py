@@ -56,11 +56,20 @@ def test_to_row_schema():
 
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
-    assert counts == {"attributed": 300, "none_of_these": 150, "own_cause": 100,
-                      "multi": 110, "shared_origin": 40, "truncated": 50,
-                      "injection": 100, "empty_candidates": 50,
+    assert counts == {"attributed": 260, "none_of_these": 150, "own_cause": 100,
+                      "multi": 110, "shared_origin": 40, "shared_origin_decoy": 40,
+                      "truncated": 50, "injection": 100, "empty_candidates": 50,
                       "wrong_attribution": 100}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
+    # The two shared-origin halves must stay equal at every size, not only at
+    # this one. `generate` emits them as twins from a single salt and spends
+    # both budgets in one loop, so an unequal split would either drop rows or
+    # teach some scenarios under a single answer -- which is the shortcut the
+    # pairing exists to remove. 997 is the awkward size: it is prime, so every
+    # share truncates.
+    for size in (10, 100, 997, 1000, 4232):
+        c = generate.counts_for(size)
+        assert c["shared_origin"] == c["shared_origin_decoy"], size
 
 
 def test_case_mix_present_in_generated_set():

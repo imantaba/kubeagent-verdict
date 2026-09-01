@@ -712,7 +712,15 @@ _T_KUBE_PROXY = Propagation(
             reason="container {container} has restarted {restarts} times",
             evidence="last state terminated with exit code 1",
             log_cause="connection refused dialing the checkout Service address",
-            local_cause="the upstream the workload calls is refusing connections",
+            # Worded to CONTRAST with this scenario's shared cause, not to
+            # restate it. "the upstream is refusing connections" was both:
+            # kube-proxy failing to program Service routes IS pods reaching no
+            # Service, so the victim's supposedly-separate cause told the same
+            # story as the shared one, and the decoy half lost its teaching
+            # point. It also spoke `SHARED_CLAIM_PHRASES`' "upstream" inside a
+            # correct separate-reasons answer. This scenario has exactly two
+            # victims, so `p.victims[:count]` always draws this one.
+            local_cause="the workload's own config still dials a retired Service address",
             local_reason="every outbound call is refused immediately",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: connection refused to a Service address "

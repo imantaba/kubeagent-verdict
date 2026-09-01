@@ -207,41 +207,66 @@ def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(kept):
 
 
 def _independent_share(rows):
+    """Independent-answer share among rows that carry an origin read.
+
+    `shared_origin_decoy` counts on the independent side and MUST: it is the
+    counter-example class now. Leaving it out kept this instrument reading
+    0.386 while the pile it measures had moved to 0.619 -- passing, and
+    blind to the 169 rows the change was about.
+    """
     shared = len(_by_case(rows, "shared_origin"))
-    independent = len([e for e in _by_case(rows, "multi")
-                       if "origin_read_label" in e.meta])
+    independent = (len(_by_case(rows, "shared_origin_decoy"))
+                   + len([e for e in _by_case(rows, "multi")
+                          if "origin_read_label" in e.meta]))
     return independent / (shared + independent)
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls: the every-third-`multi`-row rate.
+    """What the EMITTER controls, and it is no longer a coin flip: 0.657.
 
-    This is the generator's own responsibility and it is a coin flip here.
-    It is deliberately not the same claim as the one below — the filter runs
-    after this and does not take from both classes equally.
+    Two sources feed the independent side now. The paired half is exact by
+    construction -- every `shared_origin` row is emitted with a
+    `shared_origin_decoy` twin from the same salt, so those two contribute
+    169/169 and cannot drift. On top of that sit the surviving
+    every-third-`multi` negatives, which have no positive counterpart, and
+    they are the whole of the lean.
+
+    Kept deliberately rather than balanced away: they are a DIFFERENT
+    counter-example -- a healthy origin read over arbitrary victims, where
+    the pair holds the victims fixed -- so removing them to reach 0.5 would
+    trade coverage for a rounder number. The band is stated where the pile
+    actually sits and still fails both degenerate ends.
     """
-    assert 0.4 <= _independent_share(rows) <= 0.6
+    assert 0.55 <= _independent_share(rows) <= 0.75
 
 
 def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     """What the MODEL reads, which is the number that decides what it learns.
 
     A 9:1 split is a prior, not a cue kill. This is the assertion the module
-    docstring's argument actually depends on, and the one that was missing:
-    the emitted split is ~48/52 but `drop_held_out` takes about a third of
-    the counter-examples and none of the positives, so the pile the
-    optimizer sees leans ~62/38 toward the shared answer.
+    docstring's argument actually depends on, and the one that was missing.
 
-    The floor is therefore 0.30, not 0.40, and that is a narrowed claim
-    rather than a satisfied one. It still fails loudly at the state this
-    module was written to end — 1.00/0.00, no counter-examples at all — and
-    it fails if the filter ever gets hungrier. Closing the gap the rest of
-    the way means emitting more counter-examples, which moves dataset bytes;
-    until then the lean is written down here, in `generate.py`, and in
-    `docs/design.md` rather than described as a coin flip.
+    It used to record a ~62/38 lean toward the SHARED answer and name the
+    remedy it had not paid for: "closing the gap the rest of the way means
+    emitting more counter-examples, which moves dataset bytes". That was
+    paid. `shared_origin_decoy` emits one counter-example per positive from
+    the same salt, and the lean now runs the other way -- 0.619 toward the
+    independent answer, from the `multi` negatives that have no twin.
+
+    The direction matters less than what it is no longer confounded with.
+    Before, the two classes differed in their victims as well as in their
+    read, so symptom coherence separated them without reading the origin at
+    all; the paired half holds the victims byte-identical, so it cannot.
+    `drop_held_out` splits on group keys and both halves of a pair share
+    one, so it takes pairs whole and the 169/169 core survives the filter
+    exactly -- the residual lean is the negatives, not the filter.
+
+    The band still fails loudly at the state this module was written to end
+    — 1.00/0.00, no counter-examples at all — and now also fails if the
+    pairing ever emits one-sidedly.
     """
     share = _independent_share(kept)
-    assert 0.30 <= share <= 0.60, f"kept-pile independent share {share:.3f}"
+    assert 0.55 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
 
 
 def test_a_negative_multi_row_shows_the_component_healthy(rows):
