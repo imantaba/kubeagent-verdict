@@ -268,6 +268,36 @@ on a workstation — run the training step under `nohup` and watch
      tempted. Its `confidence carried` is weak for a second reason — a decoy
      row's correct confidences are the ones already printed in the prompt.
 
+     The **pair does not share that limit**, and it is the number to read
+     first. `paired shared-origin (both halves right)` scores a pair 1.0 only
+     when the probe half claims a shared origin *and* its twin denies one, so
+     every habit that answers both halves the same way scores 0.0 on it
+     whichever answer it picks — the 0830 model scores **0.0**. **The bar is
+     ≥ 0.7 of 10.** Read anything at or below 0.3 as *no evidence of reading*:
+     answering each row independently by coin flip lands a pair 0.25 of the
+     time, so a score in that band is what chance produces and is not a
+     partial pass.
+
+     Read the two rates above as **marginals of this one**, and distrust them
+     when they disagree with it. The 0901 model scored `separate reasons` 0.5
+     and `false shared` 0.4 — two middling numbers that read as partial skill
+     and cleared this decider's pre-registered bar in its letter — while
+     scoring **0.1** paired: nine of its ten pairs answered both worlds
+     identically, so the verdict was a function of which scenario it was
+     looking at rather than of what the reads said. Neither marginal can see
+     that, because a per-scenario constant landing right half the time is
+     arithmetically indistinguishable from half-skill until the halves are
+     joined. That is the whole reason this number exists.
+
+     `the answer changed with the evidence` is printed beside it and is a
+     **diagnostic, not credit**: a model that flips with the evidence and gets
+     the direction wrong every time reads 1.0 there and 0.0 on the score. It
+     bounds the score from above, so the gap between them is "changed, but
+     backwards". Both read **n/a** on a run against the frozen 253-row exam,
+     which carries the probe half and no twin — ten half-pairs are not a
+     score, and a decider that printed a number there would be reporting one
+     it could not have measured.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
      `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
      for a run scored against the exam as it stood before the
