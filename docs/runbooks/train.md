@@ -45,6 +45,33 @@ on a workstation — run the training step under `nohup` and watch
    defaults to Ollama's `http://localhost:11434/v1`, so a llama-server run
    without `--endpoint` silently scores whatever Ollama is serving.
 
+   **Before serving anything, check whether the control is already banked.**
+   `evaluate` records each row's model output verbatim in `results.jsonl`
+   precisely so a run can be re-scored without re-running inference, and it
+   takes a `chat_fn` — so a previous run replays through the *current* scoring
+   code by handing it the banked outputs in file order:
+
+       rows = [...]                      # the test rows, same order as results
+       banked = [json.loads(l) for l in open('out/eval-<prev>/results.jsonl')]
+       it = iter(b['output'] for b in banked)
+       res = evaluate(rows, lambda messages: next(it))
+
+   That is a real control, not a shortcut: the generations are the old model's,
+   and every metric is recomputed by today's code. It cost seconds where
+   re-serving costs the ~2¼ hours below. It is valid only when the rows are the
+   same rows — assert `len(banked) == len(rows)` and confirm the test bytes
+   match, because `evaluate` walks rows positionally and a length-matched but
+   reordered file would score silently wrong.
+
+   The replay path does **not** apply when the scoring change needs something
+   the banked run never produced. A decider added after a run was banked reads
+   n/a on it rather than a number: `paired_contrast` needs a `pair_key` that
+   older `results.jsonl` files do not carry, so it reports `n: 0` — and a
+   decider needing rows the old run was never served (its twin slice, say)
+   reports `unpaired`, not a score built from half-pairs. Re-scoring through
+   `evaluate` regenerates both, which is why the replay goes through
+   `evaluate` rather than reading `results.jsonl` fields directly.
+
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
 
@@ -55,6 +82,29 @@ on a workstation — run the training step under `nohup` and watch
    Progress: `python -c "import json; print(len(json.load(open('out/adapter/train_log.json'))['losses']))"`
    once it exists; before that, `tail out/train.out`. A smoke run first is
    cheap and catches config errors: `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+
+   **Set `HF_HUB_OFFLINE=1`.** `kv-train` contacts the Hugging Face Hub for the
+   base model even when it is already in `~/.cache/huggingface`, and a hub
+   round trip that fails takes the run with it —
+   `httpx.RemoteProtocolError: Server disconnected without sending a response`,
+   raised before a single optimizer step. The weights were on disk the whole
+   time. Offline mode reads the cache and never dials out, which removes a
+   network dependency the training step does not otherwise have:
+
+       nohup env HF_HUB_OFFLINE=1 kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
+
+   Two notes on running it over ssh. `nohup` is what lets the run survive the
+   ssh session ending, so a dropped connection costs nothing — but the shell
+   that launches it may be killed before `echo $! > out/train.pid` runs, which
+   leaves an empty pidfile beside a healthy process. Recover the real pid with
+   `ps -eo pid,cmd | grep "[k]v-train"` and write it back.
+
+   And when polling that pid from another machine, **an ssh failure is not
+   evidence the process ended**. `! ssh host "kill -0 $PID"` cannot distinguish
+   exit 1 (pid gone) from exit 255 (could not connect), so one unreachable
+   moment reports a healthy two-hour-old run as finished. Poll for an explicit
+   token instead — `ssh host "kill -0 $PID && echo ALIVE || echo GONE"` — and
+   treat anything that is neither `ALIVE` nor `GONE` as "ask again".
 
 4. **Export** (~30 min: clone, convert, cmake build, quantize):
 
