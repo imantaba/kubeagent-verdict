@@ -83,11 +83,11 @@ alone runs **upwards of 15 hours** on a workstation — run it under
    **Budget upwards of 15 hours.** That is a floor, not an estimate, and
    the honest reason is that no run here has been timed end to end: no
    completed run has both a start and an end on record. What *is* measured
-   is two consecutive attempts that never finished — one stopped at 12h19m
-   when the box lost power, and the next was still running at 15h15m, by
-   direct `ps` reading, when the host became unreachable. An earlier version
-   of this line said "several hours"; that is wrong by at least a factor of
-   three, and under-budgeting is what makes a healthy run look hung.
+   is one attempt that stopped at 12h19m when the box lost power, and the
+   run after it still going at 15h50m by direct `ps` reading, with no
+   adapter directory on disk. An earlier version of this line said
+   "several hours"; that is wrong by at least a factor of three, and
+   under-budgeting is what makes a healthy run look hung.
 
    A smoke run first is cheap and catches config errors:
    `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.

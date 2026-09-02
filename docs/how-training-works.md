@@ -152,9 +152,9 @@ about **536 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
 takes **upwards of 15 hours** — plan for overnight, not an afternoon. An
 earlier version of this line said "several hours", which was wrong by at least
 a factor of three. Fifteen hours is a floor rather than a stopwatch reading: no
-run here has ever been timed from start to finish, and the two most recent
-attempts both ended early — one stopped at 12h19m when the machine lost power,
-and the next was still going at 15h15m when the machine fell off the network.
+run here has ever been timed from start to finish. One attempt stopped at
+12h19m when the machine lost power; the run after it was still going at
+15h50m, with no finished model on disk yet.
 
 Getting that budget wrong matters, because the program prints *nothing at all*
 while it works. "No output" during a run is normal, not a hang — but if you are
