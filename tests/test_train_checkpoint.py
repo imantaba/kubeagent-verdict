@@ -19,6 +19,8 @@ RNG entirely would still pass -- the check would be measuring nothing on the
 axis it most needs to measure.
 """
 
+import json
+
 import pytest
 import torch
 
@@ -136,6 +138,12 @@ def test_a_resumed_run_is_bit_identical_to_an_uninterrupted_one(
     assert not resumed.exists(), (
         "a run that died mid-loop must not leave an adapter directory -- its "
         "presence is the signal that a run finished")
+
+    progress = json.loads(
+        (t.checkpoint_dir(resumed) / "progress.json").read_text(encoding="utf-8"))
+    assert progress["optimizer_steps"] > 0
+    assert progress["epochs_total"] == CFG.epochs
+    assert progress["examples_per_epoch"] == EXAMPLES
 
     t.run_training(build_model(tokenizer), tokenizer, ROWS, CFG, resumed, resume=True)
 

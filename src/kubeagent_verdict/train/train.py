@@ -65,7 +65,8 @@ def _fingerprint(cfg: TrainConfig, encoded: list) -> str:
 
 def _save_checkpoint(ckpt_dir: Path, model, optimizer, *, fingerprint: str,
                      epoch: int, next_index: int, order: list[int], step: int,
-                     losses: list[float], py_rng_state, torch_rng_state) -> None:
+                     losses: list[float], py_rng_state, torch_rng_state,
+                     total_epochs: int, examples_per_epoch: int) -> None:
     """Write resume state. Called only at an accumulation boundary.
 
     Every caller sits immediately after `optimizer.zero_grad()`, so there are
@@ -99,6 +100,17 @@ def _save_checkpoint(ckpt_dir: Path, model, optimizer, *, fingerprint: str,
     torch.save(blob, tmp)
     os.replace(tmp, ckpt_dir / CHECKPOINT_FILE)
     model.save_pretrained(ckpt_dir / "adapter")
+    # The only readable progress signal a long run has. `train_log.json` is
+    # written once, after the last epoch, so watching it tells an operator
+    # nothing for twelve hours; the runbook's advice to do so had to be
+    # retracted. This says how far along the run is without needing torch to
+    # open a pickle to answer.
+    (ckpt_dir / "progress.json").write_text(
+        json.dumps({"optimizer_steps": step, "epoch": epoch,
+                    "examples_done_this_epoch": next_index,
+                    "epochs_total": total_epochs,
+                    "examples_per_epoch": examples_per_epoch}, indent=2) + "\n",
+        encoding="utf-8")
 
 
 def _peft_state_dict(model):
@@ -192,7 +204,9 @@ def run_training(model, tokenizer, rows: list[tuple[str, str, str]],
                         ckpt_dir, model, optimizer, fingerprint=fingerprint,
                         epoch=epoch, next_index=i + 1, order=order, step=step,
                         losses=losses, py_rng_state=rng.getstate(),
-                        torch_rng_state=torch.get_rng_state())
+                        torch_rng_state=torch.get_rng_state(),
+                        total_epochs=cfg.epochs,
+                        examples_per_epoch=len(encoded))
     optimizer.step()  # flush a trailing partial accumulation
     optimizer.zero_grad()
 
