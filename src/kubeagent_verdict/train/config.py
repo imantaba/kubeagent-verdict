@@ -19,5 +19,10 @@ class TrainConfig:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
+    # Not part of the recipe: writing a checkpoint reads the RNG state
+    # without consuming it, so it cannot move the weights. Default on,
+    # because the failure it prevents -- a full run lost whole to a power
+    # loss -- happened once precisely because nobody had turned it on.
+    checkpoint_every: int = 25
     target_modules: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj",
                                        "gate_proj", "up_proj", "down_proj")

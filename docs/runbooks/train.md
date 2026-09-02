@@ -9,7 +9,8 @@ That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
 resolve to today. The full pipeline is CPU-only and takes several hours
 on a workstation — run the training step under `nohup` and watch
-`train_log.json`.
+`out/adapter-checkpoint/progress.json` (step 3; **not** `train_log.json`,
+which does not exist until the run is over).
 
 1. **Dataset** (seconds):
 
@@ -82,14 +83,26 @@ on a workstation — run the training step under `nohup` and watch
    A smoke run first is cheap and catches config errors:
    `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
 
-   **There is no progress signal during the run.** Two lines here used to say
-   otherwise and were wrong in the same way. `train_log.json` cannot be
-   watched "once it exists", because `train.py` creates its output directory
-   *after* the epoch loop (`out_dir.mkdir` at train.py:66, loop at :49) — it
-   exists only when the run is already over. And `out/train.out` stops growing
-   the moment the weight load finishes and then stays byte-identical for the
-   whole run, so tailing it after the first minute tells you nothing. Neither
-   is a progress indicator; both were listed as one.
+   **Progress is two questions, and they have different answers.**
+
+   *How far along is it?* — `cat out/adapter-checkpoint/progress.json`:
+   optimizer steps done, which epoch, how far into it, and both totals to
+   read them against. It is written at every checkpoint.
+
+   *Is it still moving?* — a CPU-time delta, below. Do not use
+   `progress.json` for this. At the pinned recipe the run is ~536 optimizer
+   steps, so at the default interval the file is rewritten about 21 times
+   across the whole run — tens of minutes apart on this hardware. An mtime
+   that has not moved for a few minutes means nothing.
+
+   Neither question is answered by the two things this runbook used to
+   offer, and they were wrong in the same way. `train_log.json` cannot be
+   watched "once it exists", because `run_training` creates its output
+   directory *after* the epoch loop (`out_dir.mkdir` at train.py:213, loop
+   at :181) — it exists only when the run is already over. And
+   `out/train.out` stops growing the moment the weight load finishes and
+   then stays byte-identical for the whole run, so tailing it after the
+   first minute tells you nothing.
 
    What does distinguish working from hung is a CPU-time delta:
 
@@ -125,12 +138,43 @@ on a workstation — run the training step under `nohup` and watch
    leaves an empty pidfile beside a healthy process. Recover the real pid with
    `ps -eo pid,cmd | grep "[k]v-train"` and write it back.
 
-   **A full run is long enough that host stability is part of the plan, and
-   `kv-train` has no checkpointing.** The adapter is written exactly once, by
-   `model.save_pretrained` after the last epoch, so a run that dies at 99%
-   produces nothing at all — not a partial adapter, not a resumable state.
-   Measured the hard way: a run reached 12h19m and was lost whole to a hard
-   power loss on the training box, with `out/adapter/` never created.
+   **A run that dies can now be resumed**, so host stability costs minutes
+   rather than a day:
+
+       nohup env HF_HUB_OFFLINE=1 kv-train --dataset out/dataset --out out/adapter --resume > out/train.out 2>&1 &
+
+   It restarts from the last checkpoint, redoing at most `--checkpoint-every`
+   optimizer steps of work (25 by default; `0` disables checkpointing). A
+   resumed run is **bit-for-bit identical** to one that was never
+   interrupted, which `tests/test_train_checkpoint.py` asserts as an
+   equality rather than by inspection: every piece of state resume carries
+   — the optimizer moments, the torch RNG that LoRA dropout draws from, the
+   Python RNG that orders each epoch, the position within the epoch — moves
+   the weights if it is dropped, and moving the weights fails that test.
+
+   Two things it refuses rather than guesses at:
+
+   - **A checkpoint from a different recipe or dataset**, rejected by
+     fingerprint. This is the one failure here with no downstream detector:
+     it finishes, writes an adapter, and reports a clean run, having trained
+     something no scoreboard can tell apart from the model you meant.
+   - **`--resume` with no checkpoint present**, which is an error and not a
+     silent fresh start. The usual cause is `--out` naming the wrong
+     directory. A run that died *before* its first checkpoint genuinely has
+     nothing to resume — start it normally.
+
+   The checkpoint sits at `out/adapter-checkpoint/`, a sibling of `--out`
+   and deliberately never inside it, so `out/adapter/` existing still means
+   exactly one thing: the run finished. A completed run deletes its own
+   checkpoint, so a stale one cannot be resumed into.
+
+   This paragraph used to say the opposite — that `kv-train` had no
+   checkpointing, that a run dying at 99% produced nothing at all, not a
+   partial adapter and not a resumable state. That was true when it was
+   written, and it was written because a run reached 12h19m and was lost
+   whole to a hard power loss with `out/adapter/` never created. That run is
+   why the rest of this section exists; it is no longer what a power loss
+   costs.
 
    Tell a power loss from a crash before assuming either. A crash inside
    `kv-train` appends a traceback to `out/train.out`, because stdout and
@@ -144,10 +188,12 @@ on a workstation — run the training step under `nohup` and watch
 
    `Dirty bit is set. Fs was not properly unmounted and some data may be
    corrupt` is the confirmation, and it is also an instruction: **re-verify
-   the dataset before relaunching.** The training inputs sat on that
-   filesystem while it went down, and a silently corrupted `train.jsonl`
-   would train a model nobody could account for. Compare all four files
-   against the machine they were generated on:
+   the dataset before relaunching**, and re-verify it even when resuming.
+   `--resume` fingerprints the recipe and the encoded rows, so it refuses a
+   dataset that changed — but a corrupted file that still parses is a
+   different dataset, and being refused tells you nothing about which of the
+   two is the corrupt one. Compare all four files against the machine they
+   were generated on:
 
        sha256sum out/dataset/{train,val,test}.jsonl out/dataset/manifest.json
 
