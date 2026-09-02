@@ -162,10 +162,10 @@ _COREDNS = Propagation(
          "Last log:  Corefile:8 - Error during parsing: unknown directive 'foward'"),
     ),
     healthy_origin_content=(
-        ("Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+        "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
          "Pods:      coredns-7d8f9c4b5-2xk4m   1/1  Running  0 restarts\n"
          "           coredns-7d8f9c4b5-qp7rt   1/1  Running  0 restarts\n"
-         "Last log:  [INFO] plugin/reload: Running configuration SHA512 unchanged")
+         "Last log:  [INFO] plugin/reload: Running configuration SHA512 unchanged"
     ),
     victims=(
         Victim(
@@ -243,11 +243,11 @@ _NODE_LOST = Propagation(
          "         node.kubernetes.io/unreachable:NoSchedule"),
     ),
     healthy_origin_content=(
-        ("Conditions:\n"
+        "Conditions:\n"
          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
-         "Taints:  <none>")
+         "Taints:  <none>"
     ),
     victims=(
         Victim(
@@ -305,9 +305,9 @@ _STORAGE = Propagation(
          "PersistentVolumes bound in the last 20m: 0"),
     ),
     healthy_origin_content=(
-        ("provisioner: example.com/local-path\n"
+        "provisioner: example.com/local-path\n"
          "controller local-path-storage/local-path-provisioner: 1/1 ready, Running\n"
-         "PersistentVolumes bound in the last 20m: 7")
+         "PersistentVolumes bound in the last 20m: 7"
     ),
     victims=(
         Victim(
@@ -386,10 +386,10 @@ _REGISTRY = Propagation(
          "distinct registry hosts in the failing set: 1"),
     ),
     healthy_origin_content=(
-        ("pods reporting an image pull error name no registry host in common, and\n"
+        "pods reporting an image pull error name no registry host in common, and\n"
          "no two of them fail the same way: manifest unknown, unauthorized,\n"
          "no such host\n"
-         "distinct registry hosts in the failing set: one per failing pod")
+         "distinct registry hosts in the failing set: one per failing pod"
     ),
     victims=(
         Victim(
@@ -467,13 +467,13 @@ _DISK_PRESSURE = Propagation(
          "Allocated resources:\n  cpu     1200m (30%)\n  memory  2Gi (41%)"),
     ),
     healthy_origin_content=(
-        ("Conditions:\n"
+        "Conditions:\n"
          "  DiskPressure   False  KubeletHasNoDiskPressure  kubelet has no disk pressure\n"
          "  Ready          True   KubeletReady\n"
          "Taints:  <none>\n"
          "Allocated resources:\n"
          "  cpu     1200m (30%)\n"
-         "  memory  2Gi (41%)")
+         "  memory  2Gi (41%)"
     ),
     victims=(
         Victim(
@@ -550,10 +550,10 @@ _NETPOL = Propagation(
          "pods selected: 6 of 6"),
     ),
     healthy_origin_content=(
-        ("podSelector: app=metrics-collector\n"
+        "podSelector: app=metrics-collector\n"
          "policyTypes: Ingress\n"
          "ingress: allow from namespaceSelector kube-system\n"
-         "pods selected: 0 of 6")
+         "pods selected: 0 of 6"
     ),
     victims=(
         Victim(
