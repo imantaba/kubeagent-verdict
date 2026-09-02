@@ -613,12 +613,66 @@ enough to tell them apart.
 - Negative control: **done, and it failed the previous model** — 0.1 on the
   paired decider. That is the point of the control: it shows the exam got
   harder, not softer.
-- Training run: **in progress**, same recipe, one variable changed.
-- Export to a `.gguf`: **not started**, and still gated behind separate
-  authorisation, because it is what overwrites a shipped artifact.
-- Scoring against the deciders: **not started**, needs the export first.
-- Publishing: nothing is published, and no claim about any of these models
-  should be made anywhere until an exam is scored.
+- Training run: **done** — it finished in 17h42m, the same recipe with one
+  variable changed.
+- Export to a `.gguf`: **done**, under its own authorisation, and written to
+  `dist-retrain-0902/` rather than `dist/`, so the shipped artifact was not
+  overwritten.
+- Scoring against the deciders: **done — and the model is refused.** Four of
+  the six are met: the JSON contract reads 1.0 over all 263 rows, the decoy
+  slices hold, the length gap is +0.0000 with both of its rates at 1.0 (so it
+  is neither the floor abstention nor the partial mirror), and suggestion echo
+  is 0.0 with the full exam as its denominator. Two fail. The paired
+  shared-origin decider reads **0.1 of 10** against a bar of **≥ 0.7**, inside
+  the band the runbook defines as *no evidence of reading*; its decoy marginal
+  `false shared` reads 2 of 10 against a bar of ≤ 1 of 10. Overconfidence
+  reads **0.7692 over a denominator of 13** — a real denominator, not a blind
+  one, and worse than the 0.6069 the untuned baseline scored, which is the only
+  thing that decider asks of it.
+- Publishing: nothing is published, and nothing may be. The exam has now been
+  scored and the model did not pass it.
+
+### Why it failed, measured rather than guessed
+
+The curriculum change landed: the built dataset carries 220 `shared_origin`
+lessons and 220 `shared_origin_decoy` lessons, and the two halves of a pair are
+byte-identical apart from the one line that says whether the shared read is
+broken. "The textbook never taught this" is therefore no longer available as the
+explanation. Four measurements say what the explanation is instead.
+
+**It is not the rendering.** The training renderer and the exam renderer produce
+the same user prompt and the same answer, byte for byte; they differ only in
+bookkeeping the model never sees. Scoring the exam's six scenarios through the
+*training* renderer reads 0.083 paired, against 0.1 for the exam itself.
+
+**It is the scenario.** The four scenarios training draws from are disjoint from
+the exam's six, deliberately, so the skill has to generalise. Scoring the four
+*training* scenarios as exam questions reads **0.5 paired of 8**, against **0.1
+of 10** on the unseen six — a five-fold gap with the rendering held constant.
+
+**And the 0.5 is not partial skill either.** It is two scenarios answered by
+reading and two answered by a constant: `internal-ca-expired` says "separate" on
+both halves of both its pairs, `kube-proxy-degraded` says "shared" on both
+halves of both of its. The two it gets right are the two whose discriminating
+line is a state token — `Error from server (NotFound)`, `Replicas: 0 … Pods:
+none`. The two it gets wrong are the two whose discriminating line is a
+quantity: `notAfter: expired 2h ago` against `288 days remaining`, and `last
+Service route sync: 11m ago (peer nodes: 4s ago)` against `3s ago`.
+
+**The line is not weakly read; on three pairs of four it is not read at all.**
+Rewriting those quantities into the same unit — `0 days remaining` against
+`288`, `660s` against `3s` beside peers at `4s` — moves nothing: 0 of 4.
+Replacing the quantity with a bald state token — `notAfter: expired` against
+`notAfter: valid`, `sync: stale` against `sync: current` — moves one: 1 of 4.
+`kube-proxy-degraded` answers "shared" whatever that line says.
+
+What makes the shortcut cheap is visible in the corpus. Across 521 shared-half
+verdicts there are four cause templates, three of which cover 74% of them, and
+the scenario is legible from the rest of the prompt; the discriminating line is
+one line in roughly forty. Recognising the scenario and emitting its usual
+template fits the training data almost as well as reading the line, and costs
+far less. Four scenarios repeated about 55 times each is not enough distinct
+context to make the rule cheaper than the lookup.
 
 ---
 
