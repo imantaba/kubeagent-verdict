@@ -8,7 +8,7 @@ pinned lock file:
 That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
 resolve to today. The full pipeline is CPU-only, and the training step
-alone runs **upwards of 15 hours** on a workstation — run it under
+alone runs **about 17½ hours** on a workstation — run it under
 `nohup` and watch `out/adapter-checkpoint/progress.json` (step 3;
 **not** `train_log.json`, which does not exist until the run is over).
 
@@ -76,18 +76,19 @@ alone runs **upwards of 15 hours** on a workstation — run it under
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
 
-3. **Train** (15+ hours, CPU):
+3. **Train** (~17½ hours, CPU):
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
 
-   **Budget upwards of 15 hours.** That is a floor, not an estimate, and
-   the honest reason is that no run here has been timed end to end: no
-   completed run has both a start and an end on record. What *is* measured
-   is one attempt that stopped at 12h19m when the box lost power, and the
-   run after it still going at 15h50m by direct `ps` reading, with no
-   adapter directory on disk. An earlier version of this line said
-   "several hours"; that is wrong by at least a factor of three, and
-   under-budgeting is what makes a healthy run look hung.
+   **Budget about 17½ hours.** That is measured now, not estimated: one
+   run has been timed end to end at **17h42m** — 4,292 examples, two
+   epochs, 536 optimizer steps, just under two minutes per step. Two
+   earlier versions of this line under-budgeted, first at "several hours"
+   and then at "upwards of 15 hours" offered as a floor because no
+   completed run had both a start and an end on record. One does now, and
+   the floor was low by nearly three hours. The attempt that stopped at
+   12h19m in a power loss was roughly 70% through, not a run that was
+   failing.
 
    A smoke run first is cheap and catches config errors:
    `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
@@ -123,13 +124,16 @@ alone runs **upwards of 15 hours** on a workstation — run it under
    working shows a falling one, while a healthy run holds steady — this run
    sat at 1335–1336% across eight hours.
 
-   **Budget hours, and do not guess.** 4292 rows x 2 epochs at grad_accum 16
-   is ~536 optimizer steps, and that had not finished at 8h on this hardware.
-   The two previous full runs left only loose upper bounds — 17h and 24h
-   between dataset-written and adapter-written — and both include idle time
-   between generating the dataset and launching, so neither is a duration.
-   There is no trustworthy figure to quote yet; record the real one the first
-   time a run is watched end to end.
+   **The figure is measured now.** 4292 rows x 2 epochs at grad_accum 16 is
+   536 optimizer steps — exactly what the finished run did — and it took
+   **17h42m** on this hardware, just under two minutes per step, measured
+   from process start to the adapter's own mtime. This paragraph used to say
+   there was no trustworthy figure to quote and to record the real one the
+   first time a run was watched end to end; that is what happened. The two
+   older runs still offer only loose upper bounds — 17h and 24h between
+   dataset-written and adapter-written, both including idle time before
+   launch — so they stay bounds rather than durations, and the measurement
+   above does not come from them.
 
    **Set `HF_HUB_OFFLINE=1`.** `kv-train` contacts the Hugging Face Hub for the
    base model even when it is already in `~/.cache/huggingface`, and a hub

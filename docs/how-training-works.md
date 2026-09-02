@@ -48,7 +48,7 @@ Four commands, in order. Think of it as writing an exam course:
 | Step | Command | Plain English | Time |
 |---|---|---|---|
 | 1 | `kv-dataset` | **Write the textbook.** Generate thousands of realistic practice questions with known-correct answers. | seconds |
-| 2 | `kv-train` | **Teach.** Show the model the questions and answers over and over until it learns the pattern. | hours |
+| 2 | `kv-train` | **Teach.** Show the model the questions and answers over and over until it learns the pattern. | ~17½ hours |
 | 3 | `kv-export` | **Print and shrink.** Turn the trained result into one compact file a laptop can run. | ~30 min |
 | 4 | `kv-eval` | **Sit the exam.** Score the model on questions it has never seen, and check the score against a fixed bar. | ~2¼ hours |
 
@@ -149,12 +149,14 @@ training runs are only comparable if they used the same recipe:
 
 Two epochs over 4,292 questions, nudging once per 16 questions, works out to
 about **536 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
-takes **upwards of 15 hours** — plan for overnight, not an afternoon. An
-earlier version of this line said "several hours", which was wrong by at least
-a factor of three. Fifteen hours is a floor rather than a stopwatch reading: no
-run here has ever been timed from start to finish. One attempt stopped at
-12h19m when the machine lost power; the run after it was still going at
-15h50m, with no finished model on disk yet.
+takes **about 17½ hours** — plan for overnight, not an afternoon. That is a
+stopwatch reading now rather than a floor: one run has finally been timed start
+to finish, at **17h42m**, and it did exactly 4,292 questions and exactly 536
+nudges, so the arithmetic above holds. Two earlier versions of this line were
+wrong in the same direction — "several hours" first, then "upwards of 15 hours"
+offered as a floor because nothing had yet been timed end to end. The attempt
+that stopped at 12h19m when the machine lost power was not a run in trouble: it
+was about 70% of the way through.
 
 Getting that budget wrong matters, because the program prints *nothing at all*
 while it works. "No output" during a run is normal, not a hang — but if you are
