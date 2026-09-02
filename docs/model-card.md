@@ -493,8 +493,13 @@ baseline column as a floor whose identity is attested rather than
 demonstrated, and re-run it with today's `kv-eval` if that distinction
 matters to you.
 
-**Released model** — `dist/kubeagent-verdict-0.6b-q8_0.gguf`, sha256
-`7f3d84ad3a38ab094225cdfae1c20844e9cf086486c9bea5bd3996c52d4d5e0a`:
+**Released model** — sha256
+`7f3d84ad3a38ab094225cdfae1c20844e9cf086486c9bea5bd3996c52d4d5e0a`. It was
+exported to `dist/`, which is where `kv-export` writes and where the runbook
+tells a reader to look. It is no longer there: later exports are kept apart
+from it by moving the directory aside rather than by writing beside it, so
+these bytes now sit in `dist-v2-superseded/` and `dist/` does not exist. The
+hash is the identity; the path is only where the bytes happen to be.
 
 | slice | n | contract | cause | confidence carried | overconfident | injection echo | decoy | length helps | length misleads |
 |---|---|---|---|---|---|---|---|---|---|
@@ -532,9 +537,13 @@ because its zeros are the worked example for "a `0.0` is not a pass":
 
 ### The release bar, read out
 
-`docs/runbooks/train.md` step 6 names four deciders. Three are met; the
-fourth cannot be measured on this run, and that is reported as unmeasured
-rather than as a pass.
+`docs/runbooks/train.md` step 6 named four deciders when this release was
+scored. Three are met; the fourth cannot be measured on this run, and that is
+reported as unmeasured rather than as a pass. Step 6 now names **six** — the
+paired shared-origin join and the suggestion-echo check were added afterwards,
+from failures the four could not see. This table is the four, and is left as
+the four: the two later deciders were never run against this model, and filling
+them in from adjacent numbers would be inventing readings.
 
 | decider | reading | verdict |
 |---|---|---|
@@ -557,3 +566,23 @@ closed-set selection (it is selection — 224/224 verbatim); that
 the prompt and cannot fail); and that the untuned baseline's zeros on
 `decoy` and on both halves of the length pair are a strength (they are
 the arithmetic shadow of `cause 0.0576`).
+
+### What happened after this release
+
+Three retrains followed, and **all three were refused**. None shipped, and
+none overwrote the released bytes: each was exported to its own
+`dist-retrain-<date>/` directory, and the artifact this card describes is
+still on disk under the hash above.
+
+| run | what changed | why it was refused |
+|---|---|---|
+| 0830 | broad recipe retrain | `separate reasons` 1.0 of 10 — it answered "independent causes" on every shared-origin question |
+| 0901 | shared-origin lessons added to the curriculum | scored as two runs rather than one, so the paired join reported `unpaired` on every pair and could not be read at all |
+| 0902 | the same lessons, scored as one 263-row run | paired shared-origin **0.1 of 10** against a bar of ≥ 0.7, and overconfidence 0.7692 over a denominator of 13 |
+
+The 0902 refusal was then traced to its cause rather than left as a number;
+what the measurements say is written up under "Why it failed, measured rather
+than guessed" in [how-training-works.md](how-training-works.md). The short
+version is that the curriculum change did land — 440 shared-origin lessons are
+in the built dataset — and the model still answers most of them from the
+scenario rather than from the one line that distinguishes the two halves.
