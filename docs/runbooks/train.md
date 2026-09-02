@@ -45,6 +45,33 @@ on a workstation — run the training step under `nohup` and watch
    defaults to Ollama's `http://localhost:11434/v1`, so a llama-server run
    without `--endpoint` silently scores whatever Ollama is serving.
 
+   **Before serving anything, check whether the control is already banked.**
+   `evaluate` records each row's model output verbatim in `results.jsonl`
+   precisely so a run can be re-scored without re-running inference, and it
+   takes a `chat_fn` — so a previous run replays through the *current* scoring
+   code by handing it the banked outputs in file order:
+
+       rows = [...]                      # the test rows, same order as results
+       banked = [json.loads(l) for l in open('out/eval-<prev>/results.jsonl')]
+       it = iter(b['output'] for b in banked)
+       res = evaluate(rows, lambda messages: next(it))
+
+   That is a real control, not a shortcut: the generations are the old model's,
+   and every metric is recomputed by today's code. It cost seconds where
+   re-serving costs the ~2¼ hours below. It is valid only when the rows are the
+   same rows — assert `len(banked) == len(rows)` and confirm the test bytes
+   match, because `evaluate` walks rows positionally and a length-matched but
+   reordered file would score silently wrong.
+
+   The replay path does **not** apply when the scoring change needs something
+   the banked run never produced. A decider added after a run was banked reads
+   n/a on it rather than a number: `paired_contrast` needs a `pair_key` that
+   older `results.jsonl` files do not carry, so it reports `n: 0` — and a
+   decider needing rows the old run was never served (its twin slice, say)
+   reports `unpaired`, not a score built from half-pairs. Re-scoring through
+   `evaluate` regenerates both, which is why the replay goes through
+   `evaluate` rather than reading `results.jsonl` fields directly.
+
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
 
@@ -52,9 +79,84 @@ on a workstation — run the training step under `nohup` and watch
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
 
-   Progress: `python -c "import json; print(len(json.load(open('out/adapter/train_log.json'))['losses']))"`
-   once it exists; before that, `tail out/train.out`. A smoke run first is
-   cheap and catches config errors: `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+   A smoke run first is cheap and catches config errors:
+   `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+
+   **There is no progress signal during the run.** Two lines here used to say
+   otherwise and were wrong in the same way. `train_log.json` cannot be
+   watched "once it exists", because `train.py` creates its output directory
+   *after* the epoch loop (`out_dir.mkdir` at train.py:66, loop at :49) — it
+   exists only when the run is already over. And `out/train.out` stops growing
+   the moment the weight load finishes and then stays byte-identical for the
+   whole run, so tailing it after the first minute tells you nothing. Neither
+   is a progress indicator; both were listed as one.
+
+   What does distinguish working from hung is a CPU-time delta:
+
+       ssh host 'a=$(ps -o times= -p PID); sleep 15; b=$(ps -o times= -p PID); echo $((b-a))'
+
+   A healthy run on this box returns ~200 CPU-seconds per 15 wall-seconds,
+   i.e. ~14 cores busy. `ps -o pcpu=` reads the other way and is worth a
+   glance too: it is a *lifetime* average, so a process that quietly stopped
+   working shows a falling one, while a healthy run holds steady — this run
+   sat at 1335–1336% across eight hours.
+
+   **Budget hours, and do not guess.** 4292 rows x 2 epochs at grad_accum 16
+   is ~536 optimizer steps, and that had not finished at 8h on this hardware.
+   The two previous full runs left only loose upper bounds — 17h and 24h
+   between dataset-written and adapter-written — and both include idle time
+   between generating the dataset and launching, so neither is a duration.
+   There is no trustworthy figure to quote yet; record the real one the first
+   time a run is watched end to end.
+
+   **Set `HF_HUB_OFFLINE=1`.** `kv-train` contacts the Hugging Face Hub for the
+   base model even when it is already in `~/.cache/huggingface`, and a hub
+   round trip that fails takes the run with it —
+   `httpx.RemoteProtocolError: Server disconnected without sending a response`,
+   raised before a single optimizer step. The weights were on disk the whole
+   time. Offline mode reads the cache and never dials out, which removes a
+   network dependency the training step does not otherwise have:
+
+       nohup env HF_HUB_OFFLINE=1 kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
+
+   Two notes on running it over ssh. `nohup` is what lets the run survive the
+   ssh session ending, so a dropped connection costs nothing — but the shell
+   that launches it may be killed before `echo $! > out/train.pid` runs, which
+   leaves an empty pidfile beside a healthy process. Recover the real pid with
+   `ps -eo pid,cmd | grep "[k]v-train"` and write it back.
+
+   **A full run is long enough that host stability is part of the plan, and
+   `kv-train` has no checkpointing.** The adapter is written exactly once, by
+   `model.save_pretrained` after the last epoch, so a run that dies at 99%
+   produces nothing at all — not a partial adapter, not a resumable state.
+   Measured the hard way: a run reached 12h19m and was lost whole to a hard
+   power loss on the training box, with `out/adapter/` never created.
+
+   Tell a power loss from a crash before assuming either. A crash inside
+   `kv-train` appends a traceback to `out/train.out`, because stdout and
+   stderr are redirected there. A power loss appends nothing, and leaves its
+   evidence in the system log instead:
+
+       journalctl --list-boots | tail -3          # a new boot you did not ask for
+       journalctl -b -1 --no-pager | tail -20     # previous boot ends mid-stride,
+                                                  # with no shutdown sequence
+       journalctl -b 0 --no-pager | grep -iE "recovering journal|Dirty bit"
+
+   `Dirty bit is set. Fs was not properly unmounted and some data may be
+   corrupt` is the confirmation, and it is also an instruction: **re-verify
+   the dataset before relaunching.** The training inputs sat on that
+   filesystem while it went down, and a silently corrupted `train.jsonl`
+   would train a model nobody could account for. Compare all four files
+   against the machine they were generated on:
+
+       sha256sum out/dataset/{train,val,test}.jsonl out/dataset/manifest.json
+
+   And when polling that pid from another machine, **an ssh failure is not
+   evidence the process ended**. `! ssh host "kill -0 $PID"` cannot distinguish
+   exit 1 (pid gone) from exit 255 (could not connect), so one unreachable
+   moment reports a healthy two-hour-old run as finished. Poll for an explicit
+   token instead — `ssh host "kill -0 $PID && echo ALIVE || echo GONE"` — and
+   treat anything that is neither `ALIVE` nor `GONE` as "ask again".
 
 4. **Export** (~30 min: clone, convert, cmake build, quantize):
 
@@ -114,7 +216,7 @@ on a workstation — run the training step under `nohup` and watch
    it were judged against the same test set. `manifest_sha256` answers a
    different question. `kv-dataset` builds `test.jsonl` from
    `generate.test_set()`, which takes neither a seed nor a size, so a
-   `--seed 17` run and a `--seed 42` run write the same 253 test rows and two
+   `--seed 17` run and a `--seed 42` run write the same 263 test rows and two
    different manifests. A differing `manifest_sha256` beside a matching
    `test_sha256` therefore means **same rows, different dataset config** —
    often exactly the comparison you want, not a reason to discard it. A
@@ -133,9 +235,19 @@ on a workstation — run the training step under `nohup` and watch
    per row, so `results.jsonl` line *i* is `test.jsonl` line *i*, and each old
    run's per-row identity can be reconstructed from what it *did* store and
    compared position for position against the test file scored today. The
-   control matched all 253 positions; the baseline's 243 are exactly today's
+   control matched all 253 positions; the baseline's 243 are exactly those
    253 minus the ten `shared_origin_probe` rows added afterwards, with zero
    positional mismatches.
+
+   Those counts are the file as it stood when that check was run. `test.jsonl`
+   has since grown to **263** rows, by appending the ten
+   `shared_origin_decoy_probe` rows and nothing else: the first 253 lines are
+   byte-identical, so the check re-runs unchanged against the file's prefix and
+   both older runs stay qualified. That is the only reason an append is
+   tolerated at all — `test_set()` builds the exam by concatenation, never by
+   interleaving, and `tests/test_generate.py` pins both the per-slice counts and
+   the order. A change that renumbers an existing row invalidates every banked
+   scoreboard and is a different decision from this one.
 
    That check is not a weaker substitute for the hash — it is stronger. The
    hash is computed after scoring (`cli.py` reads the file, runs the whole
@@ -235,21 +347,81 @@ on a workstation — run the training step under `nohup` and watch
      answers "shared origin" scores 0 on `separate_reasons_rate`. The second
      is the obvious failure mode of the obvious correction to the first, and
      nothing measured it until now. **`false_shared_rate` must be ≤ 1 of
-     19** — the whole `multi_misattribution_probe` slice, whose count is
-     pinned by `tests/test_generate.py`. Check the ambiguous count printed
+     19** on `multi_misattribution_probe` **and ≤ 1 of 10 on
+     `shared_origin_decoy_probe`**; both counts are pinned by
+     `tests/test_generate.py`. The second slice is the one that matters. It is
+     `shared_origin_probe` rendered from the same ten scenarios and the same
+     seeds with the cluster-wide read *healthy*: identical workloads, identical
+     candidate menus in identical order, identical evidence labels, and the
+     correct answer is separate causes. Nothing that keys on a label, a
+     position, or a tag can pass both halves of the pair, which is what the
+     pair is for. Read the halves on their own slices — a scoreboard that
+     reports `false shared` only on 19 rows is a run against the pre-append
+     253-row exam, and decider 5 is then measured on the weaker denominator it
+     had before. Check the ambiguous count printed
      under the table beside it: a large one means the phrase sets need
      narrowing, not that the model changed, and it shrinks the denominator
      the ratio above is read against.
 
+     One limit, so it is not read as more than it is: the decoy slice **could
+     not have failed the 0830 model**, which answered "separate reasons" to
+     every shared-origin question and would score 1.0 on it. It is a trap for a
+     model corrected toward "shared", not evidence about one that was never
+     tempted. Its `confidence carried` is weak for a second reason — a decoy
+     row's correct confidences are the ones already printed in the prompt.
+
+     The **pair does not share that limit**, and it is the number to read
+     first. `paired shared-origin (both halves right)` scores a pair 1.0 only
+     when the probe half claims a shared origin *and* its twin denies one, so
+     every habit that answers both halves the same way scores 0.0 on it
+     whichever answer it picks — the 0830 model scores **0.0**. **The bar is
+     ≥ 0.7 of 10.** Read anything at or below 0.3 as *no evidence of reading*:
+     answering each row independently by coin flip lands a pair 0.25 of the
+     time, so a score in that band is what chance produces and is not a
+     partial pass.
+
+     Read the two rates above as **marginals of this one**, and distrust them
+     when they disagree with it. The 0901 model scored `separate reasons` 0.5
+     and `false shared` 0.4 — two middling numbers that read as partial skill
+     and cleared this decider's pre-registered bar in its letter — while
+     scoring **0.1** paired: nine of its ten pairs answered both worlds
+     identically, so the verdict was a function of which scenario it was
+     looking at rather than of what the reads said. Neither marginal can see
+     that, because a per-scenario constant landing right half the time is
+     arithmetically indistinguishable from half-skill until the halves are
+     joined. That is the whole reason this number exists.
+
+     `the answer changed with the evidence` is printed beside it and is a
+     **diagnostic, not credit**: a model that flips with the evidence and gets
+     the direction wrong every time reads 1.0 there and 0.0 on the score. It
+     bounds the score from above, so the gap between them is "changed, but
+     backwards". Both read **n/a** on a run against the frozen 253-row exam,
+     which carries the probe half and no twin — ten half-pairs are not a
+     score, and a decider that printed a number there would be reporting one
+     it could not have measured.
+
+     There is a second way to get that n/a, and it looks like diligence.
+     `paired_contrast` builds its pairs from **one** `results` list, so the
+     two halves must be scored in the **same run**. Scoring the frozen 253
+     and the ten decoy rows as two `kv-eval` invocations — the obvious way
+     to read the halves "separately" — puts each twin in a different results
+     file, and every pair reports `unpaired`. Score
+     `out/dataset/test.jsonl` whole, all 263 rows, exactly as step 2 writes
+     it: the scoreboard already prints one row per slice, so the halves are
+     still read separately, and the pair is still joined. `unpaired: 10`
+     under the table is the tell that this happened.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
-     `suggestion echo` must be **0 of 253** — the whole test set. Every
+     `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
+     for a run scored against the exam as it stood before the
+     `shared_origin_decoy_probe` append. Every
      finding in a scan prompt carries a `suggested fix (deterministic,
      pre-reviewed — do not substitute): <text> | run: <cmd>` line, and that
      text is a *symptom* restated generically by `internal/remediation.For`,
      never a diagnosis. Returning it is the cheapest wrong answer available:
      it is fluent, it is on-topic, and it is already in the context window.
      The bar is zero rather than a tolerance because on this corpus a correct
-     answer is never a suggestion string — measured, 0 of 253 rows have a
+     answer is never a suggestion string — measured, 0 of 263 rows have a
      stored winner cause that matches one — so every echo is a wrong answer
      and costs cause accuracy too. Read the two together; alone this rate
      only names the *mechanism* behind a cause miss, and a model can miss for
@@ -265,9 +437,12 @@ on a workstation — run the training step under `nohup` and watch
      strings `internal/remediation.For` can produce. Re-scoring v0.1.0's
      recorded outputs against its own prompts returns `0.0 (253)`, which
      looks like a clean pass and is not a measurement at all. So a 0 here is
-     a pass only when **`n` is 253 and `tests/test_dataset_suggestions.py`
-     is green** — that test is what makes the prompt vocabulary kubeagent's,
-     and without it the number is decoration.
+     a pass only when **`n` is the full row count of the exam that was scored
+     (263 today, 253 before the append) and
+     `tests/test_dataset_suggestions.py` is green** — that test renders
+     `generate.test_set()` in full, so it covers the appended rows without
+     amendment, and it is what makes the prompt vocabulary kubeagent's.
+     Without it the number is decoration.
 
      Note where the failure was actually seen: **live, not on the eval.**
      v0.1.0 scores 0.0 on the synthetic set and still handed back

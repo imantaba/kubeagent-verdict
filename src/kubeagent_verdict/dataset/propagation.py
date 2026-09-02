@@ -89,6 +89,17 @@ class Victim:
     local_cause: str  # the decoy: locally plausible, carries `attributed`
     local_reason: str
     read: tuple[str, str]  # (label, content) — this victim's own evidence read
+    # The SAME read, same label, in the world where the origin is fine. Empty
+    # means `read[1]` is already true there and is reused verbatim.
+    #
+    # Only `shared_origin_decoy_probe` renders this, and it needs one wherever
+    # the victim's own read ASSERTS the origin is broken -- a probe event
+    # naming a resolver failure, a PVC saying the node is not Ready. Left
+    # empty, that row would show a healthy origin and evidence contradicting
+    # it, and its "correct" answer would be indefensible. Five of the sixteen
+    # eval victims need none: their evidence is a local symptom that reads the
+    # same either way.
+    healthy_read_content: str = ""
     log_cause: str = ""
     # The deterministic pass's OWN grade for its (wrong) local attribution.
     # Varied within a scenario on purpose — see the module docstring on
@@ -115,10 +126,15 @@ class Propagation:
     confidence: str  # the expected grade for the shared attribution
     origin_read: tuple[str, str]
     victims: tuple[Victim, ...]
-    # The SAME origin read, showing the component healthy. Trainable scenarios
-    # must carry one; the eval six never render it. It is what a `multi` row
-    # puts at the head of its reads so that "an origin read is present" stops
-    # being a free answer -- see `cases.multi`.
+    # The SAME origin read, showing the component healthy. Every scenario
+    # carries one, and the two pools render it for different reasons: a
+    # trainable one is what a `multi` row puts at the head of its reads so that
+    # "an origin read is present" stops being a free answer (`cases.multi`),
+    # and an eval one is the whole of `cases.shared_origin_decoy_probe`, which
+    # asks the same question with this content in place of `origin_read[1]`
+    # and takes the opposite answer. The eval six carried `""` until that
+    # slice existed; nothing rendered it, and the exam could not tell a model
+    # that reads the content from one that matches the label.
     healthy_origin_content: str = ""
     shared_verdict: str = "outranked"
     distractor_verdict: str = "ruled_out"
@@ -145,6 +161,12 @@ _COREDNS = Propagation(
          "           coredns-7d8f9c4b5-qp7rt   0/1  CrashLoopBackOff  9 restarts\n"
          "Last log:  Corefile:8 - Error during parsing: unknown directive 'foward'"),
     ),
+    healthy_origin_content=(
+        ("Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+         "Pods:      coredns-7d8f9c4b5-2xk4m   1/1  Running  0 restarts\n"
+         "           coredns-7d8f9c4b5-qp7rt   1/1  Running  0 restarts\n"
+         "Last log:  [INFO] plugin/reload: Running configuration SHA512 unchanged")
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
@@ -168,6 +190,12 @@ _COREDNS = Propagation(
                   ("Warning  Unhealthy  12x  kubelet  Readiness probe failed: "
                    "checking dependency: lookup sessions.auth.svc.cluster.local: "
                    "server misbehaving")),
+            # A resolver answering SERVFAIL is a broken resolver. With CoreDNS
+            # healthy the probe still fails, on its own one-second budget.
+            healthy_read_content=(
+                "Warning  Unhealthy  12x  kubelet  Readiness probe failed: "
+                "checking dependency sessions.auth.svc.cluster.local: "
+                "context deadline exceeded after 1s"),
             pass_confidence="medium",
         ),
         Victim(
@@ -180,6 +208,11 @@ _COREDNS = Propagation(
             read=("get_related service {ns}/{name}",
                   ("type: ClusterIP (headless)\nselector: app={name}\n"
                    "ready endpoints: 0 of 3")),
+            # Deleted, not merely endpoint-less: with DNS healthy the local cause
+            # is only true if the Service is actually gone.
+            healthy_read_content=(
+                "type: <none>\nselector: n/a\n"
+                "ready endpoints: n/a  (no Service named {name} in {ns})"),
             pass_confidence="high",
         ),
     ),
@@ -209,6 +242,13 @@ _NODE_LOST = Propagation(
          "Taints:  node.kubernetes.io/unreachable:NoExecute\n"
          "         node.kubernetes.io/unreachable:NoSchedule"),
     ),
+    healthy_origin_content=(
+        ("Conditions:\n"
+         "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+         "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+         "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+         "Taints:  <none>")
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="Pending", issue="Unschedulable",
@@ -219,6 +259,11 @@ _NODE_LOST = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  FailedScheduling  kubelet  0/3 nodes are available: "
                    "1 node(s) were unschedulable, 2 Insufficient cpu.")),
+            # No node is unschedulable while the origin node is Ready, so the
+            # shortfall has to be capacity on all three.
+            healthy_read_content=(
+                "Warning  FailedScheduling  kubelet  0/3 nodes are available: "
+                "3 Insufficient cpu."),
             pass_confidence="high",
         ),
         Victim(
@@ -230,6 +275,9 @@ _NODE_LOST = Propagation(
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
                   ("Status: Bound\nAccess Modes: RWO\n"
                    "Attached to node: {node}  (node is not Ready)")),
+            healthy_read_content=(
+                "Status: Bound\nAccess Modes: RWO\n"
+                "Attached to node: {node}  (node is Ready)"),
             pass_confidence="medium",
         ),
     ),
@@ -256,6 +304,11 @@ _STORAGE = Propagation(
          "CrashLoopBackOff\n"
          "PersistentVolumes bound in the last 20m: 0"),
     ),
+    healthy_origin_content=(
+        ("provisioner: example.com/local-path\n"
+         "controller local-path-storage/local-path-provisioner: 1/1 ready, Running\n"
+         "PersistentVolumes bound in the last 20m: 7")
+    ),
     victims=(
         Victim(
             workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
@@ -268,6 +321,12 @@ _STORAGE = Propagation(
                   ("Status: Pending\nStorageClass: standard\n"
                    "Events: Normal  ExternalProvisioning  waiting for a volume to be "
                    "created by the external provisioner")),
+            # The origin read shows `standard` provisioning normally, so a claim
+            # that never binds has to name a class that does not exist.
+            healthy_read_content=(
+                "Status: Pending\nStorageClass: fast-ssd\n"
+                "Events: Warning  ProvisioningFailed  persistentvolume-controller  "
+                "storageclass.storage.k8s.io \"fast-ssd\" not found"),
             pass_confidence="high",
         ),
         Victim(
@@ -281,6 +340,13 @@ _STORAGE = Propagation(
                   ("Normal  WaitForFirstConsumer  persistentvolume-controller  "
                    "waiting for first consumer to be created before binding\n"
                    "Normal  ExternalProvisioning  waiting for a volume to be created")),
+            # A working provisioner that refuses one claim refuses it for a
+            # reason, and says so.
+            healthy_read_content=(
+                "Normal   WaitForFirstConsumer  persistentvolume-controller  "
+                "waiting for first consumer to be created before binding\n"
+                "Warning  ProvisioningFailed    example.com/local-path  failed to "
+                "provision volume: requested 4Ti exceeds the 512Gi free on every node"),
             pass_confidence="medium",
         ),
         Victim(
@@ -319,6 +385,12 @@ _REGISTRY = Propagation(
          "reference: dial tcp: i/o timeout\n"
          "distinct registry hosts in the failing set: 1"),
     ),
+    healthy_origin_content=(
+        ("pods reporting an image pull error name no registry host in common, and\n"
+         "no two of them fail the same way: manifest unknown, unauthorized,\n"
+         "no such host\n"
+         "distinct registry hosts in the failing set: one per failing pod")
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="ImagePullBackOff", issue="ImagePullBackOff",
@@ -329,6 +401,12 @@ _REGISTRY = Propagation(
             read=("describe {ns}/{pod} (Pod)",
                   ("Events: Warning  Failed  kubelet  Failed to pull image {image}: "
                    "dial tcp: i/o timeout")),
+            # The only healthy-world read that reaches the registry at all, and
+            # the one that leaves `distractor_reason` stale -- see the module
+            # docstring on what the evidence overrides.
+            healthy_read_content=(
+                "Events: Warning  Failed  kubelet  Failed to pull image {image}: "
+                "manifest unknown"),
             pass_confidence="high",
         ),
         Victim(
@@ -341,6 +419,10 @@ _REGISTRY = Propagation(
                   ("Warning  Failed  kubelet  Error: ErrImagePull\n"
                    "Warning  Failed  kubelet  failed to resolve reference: dial tcp: "
                    "i/o timeout")),
+            healthy_read_content=(
+                "Warning  Failed  kubelet  Error: ErrImagePull\n"
+                "Warning  Failed  kubelet  failed to resolve reference: "
+                "unauthorized: authentication required"),
             pass_confidence="medium",
         ),
         Victim(
@@ -353,6 +435,10 @@ _REGISTRY = Propagation(
                   ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
                    "    Reason: ImagePullBackOff\n"
                    "  Warning  Failed  kubelet  dial tcp: i/o timeout")),
+            healthy_read_content=(
+                "Init Containers:\n  {init_container}:\n"
+                "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                "  Warning  Failed  kubelet  no such host"),
             pass_confidence="high",
         ),
     ),
@@ -380,6 +466,15 @@ _DISK_PRESSURE = Propagation(
          "Taints:  node.kubernetes.io/disk-pressure:NoSchedule\n"
          "Allocated resources:\n  cpu     1200m (30%)\n  memory  2Gi (41%)"),
     ),
+    healthy_origin_content=(
+        ("Conditions:\n"
+         "  DiskPressure   False  KubeletHasNoDiskPressure  kubelet has no disk pressure\n"
+         "  Ready          True   KubeletReady\n"
+         "Taints:  <none>\n"
+         "Allocated resources:\n"
+         "  cpu     1200m (30%)\n"
+         "  memory  2Gi (41%)")
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="Pending", issue="Unschedulable",
@@ -391,6 +486,12 @@ _DISK_PRESSURE = Propagation(
                   ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
                    "available: 1 node(s) had untolerated taint "
                    "node.kubernetes.io/disk-pressure, 2 Insufficient cpu.")),
+            # A node with no DiskPressure carries no disk-pressure taint, so the
+            # taint the pod fails to tolerate must be one an operator set.
+            healthy_read_content=(
+                "Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                "available: 1 node(s) had untolerated taint dedicated=gpu, "
+                "2 Insufficient cpu."),
             pass_confidence="high",
         ),
         Victim(
@@ -403,6 +504,13 @@ _DISK_PRESSURE = Propagation(
             read=("describe {ns}/{pod} (Pod)",
                   ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
                    "create containerd task: no space left on device")),
+            # Pod-local exhaustion, not the node's: the emptyDir fills the pod's
+            # own ephemeral budget while the node reports no disk pressure.
+            healthy_read_content=(
+                "Node: {node}\n"
+                "Ephemeral storage: pod limit 1Gi, currently used 1Gi\n"
+                "Events: Warning  Failed  kubelet  Error: failed to create "
+                "containerd task: no space left on device"),
             pass_confidence="medium",
         ),
         Victim(
@@ -440,6 +548,12 @@ _NETPOL = Propagation(
          "policyTypes: Ingress, Egress\n"
          "egress: [] (no rules — all egress denied)\n"
          "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        ("podSelector: app=metrics-collector\n"
+         "policyTypes: Ingress\n"
+         "ingress: allow from namespaceSelector kube-system\n"
+         "pods selected: 0 of 6")
     ),
     victims=(
         Victim(
@@ -598,7 +712,15 @@ _T_KUBE_PROXY = Propagation(
             reason="container {container} has restarted {restarts} times",
             evidence="last state terminated with exit code 1",
             log_cause="connection refused dialing the checkout Service address",
-            local_cause="the upstream the workload calls is refusing connections",
+            # Worded to CONTRAST with this scenario's shared cause, not to
+            # restate it. "the upstream is refusing connections" was both:
+            # kube-proxy failing to program Service routes IS pods reaching no
+            # Service, so the victim's supposedly-separate cause told the same
+            # story as the shared one, and the decoy half lost its teaching
+            # point. It also spoke `SHARED_CLAIM_PHRASES`' "upstream" inside a
+            # correct separate-reasons answer. This scenario has exactly two
+            # victims, so `p.victims[:count]` always draws this one.
+            local_cause="the workload's own config still dials a retired Service address",
             local_reason="every outbound call is refused immediately",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: connection refused to a Service address "

@@ -17,3 +17,7 @@ artifacts/
 # Subagent-driven-development scratch: per-plan ledger, task briefs, implementer
 # reports and review packages. Recoverable from git log, never part of it.
 .superpowers/
+
+# Export directories for retrain candidates. Each holds a multi-GB GGUF;
+# only dist/ is the shipped one and it is already ignored above.
+dist-retrain-*/

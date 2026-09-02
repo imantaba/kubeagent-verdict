@@ -253,11 +253,12 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~30% | Pick the candidate **verbatim**; calibrate confidence |
+| Candidate attributed, evidence supports it | ~26% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
 | `shared_origin` — 2–4 flagged, all downstream of one broken component | ~4% | Naming the SAME cause on every row when the evidence says one thing broke |
+| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~4% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -284,6 +285,71 @@ never reads the text. Separately, a third of `multi`'s rows now carry the same
 origin read with the component shown HEALTHY. Without that, no `multi` row had
 a cluster-scoped read at all, so "an origin read is present" answered the whole
 slice without reading a word of its evidence.
+
+Two residuals survived that fix. The first has since been paid, and what it
+cost is worth recording, because the counter-example that closed the obvious
+shortcut left a better one open. A `multi` row's victims are
+`rng.sample(entries)` — arbitrary catalog entries whose local symptoms have
+nothing to do with the origin read — while a `shared_origin` row's victims are
+the scenario's own, and their symptoms cohere with it. So the two classes
+differed in the VICTIMS as well as in the read, and "do these symptoms look
+like they share a cause" separated them without reading the origin at all.
+Symptom coherence is a better shortcut than the one the counter-example
+removed, and a healthy-read `multi` row does not touch it.
+
+`shared_origin_decoy` closes it on the training side, the same way
+`shared_origin_decoy_probe` closes the exam side: every `shared_origin` row is
+now emitted with a twin from the SAME rng salt, rendering the same scenario
+with the origin read showing the component healthy. The pair is a minimal
+contrast — identical inventory, identical candidate menus carrying identical
+tags in identical order, identical read labels in identical order — so the
+victims are held byte-identical and symptom coherence cannot separate the
+classes. Every trainable scenario is taught under both answers, and nothing
+about the scenario predicts the label. `drop_held_out` takes pairs whole,
+since both halves share a group key, so the 169/169 core survives the filter
+exactly. The residual lean is now the surviving `multi` negatives, which have
+no positive twin: the kept pile reads ~0.62 toward the INDEPENDENT answer,
+the opposite direction from the ~62/38 toward shared recorded before, and no
+longer confounded with anything the model can read off the victims. Those
+negatives are kept rather than balanced away — a healthy read over arbitrary
+victims is a different counter-example, not a worse copy of the paired one.
+Both splits are asserted separately, one on the generator's raw output and one
+on the kept pile, so neither can be claimed by measuring the other. Second, the eval cannot yet detect the shortcut this
+paragraph closes on the training side: seven of the ten `shared_origin_probe`
+rows carry a read label appearing in none of the other 243 test rows, so
+answering "one shared cause" on those four labels and "separate causes"
+everywhere else passes BOTH halves of decider 5 while reading no evidence at
+all. That is now closed too, from the exam side, by `shared_origin_decoy_probe`
+— ten rows rendering the same six scenarios with the origin read showing the
+component HEALTHY, drawn from the same rng salts as their twins so each pair is
+a minimal contrast: identical inventory, identical candidate menus, identical
+read labels in identical order, and only the read contents different. Every
+origin read label in the exam now appears under both answers, so matching one
+predicts nothing. The menu is not re-tagged, which is the point: the local
+cause keeps `attributed` and the shared cause keeps `outranked` on BOTH halves,
+so "trust the attributed tag" sweeps the decoy slice and scores zero on its
+twin, and "take the outranked candidate" does exactly the reverse. Swapping the
+tags would have let one heuristic win both.
+
+Two limits are recorded rather than described away. The slice could not have
+failed the model it was written for — the 0830 model answered independence on
+all ten twin rows, which is the decoy slice's correct answer — so it is not
+offered as a fix on its own; it is the second half of a pair, and the pair
+could always fail 0830. And `confidence_carried` is copyable here in a way it
+is not on the twin, because the expected grade is the deterministic pass's own
+per-workload grade printed in the prompt: when the local attribution is right,
+so is its grade, and inventing a different one to defeat the copy would be
+inventing evidence. A related staleness is deliberate. In the healthy world the
+shared candidate's `reason` still asserts the broken fact — it is the
+deterministic pass's claim and the read contradicts it — and resolving that in
+favour of the read is precisely the skill the slice measures.
+
+Being an exam-side change, it moves the test set: 253 rows to 263. It is
+strictly APPENDED, so the first 253 lines of `test.jsonl` are byte-identical
+and a scoreboard banked against the shorter file still lines up row for row.
+The training set does not move at all — every new group is `propagation:`-
+prefixed and collides with nothing, so `drop_held_out` drops the same rows and
+`train.jsonl` and `val.jsonl` regenerate byte-identical across the change.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1
@@ -323,7 +389,7 @@ truncated or thin → low), so calibration is trained, not guessed.
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
-- The third closes a hole the first two could not see. `multi` is ~15% of
+- The third closes a hole the first two could not see. `multi` is ~11% of
   the curriculum and had no test row at all, and `cases.multi()` never
   swaps a tag — so across all 1,600 constituent workloads it contributes to
   train and val at `--seed 17 --size 5500` (2,478 before `drop_held_out`),
