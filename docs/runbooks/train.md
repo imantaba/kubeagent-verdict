@@ -9,7 +9,8 @@ That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
 resolve to today. The full pipeline is CPU-only and takes several hours
 on a workstation — run the training step under `nohup` and watch
-`train_log.json`.
+`out/adapter-checkpoint/progress.json` (step 3; **not** `train_log.json`,
+which does not exist until the run is over).
 
 1. **Dataset** (seconds):
 
@@ -52,9 +53,55 @@ on a workstation — run the training step under `nohup` and watch
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
 
-   Progress: `python -c "import json; print(len(json.load(open('out/adapter/train_log.json'))['losses']))"`
-   once it exists; before that, `tail out/train.out`. A smoke run first is
-   cheap and catches config errors: `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+   A smoke run first is cheap and catches config errors:
+   `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
+
+   **Progress:** `cat out/adapter-checkpoint/progress.json` — optimizer
+   steps done, which epoch, how far into it, and both totals to read them
+   against. Do **not** watch `out/adapter/train_log.json`: it is written
+   once, after the last epoch, so for the entire run it does not exist,
+   and a healthy run is indistinguishable from a dead one. This runbook
+   recommended watching it from 27c3650 until a run died at 12h19m to a
+   power loss having written nothing, which is what retired the advice.
+
+   Read it as "how far along", not as a heartbeat. At the pinned recipe —
+   4292 train rows, 2 epochs, `grad_accum` 16 — the run is ~536 optimizer
+   steps, so at the default interval the file is rewritten about 21 times
+   across the whole run: tens of minutes apart on this hardware, not
+   seconds. An mtime that has not moved for a few minutes means nothing.
+
+   **A dead run can be resumed** from its last checkpoint:
+
+       nohup kv-train --dataset out/dataset --out out/adapter --resume > out/train.out 2>&1 &
+
+   Checkpoints are written every 25 optimizer steps by default
+   (`--checkpoint-every N`, `0` disables), so a crash costs at most that
+   much work — minutes, against the hours it used to cost. A resumed run
+   is **bit-for-bit identical** to one that was never interrupted, which
+   `tests/test_train_checkpoint.py` asserts as an equality rather than
+   inspecting: every piece of state resume carries — the optimizer
+   moments, the torch RNG that LoRA dropout draws from, the Python RNG
+   that orders each epoch, the position within the epoch — moves the
+   weights if it is dropped, and moving the weights fails that test.
+
+   Two things `--resume` refuses rather than guesses at:
+
+   - **A checkpoint from a different recipe or dataset**, rejected by
+     fingerprint. This is the one failure with no downstream detector —
+     it finishes, writes an adapter, and reports a clean run, having
+     trained something no scoreboard can tell apart from the model you
+     meant to train.
+   - **`--resume` with no checkpoint present**, which is an error and not
+     a silent fresh start. The usual cause is `--out` naming the wrong
+     directory. A run that died *before* its first checkpoint genuinely
+     has nothing to resume — start it normally.
+
+   The checkpoint lives at `out/adapter-checkpoint/`, a sibling of `--out`
+   and deliberately never inside it, so `out/adapter/` existing still means
+   exactly one thing: the run finished. A completed run deletes its own
+   checkpoint, so a stale one can never be resumed into. The `adapter/`
+   subdirectory beside `checkpoint.pt` is a convenience snapshot for
+   looking at a partly-trained model; resume does not read it.
 
 4. **Export** (~30 min: clone, convert, cmake build, quantize):
 
