@@ -13,6 +13,12 @@ carry -- optimizer moments, the torch RNG that LoRA dropout draws from, the
 Python RNG that orders each epoch, the position within the epoch -- moves the
 weights if it is dropped, and moving the weights fails this test by name.
 
+One piece is the exception and so is asserted separately: the recorded loss
+history. Dropping it leaves the weights untouched and truncates
+`train_log.json`, so the equality above cannot see it -- a resumed run would
+report a training curve missing everything before the crash while claiming to
+be the same run.
+
 `lora_dropout` is deliberately non-zero in these tests. With dropout at 0.0 the
 forward pass consumes no torch randomness, and a resume that forgot the torch
 RNG entirely would still pass -- the check would be measuring nothing on the
@@ -149,6 +155,16 @@ def test_a_resumed_run_is_bit_identical_to_an_uninterrupted_one(
 
     assert_identical(adapter_weights(uninterrupted), adapter_weights(resumed),
                      "resumed run diverged from the uninterrupted one")
+
+    # Not implied by the weights: `losses` is carried through the checkpoint
+    # and never read back into the model, so dropping it passes the check
+    # above and silently truncates the training curve.
+    a, b = (json.loads((d / "train_log.json").read_text(encoding="utf-8"))
+            for d in (uninterrupted, resumed))
+    assert a["losses"] == b["losses"], (
+        f"resumed run recorded {len(b['losses'])} losses, uninterrupted "
+        f"recorded {len(a['losses'])}")
+    assert a["optimizer_steps"] == b["optimizer_steps"]
 
 
 @pytest.mark.network
