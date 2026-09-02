@@ -49,4 +49,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev,train]" --extra-index-url https://download.pytorch.org/whl/cpu
-      - run: pytest tests/test_train.py -q -m "network"
+      - run: pytest -q -m "network"

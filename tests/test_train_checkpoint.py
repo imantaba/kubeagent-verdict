@@ -28,7 +28,6 @@ axis it most needs to measure.
 import json
 
 import pytest
-import torch
 
 from kubeagent_verdict.train.config import TrainConfig
 
@@ -71,6 +70,7 @@ def build_model(tokenizer):
     comparison below would fail for a reason that has nothing to do with
     resume.
     """
+    import torch
     from peft import LoraConfig, get_peft_model
     from transformers import Qwen3Config, Qwen3ForCausalLM
 
@@ -98,6 +98,8 @@ def adapter_weights(out_dir):
 
 
 def assert_identical(a, b, why):
+    import torch
+
     assert a.keys() == b.keys(), f"{why}: different tensor names"
     differing = [k for k in a if not torch.equal(a[k], b[k])]
     assert differing == [], (
