@@ -7,10 +7,10 @@ pinned lock file:
 
 That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
-resolve to today. The full pipeline is CPU-only and takes several hours
-on a workstation — run the training step under `nohup` and watch
-`out/adapter-checkpoint/progress.json` (step 3; **not** `train_log.json`,
-which does not exist until the run is over).
+resolve to today. The full pipeline is CPU-only, and the training step
+alone runs **upwards of 15 hours** on a workstation — run it under
+`nohup` and watch `out/adapter-checkpoint/progress.json` (step 3;
+**not** `train_log.json`, which does not exist until the run is over).
 
 1. **Dataset** (seconds):
 
@@ -76,9 +76,18 @@ which does not exist until the run is over).
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
 
-3. **Train** (hours, CPU):
+3. **Train** (15+ hours, CPU):
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
+
+   **Budget upwards of 15 hours.** That is a floor, not an estimate, and
+   the honest reason is that no run here has been timed end to end: no
+   completed run has both a start and an end on record. What *is* measured
+   is two consecutive attempts that never finished — one stopped at 12h19m
+   when the box lost power, and the next was still running at 15h15m, by
+   direct `ps` reading, when the host became unreachable. An earlier version
+   of this line said "several hours"; that is wrong by at least a factor of
+   three, and under-budgeting is what makes a healthy run look hung.
 
    A smoke run first is cheap and catches config errors:
    `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.

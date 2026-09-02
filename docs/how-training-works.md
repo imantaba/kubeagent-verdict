@@ -149,9 +149,25 @@ training runs are only comparable if they used the same recipe:
 
 Two epochs over 4,292 questions, nudging once per 16 questions, works out to
 about **536 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
-takes several hours, and the program deliberately prints *nothing at all* until
-it finishes — so "no output" during a run is normal, not a hang. The only
-progress signal is that the process is still alive.
+takes **upwards of 15 hours** — plan for overnight, not an afternoon. An
+earlier version of this line said "several hours", which was wrong by at least
+a factor of three. Fifteen hours is a floor rather than a stopwatch reading: no
+run here has ever been timed from start to finish, and the two most recent
+attempts both ended early — one stopped at 12h19m when the machine lost power,
+and the next was still going at 15h15m when the machine fell off the network.
+
+Getting that budget wrong matters, because the program prints *nothing at all*
+while it works. "No output" during a run is normal, not a hang — but if you are
+expecting an afternoon, a perfectly healthy run starts looking stuck hours
+before anything is actually wrong.
+
+There is one real progress signal. Every 25 nudges the run saves its place to
+`out/adapter-checkpoint/progress.json`, a small file naming the nudge and epoch
+it has reached — reading it is how you tell "still working" from "wedged"
+without guessing. That saved place is also what `--resume` continues from, so a
+run cut short part-way carries on instead of starting over. The finished
+model's own `train_log.json` is no help while you wait: it is not written until
+the run is already over.
 
 ### Step 3: printing it (`kv-export`)
 
