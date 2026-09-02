@@ -98,8 +98,8 @@ twin. They are the whole subject of Part 2.
 
 The generator then splits everything into three piles:
 
-- **train** — 4,232 questions. The model studies these.
-- **validation** — 435 questions. Held back during development.
+- **train** — 4,292 questions. The model studies these.
+- **validation** — 426 questions. Held back during development.
 - **test** — 263 questions. **The exam.** The model must never see these.
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
@@ -147,8 +147,8 @@ training runs are only comparable if they used the same recipe:
 | seed | 17 | fixed, so the shuffle is the same every run |
 | LoRA rank | 16 | how many sticky notes |
 
-Two epochs over 4,232 questions, nudging once per 16 questions, works out to
-about **529 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
+Two epochs over 4,292 questions, nudging once per 16 questions, works out to
+about **536 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
 takes several hours, and the program deliberately prints *nothing at all* until
 it finishes — so "no output" during a run is normal, not a hang. The only
 progress signal is that the process is still alive.
