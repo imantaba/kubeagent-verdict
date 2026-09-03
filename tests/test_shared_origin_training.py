@@ -321,10 +321,15 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 
 
 # Captured on `main` @ `ee2980e` and re-confirmed on this branch before any
-# edit. Every banked scoreboard -- 0830, 0901, 0902 -- was scored against
-# exactly these 263 rows, so if this moves, those numbers are no longer
-# comparable to anything measured after it and the change that moved it is
-# wrong. The row count above cannot see a rewrite that keeps the count.
+# edit. The 263 rows are the exam in its current shape, and this hash is not a
+# claim that every past number was measured against them: 0902 is the only
+# banked run scored against exactly this set in one go; 0901 covered the same
+# rows as two runs (253 plus the ten `shared_origin_decoy_probe` rows), which
+# is why its paired join reported `unpaired`; and 0830 predates those ten rows
+# entirely, covering only the other 253. What the hash buys is forward-looking
+# -- every number measured from here on stays comparable -- so a change that
+# moves it is wrong unless it means to retire the comparison. The row count
+# above cannot see a rewrite that keeps the count.
 EVAL_SET_SHA256 = "e8cbb549289ebaf07ba817dd3d32fdf70724c0ae80410eb47d2228a3b22b49de"
 
 
