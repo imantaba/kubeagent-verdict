@@ -654,7 +654,8 @@ def test_training_still_contaminates_nothing(rows):
 BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
              # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
              # the time per scenario, 5.7% across twenty -- a deterministic
-             # failure with correct data. 22 draws puts it below 1e-5.
+             # failure with correct data. 22 draws puts it at 1.4e-6 per
+             # scenario, 2.9e-5 across twenty.
 
 
 @pytest.fixture(scope="module")
@@ -699,8 +700,8 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 
     The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
     random: this is a sampling check, and its strength is a function of `BIG`.
-    At 22 draws per scenario a correct pool trips it less than once in 10^5
-    runs. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
+    At 22 draws a correct pool trips it about once in 35,000 runs across the
+    whole pool. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
     and the failure names a scenario whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
@@ -719,11 +720,15 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     """The flattening the slice exists for.
 
-    Measured on the four-scenario pool before this slice: 15 distinct causes,
-    top one 0.263 and top three 0.633. A model that answers the single most
-    common cause on every shared-origin row was right a quarter of the time.
-    The bar is 0.12 and 0.30 -- both of which the old pool failed by a wide
-    margin, which is what makes this check non-vacuous.
+    Measured on the four-scenario pool before this slice, at this test's own
+    `BIG`: 15 distinct causes, top one 0.263 and top three 0.609. A model that
+    answers the single most common cause on every shared-origin row was right a
+    quarter of the time. The bar is 0.12 and 0.30 -- both of which the old pool
+    failed by a wide margin, which is what makes this check non-vacuous.
+
+    The size is named because top three moves with it: 0.633 at 5500, 0.609
+    here, 0.602 at 20000, as the tail keeps gaining distinct causes. Top one is
+    stable at 0.263 across all four.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"
