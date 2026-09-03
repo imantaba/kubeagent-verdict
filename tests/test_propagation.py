@@ -307,3 +307,17 @@ def test_a_subset_row_renders_fewer_victims_from_the_same_scenario():
     p = next(s for s in propagation.all_scenarios() if len(s.victims) >= 3)
     ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key), victims=2)
     assert len(json.loads(ex.assistant)["verdicts"]) == 2
+
+
+def test_the_eval_six_declare_no_variants_and_no_state():
+    """The exam is frozen this slice.
+
+    `origin_variants` and `origin_state` are trainable-pool fields. Populating
+    them on an eval scenario would change what the exam renders and void every
+    banked scoreboard; the draw in `_render_shared_origin` is guarded on the
+    field being non-empty precisely so the six consume the same RNG they always
+    have. The eval six are asked, not taught.
+    """
+    for p in propagation.all_scenarios():
+        assert p.origin_variants == (), p.key
+        assert p.origin_state == ("", ""), p.key

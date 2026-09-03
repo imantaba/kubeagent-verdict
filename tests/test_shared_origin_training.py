@@ -182,6 +182,119 @@ def test_every_trainable_scenario_names_its_state_in_words():
             assert broken_token not in healthy, f"{p.key}: {broken_token!r} in a healthy read"
 
 
+_SCOPE_FOR_RADIUS = {"cluster": None, "node": "node", "namespace": "ns"}
+
+
+def test_blast_radius_and_scope_field_agree():
+    """A node-scoped origin is only coherent if every victim is on that node.
+    `_propagation_names` pins the field named by `scope_field`, so a radius
+    that disagrees with it asserts a blast radius its own inventory
+    contradicts.
+    """
+    for p in propagation.trainable_scenarios():
+        assert p.scope_field == _SCOPE_FOR_RADIUS[p.blast_radius], p.key
+
+
+def test_no_two_trainable_scenarios_share_an_answer_string():
+    """A cause string reused across scenarios is a lookup key spanning both."""
+    seen = {}
+    for p in propagation.trainable_scenarios():
+        for field, value in (("shared_cause", p.shared_cause),
+                             ("distractor_cause", p.distractor_cause)):
+            assert value not in seen, f"{p.key}.{field} repeats {seen[value]}"
+            seen[value] = f"{p.key}.{field}"
+
+
+def test_no_two_trainable_scenarios_share_a_local_cause():
+    """Same reason, on the decoy half's answers."""
+    seen = {}
+    for p in propagation.trainable_scenarios():
+        for v in p.victims:
+            assert v.local_cause not in seen, (
+                f"{p.key}: local_cause repeats {seen[v.local_cause]}")
+            seen[v.local_cause] = p.key
+
+
+def test_pass_confidence_varies_within_every_trainable_scenario():
+    """Guidance in the module docstring until now. With sixteen new scenarios
+    written at once, "vary the confidence" as guidance will not hold, and a
+    scenario whose victims all carry one grade reopens the confidence-copy
+    shortcut the docstring says is closed.
+    """
+    for p in propagation.trainable_scenarios():
+        grades = {v.pass_confidence for v in p.victims}
+        assert len(grades) > 1, f"{p.key}: every victim carries {grades}"
+
+
+def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
+    """The mechanised half of constraint 10.
+
+    On the decoy half the origin read shows the component healthy. A victim
+    read that still carries the scenario's broken state token contradicts it
+    in the same prompt, and the row teaches nothing except that the evidence
+    disagrees with itself. Deciding whether a read "asserts the origin is
+    broken" is a judgment about English and is not mechanised; the token is
+    the case where it is mechanical, and it is checked.
+    """
+    for p in propagation.trainable_scenarios():
+        broken_token = p.origin_state[0]
+        if not broken_token:
+            continue
+        for v in p.victims:
+            if broken_token not in v.read[1]:
+                continue
+            assert v.healthy_read_content, (
+                f"{p.key}: a victim read carries {broken_token!r} with no healthy swap")
+            assert broken_token not in v.healthy_read_content, (
+                f"{p.key}: the healthy swap still carries {broken_token!r}")
+
+
+_QUANTITY = re.compile(r"\d+[A-Za-z]*")
+
+
+def _canonical_rendering(content: str) -> str:
+    """A variant with its quantities and its line order taken away.
+
+    Every number-plus-unit token collapses to `N` and the lines are sorted, so
+    two renderings that differ only in their numbers -- or only in the order
+    they present the same fields -- reduce to the same string. Two genuinely
+    different renderings do not.
+    """
+    return "\n".join(sorted(
+        re.sub(r"\s+", " ", _QUANTITY.sub("N", line)).strip()
+        for line in content.split("\n") if line.strip()))
+
+
+def test_no_two_variants_are_the_same_rendering_with_different_numbers():
+    """The variant axis is renderings, not numbers.
+
+    A scenario can satisfy the count check, the first-line check and the state
+    check with four copies of one template carrying different quantities --
+    which is exactly the lookup the variant axis exists to defeat, dressed as
+    diversity. This is the mechanical half of "vary the rendering". The rest
+    stays authoring guidance in the module docstring, because judging whether
+    two English sentences say the same thing in different words is not a test.
+
+    Not vacuous, and not hypothetically: `internal-ca-expired` and
+    `shared-dependency-scaled-to-zero` both failed this at `a861e91`, on both
+    halves, after passing every other test in this file and a full task
+    review. One was the same three-line template with two numbers swapped; the
+    other was those lines reordered. Sorting is what catches the second, and
+    collapsing the unit letter along with the digits is what catches the first
+    -- `2h` against `41m` leaves `h` against `m` if only digits are stripped,
+    and the collision is missed.
+    """
+    for p in propagation.trainable_scenarios():
+        for half, which in ((0, "broken"), (1, "healthy")):
+            seen = {}
+            for i, pair in enumerate(p.origin_variants):
+                form = _canonical_rendering(pair[half])
+                assert form not in seen, (
+                    f"{p.key}: {which} variant {i} is variant {seen[form]} with "
+                    f"different numbers or a different line order")
+                seen[form] = i
+
+
 def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
     banned = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
               re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
@@ -190,10 +303,13 @@ def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
         blob = "\n".join([p.origin, p.shared_cause, p.shared_reason,
                           p.distractor_cause, p.distractor_reason, p.rationale,
                           p.remedy, p.origin_read[0], p.origin_read[1],
-                          p.healthy_origin_content]
+                          p.healthy_origin_content,
+                          p.origin_state[0], p.origin_state[1]]
+                         + [f"{b}\n{h}" for b, h in p.origin_variants]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n"
                             f"{v.local_cause}\n{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
+                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}"
+                            for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"
 
