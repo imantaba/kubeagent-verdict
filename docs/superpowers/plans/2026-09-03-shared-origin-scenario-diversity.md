@@ -1084,14 +1084,19 @@ The per-scenario invariants cannot see the curriculum. This task asserts the pro
 - Consumes: `propagation.trainable_scenarios()`, `generate.generate(seed, size)`, `Example.case`, `Example.meta["origin"]`, `Example.meta["expected"]`.
 - Produces: nothing later tasks read.
 
-The generator was measured before this plan was written: `generate.generate(seed=17, size=5500)` takes **0.3 seconds** and yields 220 `shared_origin` rows. It is a plain module-scoped fixture and carries **no `slow` marker**.
+The generator was measured before this plan was written: `generate.generate(seed=17, size=11000)` takes **0.54 seconds** and yields 440 `shared_origin` rows -- 22 per scenario at twenty scenarios. It is a plain module-scoped fixture and carries **no `slow` marker**.
+
+`BIG` was 5500 in this plan's first draft, and that was measured too: 220 rows, 11 per scenario, 0.33 seconds. It was raised because 11 draws is not enough sampling to make `test_every_trainable_scenario_renders_at_least_three_origin_variants` a statement about the data. A scenario declaring four variants that are drawn uniformly shows fewer than three distinct ones in 11 draws with probability 0.0029; across twenty scenarios that is **5.7%** -- roughly one plan run in seventeen fails this test with nothing wrong in the pool at all. The seed is fixed, so such a failure is deterministic rather than flaky, which makes it worse and not better: it would name a scenario, and an implementer would rewrite four correct variants trying to satisfy it. At 22 draws the same probability is below 1 in 10^5 across the whole pool, and generation costs 0.2 seconds more.
 
 - [ ] **Step 1: Write the tests**
 
 Add to `tests/test_shared_origin_training.py`. Add `from collections import Counter` to the imports.
 
 ```python
-BIG = 5500  # 0.3s to generate; 11 rows of each half per scenario at 20 scenarios
+BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
+             # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
+             # the time per scenario, 5.7% across twenty -- a deterministic
+             # failure with correct data. 22 draws puts it below 1e-5.
 
 
 @pytest.fixture(scope="module")
@@ -1133,6 +1138,12 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
     were keyed on something constant per scenario, every row would carry
     variant 0 and the whole mechanism would be inert while its own unit test
     still passed.
+
+    The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
+    random: this is a sampling check, and its strength is a function of `BIG`.
+    At 22 draws per scenario a correct pool trips it less than once in 10^5
+    runs. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
+    and the failure names a scenario whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
     seen = {k: set() for k in by_key}
