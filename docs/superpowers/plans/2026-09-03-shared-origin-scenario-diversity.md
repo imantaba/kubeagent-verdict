@@ -377,18 +377,18 @@ Add `origin_state=` and `origin_variants=` to each, directly after `healthy_orig
          ("notAfter: 112 days remaining\n"
           "issuer: cluster-internal-ca\n"
           "workloads mounting this bundle: 9 across 4 namespaces")),
-        (("issuer: cluster-internal-ca\n"
-          "notAfter: expired 6d ago\n"
+        (("notAfter: expired 6d ago\n"
+          "issuer: cluster-internal-ca\n"
           "served to: 23 workloads across 8 namespaces"),
-         ("issuer: cluster-internal-ca\n"
-          "notAfter: 401 days remaining\n"
+         ("notAfter: 401 days remaining\n"
+          "issuer: cluster-internal-ca\n"
           "served to: 23 workloads across 8 namespaces")),
-        (("bundle: cluster-internal-ca\n"
-          "validity: expired\n"
+        (("validity: expired\n"
+          "bundle: cluster-internal-ca\n"
           "renewal: no successful renewal recorded\n"
           "mounted by: 6 workloads"),
-         ("bundle: cluster-internal-ca\n"
-          "validity: 74 days remaining\n"
+         ("validity: 74 days remaining\n"
+          "bundle: cluster-internal-ca\n"
           "renewal: last renewal completed\n"
           "mounted by: 6 workloads")),
     ),
@@ -447,16 +447,16 @@ Add `origin_state=` and `origin_variants=` to each, directly after `healthy_orig
          ("app-settings: present, 5 keys\n"
           "namespace {ns}: Active\n"
           "workloads in {ns} mounting it: 4 of 4")),
-        (("get configmap app-settings -n {ns}: NotFound\n"
+        (("the shared app-settings ConfigMap: NotFound\n"
           "last seen in the namespace event log 12m ago\n"
           "pods in {ns} referencing it: 9 of 9"),
-         ("get configmap app-settings -n {ns}: 11 keys\n"
+         ("the shared app-settings ConfigMap: 11 keys\n"
           "last written 12m ago\n"
           "pods in {ns} referencing it: 9 of 9")),
-        (("the shared ConfigMap in {ns} resolves NotFound\n"
+        (("the ConfigMap every flagged workload mounts resolves NotFound\n"
           "namespace {ns}: Active, no deletion timestamp\n"
           "mounted by every workload flagged here"),
-         ("the shared ConfigMap in {ns} resolves with 6 keys\n"
+         ("the ConfigMap every flagged workload mounts resolves with 6 keys\n"
           "namespace {ns}: Active, no deletion timestamp\n"
           "mounted by every workload flagged here")),
     ),
@@ -473,12 +473,12 @@ Add `origin_state=` and `origin_variants=` to each, directly after `healthy_orig
          ("Replicas:  4 desired | 4 updated | 4 total | 4 available\n"
           "Pods:      4 Running, 0 restarts\n"
           "Last scale event: none in the last 24h")),
-        (("Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
-          "Pods:      none\n"
-          "Last scale event: 2h ago, 6 replicas to 0"),
-         ("Replicas:  6 desired | 6 updated | 6 total | 6 available\n"
-          "Pods:      6 Running, 0 restarts\n"
-          "Last scale event: none in the last 7d")),
+        (("Last scale event: 2h ago, 6 replicas to 0\n"
+          "Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
+          "Pods:      none"),
+         ("Last scale event: none in the last 7d\n"
+          "Replicas:  6 desired | 6 updated | 6 total | 6 available\n"
+          "Pods:      6 Running, 0 restarts")),
         (("desired replicas: 0, available: 0\n"
           "scale history: 11m ago, 3 replicas to 0\n"
           "no pod has been scheduled for this Deployment since"),
