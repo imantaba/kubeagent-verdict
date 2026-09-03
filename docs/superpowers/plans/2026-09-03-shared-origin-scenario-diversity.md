@@ -380,12 +380,12 @@ Add `origin_state=` and `origin_variants=` to each, directly after `healthy_orig
          ("notAfter: 288 days remaining\n"
           "issuer: cluster-internal-ca\n"
           "workloads mounting this bundle: 14 across 6 namespaces")),
-        (("notAfter: expired 41m ago\n"
-          "issuer: cluster-internal-ca\n"
-          "workloads mounting this bundle: 9 across 4 namespaces"),
-         ("notAfter: 112 days remaining\n"
-          "issuer: cluster-internal-ca\n"
-          "workloads mounting this bundle: 9 across 4 namespaces")),
+        (("verification of the presented chain failed\n"
+          "the signing certificate in the cluster-internal-ca bundle expired 41m ago\n"
+          "9 workloads present certificates signed by that bundle"),
+         ("verification of the presented chain succeeded\n"
+          "the signing certificate in the cluster-internal-ca bundle has 112 days remaining\n"
+          "9 workloads present certificates signed by that bundle")),
         (("notAfter: expired 6d ago\n"
           "issuer: cluster-internal-ca\n"
           "served to: 23 workloads across 8 namespaces"),
@@ -482,12 +482,12 @@ Add `origin_state=` and `origin_variants=` to each, directly after `healthy_orig
          ("Replicas:  4 desired | 4 updated | 4 total | 4 available\n"
           "Pods:      4 Running, 0 restarts\n"
           "Last scale event: none in the last 24h")),
-        (("Last scale event: 2h ago, 6 replicas to 0\n"
-          "Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
-          "Pods:      none"),
-         ("Last scale event: none in the last 7d\n"
-          "Replicas:  6 desired | 6 updated | 6 total | 6 available\n"
-          "Pods:      6 Running, 0 restarts")),
+        (("scale subresource reports a spec replica count of 0\n"
+          "the last recorded event took it from 6 replicas to 0\n"
+          "no pod belonging to this Deployment is scheduled"),
+         ("scale subresource reports a spec replica count of 6\n"
+          "the last recorded event predates the retention window\n"
+          "6 pods belonging to this Deployment are Running")),
         (("desired replicas: 0, available: 0\n"
           "scale history: 11m ago, 3 replicas to 0\n"
           "no pod has been scheduled for this Deployment since"),
