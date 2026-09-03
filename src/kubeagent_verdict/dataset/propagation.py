@@ -1242,10 +1242,10 @@ _T_AUTOSCALER_CAPACITY = Propagation(
                  "unscheduled",
     shared_reason="the autoscaler's own status reports the node group at max size "
                   "with a scale-up event refused nine minutes ago",
-    distractor_cause="the pending workloads request more CPU or memory than any "
-                      "node type in the cluster provides",
-    distractor_reason="each pending pod's own requests fit comfortably within a "
-                      "single node's allocatable capacity",
+    distractor_cause="a NoSchedule taint left behind by last night's maintenance "
+                     "window still covers the whole node pool",
+    distractor_reason="every node's taint list is unchanged from what it was "
+                      "before the maintenance window opened",
     rationale="the workload cannot be scheduled because the autoscaler has nowhere "
               "left to grow the cluster, which is true of every pending pod "
               "cluster-wide right now",
@@ -1261,9 +1261,9 @@ _T_AUTOSCALER_CAPACITY = Propagation(
     ),
     healthy_origin_content=(
         "scale-up status: eligible\n"
-        "node group at 6 of 10 nodes\n"
+        "node group at 10 of 16 nodes\n"
         "last scale-up attempt: succeeded 9m ago\n"
-        "pending pods cluster-wide: 0"
+        "pending pods cluster-wide: 2"
     ),
     origin_state=("blocked", "eligible"),
     origin_variants=(
@@ -1272,15 +1272,15 @@ _T_AUTOSCALER_CAPACITY = Propagation(
           "last scale-up attempt: refused 9m ago\n"
           "pending pods cluster-wide: 7"),
          ("scale-up status: eligible\n"
-          "node group at 6 of 10 nodes\n"
+          "node group at 10 of 16 nodes\n"
           "last scale-up attempt: succeeded 9m ago\n"
-          "pending pods cluster-wide: 0")),
+          "pending pods cluster-wide: 2")),
         (("requesting one more node from the node group was refused\n"
           "the node group's scale-up path is blocked at its configured maximum\n"
           "7 pods are pending on this node group's capacity"),
          ("requesting one more node from the node group succeeded\n"
-          "the node group's scale-up path is eligible below its configured maximum\n"
-          "no pods are pending on this node group's capacity")),
+          "the node group's scale-up path is eligible below its raised maximum\n"
+          "2 pods are pending for reasons another node would not fix")),
         (("Warning  NotTriggerScaleUp  9x  cluster-autoscaler  scale-up blocked: "
           "max node group size reached"),
          ("Normal  TriggeredScaleUp  cluster-autoscaler  scale-up eligible: node "
@@ -1291,22 +1291,22 @@ _T_AUTOSCALER_CAPACITY = Propagation(
           "unschedulable pods tracked: 7"),
          ("autoscaler status: eligible\n"
           "reason: none\n"
-          "nodes: 6/10\n"
-          "unschedulable pods tracked: 0")),
+          "nodes: 10/16\n"
+          "unschedulable pods tracked: 2")),
     ),
     victims=(
         Victim(
             workload_kind="Deployment", status="Pending", issue="Unschedulable",
             reason="0/10 nodes are available",
-            evidence="10 node(s) didn't match Pod's node affinity/selector",
-            local_cause="this workload's own nodeSelector requests a label no "
-                        "current node carries",
-            local_reason="the scheduler reports a node-affinity mismatch, not a "
-                        "resource shortfall",
+            evidence="10 node(s) had insufficient memory",
+            local_cause="this Deployment's own memory request was raised in its "
+                        "last rollout above what a single node in this pool "
+                        "can allocate",
+            local_reason="the previous ReplicaSet is still Running on these nodes "
+                        "with the smaller request",
             read=("get_events {ns}/{name}",
                   ("Warning  FailedScheduling  default-scheduler  0/10 nodes are "
-                   "available: 10 node(s) didn't match Pod's node "
-                   "affinity/selector.")),
+                   "available: 10 Insufficient memory.")),
             pass_confidence="high",
         ),
         Victim(
@@ -1324,8 +1324,8 @@ _T_AUTOSCALER_CAPACITY = Propagation(
             healthy_read_content=(
                 "Warning  FailedScheduling  default-scheduler  0/10 nodes are "
                 "available: 10 Insufficient cpu.\n"
-                "Warning  NotTriggerScaleUp  cluster-autoscaler  scale-up "
-                "eligible: pod requests exceed the largest node type"),
+                "Warning  NotTriggerScaleUp  cluster-autoscaler  no scale-up "
+                "would help: pod requests exceed the largest node type"),
             pass_confidence="medium",
         ),
     ),
