@@ -1008,7 +1008,447 @@ _T_SCALED_TO_ZERO = Propagation(
     ),
 )
 
-_TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO)
+_T_IMAGE_PULL_SECRET = Propagation(
+    key="image-pull-secret-expired",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the registry pull secret used cluster-wide has an expired token",
+    shared_cause="the cluster-wide image pull secret's registry token expired, so no "
+                 "workload can pull its image",
+    shared_reason="the shared regcred Secret used by every pull reports its token "
+                  "expired eighteen minutes ago",
+    distractor_cause="each workload's own imagePullSecrets reference was dropped in "
+                      "its last rollout",
+    distractor_reason="every failing pod spec still lists the shared regcred secret "
+                      "in imagePullSecrets",
+    rationale="the workload cannot pull because the cluster-wide pull secret "
+              "authorizing every pull has expired, which is true of every image "
+              "request right now",
+    remedy="Rotate the shared pull secret's registry token; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related secret shared-regcred (cluster-wide)",
+        ("auth token: expired 18m ago\n"
+         "registry: the cluster's private image registry\n"
+         "workloads referencing this secret: 11 across 5 namespaces"),
+    ),
+    healthy_origin_content=(
+        "auth token: current, 29 days remaining\n"
+        "registry: the cluster's private image registry\n"
+        "workloads referencing this secret: 11 across 5 namespaces"
+    ),
+    origin_state=("expired", "current"),
+    origin_variants=(
+        (("auth token: expired 18m ago\n"
+          "registry: the cluster's private image registry\n"
+          "workloads referencing this secret: 11 across 5 namespaces"),
+         ("auth token: current, 29 days remaining\n"
+          "registry: the cluster's private image registry\n"
+          "workloads referencing this secret: 11 across 5 namespaces")),
+        (("verification of the pull secret against the registry failed\n"
+          "the presented token is expired\n"
+          "11 workloads authenticate through this secret"),
+         ("verification of the pull secret against the registry succeeded\n"
+          "the presented token is current\n"
+          "11 workloads authenticate through this secret")),
+        (("Warning  Failed  11x  kubelet  Failed to pull image: unauthorized: the "
+          "registry token has expired"),
+         ("Normal  Pulled  11x  kubelet  Successfully pulled image using a current "
+          "registry token")),
+        (("regcred status: expired\n"
+          "last successful pull cluster-wide: 18m before the token lapsed\n"
+          "workloads relying on it: 11"),
+         ("regcred status: current\n"
+          "last successful pull cluster-wide: seconds ago\n"
+          "workloads relying on it: 11")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="ErrImagePull", issue="ErrImagePull",
+            reason="container {container} cannot pull {image}",
+            evidence="failed to authenticate pulling {image}",
+            local_cause="this workload's own image tag no longer exists in the registry",
+            local_reason="the pull fails immediately rather than retrying",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: ErrImagePull\n"
+                   "Warning  Failed  kubelet  unauthorized: authentication token has "
+                   "expired")),
+            healthy_read_content=(
+                "Warning  Failed  kubelet  Error: ErrImagePull\n"
+                "Warning  Failed  kubelet  manifest unknown: tag not found"),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="ImagePullBackOff", issue="ImagePullBackOff",
+            reason="container {container} cannot pull {image}",
+            evidence="Back-off pulling image {image}",
+            local_cause="the agent's pinned image digest was removed by a registry "
+                        "garbage collection",
+            local_reason="the pull is retried and backed off repeatedly",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Failed to pull image {image}: "
+                   "unauthorized: the presented pull secret token has expired")),
+            healthy_read_content=(
+                "Events: Warning  Failed  kubelet  Failed to pull image {image}: "
+                "manifest unknown for digest"),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="Init:ErrImagePull", issue="Init:ErrImagePull",
+            reason="init container {init_container} cannot pull its image",
+            evidence="failed to authenticate pulling the init image",
+            local_cause="the migration Job's init image reference has a typo",
+            local_reason="the init container never starts",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
+                   "    Reason: ErrImagePull\n"
+                   "  Warning  Failed  kubelet  unauthorized: authentication token "
+                   "has expired")),
+            healthy_read_content=(
+                "Init Containers:\n  {init_container}:\n"
+                "    State: Waiting\n    Reason: ErrImagePull\n"
+                "  Warning  Failed  kubelet  manifest unknown: tag not found"),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:ImagePullBackOff",
+            issue="Init:ImagePullBackOff",
+            reason="init container {init_container} cannot pull its image",
+            evidence="Back-off pulling image for init container {init_container}",
+            local_cause="the StatefulSet's init image was retagged to a version that "
+                        "was never pushed",
+            local_reason="the init container's pull is backed off on every retry",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
+                   "    Reason: ImagePullBackOff\n"
+                   "  Warning  Failed  kubelet  unauthorized: the shared pull secret "
+                   "token has expired")),
+            healthy_read_content=(
+                "Init Containers:\n  {init_container}:\n"
+                "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                "  Warning  Failed  kubelet  manifest unknown: tag not found"),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_SECRET_KEY_RENAMED = Propagation(
+    key="shared-secret-key-renamed",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the shared Secret every workload reads a key from was renamed by a "
+           "platform change",
+    shared_cause="the shared platform Secret's key was renamed cluster-wide, so "
+                 "every workload that reads it fails to start",
+    shared_reason="every workload referencing the shared Secret's old key name "
+                  "reports the same missing-key error",
+    distractor_cause="the workloads' RBAC permission to read Secrets was revoked in "
+                      "the last policy sync",
+    distractor_reason="each pod's service account can still describe the Secret "
+                      "object itself, only the key it wants is gone",
+    rationale="the workload cannot start because the key it reads from the shared "
+              "Secret no longer exists under that name, which is true of every "
+              "workload reading this Secret right now",
+    remedy="Restore the shared Secret's original key name (or add both keys during "
+           "the rename); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related secret platform/shared-credentials (cluster-wide)",
+        ("lookup result: missing\n"
+         "requested key: api-token\n"
+         "keys defined on the secret: db-password, tls-cert, svc-token\n"
+         "workloads referencing this secret: 9 across 4 namespaces"),
+    ),
+    healthy_origin_content=(
+        "lookup result: intact\n"
+        "requested key: api-token\n"
+        "keys defined on the secret: api-token, db-password, tls-cert\n"
+        "workloads referencing this secret: 9 across 4 namespaces"
+    ),
+    origin_state=("missing", "intact"),
+    origin_variants=(
+        (("lookup result: missing\n"
+          "requested key: api-token\n"
+          "keys defined on the secret: db-password, tls-cert, svc-token\n"
+          "workloads referencing this secret: 9 across 4 namespaces"),
+         ("lookup result: intact\n"
+          "requested key: api-token\n"
+          "keys defined on the secret: api-token, db-password, tls-cert\n"
+          "workloads referencing this secret: 9 across 4 namespaces")),
+        (("verification that the shared Secret carries the expected key failed\n"
+          "the key api-token is missing from the Secret's data\n"
+          "9 workloads request that key"),
+         ("verification that the shared Secret carries the expected key succeeded\n"
+          "the key api-token is intact in the Secret's data\n"
+          "9 workloads request that key")),
+        (("Warning  Failed  9x  kubelet  couldn't find key api-token in Secret "
+          "platform/shared-credentials: missing"),
+         ("Normal  Synced  9x  kubelet  key api-token in Secret "
+          "platform/shared-credentials: intact")),
+        (("shared-credentials data keys: db-password, tls-cert, svc-token\n"
+          "api-token: missing since the last platform sync\n"
+          "9 workloads mount this secret"),
+         ("shared-credentials data keys: api-token, db-password, tls-cert\n"
+          "api-token: intact, unchanged since creation\n"
+          "9 workloads mount this secret")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CreateContainerConfigError",
+            issue="CreateContainerConfigError",
+            reason="container {container} cannot build its environment",
+            evidence="couldn't find key api-token in Secret shared-credentials",
+            local_cause="this workload's own manifest requests a key from its own "
+                        "Secret that it renamed in the last deploy",
+            local_reason="the container never starts and reports a missing key",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Error: couldn't find key "
+                   "api-token in Secret shared-credentials: missing")),
+            healthy_read_content=(
+                "Events: Warning  Failed  kubelet  Error: couldn't find key "
+                "legacy-token in Secret {ns}/app-secrets"),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="panic: required credential api-token not found in environment",
+            local_cause="this replica's own manifest never added api-token to its "
+                        "envFrom list",
+            local_reason="the container panics immediately after reading its "
+                        "environment",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: missing required credential api-token "
+                   "(3 of 3 sampled restarts)")),
+            healthy_read_content=(
+                "classified cause: environment variable api-token never declared "
+                "in this replica's own manifest (3 of 3 sampled restarts)"),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_AUTOSCALER_CAPACITY = Propagation(
+    key="cluster-autoscaler-at-capacity",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the cluster autoscaler cannot add a node because its node group is "
+           "already at maximum size",
+    shared_cause="the cluster autoscaler cannot add a node because the node group "
+                 "is already at its configured maximum, so pending pods stay "
+                 "unscheduled",
+    shared_reason="the autoscaler's own status reports the node group at max size "
+                  "with a scale-up event refused nine minutes ago",
+    distractor_cause="the pending workloads request more CPU or memory than any "
+                      "node type in the cluster provides",
+    distractor_reason="each pending pod's own requests fit comfortably within a "
+                      "single node's allocatable capacity",
+    rationale="the workload cannot be scheduled because the autoscaler has nowhere "
+              "left to grow the cluster, which is true of every pending pod "
+              "cluster-wide right now",
+    remedy="Raise the node group's maximum size (or free capacity elsewhere); the "
+           "flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related deployment kube-system/cluster-autoscaler (cluster-wide)",
+        ("scale-up status: blocked\n"
+         "node group at 10 of 10 nodes (max size reached)\n"
+         "last scale-up attempt: refused 9m ago\n"
+         "pending pods cluster-wide: 7"),
+    ),
+    healthy_origin_content=(
+        "scale-up status: eligible\n"
+        "node group at 6 of 10 nodes\n"
+        "last scale-up attempt: succeeded 9m ago\n"
+        "pending pods cluster-wide: 0"
+    ),
+    origin_state=("blocked", "eligible"),
+    origin_variants=(
+        (("scale-up status: blocked\n"
+          "node group at 10 of 10 nodes (max size reached)\n"
+          "last scale-up attempt: refused 9m ago\n"
+          "pending pods cluster-wide: 7"),
+         ("scale-up status: eligible\n"
+          "node group at 6 of 10 nodes\n"
+          "last scale-up attempt: succeeded 9m ago\n"
+          "pending pods cluster-wide: 0")),
+        (("requesting one more node from the node group was refused\n"
+          "the node group's scale-up path is blocked at its configured maximum\n"
+          "7 pods are pending on this node group's capacity"),
+         ("requesting one more node from the node group succeeded\n"
+          "the node group's scale-up path is eligible below its configured maximum\n"
+          "no pods are pending on this node group's capacity")),
+        (("Warning  NotTriggerScaleUp  9x  cluster-autoscaler  scale-up blocked: "
+          "max node group size reached"),
+         ("Normal  TriggeredScaleUp  cluster-autoscaler  scale-up eligible: node "
+          "group provisioned a new node")),
+        (("autoscaler status: blocked\n"
+          "reason: MaxNodeGroupSizeReached\n"
+          "nodes: 10/10\n"
+          "unschedulable pods tracked: 7"),
+         ("autoscaler status: eligible\n"
+          "reason: none\n"
+          "nodes: 6/10\n"
+          "unschedulable pods tracked: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Pending", issue="Unschedulable",
+            reason="0/10 nodes are available",
+            evidence="10 node(s) didn't match Pod's node affinity/selector",
+            local_cause="this workload's own nodeSelector requests a label no "
+                        "current node carries",
+            local_reason="the scheduler reports a node-affinity mismatch, not a "
+                        "resource shortfall",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/10 nodes are "
+                   "available: 10 node(s) didn't match Pod's node "
+                   "affinity/selector.")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="0/10 nodes are available",
+            evidence="pod triggered a scale-up request that was refused",
+            local_cause="the Job's own resource request was rounded up by a "
+                        "defaulting webhook to more than any node provides",
+            local_reason="the request, not the cluster, is why no node fits",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/10 nodes are "
+                   "available: 10 Insufficient cpu.\n"
+                   "Warning  NotTriggerScaleUp  cluster-autoscaler  scale-up "
+                   "blocked: max node group size reached")),
+            healthy_read_content=(
+                "Warning  FailedScheduling  default-scheduler  0/10 nodes are "
+                "available: 10 Insufficient cpu.\n"
+                "Warning  NotTriggerScaleUp  cluster-autoscaler  scale-up "
+                "eligible: pod requests exceed the largest node type"),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_SIDECAR_INJECTOR = Propagation(
+    key="sidecar-injector-broken",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="a mutating webhook injects a sidecar image into every pod it admits, "
+           "and that image cannot start",
+    shared_cause="the sidecar injector webhook is injecting a broken sidecar image "
+                 "into every pod it mutates, so any pod admitted with that sidecar "
+                 "fails to start",
+    shared_reason="the injector's own webhook configuration still points at a "
+                  "sidecar image tag that was retracted from the registry two "
+                  "hours ago",
+    distractor_cause="the injected sidecar's own configuration file has a syntax "
+                      "error introduced in the last mesh upgrade",
+    distractor_reason="the very same configuration parses successfully on the "
+                      "injector's own health check, and each pod's container "
+                      "reports a distinct startup failure",
+    rationale="the workload cannot start because the sidecar injected into every "
+              "pod it mutates cannot run, which is true of every pod this webhook "
+              "touches right now",
+    remedy="Point the sidecar injector webhook at a working image tag; the flagged "
+           "workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe mutatingwebhookconfiguration mesh-sidecar-injector",
+        ("image status: retracted\n"
+         "injected sidecar image: proxy:v1.19.2\n"
+         "pods mutated by this webhook in the last hour: 8"),
+    ),
+    healthy_origin_content=(
+        "image status: validated\n"
+        "injected sidecar image: proxy:v1.19.1\n"
+        "pods mutated by this webhook in the last hour: 8"
+    ),
+    origin_state=("retracted", "validated"),
+    origin_variants=(
+        (("image status: retracted\n"
+          "injected sidecar image: proxy:v1.19.2\n"
+          "pods mutated by this webhook in the last hour: 8"),
+         ("image status: validated\n"
+          "injected sidecar image: proxy:v1.19.1\n"
+          "pods mutated by this webhook in the last hour: 8")),
+        (("verification of the injected sidecar image against the registry failed\n"
+          "the image tag was retracted after publishing\n"
+          "8 pods were mutated with this sidecar in the last hour"),
+         ("verification of the injected sidecar image against the registry "
+          "succeeded\n"
+          "the image tag is validated and current\n"
+          "8 pods were mutated with this sidecar in the last hour")),
+        (("Warning  FailedCreate  8x  mesh-sidecar-injector  webhook injected a "
+          "retracted sidecar image into the pod spec"),
+         ("Normal  Injected  8x  mesh-sidecar-injector  webhook injected a "
+          "validated sidecar image into the pod spec")),
+        (("sidecar injector status: retracted image pinned\n"
+          "last successful injection with a working image: nine days ago\n"
+          "pods mutated since: 8, all failing"),
+         ("sidecar injector status: validated image pinned\n"
+          "last successful injection with a working image: seconds ago\n"
+          "pods mutated since: 8, all healthy")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="exec format error: injected sidecar binary is not compatible "
+                      "with this image tag",
+            local_cause="this pod's own image predates the sidecar's expected base "
+                        "OS and the two are incompatible",
+            local_reason="the init container fails on every attempt, immediately",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: retracted sidecar image failed to execute "
+                   "(3 of 3 sampled restarts)")),
+            healthy_read_content=(
+                "classified cause: incompatible base OS between the pod's image "
+                "and its sidecar (3 of 3 sampled restarts)"),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="dial unix /var/run/sidecar.sock: connect: connection refused",
+            local_cause="this replica's own service mesh configuration was applied "
+                        "before the sidecar was ready",
+            local_reason="the container exits waiting on a local sidecar socket "
+                        "that never appears",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: local sidecar socket unavailable, image never "
+                   "started listening (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 10 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="this workload's own readiness probe was pointed at the "
+                        "wrong port during its last rollout",
+            local_reason="every probe attempt is refused rather than reaching the "
+                        "sidecar",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  10x  kubelet  Readiness probe failed: "
+                   "connection refused: the injected sidecar image (retracted) "
+                   "never opened its port")),
+            healthy_read_content=(
+                "Warning  Unhealthy  10x  kubelet  Readiness probe failed: "
+                "connection refused: probe targets port 9090 but the container "
+                "listens on 8080"),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
+                       _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
+                       _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
