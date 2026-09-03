@@ -1823,11 +1823,407 @@ _T_CSI_NODE_DRIVER = Propagation(
     ),
 )
 
+
+_T_NODE_PID_PRESSURE = Propagation(
+    key="node-pid-pressure",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node hit its kernel PID limit and can no longer fork new processes",
+    shared_cause="node {node} is at its kernel PID limit, so no new process can be "
+                 "forked for any pod scheduled there",
+    shared_reason="{node} reports 32768 of 32768 PIDs in use and every fork on it now "
+                  "fails, while its peers sit under half that count",
+    distractor_cause="the node's CPU is fully saturated by another workload, starving "
+                     "these processes",
+    distractor_reason="the node's own CPU utilization is unremarkable, and no other "
+                      "workload is consuming an unusual share of it",
+    rationale="the workload cannot fork a new process because {node} itself has no "
+              "PIDs left to give it, which is true of everything scheduled there right now",
+    remedy="Recover the PID pressure on {node} (kill the offending process or raise "
+           "pid_max); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (process table)",
+        ("Process table: exhausted\n"
+         "PIDs in use: 32768 of 32768\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "kubelet log: fork() failing across pods scheduled here"),
+    ),
+    healthy_origin_content=(
+        "Process table: available\n"
+        "PIDs in use: 4102 of 32768\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "kubelet log: fork() succeeding normally"
+    ),
+    origin_state=("exhausted", "available"),
+    origin_variants=(
+        (("Process table: exhausted\n"
+          "PIDs in use: 32768 of 32768\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: fork() failing across pods scheduled here"),
+         ("Process table: available\n"
+          "PIDs in use: 4102 of 32768\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: fork() succeeding normally")),
+        (("kubelet reports the node's process table exhausted\n"
+          "fork attempts across the node have failed for 6m\n"
+          "peer nodes show plenty of headroom"),
+         ("kubelet reports the node's process table available\n"
+          "no fork attempts have failed in the last 24h\n"
+          "peer nodes show the same headroom")),
+        (("Warning  SystemOOM  kubelet  Process table exhausted: fork/exec failing "
+          "node-wide"),
+         ("Normal  NodeReady  kubelet  Process table available: fork/exec succeeding "
+          "node-wide")),
+        (("PID table status: exhausted\n"
+          "remaining PID budget: 0\n"
+          "kubelet has logged fork failures for 9m"),
+         ("PID table status: available\n"
+          "remaining PID budget: 27000\n"
+          "kubelet has logged no fork failures in the last hour")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: unable to start container "
+                     "process: resource temporarily unavailable",
+            local_cause="this pod's own PID cgroup was already exhausted by the other "
+                        "containers in the same pod before this one was created",
+            local_reason="the pod's own cgroup accounting already shows its PID "
+                        "ceiling reached by its sidecar containers alone",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                   "create containerd task: unable to start container process: "
+                   "resource temporarily unavailable")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                  "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="fork retry failed: resource temporarily unavailable",
+            local_cause="this workload's own batch routine leaks subprocesses until "
+                        "it hits its own container's process ceiling",
+            local_reason="the container's own process count climbs to its configured "
+                        "ceiling right before each crash",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: fork of a new subprocess failed, resource "
+                   "temporarily unavailable (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_NODE_RUNTIME_RESTARTING = Propagation(
+    key="node-runtime-restarting",
+    blast_radius="node",
+    scope_field="node",
+    origin="the container runtime on the node is restarting under the workloads it "
+           "hosts",
+    shared_cause="the container runtime on node {node} keeps restarting, so every "
+                 "container it hosts loses its connection to it mid-operation",
+    shared_reason="{node}'s container runtime has restarted 5 times in the last ten "
+                  "minutes while its peers' runtimes have stayed up the whole time",
+    distractor_cause="a recent application rollout added a slow dependency call to "
+                     "the request path",
+    distractor_reason="neither workload's own image or config changed in the last "
+                      "rollout window, so nothing in their own request path is new",
+    rationale="the workload cannot keep a stable connection to the container runtime "
+              "because {node}'s own runtime keeps restarting underneath it, which is "
+              "true of everything scheduled there right now",
+    remedy="Stabilize or restart the container runtime service on {node}; the "
+           "flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (container runtime)",
+        ("Container runtime: restarting\n"
+         "containerd restarts in the last 10m: 5\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "kubelet log: connection to the container runtime service was lost, "
+         "reconnecting"),
+    ),
+    healthy_origin_content=(
+        "Container runtime: stable\n"
+        "containerd restarts in the last 24h: 0\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "kubelet log: connection to the container runtime service is steady"
+    ),
+    origin_state=("restarting", "stable"),
+    origin_variants=(
+        (("Container runtime: restarting\n"
+          "containerd restarts in the last 10m: 5\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: connection to the container runtime service was lost, "
+          "reconnecting"),
+         ("Container runtime: stable\n"
+          "containerd restarts in the last 24h: 0\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: connection to the container runtime service is steady")),
+        (("the container runtime on this node is restarting\n"
+          "containerd has crashed and been relaunched 5 times in 10m\n"
+          "kubelet reports itself Ready throughout"),
+         ("the container runtime on this node is stable\n"
+          "containerd has not crashed in the last 24h\n"
+          "kubelet reports itself Ready throughout")),
+        (("Warning  ContainerRuntimeRestarting  kubelet  containerd health check "
+          "failed, restarting the runtime (5th time in 10m)"),
+         ("Normal  ContainerRuntimeStable  kubelet  containerd health check passing, "
+          "runtime stable")),
+        (("containerd status: restarting\n"
+          "last crash: 40s ago\n"
+          "uptime since last crash: under a minute"),
+         ("containerd status: stable\n"
+          "last crash: none recorded\n"
+          "uptime since last crash: over a week")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                  "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="an in-container exec call never returned before the container "
+                      "was torn down",
+            local_cause="this workload's own exec-based liveness hook occasionally "
+                        "hangs against a subprocess it launches",
+            local_reason="the previous run's log shows the exec hook itself still "
+                        "blocked at the moment the container was killed",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: liveness exec hook blocked past its timeout "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 10 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="the agent's own readiness probe script depends on a local "
+                        "cache warm-up that has not finished",
+            local_reason="the probe only fails in the first several minutes after "
+                        "each restart of this pod, matching a cold cache",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  10x  kubelet  Readiness probe failed: exec "
+                   "probe error: runtime did not respond within the exec timeout")),
+            healthy_read_content=(
+                "Warning  Unhealthy  10x  kubelet  Readiness probe failed: exec "
+                "probe error: command exited 1 while the local cache was still "
+                "warming"),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_NODE_CLOCK_SKEW = Propagation(
+    key="node-clock-skew",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's clock has drifted far enough off that certificate and token "
+           "validation fails there",
+    shared_cause="node {node}'s system clock has drifted out of tolerance, so every "
+                 "certificate and token it checks fails validation",
+    shared_reason="{node}'s clock reports 6m42s of skew against the cluster's time "
+                  "source, past the one-minute tolerance every validator enforces, "
+                  "while its peers show no measurable skew",
+    distractor_cause="the workloads' bound service account tokens simply expired and "
+                     "were never refreshed",
+    distractor_reason="each token's own issued and expiry timestamps are still "
+                      "comfortably within their validity window",
+    rationale="the workload's own certificate check fails because {node}'s clock "
+              "disagrees with everyone else's about what time it is, which is true "
+              "of everything validated there right now",
+    remedy="Correct the system clock on {node} (restart or resync its time "
+           "service); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (system clock)",
+        ("System clock: skewed\n"
+         "offset from cluster time source: 6m42s ahead\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "kubelet log: certificate and token validation are failing node-wide"),
+    ),
+    healthy_origin_content=(
+        "System clock: synced\n"
+        "offset from cluster time source: under 50ms\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "kubelet log: certificate and token validation are passing normally"
+    ),
+    origin_state=("skewed", "synced"),
+    origin_variants=(
+        (("System clock: skewed\n"
+          "offset from cluster time source: 6m42s ahead\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: certificate and token validation are failing node-wide"),
+         ("System clock: synced\n"
+          "offset from cluster time source: under 50ms\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: certificate and token validation are passing normally")),
+        (("the node's system clock is skewed against the cluster\n"
+          "it reads 6m42s ahead of every peer's clock\n"
+          "kubelet itself still posts Ready"),
+         ("the node's system clock is synced with the cluster\n"
+          "it reads within 50ms of every peer's clock\n"
+          "kubelet itself still posts Ready")),
+        (("Warning  ClockSkewDetected  kubelet  system clock is skewed by 6m42s "
+          "from the cluster's time source"),
+         ("Normal  ClockSkewCleared  kubelet  system clock is synced with the "
+          "cluster's time source")),
+        (("time sync status: skewed\n"
+          "drift measured: 402s\n"
+          "last successful sync: none in the current session"),
+         ("time sync status: synced\n"
+          "drift measured: under 1s\n"
+          "last successful sync: 4s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="x509: certificate has expired or is not yet valid",
+            local_cause="this workload's own client certificate genuinely expired "
+                        "and was never renewed",
+            local_reason="the certificate's own notAfter timestamp had already "
+                        "passed before this restart began",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: x509 certificate validity check failed (3 of 3 "
+                   "sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 9 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="this replica's own mounted certificate bundle is a stale "
+                        "copy from before the last routine rotation",
+            local_reason="the mounted bundle's own serial number does not match the "
+                        "one currently issued",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  9x  kubelet  Readiness probe failed: x509: "
+                   "certificate has expired or is not yet valid")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_NODE_CONNTRACK_FULL = Propagation(
+    key="node-conntrack-full",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's conntrack table is full, so it drops new connections",
+    shared_cause="node {node}'s conntrack table is full, so any new connection "
+                 "opened from a pod scheduled there is dropped",
+    shared_reason="{node} reports 262144 of 262144 conntrack entries in use with new "
+                  "insertions failing, while its peers run at a fraction of their "
+                  "table's size",
+    distractor_cause="the Services these workloads call are throttling requests "
+                     "under load",
+    distractor_reason="each called Service reports normal request latency and no "
+                      "throttling in its own metrics",
+    rationale="the workload cannot open a new connection because {node}'s conntrack "
+              "table has no room for one, which is true of everything scheduled "
+              "there right now",
+    remedy="Clear or expand the conntrack table on {node} (raise nf_conntrack_max "
+           "or clear stale entries); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (conntrack)",
+        ("Conntrack table: full\n"
+         "entries in use: 262144 of 262144\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "kubelet log: new connections are being dropped node-wide"),
+    ),
+    healthy_origin_content=(
+        "Conntrack table: clear\n"
+        "entries in use: 8192 of 262144\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "kubelet log: new connections are succeeding normally"
+    ),
+    origin_state=("full", "clear"),
+    origin_variants=(
+        (("Conntrack table: full\n"
+          "entries in use: 262144 of 262144\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: new connections are being dropped node-wide"),
+         ("Conntrack table: clear\n"
+          "entries in use: 8192 of 262144\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kubelet log: new connections are succeeding normally")),
+        (("this node's conntrack table is full\n"
+          "new connection attempts here are being refused at the netfilter layer\n"
+          "peer nodes' tables are far from their limit"),
+         ("this node's conntrack table is clear\n"
+          "new connection attempts here are succeeding at the netfilter layer\n"
+          "peer nodes' tables show the same headroom")),
+        (("Warning  ConntrackTableFull  kubelet  nf_conntrack: table full, dropping "
+          "packet"),
+         ("Normal  ConntrackTableClear  kubelet  nf_conntrack: table clear, "
+          "accepting packets")),
+        (("conntrack status: full\n"
+          "free entries: 0\n"
+          "insertion failures logged in the last 5m: 1400"),
+         ("conntrack status: clear\n"
+          "free entries: 253952\n"
+          "insertion failures logged in the last 5m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 11 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container {container}",
+            local_cause="this replica's own readiness probe timeout is shorter than "
+                        "the dependency it checks needs under any load",
+            local_reason="the probe's own timeout window is tighter than the "
+                        "dependency's typical response time",
+            read=("get_events {ns}/{name}",
+                  "Warning  Unhealthy  11x  kubelet  Readiness probe failed: dial "
+                  "tcp: i/o timeout"),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="failed to reach its peer: dial tcp: connection timed out",
+            local_cause="this workload's own peer-discovery retry budget is too "
+                        "small for a dependency that is merely slow to respond",
+            local_reason="the container gives up and exits before a slow connection "
+                        "would eventually succeed",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: outbound connection attempts timing out (3 of "
+                   "3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
                        _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
                        _T_BASE_IMAGE_TAG, _T_PVC_MULTI_ATTACH, _T_CNI_IP_POOL,
-                       _T_CSI_NODE_DRIVER)
+                       _T_CSI_NODE_DRIVER, _T_NODE_PID_PRESSURE,
+                       _T_NODE_RUNTIME_RESTARTING, _T_NODE_CLOCK_SKEW,
+                       _T_NODE_CONNTRACK_FULL)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
