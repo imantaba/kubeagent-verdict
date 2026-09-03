@@ -138,10 +138,14 @@ class Propagation:
     healthy_origin_content: str = ""
     # The discriminating read, rendered several ways. Each entry is
     # (broken content, healthy content) and entry 0 must equal
-    # (origin_read[1], healthy_origin_content) -- three call sites read those
-    # two directly, and making the legacy pair one of the drawn variants is
-    # what keeps them showing content the model has actually seen. Empty on
-    # the eval six: the exam is frozen and must consume the same RNG.
+    # (origin_read[1], healthy_origin_content). Two call sites reach that pair
+    # directly: `_render_shared_origin` takes it as the fallback when a
+    # scenario declares no variants, and `cases.multi`'s `healthy_origin`
+    # branch renders `healthy_origin_content` on its own, never going through
+    # the draw -- so the legacy wording is rendered whatever the variants say,
+    # and keeping it as entry 0 is what keeps those sites showing content the
+    # model has actually seen. Empty on the eval six: the exam is frozen and
+    # must consume the same RNG.
     origin_variants: tuple[tuple[str, str], ...] = ()
     # (broken token, healthy token). A word, not only a number -- the two
     # scenarios that failed at eval were separated by a quantity and the two

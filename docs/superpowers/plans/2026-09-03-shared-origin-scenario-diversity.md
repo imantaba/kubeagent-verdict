@@ -199,10 +199,14 @@ In `src/kubeagent_verdict/dataset/propagation.py`, inside the frozen `Propagatio
 ```python
     # The discriminating read, rendered several ways. Each entry is
     # (broken content, healthy content) and entry 0 must equal
-    # (origin_read[1], healthy_origin_content) -- three call sites read those
-    # two directly, and making the legacy pair one of the drawn variants is
-    # what keeps them showing content the model has actually seen. Empty on
-    # the eval six: the exam is frozen and must consume the same RNG.
+    # (origin_read[1], healthy_origin_content). Two call sites reach that pair
+    # directly: `_render_shared_origin` takes it as the fallback when a
+    # scenario declares no variants, and `cases.multi`'s `healthy_origin`
+    # branch renders `healthy_origin_content` on its own, never going through
+    # the draw -- so the legacy wording is rendered whatever the variants say,
+    # and keeping it as entry 0 is what keeps those sites showing content the
+    # model has actually seen. Empty on the eval six: the exam is frozen and
+    # must consume the same RNG.
     origin_variants: tuple[tuple[str, str], ...] = ()
     # (broken token, healthy token). A word, not only a number -- the two
     # scenarios that failed at eval were separated by a quantity and the two
@@ -279,10 +283,10 @@ Add to `tests/test_shared_origin_training.py`, in the scenario-rule block:
 ```python
 def test_every_trainable_scenario_declares_at_least_four_origin_variants():
     """Four literal strings per scenario is a lookup; several renderings of one
-    relation is not. Variant 0 must be the legacy pair because three call sites
-    read `origin_read[1]` / `healthy_origin_content` without going through the
-    draw -- `multi`'s healthy-origin read (cases.py:788-789), the banned-shape
-    blob, and the healthy-read invariant -- and they must keep showing content
+    relation is not. Variant 0 must be the legacy pair because `multi`'s
+    healthy-origin read renders `healthy_origin_content` without going through
+    the draw, and the pool invariants below read `origin_read[1]` /
+    `healthy_origin_content` directly -- all of them must keep showing content
     the model has actually seen.
     """
     for p in propagation.trainable_scenarios():
