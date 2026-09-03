@@ -135,10 +135,16 @@ def test_no_scenario_text_carries_a_banned_identifier_shape():
               re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
               re.compile(r"@"))
     for p in propagation.all_scenarios():
+        for v in p.victims:
+            assert isinstance(v.network_policies, tuple), (
+                f"{p.key}: network_policies must be a tuple, not "
+                f"{type(v.network_policies).__name__} -- a bare str is truthy, "
+                "survives the `or ()`, and would be joined character by "
+                "character, so every pattern below would silently miss it")
         blob = "\n".join([p.origin, p.shared_cause, p.shared_reason, p.distractor_cause,
                           p.distractor_reason, p.rationale, p.remedy,
                           p.origin_read[0], p.origin_read[1],
-                          p.healthy_origin_content]
+                          p.healthy_origin_content, p.notes]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n{v.local_cause}\n"
                             f"{v.local_reason}\n"
                             f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"

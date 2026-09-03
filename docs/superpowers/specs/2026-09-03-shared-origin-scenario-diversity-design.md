@@ -120,10 +120,11 @@ origin_variants: tuple[tuple[str, str], ...] = ()   # (broken content, healthy c
 **The legacy pair stays and becomes variant 0.** `origin_read[1]` and
 `healthy_origin_content` remain populated on every scenario and must equal
 `origin_variants[0]`. Two call sites read them without going through the draw
-— `multi`'s healthy-origin read (`cases.py:788-789`) and the healthy-read
-invariant — and making the legacy pair one of the drawn variants is what keeps
-those two showing content the model has actually seen,
-with no edit to any of them. It is asserted, not left to authoring care.
+— `_render_shared_origin`'s fallback when a scenario declares no variants
+(`cases.py:537`) and `multi`'s healthy-origin branch (`cases.py:800`) — and
+making the legacy pair one of the drawn variants is what keeps those two
+showing content the model has actually seen, with no edit to either. It is
+asserted, not left to authoring care.
 
 **The label does not move.** `origin_read[0]` stays a single string. That is the
 seam almost every consumer keys on — `origin_read_label` in `Example.meta`,
