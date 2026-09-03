@@ -40,6 +40,7 @@ does not belong in this module.
 import hashlib
 import json
 import re
+from collections import Counter
 
 import pytest
 
@@ -648,3 +649,88 @@ def test_training_still_contaminates_nothing(rows):
     held = {part for e in test for part in e.group.split("+")}
     for e in kept:
         assert not any(part in held for part in e.group.split("+")), e.group
+
+
+BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
+             # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
+             # the time per scenario, 5.7% across twenty -- a deterministic
+             # failure with correct data. 22 draws puts it below 1e-5.
+
+
+@pytest.fixture(scope="module")
+def big_rows():
+    return generate.generate(seed=SEED, size=BIG)
+
+
+def test_the_trainable_pool_exercises_every_issue_kind():
+    """A kind absent from the curriculum is a kind the shared-origin rule was
+    never taught over -- and `vocab.ISSUE_KINDS` is what the eval draws from.
+    """
+    seen = {v.issue for p in propagation.trainable_scenarios() for v in p.victims}
+    missing = sorted(set(vocab.ISSUE_KINDS) - seen)
+    assert not missing, f"no trainable scenario exercises: {missing}"
+
+
+def test_the_trainable_pool_holds_twenty_scenarios():
+    """Four scenarios is what the pool held when it scored 0.5 in-distribution
+    and 0.1 out. The count is asserted so shrinking it back is a deliberate
+    edit rather than a merge artefact.
+    """
+    assert len(propagation.trainable_scenarios()) == 20
+
+
+def test_every_trainable_scenario_is_taught_equally(big_rows):
+    """Equal shares are what make a constant answer chance-level: a scenario
+    the curriculum shows twice as often is one the model can afford to answer
+    by name.
+    """
+    keys = {p.key for p in propagation.trainable_scenarios()}
+    for case in ("shared_origin", "shared_origin_decoy"):
+        counts = Counter(e.meta["origin"] for e in big_rows if e.case == case)
+        assert set(counts) == keys, f"{case}: {sorted(keys ^ set(counts))}"
+        assert len(set(counts.values())) == 1, f"{case}: uneven shares {dict(counts)}"
+
+
+def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_rows):
+    """Declaring four variants is not the same as rendering them. If the draw
+    were keyed on something constant per scenario, every row would carry
+    variant 0 and the whole mechanism would be inert while its own unit test
+    still passed.
+
+    The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
+    random: this is a sampling check, and its strength is a function of `BIG`.
+    At 22 draws per scenario a correct pool trips it less than once in 10^5
+    runs. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
+    and the failure names a scenario whose data is fine.
+    """
+    by_key = {p.key: p for p in propagation.trainable_scenarios()}
+    seen = {k: set() for k in by_key}
+    for e in big_rows:
+        if e.case != "shared_origin":
+            continue
+        p = by_key[e.meta["origin"]]
+        for i, (broken, _healthy) in enumerate(p.origin_variants):
+            if broken.split("\n")[0] in e.user:
+                seen[p.key].add(i)
+    thin = {k: sorted(v) for k, v in seen.items() if len(v) < 3}
+    assert not thin, f"scenarios rendering fewer than 3 variants: {thin}"
+
+
+def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
+    """The flattening the slice exists for.
+
+    Measured on the four-scenario pool before this slice: 15 distinct causes,
+    top one 0.263 and top three 0.633. A model that answers the single most
+    common cause on every shared-origin row was right a quarter of the time.
+    The bar is 0.12 and 0.30 -- both of which the old pool failed by a wide
+    margin, which is what makes this check non-vacuous.
+    """
+    causes = Counter(cause
+                     for e in big_rows if e.case == "shared_origin"
+                     for cause in e.meta["expected"].values())
+    total = sum(causes.values())
+    top = causes.most_common(3)
+    assert top[0][1] / total <= 0.12, (
+        f"{top[0][0]!r} is {top[0][1] / total:.3f} of all shared-origin causes")
+    assert sum(n for _c, n in top) / total < 0.30, (
+        f"top three are {sum(n for _c, n in top) / total:.3f} of all causes")
