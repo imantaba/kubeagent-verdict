@@ -1992,7 +1992,7 @@ _T_NODE_RUNTIME_RESTARTING = Propagation(
             workload_kind="Deployment", status="RestartLoop", issue="RestartLoop",
             reason="container {container} has restarted {restarts} times and is "
                   "Running again between attempts",
-            evidence="last state terminated with exit code 1",
+            evidence="last state terminated with exit code 137",
             log_cause="an in-container exec call never returned before the container "
                       "was torn down",
             local_cause="this workload's own exec-based liveness hook occasionally "
@@ -2128,9 +2128,9 @@ _T_NODE_CONNTRACK_FULL = Propagation(
     origin="the node's conntrack table is full, so it drops new connections",
     shared_cause="node {node}'s conntrack table is full, so any new connection "
                  "opened from a pod scheduled there is dropped",
-    shared_reason="{node} reports 262144 of 262144 conntrack entries in use with new "
-                  "insertions failing, while its peers run at a fraction of their "
-                  "table's size",
+    shared_reason="new connections through {node}'s netfilter path are being refused "
+                  "rather than tracked, and the drops are logged there continuously "
+                  "while no other node logs any",
     distractor_cause="the Services these workloads call are throttling requests "
                      "under load",
     distractor_reason="each called Service reports normal request latency and no "
