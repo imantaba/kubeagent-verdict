@@ -1458,8 +1458,8 @@ _T_BASE_IMAGE_TAG = Propagation(
     distractor_cause="the container registry is intermittently corrupting layers "
                      "during a bulk rebuild",
     distractor_reason="every pull for these images completes and matches its "
-                      "expected digest; each failure happens only after the "
-                      "container is already running",
+                      "expected digest, and the same layers verify against the "
+                      "registry's own manifest on every node that holds them",
     rationale="the workload's failure is what happens when the shared base image "
               "tag it was built from ships a broken build, which is true of every "
               "image tracking that tag right now",
@@ -1511,7 +1511,7 @@ _T_BASE_IMAGE_TAG = Propagation(
             log_cause="error while loading shared libraries: libssl.so.3: cannot "
                       "open shared object file",
             local_cause="this workload's own image pinned a libssl version its "
-                        "base image no longer ships",
+                        "base image does not ship",
             local_reason="the container exits before it can bind its listening port",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: missing shared library libssl.so.3 (3 of 3 "
@@ -1639,8 +1639,9 @@ _T_CNI_IP_POOL = Propagation(
                   "unchanged for six hours despite pods churning",
     distractor_cause="the container runtime on these nodes is refusing to create "
                      "new sandboxes",
-    distractor_reason="other pods scheduled on the very same nodes in the last "
-                      "few minutes started cleanly",
+    distractor_reason="the runtime's own health check passes on these nodes, and "
+                      "every sandbox failure names the CNI plugin rather than "
+                      "containerd",
     rationale="the workload cannot get a pod address or be scheduled with one "
               "because the shared address pool has nothing left to give it, which "
               "is true of every new pod cluster-wide right now",
