@@ -81,7 +81,7 @@ are literal and distinct; an `origin_state` word pair present in every variant
 of its own half and absent from the other; no banned identifier shape
 anywhere; and, across the pool, twenty scenarios taught in equal shares,
 exercising all sixteen issue kinds, each rendering at least three of its
-variants, with no cause template over 12% and no top three over 30%.
+variants, with no cause template over 12% and the top three under 30%.
 
 Judgment, and unenforced:
 
@@ -91,10 +91,11 @@ Judgment, and unenforced:
 - Write decoy causes a reader would have to check. A decoy dismissible on
   plausibility teaches the model to dismiss decoys, not to read the origin.
 - A victim read must be able to be true beside the *healthy* origin content.
-  The enforced half catches only the case where the `origin_state` token
-  itself appears -- and it scans `origin_variants`, so a victim read naming
-  the shared component in other words passes it vacuously.
-  `_T_CONFIGMAP`'s two `healthy_read_content` swaps are what that looks like.
+  The enforced half catches only the case where the `origin_state` broken
+  token appears literally in the victim's own read -- a read naming the
+  shared component in other words never trips the check at all, so it
+  passes vacuously. `_T_CONFIGMAP`'s two `healthy_read_content` swaps are
+  what the mechanised case looks like.
 - Staleness belongs in a trace sentence, never in a read. A candidate whose
   `reason` describes the origin as it was a minute ago is correct and is the
   skill being taught: the read above it settles the question. The same

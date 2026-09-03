@@ -1227,9 +1227,10 @@ Append to the module docstring of `src/kubeagent_verdict/dataset/propagation.py`
 Authoring a trainable scenario
 ------------------------------
 
-Nine of the rules below are enforced by `tests/test_shared_origin_training.py`
-and will fail the suite. Six are judgment and will not -- they are written here
-because a test cannot hold them, not because they matter less.
+The rules below come in two groups. The first is enforced by
+`tests/test_shared_origin_training.py` and will fail the suite. The second is
+judgment: no test expresses it, which is why it is written here. Each rule in
+the second group cost a defect to learn.
 
 Enforced: the key's shape and its disjointness from the eval six; both cause
 strings unique across the pool; every `local_cause` unique within the scenario
@@ -1238,8 +1239,10 @@ and across the pool; 2-4 victims with kinds from `vocab.ISSUE_KINDS`;
 `blast_radius`; a non-empty `healthy_origin_content`; at least four
 `origin_variants` whose first entry is the legacy pair and whose first lines
 are literal and distinct; an `origin_state` word pair present in every variant
-of its own half and absent from the other; no banned identifier shape anywhere;
-and, across the pool, all sixteen issue kinds with no cause template over 12%.
+of its own half and absent from the other; no banned identifier shape
+anywhere; and, across the pool, twenty scenarios taught in equal shares,
+exercising all sixteen issue kinds, each rendering at least three of its
+variants, with no cause template over 12% and the top three under 30%.
 
 Judgment, and unenforced:
 
@@ -1249,16 +1252,35 @@ Judgment, and unenforced:
 - Write decoy causes a reader would have to check. A decoy dismissible on
   plausibility teaches the model to dismiss decoys, not to read the origin.
 - A victim read must be able to be true beside the *healthy* origin content.
-  The enforced half catches the case where the state token itself appears;
-  naming the shared component in other words is invisible to it, and
-  `_T_CONFIGMAP`'s two `healthy_read_content` swaps are what that looks like.
+  The enforced half catches only the case where the `origin_state` broken
+  token appears literally in the victim's own read -- a read naming the
+  shared component in other words never trips the check at all, so it
+  passes vacuously. `_T_CONFIGMAP`'s two `healthy_read_content` swaps are
+  what the mechanised case looks like.
+- Staleness belongs in a trace sentence, never in a read. A candidate whose
+  `reason` describes the origin as it was a minute ago is correct and is the
+  skill being taught: the read above it settles the question. The same
+  staleness inside a read has nothing above it to resolve against, so the row
+  simply lies. On the shared half, no trace sentence may contradict the broken
+  origin read or the `shared_cause`; staleness runs one way only.
+- A trace sentence must not contradict its victim's own inventory row -- its
+  `issue` kind, `status`, `evidence` or `log cause` -- on either half. Kinds
+  carry semantics: `ContainerStartError` never ran, `CrashLoopBackOff` and
+  `RestartLoop` ran and died, `ProbeFailure` is running and failing a probe,
+  `OOMKilled` was killed by the kernel. So do termination modes: a kubelet
+  kill is exit 137 or 143, while exit 1 is the entrypoint returning 1 itself.
 - `log_cause` renders on both halves -- it belongs to the Finding, not the
   read (`cases.py:461`). Each `local_cause` must be compatible with it.
+- Do not reuse another scenario's `shared_reason` skeleton. The uniqueness
+  rules cover the cause strings and not the reason sentences, so two scenarios
+  can pass every test while reading as one template with the nouns swapped.
 - Scenarios sharing a blast radius must not share a cause shape. Four
   node-scoped scenarios that all read "the node is out of something" are one
   scenario spelled four ways.
 - Never hard-code a namespace, node or workload name. `{ns}`, `{node}` and
   `{name}` are substituted from `names.py`.
+- Render both halves and read them. This is the step that found a defect on
+  each of Tasks 7 and 8, both after a review had approved the scenario.
 ```
 
 - [ ] **Step 2: Update `docs/how-training-works.md`**
