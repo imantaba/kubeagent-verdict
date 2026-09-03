@@ -764,6 +764,9 @@ _T_CA = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
                    "remote error: tls: bad certificate")),
+            healthy_read_content=(
+                "Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
+                "connect: connection refused on the probe port"),
             pass_confidence="medium",
         ),
         Victim(
@@ -875,6 +878,9 @@ _T_KUBE_PROXY = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  Unhealthy  14x  kubelet  Readiness probe failed: "
                    "dependency check could not reach its Service")),
+            healthy_read_content=(
+                "Warning  Unhealthy  14x  kubelet  Readiness probe failed: "
+                "probe timed out after 1s, successThreshold 5 not met"),
             pass_confidence="medium",
         ),
     ),
@@ -1050,6 +1056,9 @@ _T_SCALED_TO_ZERO = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  Unhealthy  6x  kubelet  Readiness probe failed: "
                    "dependency session has no endpoints")),
+            healthy_read_content=(
+                "Warning  Unhealthy  6x  kubelet  Readiness probe failed: "
+                "HTTP probe returned 503, dependency check added in this revision"),
             pass_confidence="medium",
         ),
         Victim(
