@@ -37,6 +37,8 @@ alone passes both halves of decider 5. Fixing that is an exam-side change and
 does not belong in this module.
 """
 
+import hashlib
+import json
 import re
 
 import pytest
@@ -316,6 +318,22 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
     byte-identical across the change.
     """
     assert len(generate.test_set()) == 263
+
+
+# Captured on `main` @ `ee2980e` and re-confirmed on this branch before any
+# edit. Every banked scoreboard -- 0830, 0901, 0902 -- was scored against
+# exactly these 263 rows, so if this moves, those numbers are no longer
+# comparable to anything measured after it and the change that moved it is
+# wrong. The row count above cannot see a rewrite that keeps the count.
+EVAL_SET_SHA256 = "e8cbb549289ebaf07ba817dd3d32fdf70724c0ae80410eb47d2228a3b22b49de"
+
+
+def test_the_eval_set_is_byte_identical_to_the_one_every_scoreboard_used():
+    blob = json.dumps([generate.to_row(e) for e in generate.test_set()],
+                      sort_keys=True, ensure_ascii=False)
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    assert digest == EVAL_SET_SHA256, (
+        "the exam moved; every banked scoreboard comparison is now void")
 
 
 def test_no_eval_row_comes_from_the_trainable_pool():
