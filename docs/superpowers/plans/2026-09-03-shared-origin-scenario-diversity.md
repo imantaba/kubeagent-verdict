@@ -574,7 +574,9 @@ the eval measured that scenario never reading. It now names its state."
 
 ## Task 4: The remaining pool invariants, and freeze the eval six
 
-Constraints 4, 6, 8, 9, 10 and the constraint-14 extension. All six pass on the pool as it stands — they were checked against it before this plan was written — so they land green here and then gate the sixteen scenarios Tasks 5–8 add.
+Constraints 4, 6, 8, 9, 10, the constraint-12 extension and the constraint-14 extension. Six of the seven pass on the pool as it stands — they were checked against it before this plan was written, and re-checked after Task 3 rewrote `kube-proxy-degraded` and added `origin_state` to all four scenarios — so they land green here and then gate the sixteen scenarios Tasks 5–8 add.
+
+The seventh is different and is the one addition this plan did not start with. `test_no_two_variants_are_the_same_rendering_with_different_numbers` was written after Task 3's review found that two of the four scenarios had `origin_variants[1]` authored as `origin_variants[0]` with the numbers swapped — one the same three-line template with two quantities changed, the other those same lines reordered. Both passed every other test in the file, and both survived a full task review before a human reading of the literals caught them. Sixteen more scenarios carrying four variants each is sixty-four more chances at the same mistake, and the module docstring's "vary the rendering" was guidance a test could not enforce. It can enforce this much of it: collapse every number-plus-unit token to `N`, sort the lines, and require the results distinct. Verified against `a861e91` — the pre-fix commit — where it fails on both scenarios and on both halves, four collisions in total, while firing on neither of the two variants that were authored as genuinely different renderings.
 
 **Files:**
 - Modify: `tests/test_shared_origin_training.py`
@@ -654,6 +656,52 @@ def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
                 f"{p.key}: a victim read carries {broken_token!r} with no healthy swap")
             assert broken_token not in v.healthy_read_content, (
                 f"{p.key}: the healthy swap still carries {broken_token!r}")
+
+
+_QUANTITY = re.compile(r"\d+[A-Za-z]*")
+
+
+def _canonical_rendering(content: str) -> str:
+    """A variant with its quantities and its line order taken away.
+
+    Every number-plus-unit token collapses to `N` and the lines are sorted, so
+    two renderings that differ only in their numbers -- or only in the order
+    they present the same fields -- reduce to the same string. Two genuinely
+    different renderings do not.
+    """
+    return "\n".join(sorted(
+        re.sub(r"\s+", " ", _QUANTITY.sub("N", line)).strip()
+        for line in content.split("\n") if line.strip()))
+
+
+def test_no_two_variants_are_the_same_rendering_with_different_numbers():
+    """The variant axis is renderings, not numbers.
+
+    A scenario can satisfy the count check, the first-line check and the state
+    check with four copies of one template carrying different quantities --
+    which is exactly the lookup the variant axis exists to defeat, dressed as
+    diversity. This is the mechanical half of "vary the rendering". The rest
+    stays authoring guidance in the module docstring, because judging whether
+    two English sentences say the same thing in different words is not a test.
+
+    Not vacuous, and not hypothetically: `internal-ca-expired` and
+    `shared-dependency-scaled-to-zero` both failed this at `a861e91`, on both
+    halves, after passing every other test in this file and a full task
+    review. One was the same three-line template with two numbers swapped; the
+    other was those lines reordered. Sorting is what catches the second, and
+    collapsing the unit letter along with the digits is what catches the first
+    -- `2h` against `41m` leaves `h` against `m` if only digits are stripped,
+    and the collision is missed.
+    """
+    for p in propagation.trainable_scenarios():
+        for half, which in ((0, "broken"), (1, "healthy")):
+            seen = {}
+            for i, pair in enumerate(p.origin_variants):
+                form = _canonical_rendering(pair[half])
+                assert form not in seen, (
+                    f"{p.key}: {which} variant {i} is variant {seen[form]} with "
+                    f"different numbers or a different line order")
+                seen[form] = i
 ```
 
 Then extend the banned-shape test's blob. In `test_no_trainable_scenario_text_carries_a_banned_identifier_shape`, change the list being joined so it also covers the variants and the state tokens — a banned shape appearing only inside a variant is invisible to the blob as it stands:
@@ -697,7 +745,9 @@ Expected: PASS. These invariants were verified against the current pool before t
 
 - [ ] **Step 3: Prove the new tests are not vacuous**
 
-For each of the five new tests in `tests/test_shared_origin_training.py`, temporarily break one scenario so that test fails, confirm the failure names the scenario, and revert. Suggested mutations: set `_T_KUBE_PROXY`'s `scope_field` to `None`; copy `_T_CA`'s `shared_cause` onto `_T_CONFIGMAP`; copy one `local_cause` across two scenarios; set every `pass_confidence` in `_T_KUBE_PROXY` to `"high"`; delete the `healthy_read_content` added to `_T_CA`'s third victim. Revert every mutation before committing and re-run.
+For each of the six new tests in `tests/test_shared_origin_training.py`, temporarily break one scenario so that test fails, confirm the failure names the scenario, and revert. Suggested mutations: set `_T_KUBE_PROXY`'s `scope_field` to `None`; copy `_T_CA`'s `shared_cause` onto `_T_CONFIGMAP`; copy one `local_cause` across two scenarios; set every `pass_confidence` in `_T_KUBE_PROXY` to `"high"`; delete the `healthy_read_content` added to `_T_CA`'s third victim; and for the rendering test, copy `_T_CA`'s `origin_variants[0]` over its `origin_variants[1]` and change one number in each line — the failure must name `internal-ca-expired`, and it must name a half. Revert every mutation before committing and re-run.
+
+The rendering test has a second, stronger piece of evidence available, and it is worth recording in the report rather than only asserting the mutation: it was verified against `a861e91` before this task was dispatched, where it fails four times on the pool as that commit left it. A test whose failure has been observed on real committed data, not only on a mutation authored to trip it, is on firmer ground.
 
 - [ ] **Step 4: Run the whole suite**
 
@@ -766,7 +816,7 @@ Each one must satisfy all fifteen constraints. Nine of them are tests that alrea
 9. `scope_field` agrees with `blast_radius` — `cluster` → `None`. **(tested)**
 10. A victim read that asserts the origin is broken declares a `healthy_read_content` that does not. The token half is tested; the English half is judgment — read each victim's read against the *healthy* origin content and ask whether the two could be true at once. **(half tested)**
 11. `healthy_origin_content` is non-empty. **(tested)**
-12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. **(tested)**
+12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. No two variants may be the same rendering with different numbers or a different line order — quantities collapse to `N` and lines sort before the comparison, so swapping `2h` for `41m` or moving a line to the front does not make a new variant. **(tested)**
 13. `origin_state` is a `(broken, healthy)` word pair; each token carries a letter; the broken token appears in every broken variant and in no healthy one, and vice versa. **(tested)**
 14. No dotted-quad IP, no `https?://`, no `kubeconfig`, no `/home/`, no `@` in any field. **(tested)**
 15. Contributes toward the pool exercising all sixteen `vocab.ISSUE_KINDS` — asserted in Task 9, which is why the kinds in the table are fixed.
@@ -843,7 +893,7 @@ All fifteen constraints apply. Nine are tests that already run; six are authorin
 9. `scope_field` agrees with `blast_radius` — `cluster` → `None`, `node` → `"node"`. **(tested)**
 10. A victim read that asserts the origin is broken declares a `healthy_read_content` that does not. The token half is tested; the English half is judgment. **(half tested)**
 11. `healthy_origin_content` is non-empty. **(tested)**
-12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. **(tested)**
+12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. No two variants may be the same rendering with different numbers or a different line order — quantities collapse to `N` and lines sort before the comparison, so swapping `2h` for `41m` or moving a line to the front does not make a new variant. **(tested)**
 13. `origin_state` is a `(broken, healthy)` word pair; each token carries a letter; the broken token appears in every broken variant and in no healthy one, and vice versa. **(tested)**
 14. No dotted-quad IP, no `https?://`, no `kubeconfig`, no `/home/`, no `@` in any field. **(tested)**
 15. Contributes toward the pool exercising all sixteen `vocab.ISSUE_KINDS` — asserted in Task 9.
@@ -915,7 +965,7 @@ All fifteen constraints apply. Nine are tests that already run; six are authorin
 9. `scope_field` agrees with `blast_radius` — `node` → `"node"` on all four. **(tested)**
 10. A victim read that asserts the origin is broken declares a `healthy_read_content` that does not. The token half is tested; the English half is judgment. **(half tested)**
 11. `healthy_origin_content` is non-empty. **(tested)**
-12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. **(tested)**
+12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. No two variants may be the same rendering with different numbers or a different line order — quantities collapse to `N` and lines sort before the comparison, so swapping `2h` for `41m` or moving a line to the front does not make a new variant. **(tested)**
 13. `origin_state` is a `(broken, healthy)` word pair; each token carries a letter; the broken token appears in every broken variant and in no healthy one, and vice versa. **(tested)**
 14. No dotted-quad IP, no `https?://`, no `kubeconfig`, no `/home/`, no `@` in any field. **(tested)**
 15. Contributes toward the pool exercising all sixteen `vocab.ISSUE_KINDS` — asserted in Task 9.
@@ -987,7 +1037,7 @@ All fifteen constraints apply. Nine are tests that already run; six are authorin
 9. `scope_field` agrees with `blast_radius` — `namespace` → `"ns"` on all four. **(tested)**
 10. A victim read that asserts the origin is broken declares a `healthy_read_content` that does not. The token half is tested; the English half is judgment. `_T_CONFIGMAP`'s two swaps are the worked example: a victim naming the shared component by name, next to a healthy origin read showing that component fine, contradicts itself. **(half tested)**
 11. `healthy_origin_content` is non-empty. **(tested)**
-12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. **(tested)**
+12. At least 4 `origin_variants`, and `origin_variants[0] == (origin_read[1], healthy_origin_content)`. Every variant's first line is literal (no `{...}`) and distinct within the scenario. No two variants may be the same rendering with different numbers or a different line order — quantities collapse to `N` and lines sort before the comparison, so swapping `2h` for `41m` or moving a line to the front does not make a new variant. **(tested)**
 13. `origin_state` is a `(broken, healthy)` word pair; each token carries a letter; the broken token appears in every broken variant and in no healthy one, and vice versa. **(tested)**
 14. No dotted-quad IP, no `https?://`, no `kubeconfig`, no `/home/`, no `@` in any field. **(tested)**
 15. Contributes toward the pool exercising all sixteen `vocab.ISSUE_KINDS` — asserted in Task 9. These four carry the last missing kinds, so a typo in `OOMKilled`, `Init:OOMKilled` or `Init:CrashLoopBackOff` fails that assertion rather than passing quietly.
