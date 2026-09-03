@@ -143,6 +143,74 @@ def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"
 
 
+def test_a_scenario_with_variants_renders_more_than_one_of_them():
+    """The mechanism, exercised on a scenario built for the test.
+
+    Asserted here rather than only on the real pool because the real pool's
+    scenarios are added in later commits, and a draw site that silently
+    ignored `origin_variants` would otherwise land green.
+    """
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = propagation.trainable_scenarios()[0]
+    variants = tuple(
+        (f"state: broken variant {i}\n{base.origin_read[1]}",
+         f"state: healthy variant {i}\n{base.healthy_origin_content}")
+        for i in range(4))
+    p = dataclasses.replace(base, origin_variants=variants)
+
+    seen = set()
+    for salt in range(40):
+        e = cases.shared_origin(p, random.Random(salt), victims=2)
+        seen |= {i for i, (b, _h) in enumerate(variants)
+                 if b.split("\n")[0] in e.user}
+    assert len(seen) > 1, f"only variant(s) {seen} ever rendered"
+
+
+def test_a_pair_built_from_one_salt_draws_the_same_variant():
+    """`generate.py:156-159` spends one salt twice, so the twins replay one
+    stream. The draw sits before the `healthy` branch precisely so both halves
+    reach it in the same RNG state -- otherwise a pair could contrast variant
+    2's broken blob against variant 0's healthy one, which is two changes at
+    once and no longer isolates the origin's state.
+    """
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = propagation.trainable_scenarios()[0]
+    variants = tuple(
+        (f"state: broken variant {i}\n{base.origin_read[1]}",
+         f"state: healthy variant {i}\n{base.healthy_origin_content}")
+        for i in range(4))
+    p = dataclasses.replace(base, origin_variants=variants)
+
+    for salt in range(40):
+        one = cases.shared_origin(p, random.Random(salt), victims=2)
+        other = cases.shared_origin_decoy(p, random.Random(salt), victims=2)
+        drawn = [i for i, (b, _h) in enumerate(variants)
+                 if b.split("\n")[0] in one.user]
+        assert len(drawn) == 1, f"salt {salt}: {len(drawn)} broken variants matched"
+        assert variants[drawn[0]][1].split("\n")[0] in other.user, (
+            f"salt {salt}: the twin drew a different variant")
+
+
+def test_a_scenario_without_variants_renders_exactly_what_it_did_before():
+    """The eval six declare none and must consume the RNG identically."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    for p in propagation.all_scenarios():
+        assert p.origin_variants == (), p.key
+        e = cases.shared_origin_probe(p, random.Random(3))
+        assert p.origin_read[1].split("\n")[0] in e.user, p.key
+
+
 # ---------------------------------------------------------- the curriculum mix
 
 def test_the_case_mix_names_shared_origin_and_still_sums_to_one_hundred():

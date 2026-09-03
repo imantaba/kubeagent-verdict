@@ -136,6 +136,18 @@ class Propagation:
     # slice existed; nothing rendered it, and the exam could not tell a model
     # that reads the content from one that matches the label.
     healthy_origin_content: str = ""
+    # The discriminating read, rendered several ways. Each entry is
+    # (broken content, healthy content) and entry 0 must equal
+    # (origin_read[1], healthy_origin_content) -- three call sites read those
+    # two directly, and making the legacy pair one of the drawn variants is
+    # what keeps them showing content the model has actually seen. Empty on
+    # the eval six: the exam is frozen and must consume the same RNG.
+    origin_variants: tuple[tuple[str, str], ...] = ()
+    # (broken token, healthy token). A word, not only a number -- the two
+    # scenarios that failed at eval were separated by a quantity and the two
+    # that passed by a lexical state token. Enforced over the trainable pool
+    # only; the eval six are asked, not taught.
+    origin_state: tuple[str, str] = ("", "")
     shared_verdict: str = "outranked"
     distractor_verdict: str = "ruled_out"
     notes: str = field(default="")
