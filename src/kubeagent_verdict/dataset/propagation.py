@@ -2217,13 +2217,432 @@ _T_NODE_CONNTRACK_FULL = Propagation(
     ),
 )
 
+_T_LIMITRANGE_LOWERED = Propagation(
+    key="namespace-limitrange-lowered",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="a LimitRange in the namespace had its default memory limit lowered "
+          "under the workloads' real footprint",
+    shared_cause="the {ns} namespace's LimitRange had its default memory limit "
+                 "lowered, so every pod there without its own explicit limit "
+                 "inherits too little",
+    shared_reason="the LimitRange {ns}/default-limits sets a default container "
+                  "memory limit of 64Mi, lowered from 512Mi eighteen minutes ago",
+    distractor_cause="the nodes these pods landed on are under memory pressure "
+                     "and evicting workloads",
+    distractor_reason="every node these pods run on reports no MemoryPressure "
+                      "condition",
+    rationale="the container is OOMKilled at a memory limit it inherited from "
+              "the namespace's own LimitRange, which is true of every workload "
+              "in {ns} without its own explicit limit",
+    remedy="Raise the LimitRange's default memory limit in {ns} back to its "
+          "previous value; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe {ns}/default-limits (LimitRange)",
+        ("container memory default: lowered\n"
+         "Type       Resource  Default  DefaultRequest\n"
+         "Container  memory    64Mi     64Mi\n"
+         "changed 18m ago from 512Mi"),
+    ),
+    healthy_origin_content=(
+        "container memory default: restored\n"
+        "Type       Resource  Default  DefaultRequest\n"
+        "Container  memory    512Mi    512Mi\n"
+        "changed 18m ago to 512Mi"
+    ),
+    origin_state=("lowered", "restored"),
+    origin_variants=(
+        (("container memory default: lowered\n"
+          "Type       Resource  Default  DefaultRequest\n"
+          "Container  memory    64Mi     64Mi\n"
+          "changed 18m ago from 512Mi"),
+         ("container memory default: restored\n"
+          "Type       Resource  Default  DefaultRequest\n"
+          "Container  memory    512Mi    512Mi\n"
+          "changed 18m ago to 512Mi")),
+        (("the namespace's memory default is lowered\n"
+          "namespace {ns}: Active\n"
+          "workloads under this LimitRange: 5 of 5"),
+         ("the namespace's memory default is restored\n"
+          "namespace {ns}: Active\n"
+          "workloads under this LimitRange: 5 of 5")),
+        (("LimitRange default-limits: memory default lowered 18m ago\n"
+          "namespace {ns}: Active, no deletion timestamp\n"
+          "containers without their own limit inherit it"),
+         ("LimitRange default-limits: memory default restored 18m ago\n"
+          "namespace {ns}: Active, no deletion timestamp\n"
+          "containers without their own limit inherit it")),
+        (("the LimitRange every flagged workload falls under: memory default "
+          "lowered\n"
+          "last changed 18m ago\n"
+          "applies to every container without its own limit"),
+         ("the LimitRange every flagged workload falls under: memory default "
+          "restored\n"
+          "last changed 18m ago\n"
+          "applies to every container without its own limit")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="OOMKilled", issue="OOMKilled",
+            reason="container {container} was OOMKilled at its inherited memory "
+                  "limit",
+            evidence="container {container} last terminated with reason "
+                     "OOMKilled, exit code 137",
+            local_cause="this Deployment's own container genuinely needs more "
+                        "memory than the namespace default currently provides",
+            local_reason="its memory usage climbs past the current default "
+                        "within minutes of starting, on every attempt",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Last State:  Terminated\n"
+                   "  Reason:    OOMKilled\n"
+                   "  Exit Code: 137\n"
+                   "  Started:   3m ago")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Init:OOMKilled", issue="Init:OOMKilled",
+            reason="init container {init_container} was OOMKilled before the "
+                  "main container could start",
+            evidence='init container "{init_container}" (1/2), exitCode=137',
+            local_cause="this Job's own init container loads a dataset too "
+                        "large for the namespace default to cover",
+            local_reason="the init step allocates more than the current "
+                        "default allows before the main container ever runs",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n"
+                   "  {init_container}:\n"
+                   "    State:      Terminated\n"
+                   "    Reason:     OOMKilled\n"
+                   "    Exit Code:  137")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_EGRESS_PROXY_DOWN = Propagation(
+    key="namespace-egress-proxy-down",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's egress proxy Deployment has no ready replicas",
+    shared_cause="the {ns} egress proxy Deployment has no ready replicas, so "
+                 "every pod in {ns} that reaches out through it fails",
+    shared_reason="the {ns}/egress-proxy Deployment has been restarting "
+                  "continuously for eleven minutes and has never reached one "
+                  "ready replica",
+    distractor_cause="the namespace's NetworkPolicy began blocking egress "
+                     "traffic",
+    distractor_reason="the {ns} NetworkPolicy's egress rules are unchanged and "
+                      "still permit the traffic these pods send",
+    rationale="the workload's own outbound call fails because the {ns} egress "
+              "proxy it routes through has no ready replica, which is true of "
+              "everything that routes through it",
+    remedy="Restore the {ns} egress proxy Deployment to a ready replica; the "
+          "flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe {ns}/egress-proxy (Deployment)",
+        ("egress-proxy Deployment: restarting\n"
+         "Replicas:  3 desired | 3 updated | 0 available | 3 unavailable\n"
+         "Pods:      egress-proxy-6f9c8d7b4-2k9pl   0/1  CrashLoopBackOff  9 "
+         "restarts\n"
+         "           egress-proxy-6f9c8d7b4-7h3qx   0/1  CrashLoopBackOff  9 "
+         "restarts\n"
+         "           egress-proxy-6f9c8d7b4-mvw2n   0/1  CrashLoopBackOff  9 "
+         "restarts\n"
+         "Last log:  panic: failed to load proxy TLS certificate"),
+    ),
+    healthy_origin_content=(
+        "egress-proxy Deployment: steady\n"
+        "Replicas:  3 desired | 3 updated | 3 available | 0 unavailable\n"
+        "Pods:      egress-proxy-6f9c8d7b4-2k9pl   1/1  Running  0 restarts\n"
+        "           egress-proxy-6f9c8d7b4-7h3qx   1/1  Running  0 restarts\n"
+        "           egress-proxy-6f9c8d7b4-mvw2n   1/1  Running  0 restarts\n"
+        "Last log:  proxy ready, serving"
+    ),
+    origin_state=("restarting", "steady"),
+    origin_variants=(
+        (("egress-proxy Deployment: restarting\n"
+          "Replicas:  3 desired | 3 updated | 0 available | 3 unavailable\n"
+          "Pods:      egress-proxy-6f9c8d7b4-2k9pl   0/1  CrashLoopBackOff  9 "
+          "restarts\n"
+          "           egress-proxy-6f9c8d7b4-7h3qx   0/1  CrashLoopBackOff  9 "
+          "restarts\n"
+          "           egress-proxy-6f9c8d7b4-mvw2n   0/1  CrashLoopBackOff  9 "
+          "restarts\n"
+          "Last log:  panic: failed to load proxy TLS certificate"),
+         ("egress-proxy Deployment: steady\n"
+          "Replicas:  3 desired | 3 updated | 3 available | 0 unavailable\n"
+          "Pods:      egress-proxy-6f9c8d7b4-2k9pl   1/1  Running  0 "
+          "restarts\n"
+          "           egress-proxy-6f9c8d7b4-7h3qx   1/1  Running  0 "
+          "restarts\n"
+          "           egress-proxy-6f9c8d7b4-mvw2n   1/1  Running  0 "
+          "restarts\n"
+          "Last log:  proxy ready, serving")),
+        (("the namespace's egress proxy is restarting\n"
+          "namespace {ns}: Active\n"
+          "pods in {ns} that use it: 6 of 6"),
+         ("the namespace's egress proxy is steady\n"
+          "namespace {ns}: Active\n"
+          "pods in {ns} that use it: 6 of 6")),
+        (("egress-proxy status: restarting, 0 of 3 pods ready\n"
+          "last crash 40s ago\n"
+          "crash log: panic: failed to load proxy TLS certificate"),
+         ("egress-proxy status: steady, 3 of 3 pods ready\n"
+          "last crash: none in the last hour\n"
+          "crash log: none, proxy serving normally")),
+        (("the egress proxy every flagged workload routes through: "
+          "restarting\n"
+          "Deployment {ns}/egress-proxy: 0 of 3 available\n"
+          "routed through by every workload flagged here"),
+         ("the egress proxy every flagged workload routes through: steady\n"
+          "Deployment {ns}/egress-proxy: 3 of 3 available\n"
+          "routed through by every workload flagged here")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 10 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container "
+                     "{container}",
+            local_cause="this workload's own readiness probe budget is too "
+                        "tight for a normal external round trip",
+            local_reason="the probe fails on its own short deadline regardless "
+                        "of what it calls",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  10x  kubelet  Readiness probe failed: "
+                   "outbound check blocked waiting on the egress proxy")),
+            healthy_read_content=(
+                "Warning  Unhealthy  10x  kubelet  Readiness probe failed: "
+                "outbound check exceeded its own 900ms timeout budget"),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="dial tcp: i/o timeout while establishing an outbound "
+                      "connection",
+            local_cause="this workload's own outbound connection timeout was "
+                        "set too aggressively for a normal round trip",
+            local_reason="the container gives up before a normal outbound "
+                        "call would complete",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: outbound connections failing before the "
+                   "handshake completes (4 of 4 sampled restarts)")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NS_PVC_FULL = Propagation(
+    key="namespace-shared-pvc-full",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="a PVC shared by every workload in the namespace is completely full",
+    shared_cause="the shared PVC in {ns} is full, so any pod there that writes "
+                 "to it fails",
+    shared_reason="the shared-data PVC in {ns} reports 100Gi used against a "
+                  "100Gi capacity, with every write to it now failing",
+    distractor_cause="the disk behind the shared PVC is failing at the "
+                     "hardware level",
+    distractor_reason="the underlying disk reports no I/O errors and passes "
+                      "its own health check",
+    rationale="the workload's own write fails because the shared PVC it "
+              "writes to in {ns} has no space left, which is true of every "
+              "workload writing to it",
+    remedy="Expand or clear the shared PVC in {ns}; the flagged workloads "
+          "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related pvc {ns}/shared-data",
+        ("shared-data PVC: full\n"
+         "Capacity: 100Gi  Used: 100Gi\n"
+         "claimed by every pod in {ns} that writes to it"),
+    ),
+    healthy_origin_content=(
+        "shared-data PVC: free\n"
+        "Capacity: 100Gi  Used: 35Gi\n"
+        "claimed by every pod in {ns} that writes to it"
+    ),
+    origin_state=("full", "free"),
+    origin_variants=(
+        (("shared-data PVC: full\n"
+          "Capacity: 100Gi  Used: 100Gi\n"
+          "claimed by every pod in {ns} that writes to it"),
+         ("shared-data PVC: free\n"
+          "Capacity: 100Gi  Used: 35Gi\n"
+          "claimed by every pod in {ns} that writes to it")),
+        (("the namespace's shared PVC is full\n"
+          "StorageClass: standard-rwx\n"
+          "pods writing to it: 6 of 6"),
+         ("the namespace's shared PVC is free\n"
+          "StorageClass: standard-rwx\n"
+          "pods writing to it: 6 of 6")),
+        (("shared-data: full, 0 bytes of headroom left\n"
+          "last write failure 3m ago\n"
+          "mounted read-write by every pod in {ns} that uses it"),
+         ("shared-data: free, 65Gi of headroom left\n"
+          "last write failure: none in the last hour\n"
+          "mounted read-write by every pod in {ns} that uses it")),
+        (("the PVC every flagged workload writes to: full\n"
+          "Capacity 100Gi, Used 100Gi\n"
+          "shared read-write by every workload flagged here"),
+         ("the PVC every flagged workload writes to: free\n"
+          "Capacity 100Gi, Used 35Gi\n"
+          "shared read-write by every workload flagged here")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="write to /var/log/app/debug.log: no space left on "
+                      "device",
+            local_cause="this StatefulSet's own container writes debug dumps "
+                        "to a local path that nobody rotates",
+            local_reason="its own local disk fills from unrotated debug "
+                        "dumps on every extended run",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: failed to write to "
+                   "volume: no space left on device")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe failed 8 times in the last five minutes",
+            evidence="Unhealthy: readiness probe failed for container "
+                     "{container}",
+            local_cause="this Deployment's own health check endpoint times "
+                        "out under ordinary load, unrelated to storage",
+            local_reason="the probe fails on its own even when nothing about "
+                        "storage has changed",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
+                   "health check reports the shared volume is full")),
+            healthy_read_content=(
+                "Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
+                "health check endpoint returns 503 under its own load"),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_MIGRATION_LOCK = Propagation(
+    key="namespace-migration-lock-held",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="a schema-migration advisory lock in the namespace is still held "
+          "by a pod that no longer exists",
+    shared_cause="a schema-migration advisory lock in {ns} is still held by a "
+                 "pod that no longer exists, so every workload waiting on the "
+                 "migration blocks",
+    shared_reason="the schema-migration Lease in {ns} shows a holder identity "
+                  "that stopped renewing nineteen minutes ago and was never "
+                  "released",
+    distractor_cause="the namespace's database Service has no ready endpoints",
+    distractor_reason="the database Service in {ns} shows a ready endpoint, "
+                      "and a direct connection check against it succeeds",
+    rationale="the workload cannot get past its migration check because the "
+              "schema-migration lock in {ns} is still held by a pod that is "
+              "gone, which is true of everything waiting on it",
+    remedy="Force-release the schema-migration lock in {ns}; the flagged "
+          "workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe {ns}/schema-migration-lock (Lease)",
+        ("schema-migration-lock Lease: held\n"
+         "namespace {ns}: Active\n"
+         "HolderIdentity: a pod ID that stopped renewing 19 minutes ago"),
+    ),
+    healthy_origin_content=(
+        "schema-migration-lock Lease: released\n"
+        "namespace {ns}: Active\n"
+        "HolderIdentity: <none>"
+    ),
+    origin_state=("held", "released"),
+    origin_variants=(
+        (("schema-migration-lock Lease: held\n"
+          "namespace {ns}: Active\n"
+          "HolderIdentity: a pod ID that stopped renewing 19 minutes ago"),
+         ("schema-migration-lock Lease: released\n"
+          "namespace {ns}: Active\n"
+          "HolderIdentity: <none>")),
+        (("the namespace's migration lock is held\n"
+          "namespace {ns}: Active\n"
+          "workloads blocked on it: 5 of 5"),
+         ("the namespace's migration lock is released\n"
+          "namespace {ns}: Active\n"
+          "workloads blocked on it: 0 of 5")),
+        (("migration lock status: held, last renewed 19m ago\n"
+          "owner process no longer exists\n"
+          "every workload in {ns} waiting on the migration is blocked"),
+         ("migration lock status: released, no owner recorded\n"
+          "nothing currently holds it\n"
+          "every workload in {ns} waiting on the migration can proceed")),
+        (("the migration lock every flagged workload waits on: held\n"
+          "last renewed 19 minutes ago by a pod that is gone\n"
+          "relevant to every workload flagged here"),
+         ("the migration lock every flagged workload waits on: released\n"
+          "not renewed because nothing holds it\n"
+          "relevant to every workload flagged here")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} "
+                  "times",
+            evidence="last state terminated with exit code 1",
+            log_cause="timed out waiting to acquire the schema-migration lock",
+            local_cause="this Job's own lock-acquisition timeout is too short "
+                        "for even a normal migration window",
+            local_reason="it gives up waiting well before a normal, brief "
+                        "hold on the lock would clear",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n"
+                   "  {init_container}:\n"
+                   "    State: Waiting\n"
+                   "    Reason: CrashLoopBackOff\n"
+                   "    Restarts: 6")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="schema validation failed: expected migration version "
+                      "not yet applied",
+            local_cause="this Deployment's own database client expects a "
+                        "schema version that has not been migrated yet in "
+                        "this rollout",
+            local_reason="every replica fails the same schema version check "
+                        "on startup",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed "
+                   "container {container}: waiting on the schema-migration "
+                   "lock held by a stale pod")),
+            healthy_read_content=(
+                "Warning  BackOff  kubelet  back-off restarting failed "
+                "container {container}: schema version check failed on "
+                "startup"),
+            pass_confidence="high",
+        ),
+    ),
+)
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
                        _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
                        _T_BASE_IMAGE_TAG, _T_PVC_MULTI_ATTACH, _T_CNI_IP_POOL,
                        _T_CSI_NODE_DRIVER, _T_NODE_PID_PRESSURE,
                        _T_NODE_RUNTIME_RESTARTING, _T_NODE_CLOCK_SKEW,
-                       _T_NODE_CONNTRACK_FULL)
+                       _T_NODE_CONNTRACK_FULL, _T_LIMITRANGE_LOWERED,
+                       _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
