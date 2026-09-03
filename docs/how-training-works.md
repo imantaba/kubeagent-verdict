@@ -674,6 +674,38 @@ template fits the training data almost as well as reading the line, and costs
 far less. Four scenarios repeated about 55 times each is not enough distinct
 context to make the rule cheaper than the lookup.
 
+### Widening the curriculum
+
+The diagnosis above named the mechanism: four scenarios, repeated about 55
+times each, gave the model a shortcut — recognise which of a few familiar
+shapes the question is, and answer from that, rather than read the one line
+the answer actually turns on.
+
+The response is not a further training run. It is a change to the textbook a
+future run would use. The shared-origin curriculum now has twenty scenarios
+instead of four, and inside each one the discriminating read itself varies
+from lesson to lesson instead of repeating one of a small handful of fixed
+strings. The right answer now depends on what the read actually says, not on
+which of a few familiar shapes the question is.
+
+What changed, measured on the built dataset (the four percentages below are
+all taken at the same sample size, so they are directly comparable):
+
+- The pool: **4 scenarios → 20 scenarios**.
+- Coverage: every kind of failure in kubeagent's catalog is now exercised
+  somewhere in the pool — all sixteen; several were missing before.
+- Concentration: the single most common shared cause fell from **26.3% to
+  6.9%** of shared-origin causes, and the top three together fell from
+  **60.9% to 18.5%**.
+- The exam: unchanged — still 263 questions, still the same checksum, still 0
+  of 263 contaminated. A future score is still comparable to every past one.
+
+What this does **not** say: that the model reads better, scores higher, or has
+learned anything. No retrain has run, and this page does not authorise one.
+This is a measurement of the textbook, not of a student — whether a wider,
+less repetitive curriculum actually moves the paired shared-origin score is a
+question only a retrain can answer.
+
 ---
 
 ## Small glossary
