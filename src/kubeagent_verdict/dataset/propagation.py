@@ -2509,6 +2509,9 @@ _T_NS_PVC_FULL = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  Failed  kubelet  Error: failed to write to "
                    "volume: no space left on device")),
+            healthy_read_content=(
+                "Warning  Failed  kubelet  Error: failed to write to the "
+                "container's ephemeral storage: no space left on device"),
             pass_confidence="high",
         ),
         Victim(
