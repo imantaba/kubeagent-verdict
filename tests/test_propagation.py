@@ -137,10 +137,13 @@ def test_no_scenario_text_carries_a_banned_identifier_shape():
     for p in propagation.all_scenarios():
         blob = "\n".join([p.origin, p.shared_cause, p.shared_reason, p.distractor_cause,
                           p.distractor_reason, p.rationale, p.remedy,
-                          p.origin_read[0], p.origin_read[1]]
+                          p.origin_read[0], p.origin_read[1],
+                          p.healthy_origin_content]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n{v.local_cause}\n"
                             f"{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
+                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"
+                            + "\n".join(str(x) for x in (v.network_policies or ()))
+                            for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"
 

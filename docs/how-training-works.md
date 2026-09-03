@@ -693,7 +693,7 @@ all taken at the same sample size, so they are directly comparable):
 
 - The pool: **4 scenarios → 20 scenarios**.
 - Coverage: every kind of failure in kubeagent's catalog is now exercised
-  somewhere in the pool — all sixteen; several were missing before.
+  somewhere in the pool — all sixteen; eleven of the sixteen were missing before.
 - Concentration: the single most common shared cause fell from **26.3% to
   6.9%** of shared-origin causes, and the top three together fell from
   **60.9% to 18.5%**.

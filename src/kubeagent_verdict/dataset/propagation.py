@@ -68,7 +68,7 @@ Authoring a trainable scenario
 
 The rules below come in two groups. The first is enforced by
 `tests/test_shared_origin_training.py` and will fail the suite. The second is
-judgment: no test expresses it, which is why it is written here. Each rule in
+judgment: no test expresses it, which is why it is written here. Most rules in
 the second group cost a defect to learn.
 
 Enforced: the key's shape and its disjointness from the eval six; both cause

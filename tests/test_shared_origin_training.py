@@ -309,7 +309,8 @@ def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
                          + [f"{b}\n{h}" for b, h in p.origin_variants]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n"
                             f"{v.local_cause}\n{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}"
+                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"
+                            + "\n".join(str(x) for x in (v.network_policies or ()))
                             for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"

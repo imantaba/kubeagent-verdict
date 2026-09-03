@@ -119,10 +119,10 @@ origin_variants: tuple[tuple[str, str], ...] = ()   # (broken content, healthy c
 
 **The legacy pair stays and becomes variant 0.** `origin_read[1]` and
 `healthy_origin_content` remain populated on every scenario and must equal
-`origin_variants[0]`. Three call sites read them without going through the draw
-— `multi`'s healthy-origin read (`cases.py:788-789`), the banned-shape blob, and
-the healthy-read invariant — and making the legacy pair one of the drawn
-variants is what keeps those three showing content the model has actually seen,
+`origin_variants[0]`. Two call sites read them without going through the draw
+— `multi`'s healthy-origin read (`cases.py:788-789`) and the healthy-read
+invariant — and making the legacy pair one of the drawn variants is what keeps
+those two showing content the model has actually seen,
 with no edit to any of them. It is asserted, not left to authoring care.
 
 **The label does not move.** `origin_read[0]` stays a single string. That is the
@@ -325,7 +325,7 @@ banned shape that appears only inside a variant.
 | `src/kubeagent_verdict/dataset/cases.py` | the variant draw in `_render_shared_origin`, ~4 lines, plus its comment |
 | `tests/test_shared_origin_training.py` | constraints 4, 6, 8, 9, 10, 12, 13, 15; constraint 14 extended; and the exam-identity hash pin, beside the existing `test_the_eval_set_is_two_hundred_and_sixty_three_rows` under *the eval must not move* |
 | `tests/test_propagation.py` | the eval six declare no variants and no `origin_state` |
-| `tests/test_shared_origin_training_pair.py` | a pair draws the same variant; a scenario's rows render more than one variant |
+| `tests/test_shared_origin_training_pair.py` | untouched: a regression gate only. The two pair-variant invariants are written into `tests/test_shared_origin_training.py` instead |
 | `docs/how-training-works.md` | what changed and why, in the existing voice |
 | `docs/model-card.md` | untouched — it describes released weights, and nothing is released here |
 

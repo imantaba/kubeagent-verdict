@@ -35,7 +35,7 @@
 | `src/kubeagent_verdict/dataset/propagation.py` | the scenario tables — eval six unchanged, trainable pool grows 4 → 20, two new optional `Propagation` fields, module docstring records the authoring guidance that cannot be tested |
 | `src/kubeagent_verdict/dataset/cases.py` | one new draw site in `_render_shared_origin` (~4 lines + comment); nothing else moves |
 | `tests/test_shared_origin_training.py` | the trainable pool's invariants (constraints 4, 6, 8, 9, 10, 12, 13, 14, 15) and the exam-identity hash pin |
-| `tests/test_shared_origin_training_pair.py` | the pair invariants, extended: a pair draws the same variant, and a scenario renders more than one |
+| `tests/test_shared_origin_training_pair.py` | untouched: a regression gate only. The pair-variant invariants landed in `tests/test_shared_origin_training.py`, where Task 2 Step 1 places them |
 | `tests/test_propagation.py` | the eval six declare no variants and no state |
 | `docs/how-training-works.md` | what changed and why, in the existing voice |
 
