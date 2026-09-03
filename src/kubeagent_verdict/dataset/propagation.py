@@ -92,7 +92,8 @@ class Victim:
     # The SAME read, same label, in the world where the origin is fine. Empty
     # means `read[1]` is already true there and is reused verbatim.
     #
-    # Only `shared_origin_decoy_probe` renders this, and it needs one wherever
+    # Rendered by BOTH healthy-origin cases -- `shared_origin_decoy` (training)
+    # and `shared_origin_decoy_probe` (eval) -- and needed wherever
     # the victim's own read ASSERTS the origin is broken -- a probe event
     # naming a resolver failure, a PVC saying the node is not Ready. Left
     # empty, that row would show a healthy origin and evidence contradicting
@@ -654,6 +655,35 @@ _T_CA = Propagation(
         "issuer: cluster-internal-ca\n"
         "workloads mounting this bundle: 14 across 6 namespaces"
     ),
+    origin_state=("expired", "remaining"),
+    origin_variants=(
+        (("notAfter: expired 2h ago\n"
+          "issuer: cluster-internal-ca\n"
+          "workloads mounting this bundle: 14 across 6 namespaces"),
+         ("notAfter: 288 days remaining\n"
+          "issuer: cluster-internal-ca\n"
+          "workloads mounting this bundle: 14 across 6 namespaces")),
+        (("notAfter: expired 41m ago\n"
+          "issuer: cluster-internal-ca\n"
+          "workloads mounting this bundle: 9 across 4 namespaces"),
+         ("notAfter: 112 days remaining\n"
+          "issuer: cluster-internal-ca\n"
+          "workloads mounting this bundle: 9 across 4 namespaces")),
+        (("notAfter: expired 6d ago\n"
+          "issuer: cluster-internal-ca\n"
+          "served to: 23 workloads across 8 namespaces"),
+         ("notAfter: 401 days remaining\n"
+          "issuer: cluster-internal-ca\n"
+          "served to: 23 workloads across 8 namespaces")),
+        (("validity: expired\n"
+          "bundle: cluster-internal-ca\n"
+          "renewal: no successful renewal recorded\n"
+          "mounted by: 6 workloads"),
+         ("validity: 74 days remaining\n"
+          "bundle: cluster-internal-ca\n"
+          "renewal: last renewal completed\n"
+          "mounted by: 6 workloads")),
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
@@ -688,6 +718,8 @@ _T_CA = Propagation(
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: peer certificate rejected as expired "
                    "(3 of 3 sampled restarts)")),
+            healthy_read_content=("classified cause: peer certificate rejected as "
+                                  "untrusted (3 of 3 sampled restarts)"),
             pass_confidence="high",
         ),
     ),
@@ -711,16 +743,49 @@ _T_KUBE_PROXY = Propagation(
     confidence="high",
     origin_read=(
         "describe node {node}",
-        ("last Service route sync: 11m ago (peer nodes: 4s ago)\n"
+        ("Service route programming: stale\n"
+         "last sync 11m ago (peers synced 4s ago)\n"
          "Conditions:\n"
          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
          "kube-proxy pod on this node: 1/1 Running, 0 restarts"),
     ),
     healthy_origin_content=(
-        "last Service route sync: 3s ago (peer nodes: 4s ago)\n"
+        "Service route programming: fresh\n"
+        "last sync 3s ago (peers synced 4s ago)\n"
         "Conditions:\n"
         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
         "kube-proxy pod on this node: 1/1 Running, 0 restarts"
+    ),
+    origin_state=("stale", "fresh"),
+    origin_variants=(
+        (("Service route programming: stale\n"
+          "last sync 11m ago (peers synced 4s ago)\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kube-proxy pod on this node: 1/1 Running, 0 restarts"),
+         ("Service route programming: fresh\n"
+          "last sync 3s ago (peers synced 4s ago)\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "kube-proxy pod on this node: 1/1 Running, 0 restarts")),
+        (("route table on this node: stale\n"
+          "no route update applied for 14m while peers are within 5s\n"
+          "kube-proxy pod on this node: 1/1 Running"),
+         ("route table on this node: fresh\n"
+          "last route update applied 2s ago, within 5s of peers\n"
+          "kube-proxy pod on this node: 1/1 Running")),
+        (("kube-proxy reports its Service route table stale\n"
+          "last successful sync: 9m ago\n"
+          "peer nodes applied their tables seconds ago"),
+         ("kube-proxy reports its Service route table fresh\n"
+          "last successful sync: 4s ago\n"
+          "peer nodes applied their tables seconds ago")),
+        (("Service route sync: stale\n"
+          "endpoint changes queued and unapplied: 62\n"
+          "kube-proxy has not logged a sync in 12m"),
+         ("Service route sync: fresh\n"
+          "endpoint changes queued and unapplied: 0\n"
+          "kube-proxy logged its last sync 3s ago")),
     ),
     victims=(
         Victim(
@@ -782,6 +847,33 @@ _T_CONFIGMAP = Propagation(
         "namespace {ns}: Active\n"
         "pods in {ns} referencing it: 6 of 6"
     ),
+    origin_state=("NotFound", "keys"),
+    origin_variants=(
+        (("Error from server (NotFound): the ConfigMap app-settings does not exist\n"
+          "namespace {ns}: Active\n"
+          "pods in {ns} referencing it: 6 of 6"),
+         ("Name: app-settings, 7 keys\n"
+          "namespace {ns}: Active\n"
+          "pods in {ns} referencing it: 6 of 6")),
+        (("app-settings: NotFound\n"
+          "namespace {ns}: Active\n"
+          "workloads in {ns} mounting it: 4 of 4"),
+         ("app-settings: present, 5 keys\n"
+          "namespace {ns}: Active\n"
+          "workloads in {ns} mounting it: 4 of 4")),
+        (("the shared app-settings ConfigMap: NotFound\n"
+          "last seen in the namespace event log 12m ago\n"
+          "pods in {ns} referencing it: 9 of 9"),
+         ("the shared app-settings ConfigMap: 11 keys\n"
+          "last written 12m ago\n"
+          "pods in {ns} referencing it: 9 of 9")),
+        (("the ConfigMap every flagged workload mounts resolves NotFound\n"
+          "namespace {ns}: Active, no deletion timestamp\n"
+          "mounted by every workload flagged here"),
+         ("the ConfigMap every flagged workload mounts resolves with 6 keys\n"
+          "namespace {ns}: Active, no deletion timestamp\n"
+          "mounted by every workload flagged here")),
+    ),
     victims=(
         Victim(
             workload_kind="Deployment", status="CreateContainerConfigError",
@@ -793,6 +885,8 @@ _T_CONFIGMAP = Propagation(
             read=("describe {ns}/{pod} (Pod)",
                   ("Events: Warning  Failed  kubelet  Error: configmap "
                    "\"app-settings\" not found")),
+            healthy_read_content=("Events: Warning  Failed  kubelet  Error: couldn't "
+                                  "find key api-timeout in ConfigMap {ns}/checkout-settings"),
             pass_confidence="high",
         ),
         Victim(
@@ -817,6 +911,8 @@ _T_CONFIGMAP = Propagation(
             read=("get_events {ns}/{name}",
                   ("Warning  Failed  kubelet  Error: configmap \"app-settings\" "
                    "not found")),
+            healthy_read_content=("Warning  Failed  kubelet  Error: configmap "
+                                  "\"{name}-revision-settings\" not found"),
             pass_confidence="high",
         ),
     ),
@@ -846,6 +942,33 @@ _T_SCALED_TO_ZERO = Propagation(
         "Replicas:  4 desired | 4 updated | 4 total | 4 available\n"
         "Pods:      4 Running, 0 restarts\n"
         "Last scale event: none in the last 24h"
+    ),
+    origin_state=("replicas to 0", "Running"),
+    origin_variants=(
+        (("Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
+          "Pods:      none\n"
+          "Last scale event: 34m ago, 4 replicas to 0"),
+         ("Replicas:  4 desired | 4 updated | 4 total | 4 available\n"
+          "Pods:      4 Running, 0 restarts\n"
+          "Last scale event: none in the last 24h")),
+        (("Last scale event: 2h ago, 6 replicas to 0\n"
+          "Replicas:  0 desired | 0 updated | 0 total | 0 available\n"
+          "Pods:      none"),
+         ("Last scale event: none in the last 7d\n"
+          "Replicas:  6 desired | 6 updated | 6 total | 6 available\n"
+          "Pods:      6 Running, 0 restarts")),
+        (("desired replicas: 0, available: 0\n"
+          "scale history: 11m ago, 3 replicas to 0\n"
+          "no pod has been scheduled for this Deployment since"),
+         ("desired replicas: 3, available: 3\n"
+          "scale history: unchanged for 9d\n"
+          "3 pods Running for this Deployment")),
+        (("the session Deployment was scaled from 5 replicas to 0\n"
+          "current pods: 0\n"
+          "no endpoint is registered for its Service"),
+         ("the session Deployment holds 5 replicas\n"
+          "current pods: 5 Running\n"
+          "5 endpoints are registered for its Service")),
     ),
     victims=(
         Victim(

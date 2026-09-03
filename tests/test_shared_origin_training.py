@@ -127,6 +127,61 @@ def test_trainable_scenarios_obey_every_rule_the_eval_table_obeys():
         assert len(set(locals_)) == len(locals_), f"{p.key}: duplicate decoys"
 
 
+def test_every_trainable_scenario_declares_at_least_four_origin_variants():
+    """Four literal strings per scenario is a lookup; several renderings of one
+    relation is not. Variant 0 must be the legacy pair because `multi`'s
+    healthy-origin read renders `healthy_origin_content` without going through
+    the draw, and the pool invariants below read `origin_read[1]` /
+    `healthy_origin_content` directly -- all of them must keep showing content
+    the model has actually seen.
+    """
+    for p in propagation.trainable_scenarios():
+        assert len(p.origin_variants) >= 4, f"{p.key}: {len(p.origin_variants)}"
+        assert p.origin_variants[0] == (p.origin_read[1], p.healthy_origin_content), (
+            f"{p.key}: variant 0 is not the legacy pair")
+
+
+def test_every_variant_first_line_is_literal_and_unique_within_its_scenario():
+    """Two tests and one measurement identify a rendered variant by its first
+    line, so a first line carrying `{ns}` or repeated across variants would
+    make them silently unable to tell variants apart.
+    """
+    for p in propagation.trainable_scenarios():
+        firsts = []
+        for broken, healthy in p.origin_variants:
+            for content in (broken, healthy):
+                first = content.split("\n")[0]
+                assert "{" not in first, f"{p.key}: placeholder in {first!r}"
+                assert first.strip(), f"{p.key}: empty first line"
+                firsts.append(first)
+        assert len(set(firsts)) == len(firsts), f"{p.key}: duplicate first line"
+
+
+def test_every_trainable_scenario_names_its_state_in_words():
+    """The 0.5 in-distribution score decomposes into two scenarios read and two
+    constant. The two read are separated by a lexical state token; the two
+    constant by a quantity, and the UNIT ablation showed making the units
+    consistent moved nothing. So a discriminator that is only a number is a
+    discriminator two of four scenarios demonstrably did not read.
+
+    Necessary and demonstrably not sufficient: `internal-ca-expired` already
+    satisfies this and still failed. The other half -- "the token is not buried
+    in a numeric phrase" -- is authoring guidance in the module docstring,
+    because no honest test expresses it.
+    """
+    for p in propagation.trainable_scenarios():
+        broken_token, healthy_token = p.origin_state
+        assert broken_token.strip(), f"{p.key}: no broken state token"
+        assert healthy_token.strip(), f"{p.key}: no healthy state token"
+        assert re.search(r"[A-Za-z]", broken_token), f"{p.key}: {broken_token!r}"
+        assert re.search(r"[A-Za-z]", healthy_token), f"{p.key}: {healthy_token!r}"
+        for broken, healthy in p.origin_variants:
+            assert broken_token in broken, f"{p.key}: {broken_token!r} missing"
+            assert healthy_token not in broken, f"{p.key}: {healthy_token!r} in a broken read"
+            assert healthy_token in healthy, f"{p.key}: {healthy_token!r} missing"
+            assert broken_token not in healthy, f"{p.key}: {broken_token!r} in a healthy read"
+
+
 def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
     banned = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
               re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
