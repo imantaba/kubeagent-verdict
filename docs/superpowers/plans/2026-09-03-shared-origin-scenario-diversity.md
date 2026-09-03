@@ -1168,9 +1168,9 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     quarter of the time. The bar is 0.12 and 0.30 -- both of which the old pool
     failed by a wide margin, which is what makes this check non-vacuous.
 
-    The size is named because top three moves with it: 0.633 at 5500, 0.609
-    here, 0.602 at 20000, as the tail keeps gaining distinct causes. Top one is
-    stable at 0.263 across all four.
+    The size is named because top three moves with it: 0.633 at 5500, 0.618 at
+    8000, 0.609 here, 0.602 at 20000, as the tail keeps gaining distinct causes.
+    Top one is stable at 0.263 across all four.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"
