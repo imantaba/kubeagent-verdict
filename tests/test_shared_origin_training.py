@@ -427,24 +427,69 @@ def test_multi_survives_as_the_majority_of_multi_workload_rows(kept):
 
 # ------------------------------------------------- the structural-cue killer
 
-def _origin_labels(rows, case):
+def _origin_labels(rows, *cases):
     return {e.meta["origin_read_label"] for e in rows
-            if e.case == case and "origin_read_label" in e.meta}
+            if e.case in cases and "origin_read_label" in e.meta}
 
 
-def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(kept):
-    """The cue test. Every trainable origin read must appear under BOTH answers.
+# These two replace a single assertion that compared `shared_origin` against
+# `multi` on the KEPT pile and demanded the sets be equal. That assertion was
+# written before the decoy twin existed, and the twin superseded its premise:
+# it read the surviving `multi` negatives as the only thing standing between a
+# read label and a free giveaway, when the pair already carries every label
+# under both answers. Its docstring said a label the filter strips from every
+# `multi` row "is a giveaway in the data the model reads". Measured, it is not
+# — the twin survives the cull holding the same label and the opposite answer.
+#
+# It also could not have survived this branch. The negative budget is fixed at
+# ~30 rows however large the pool grows, the cull takes about 30% of them, and
+# the plan ends at twenty scenarios — 1.5 negatives each before the cull. The
+# equality first went red at eleven scenarios, and no arrangement of the data
+# fixes it: raising the negatives to ~4 per scenario would mean making nearly
+# every `multi` row a negative, which is the class balance
+# `test_the_generator_emits_the_two_classes_near_evenly` exists to hold.
+#
+# So the claim is narrowed to the two things that are separately true, each
+# checked where it is actually decided. Neither is vacuous: the first goes red
+# if the rotation stops offering some scenario a negative, the second if the
+# cull ever takes half a pair or the decoy stops being emitted.
 
-    If these two sets differ, some read label is a free giveaway: seeing it
-    settles the answer without reading its content. Asserted on the kept
-    pile, because a label the filter removes every instance of is a giveaway
-    in the data the model reads however even the generator's output looked.
+def test_the_emitter_offers_every_origin_read_under_both_answers(rows):
+    """The emitter's half, checked before the cull, where it is the emitter's.
+
+    Every trainable origin read must be offered under a shared answer AND
+    under an independent one. This is the rotation's contract and it stays
+    satisfiable as the pool grows: the negatives cover the pool as long as
+    there is at least one per scenario. Asserting it on the kept pile instead
+    would be asserting the cull's behaviour under the emitter's name.
+    """
+    shared = _origin_labels(rows, "shared_origin")
+    negatives = _origin_labels(rows, "multi")
+    assert shared, "no shared_origin row carries an origin read"
+    assert negatives, "no multi row carries an origin read — the cue is alive"
+    assert shared == negatives
+
+
+def test_the_cull_never_leaves_an_origin_read_under_only_shared_answers(kept):
+    """The cue guarantee proper, in the data the model actually reads.
+
+    A read label is a giveaway only if, after the cull, it appears under a
+    shared answer and under no independent one ANYWHERE. Both independent
+    classes count: the `shared_origin_decoy` twin, which carries the label with
+    per-workload causes, and the surviving `multi` negatives. Counting only the
+    latter is what made the assertion this replaces go red over a label that
+    was never a giveaway.
+
+    This is what `drop_held_out` taking pairs whole buys, and nothing else in
+    the suite checks that it still does.
     """
     shared = _origin_labels(kept, "shared_origin")
-    independent = _origin_labels(kept, "multi")
-    assert shared, "no shared_origin row carries an origin read"
-    assert independent, "no multi row carries an origin read — the cue is alive"
-    assert shared == independent
+    independent = _origin_labels(kept, "shared_origin_decoy", "multi")
+    assert shared, "no shared_origin row survived the cull"
+    giveaways = sorted(shared - independent)
+    assert not giveaways, (
+        f"{len(giveaways)} origin read label(s) survive under a shared answer "
+        f"and under no independent one: {giveaways}")
 
 
 def _independent_share(rows):

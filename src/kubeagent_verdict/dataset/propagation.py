@@ -1446,9 +1446,387 @@ _T_SIDECAR_INJECTOR = Propagation(
     ),
 )
 
+_T_BASE_IMAGE_TAG = Propagation(
+    key="shared-base-image-tag-moved",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="a shared base image tag was repointed to a broken build",
+    shared_cause="the shared base image tag was repointed to a broken build, so "
+                 "every image built from it fails to start",
+    shared_reason="the platform/runtime-base:stable tag was repointed 22m ago and "
+                  "its own smoke test is failing",
+    distractor_cause="the container registry is intermittently corrupting layers "
+                     "during a bulk rebuild",
+    distractor_reason="every pull for these images completes and matches its "
+                      "expected digest; each failure happens only after the "
+                      "container is already running",
+    rationale="the workload's failure is what happens when the shared base image "
+              "tag it was built from ships a broken build, which is true of every "
+              "image tracking that tag right now",
+    remedy="Repoint the shared base image tag back to a known-good build; the "
+           "flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related image-tag platform/runtime-base:stable (cluster-wide)",
+        ("build status: failing\n"
+         "digest: repointed 22m ago to a build that fails its own smoke test\n"
+         "images built FROM this tag: 13 across 7 namespaces"),
+    ),
+    healthy_origin_content=(
+        "build status: passing\n"
+        "digest: unchanged for 46 days, smoke test passing\n"
+        "images built FROM this tag: 13 across 7 namespaces"
+    ),
+    origin_state=("failing", "passing"),
+    origin_variants=(
+        (("build status: failing\n"
+          "digest: repointed 22m ago to a build that fails its own smoke test\n"
+          "images built FROM this tag: 13 across 7 namespaces"),
+         ("build status: passing\n"
+          "digest: unchanged for 46 days, smoke test passing\n"
+          "images built FROM this tag: 13 across 7 namespaces")),
+        (("verification of the shared base image tag's smoke test is failing\n"
+          "the platform/runtime-base:stable tag was repointed to a new build 22m "
+          "ago\n"
+          "13 images across 7 namespaces are built FROM this tag"),
+         ("verification of the shared base image tag's smoke test is passing\n"
+          "the platform/runtime-base:stable tag has been unchanged for 46 days\n"
+          "13 images across 7 namespaces are built FROM this tag")),
+        (("Warning  BuildFailed  9x  image-scanner  smoke test failing for "
+          "platform/runtime-base:stable"),
+         ("Normal  BuildPassed  9x  image-scanner  smoke test passing for "
+          "platform/runtime-base:stable")),
+        (("runtime-base tag status: failing\n"
+          "last known-good build: 46 days ago before the repoint\n"
+          "fleet images tracking this tag: 13"),
+         ("runtime-base tag status: passing\n"
+          "last known-good build: seconds ago\n"
+          "fleet images tracking this tag: 13")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="error while loading shared libraries: libssl.so.3: cannot "
+                      "open shared object file",
+            local_cause="this workload's own image pinned a libssl version its "
+                        "base image no longer ships",
+            local_reason="the container exits before it can bind its listening port",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: missing shared library libssl.so.3 (3 of 3 "
+                   "sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task for container {container}",
+            local_cause="this workload's own image build script never copied the "
+                        "server binary into the final image",
+            local_reason="the runtime cannot find an executable to launch",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Error: failed to create "
+                   "containerd task: OCI runtime create failed: exec: "
+                   "\"/app/server\": stat /app/server: no such file or directory")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_PVC_MULTI_ATTACH = Propagation(
+    key="shared-pvc-multi-attach",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="a ReadWriteOnce PVC's attachment will not release, wedging the "
+           "cluster's attach/detach queue",
+    shared_cause="one ReadWriteOnce PVC's VolumeAttachment will not release, "
+                 "wedging the cluster's attach/detach queue so every other pod's "
+                 "volume attach or mount stalls behind it",
+    shared_reason="the attach/detach queue has been wedged for 26 minutes behind "
+                  "one VolumeAttachment that never released, and every operation "
+                  "behind it is blocked",
+    distractor_cause="the storage backend's control plane is unreachable",
+    distractor_reason="the storage backend's own API answers every other query "
+                      "the CSI driver sends it during this window",
+    rationale="the workload's volume operation is stuck behind the one "
+              "VolumeAttachment wedging the shared queue, which is true of every "
+              "pending attach or mount cluster-wide right now",
+    remedy="Force-clear the stuck VolumeAttachment; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related volumeattachment (cluster-wide)",
+        ("attach/detach queue: wedged\n"
+         "the oldest unresolved VolumeAttachment has been retrying release for 26m\n"
+         "operations blocked behind it: 11 across 9 namespaces"),
+    ),
+    healthy_origin_content=(
+        "attach/detach queue: flowing\n"
+        "the oldest unresolved VolumeAttachment resolved within its normal window\n"
+        "operations blocked behind it: 0 across 9 namespaces"
+    ),
+    origin_state=("wedged", "flowing"),
+    origin_variants=(
+        (("attach/detach queue: wedged\n"
+          "the oldest unresolved VolumeAttachment has been retrying release for "
+          "26m\n"
+          "operations blocked behind it: 11 across 9 namespaces"),
+         ("attach/detach queue: flowing\n"
+          "the oldest unresolved VolumeAttachment resolved within its normal "
+          "window\n"
+          "operations blocked behind it: 0 across 9 namespaces")),
+        (("the attach/detach controller's queue is wedged\n"
+          "the oldest unresolved VolumeAttachment has retried release for 31m "
+          "without success\n"
+          "9 other volume operations are stuck behind it"),
+         ("the attach/detach controller's queue is flowing\n"
+          "the oldest unresolved VolumeAttachment resolved in under a second\n"
+          "0 other volume operations are stuck behind it")),
+        (("Warning  VolumeAttachmentStuck  attachdetach-controller  attach/detach "
+          "queue wedged behind one unresolved VolumeAttachment"),
+         ("Normal  VolumeAttachmentResolved  attachdetach-controller  "
+          "attach/detach queue flowing, no unresolved VolumeAttachment")),
+        (("queue status: wedged\n"
+          "detach retries on the oldest item: 14, all failed\n"
+          "volume operations waiting cluster-wide: 11"),
+         ("queue status: flowing\n"
+          "detach retries on the oldest item: 0 outstanding\n"
+          "volume operations waiting cluster-wide: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="VolumeAttachError",
+            reason="the pod's volume could not be attached",
+            evidence="Multi-Attach error for volume {pvc}",
+            local_cause="this workload's own StatefulSet rescheduled its pod to a "
+                        "new node before the previous pod's attachment released",
+            local_reason="the FailedAttachVolume event names Multi-Attach for this "
+                        "pod's own PVC specifically",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  8x  attachdetach-controller  "
+                   "Multi-Attach error for volume {pvc} Volume is already "
+                   "exclusively attached to one node and can't be attached to "
+                   "another")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="VolumeMountError",
+            reason="a volume the pod needs could not be mounted",
+            evidence="unmounted volumes=[data] on container {container}",
+            local_cause="this workload's own PVC has a failing underlying disk "
+                        "that predates this incident",
+            local_reason="the mount times out while the PVC itself already "
+                        "describes as Bound",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedMount  6x  kubelet  Unable to attach or mount "
+                   "volumes: unmounted volumes=[data], timed out waiting for the "
+                   "condition")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_CNI_IP_POOL = Propagation(
+    key="cni-ip-pool-exhausted",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the CNI's shared address pool is exhausted",
+    shared_cause="the CNI's shared address pool is exhausted (0 of 512 addresses "
+                 "free), so no new pod cluster-wide can be assigned an address",
+    shared_reason="the pool's own accounting reports 0 of 512 addresses free, "
+                  "unchanged for six hours despite pods churning",
+    distractor_cause="the container runtime on these nodes is refusing to create "
+                     "new sandboxes",
+    distractor_reason="other pods scheduled on the very same nodes in the last "
+                      "few minutes started cleanly",
+    rationale="the workload cannot get a pod address or be scheduled with one "
+              "because the shared address pool has nothing left to give it, which "
+              "is true of every new pod cluster-wide right now",
+    remedy="Free or expand the CNI's shared address pool; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related ipamconfig cluster-pod-network (cluster-wide)",
+        ("pool status: depleted\n"
+         "free addresses: 0 of 512\n"
+         "pods waiting on an address: 9 across 6 namespaces"),
+    ),
+    healthy_origin_content=(
+        "pool status: available\n"
+        "free addresses: 340 of 512\n"
+        "pods waiting on an address: 0 across 6 namespaces"
+    ),
+    origin_state=("depleted", "available"),
+    origin_variants=(
+        (("pool status: depleted\n"
+          "free addresses: 0 of 512\n"
+          "pods waiting on an address: 9 across 6 namespaces"),
+         ("pool status: available\n"
+          "free addresses: 340 of 512\n"
+          "pods waiting on an address: 0 across 6 namespaces")),
+        (("verification of the shared pod-network address pool found it depleted\n"
+          "0 of 512 addresses remain free\n"
+          "9 pods are waiting on the pool to free an address"),
+         ("verification of the shared pod-network address pool found it available\n"
+          "188 of 512 addresses remain free\n"
+          "0 pods are waiting on the pool to free an address")),
+        (("Warning  IPAMPoolExhausted  9x  ipam-controller  pod-network address "
+          "pool depleted: 0 of 512 free"),
+         ("Normal  IPAMPoolHealthy  ipam-controller  pod-network address pool "
+          "available: 340 of 512 free")),
+        (("address pool: depleted\n"
+          "last successful allocation: 6h ago\n"
+          "allocation requests queued: 9"),
+         ("address pool: available\n"
+          "last successful allocation: seconds ago\n"
+          "allocation requests queued: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="the pod's network sandbox could not be created",
+            evidence="failed to create pod sandbox for container {container}",
+            local_cause="this workload's own CNI annotation requests a static IP "
+                        "address that is already allocated to another pod",
+            local_reason="the sandbox failure names an address that is "
+                        "unavailable specifically for this workload's static "
+                        "request",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  FailedCreatePodSandBox  kubelet  Failed to "
+                   "create pod sandbox: plugin type=\"cni\" failed (add): no "
+                   "available IP addresses in the pool")),
+            healthy_read_content=(
+                "Events: Warning  FailedCreatePodSandBox  kubelet  Failed to "
+                "create pod sandbox: plugin type=\"cni\" failed (add): requested "
+                "static IP address already allocated"),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="0/12 nodes are available",
+            evidence="0/12 nodes accepted the pod",
+            local_cause="the Job's own pod spec requests a secondary network "
+                        "interface that most other workloads do not",
+            local_reason="the FailedScheduling message names insufficient network "
+                        "addresses, and this workload's own spec is the one asking "
+                        "for extra interfaces per pod",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/12 nodes are "
+                   "available: 12 Insufficient pod-network addresses.")),
+            healthy_read_content=(
+                "Warning  FailedScheduling  default-scheduler  0/12 nodes are "
+                "available: 12 node(s) had no free secondary network interface "
+                "slot for this pod."),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
+_T_CSI_NODE_DRIVER = Propagation(
+    key="csi-node-driver-crashed",
+    blast_radius="node",
+    scope_field="node",
+    origin="the CSI node driver's DaemonSet pod on {node} crashed and has not "
+           "recovered",
+    shared_cause="the CSI node driver's pod on node {node} crashed, so no pod "
+                 "scheduled there can mount or use a volume",
+    shared_reason="the CSI node driver's DaemonSet pod on {node} shows crashed "
+                  "with 4 failed restarts, while its peers on other nodes are "
+                  "current",
+    distractor_cause="the whole node {node} is unhealthy and about to be replaced",
+    distractor_reason="the node's own Ready condition is True, and every other "
+                      "pod scheduled on {node} is running normally",
+    rationale="the workload's volume operation fails because the CSI node driver "
+              "that would carry it out is not running on {node}, which is true of "
+              "everything scheduled there right now",
+    remedy="Restart or recover the CSI node driver pod on {node}; the flagged "
+           "workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (CSI status)",
+        ("CSI node driver: crashed\n"
+         "last restart 9m ago (peers on other nodes are current)\n"
+         "Conditions:\n"
+         "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+         "CSI node driver pod on this node: 0/1 CrashLoopBackOff, 4 restarts"),
+    ),
+    healthy_origin_content=(
+        "CSI node driver: healthy\n"
+        "last restart: none in the last 24h (peers on other nodes are current)\n"
+        "Conditions:\n"
+        "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+        "CSI node driver pod on this node: 1/1 Running, 0 restarts"
+    ),
+    origin_state=("crashed", "healthy"),
+    origin_variants=(
+        (("CSI node driver: crashed\n"
+          "last restart 9m ago (peers on other nodes are current)\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "CSI node driver pod on this node: 0/1 CrashLoopBackOff, 4 restarts"),
+         ("CSI node driver: healthy\n"
+          "last restart: none in the last 24h (peers on other nodes are current)\n"
+          "Conditions:\n"
+          "  Ready   True   KubeletReady   kubelet is posting ready status\n"
+          "CSI node driver pod on this node: 1/1 Running, 0 restarts")),
+        (("verification of the CSI node driver on this node found it crashed\n"
+          "the driver pod has failed to stay up for 9m across 4 restart attempts\n"
+          "peer nodes' CSI drivers are current"),
+         ("verification of the CSI node driver on this node found it healthy\n"
+          "the driver pod has been steady for over a day\n"
+          "peer nodes' CSI drivers are current")),
+        (("Warning  BackOff  4x  kubelet  Back-off restarting failed container "
+          "csi-node-driver (crashed)"),
+         ("Normal  Started  kubelet  Started container csi-node-driver (healthy)")),
+        (("CSI node driver status: crashed\n"
+          "restart count: 4, none successful\n"
+          "last known-good state: 9m ago"),
+         ("CSI node driver status: healthy\n"
+          "restart count: 0\n"
+          "last known-good state: current")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="VolumeMountError",
+            reason="a volume the pod needs could not be mounted",
+            evidence="unmounted volumes=[data] on container {container}",
+            local_cause="this workload's own PVC is stuck Terminating from a "
+                        "delete that never finished",
+            local_reason="the mount times out while this specific PVC's "
+                        "finalizer never clears",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedMount  6x  kubelet  Unable to attach or mount "
+                   "volumes: unmounted volumes=[data], timed out waiting for the "
+                   "condition")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="open /data/lockfile: no such file or directory (volume not "
+                      "yet mounted when the container started)",
+            local_cause="this workload's own container starts before its volume "
+                        "mount is verified ready",
+            local_reason="the container always exits on its first read from the "
+                        "unmounted path",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: read from an unmounted data path failed (3 "
+                   "of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
+    ),
+)
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
-                       _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR)
+                       _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
+                       _T_BASE_IMAGE_TAG, _T_PVC_MULTI_ATTACH, _T_CNI_IP_POOL,
+                       _T_CSI_NODE_DRIVER)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
