@@ -135,12 +135,21 @@ def test_no_scenario_text_carries_a_banned_identifier_shape():
               re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
               re.compile(r"@"))
     for p in propagation.all_scenarios():
+        for v in p.victims:
+            assert isinstance(v.network_policies, tuple), (
+                f"{p.key}: network_policies must be a tuple, not "
+                f"{type(v.network_policies).__name__} -- a bare str is truthy, "
+                "survives the `or ()`, and would be joined character by "
+                "character, so every pattern below would silently miss it")
         blob = "\n".join([p.origin, p.shared_cause, p.shared_reason, p.distractor_cause,
                           p.distractor_reason, p.rationale, p.remedy,
-                          p.origin_read[0], p.origin_read[1]]
+                          p.origin_read[0], p.origin_read[1],
+                          p.healthy_origin_content, p.notes]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n{v.local_cause}\n"
                             f"{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
+                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"
+                            + "\n".join(str(x) for x in (v.network_policies or ()))
+                            for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"
 
@@ -307,3 +316,17 @@ def test_a_subset_row_renders_fewer_victims_from_the_same_scenario():
     p = next(s for s in propagation.all_scenarios() if len(s.victims) >= 3)
     ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key), victims=2)
     assert len(json.loads(ex.assistant)["verdicts"]) == 2
+
+
+def test_the_eval_six_declare_no_variants_and_no_state():
+    """The exam is frozen this slice.
+
+    `origin_variants` and `origin_state` are trainable-pool fields. Populating
+    them on an eval scenario would change what the exam renders and void every
+    banked scoreboard; the draw in `_render_shared_origin` is guarded on the
+    field being non-empty precisely so the six consume the same RNG they always
+    have. The eval six are asked, not taught.
+    """
+    for p in propagation.all_scenarios():
+        assert p.origin_variants == (), p.key
+        assert p.origin_state == ("", ""), p.key

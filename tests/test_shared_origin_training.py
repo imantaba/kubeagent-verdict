@@ -37,7 +37,10 @@ alone passes both halves of decider 5. Fixing that is an exam-side change and
 does not belong in this module.
 """
 
+import hashlib
+import json
 import re
+from collections import Counter
 
 import pytest
 
@@ -125,20 +128,266 @@ def test_trainable_scenarios_obey_every_rule_the_eval_table_obeys():
         assert len(set(locals_)) == len(locals_), f"{p.key}: duplicate decoys"
 
 
+def test_every_trainable_scenario_declares_at_least_four_origin_variants():
+    """Four literal strings per scenario is a lookup; several renderings of one
+    relation is not. Variant 0 must be the legacy pair because `multi`'s
+    healthy-origin read renders `healthy_origin_content` without going through
+    the draw, and the pool invariants below read `origin_read[1]` /
+    `healthy_origin_content` directly -- all of them must keep showing content
+    the model has actually seen.
+    """
+    for p in propagation.trainable_scenarios():
+        assert len(p.origin_variants) >= 4, f"{p.key}: {len(p.origin_variants)}"
+        assert p.origin_variants[0] == (p.origin_read[1], p.healthy_origin_content), (
+            f"{p.key}: variant 0 is not the legacy pair")
+
+
+def test_every_variant_first_line_is_literal_and_unique_within_its_scenario():
+    """Two tests and one measurement identify a rendered variant by its first
+    line, so a first line carrying `{ns}` or repeated across variants would
+    make them silently unable to tell variants apart.
+    """
+    for p in propagation.trainable_scenarios():
+        firsts = []
+        for broken, healthy in p.origin_variants:
+            for content in (broken, healthy):
+                first = content.split("\n")[0]
+                assert "{" not in first, f"{p.key}: placeholder in {first!r}"
+                assert first.strip(), f"{p.key}: empty first line"
+                firsts.append(first)
+        assert len(set(firsts)) == len(firsts), f"{p.key}: duplicate first line"
+
+
+def test_every_trainable_scenario_names_its_state_in_words():
+    """The 0.5 in-distribution score decomposes into two scenarios read and two
+    constant. The two read are separated by a lexical state token; the two
+    constant by a quantity, and the UNIT ablation showed making the units
+    consistent moved nothing. So a discriminator that is only a number is a
+    discriminator two of four scenarios demonstrably did not read.
+
+    Necessary and demonstrably not sufficient: `internal-ca-expired` already
+    satisfies this and still failed. The other half -- "the token is not buried
+    in a numeric phrase" -- is authoring guidance in the module docstring,
+    because no honest test expresses it.
+    """
+    for p in propagation.trainable_scenarios():
+        broken_token, healthy_token = p.origin_state
+        assert broken_token.strip(), f"{p.key}: no broken state token"
+        assert healthy_token.strip(), f"{p.key}: no healthy state token"
+        assert re.search(r"[A-Za-z]", broken_token), f"{p.key}: {broken_token!r}"
+        assert re.search(r"[A-Za-z]", healthy_token), f"{p.key}: {healthy_token!r}"
+        for broken, healthy in p.origin_variants:
+            assert broken_token in broken, f"{p.key}: {broken_token!r} missing"
+            assert healthy_token not in broken, f"{p.key}: {healthy_token!r} in a broken read"
+            assert healthy_token in healthy, f"{p.key}: {healthy_token!r} missing"
+            assert broken_token not in healthy, f"{p.key}: {broken_token!r} in a healthy read"
+
+
+_SCOPE_FOR_RADIUS = {"cluster": None, "node": "node", "namespace": "ns"}
+
+
+def test_blast_radius_and_scope_field_agree():
+    """A node-scoped origin is only coherent if every victim is on that node.
+    `_propagation_names` pins the field named by `scope_field`, so a radius
+    that disagrees with it asserts a blast radius its own inventory
+    contradicts.
+    """
+    for p in propagation.trainable_scenarios():
+        assert p.scope_field == _SCOPE_FOR_RADIUS[p.blast_radius], p.key
+
+
+def test_no_two_trainable_scenarios_share_an_answer_string():
+    """A cause string reused across scenarios is a lookup key spanning both."""
+    seen = {}
+    for p in propagation.trainable_scenarios():
+        for field, value in (("shared_cause", p.shared_cause),
+                             ("distractor_cause", p.distractor_cause)):
+            assert value not in seen, f"{p.key}.{field} repeats {seen[value]}"
+            seen[value] = f"{p.key}.{field}"
+
+
+def test_no_two_trainable_scenarios_share_a_local_cause():
+    """Same reason, on the decoy half's answers."""
+    seen = {}
+    for p in propagation.trainable_scenarios():
+        for v in p.victims:
+            assert v.local_cause not in seen, (
+                f"{p.key}: local_cause repeats {seen[v.local_cause]}")
+            seen[v.local_cause] = p.key
+
+
+def test_pass_confidence_varies_within_every_trainable_scenario():
+    """Guidance in the module docstring until now. With sixteen new scenarios
+    written at once, "vary the confidence" as guidance will not hold, and a
+    scenario whose victims all carry one grade reopens the confidence-copy
+    shortcut the docstring says is closed.
+    """
+    for p in propagation.trainable_scenarios():
+        grades = {v.pass_confidence for v in p.victims}
+        assert len(grades) > 1, f"{p.key}: every victim carries {grades}"
+
+
+def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
+    """The mechanised half of constraint 10.
+
+    On the decoy half the origin read shows the component healthy. A victim
+    read that still carries the scenario's broken state token contradicts it
+    in the same prompt, and the row teaches nothing except that the evidence
+    disagrees with itself. Deciding whether a read "asserts the origin is
+    broken" is a judgment about English and is not mechanised; the token is
+    the case where it is mechanical, and it is checked.
+    """
+    for p in propagation.trainable_scenarios():
+        broken_token = p.origin_state[0]
+        if not broken_token:
+            continue
+        for v in p.victims:
+            if broken_token not in v.read[1]:
+                continue
+            assert v.healthy_read_content, (
+                f"{p.key}: a victim read carries {broken_token!r} with no healthy swap")
+            assert broken_token not in v.healthy_read_content, (
+                f"{p.key}: the healthy swap still carries {broken_token!r}")
+
+
+_QUANTITY = re.compile(r"\d+[A-Za-z]*")
+
+
+def _canonical_rendering(content: str) -> str:
+    """A variant with its quantities and its line order taken away.
+
+    Every number-plus-unit token collapses to `N` and the lines are sorted, so
+    two renderings that differ only in their numbers -- or only in the order
+    they present the same fields -- reduce to the same string. Two genuinely
+    different renderings do not.
+    """
+    return "\n".join(sorted(
+        re.sub(r"\s+", " ", _QUANTITY.sub("N", line)).strip()
+        for line in content.split("\n") if line.strip()))
+
+
+def test_no_two_variants_are_the_same_rendering_with_different_numbers():
+    """The variant axis is renderings, not numbers.
+
+    A scenario can satisfy the count check, the first-line check and the state
+    check with four copies of one template carrying different quantities --
+    which is exactly the lookup the variant axis exists to defeat, dressed as
+    diversity. This is the mechanical half of "vary the rendering". The rest
+    stays authoring guidance in the module docstring, because judging whether
+    two English sentences say the same thing in different words is not a test.
+
+    Not vacuous, and not hypothetically: `internal-ca-expired` and
+    `shared-dependency-scaled-to-zero` both failed this at `a861e91`, on both
+    halves, after passing every other test in this file and a full task
+    review. One was the same three-line template with two numbers swapped; the
+    other was those lines reordered. Sorting is what catches the second, and
+    collapsing the unit letter along with the digits is what catches the first
+    -- `2h` against `41m` leaves `h` against `m` if only digits are stripped,
+    and the collision is missed.
+    """
+    for p in propagation.trainable_scenarios():
+        for half, which in ((0, "broken"), (1, "healthy")):
+            seen = {}
+            for i, pair in enumerate(p.origin_variants):
+                form = _canonical_rendering(pair[half])
+                assert form not in seen, (
+                    f"{p.key}: {which} variant {i} is variant {seen[form]} with "
+                    f"different numbers or a different line order")
+                seen[form] = i
+
+
 def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
     banned = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
               re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
               re.compile(r"@"))
     for p in propagation.trainable_scenarios():
+        for v in p.victims:
+            assert isinstance(v.network_policies, tuple), (
+                f"{p.key}: network_policies must be a tuple, not "
+                f"{type(v.network_policies).__name__} -- a bare str is truthy, "
+                "survives the `or ()`, and would be joined character by "
+                "character, so every pattern below would silently miss it")
         blob = "\n".join([p.origin, p.shared_cause, p.shared_reason,
                           p.distractor_cause, p.distractor_reason, p.rationale,
                           p.remedy, p.origin_read[0], p.origin_read[1],
-                          p.healthy_origin_content]
+                          p.healthy_origin_content,
+                          p.origin_state[0], p.origin_state[1], p.notes]
+                         + [f"{b}\n{h}" for b, h in p.origin_variants]
                          + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n"
                             f"{v.local_cause}\n{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}" for v in p.victims])
+                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"
+                            + "\n".join(str(x) for x in (v.network_policies or ()))
+                            for v in p.victims])
         for pat in banned:
             assert not pat.search(blob), f"{p.key}: {pat.pattern}"
+
+
+def test_a_scenario_with_variants_renders_more_than_one_of_them():
+    """The mechanism, exercised on a scenario built for the test.
+
+    Asserted here rather than only on the real pool because the real pool's
+    scenarios are added in later commits, and a draw site that silently
+    ignored `origin_variants` would otherwise land green.
+    """
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = propagation.trainable_scenarios()[0]
+    variants = tuple(
+        (f"state: broken variant {i}\n{base.origin_read[1]}",
+         f"state: healthy variant {i}\n{base.healthy_origin_content}")
+        for i in range(4))
+    p = dataclasses.replace(base, origin_variants=variants)
+
+    seen = set()
+    for salt in range(40):
+        e = cases.shared_origin(p, random.Random(salt), victims=2)
+        seen |= {i for i, (b, _h) in enumerate(variants)
+                 if b.split("\n")[0] in e.user}
+    assert len(seen) > 1, f"only variant(s) {seen} ever rendered"
+
+
+def test_a_pair_built_from_one_salt_draws_the_same_variant():
+    """`generate.py:156-159` spends one salt twice, so the twins replay one
+    stream. The draw sits before the `healthy` branch precisely so both halves
+    reach it in the same RNG state -- otherwise a pair could contrast variant
+    2's broken blob against variant 0's healthy one, which is two changes at
+    once and no longer isolates the origin's state.
+    """
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = propagation.trainable_scenarios()[0]
+    variants = tuple(
+        (f"state: broken variant {i}\n{base.origin_read[1]}",
+         f"state: healthy variant {i}\n{base.healthy_origin_content}")
+        for i in range(4))
+    p = dataclasses.replace(base, origin_variants=variants)
+
+    for salt in range(40):
+        one = cases.shared_origin(p, random.Random(salt), victims=2)
+        other = cases.shared_origin_decoy(p, random.Random(salt), victims=2)
+        drawn = [i for i, (b, _h) in enumerate(variants)
+                 if b.split("\n")[0] in one.user]
+        assert len(drawn) == 1, f"salt {salt}: {len(drawn)} broken variants matched"
+        assert variants[drawn[0]][1].split("\n")[0] in other.user, (
+            f"salt {salt}: the twin drew a different variant")
+
+
+def test_a_scenario_without_variants_renders_exactly_what_it_did_before():
+    """The eval six declare none and must consume the RNG identically."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    for p in propagation.all_scenarios():
+        assert p.origin_variants == (), p.key
+        e = cases.shared_origin_probe(p, random.Random(3))
+        assert p.origin_read[1].split("\n")[0] in e.user, p.key
 
 
 # ---------------------------------------------------------- the curriculum mix
@@ -186,24 +435,69 @@ def test_multi_survives_as_the_majority_of_multi_workload_rows(kept):
 
 # ------------------------------------------------- the structural-cue killer
 
-def _origin_labels(rows, case):
+def _origin_labels(rows, *cases):
     return {e.meta["origin_read_label"] for e in rows
-            if e.case == case and "origin_read_label" in e.meta}
+            if e.case in cases and "origin_read_label" in e.meta}
 
 
-def test_an_origin_shaped_read_no_longer_predicts_a_shared_answer(kept):
-    """The cue test. Every trainable origin read must appear under BOTH answers.
+# These two replace a single assertion that compared `shared_origin` against
+# `multi` on the KEPT pile and demanded the sets be equal. That assertion was
+# written before the decoy twin existed, and the twin superseded its premise:
+# it read the surviving `multi` negatives as the only thing standing between a
+# read label and a free giveaway, when the pair already carries every label
+# under both answers. Its docstring said a label the filter strips from every
+# `multi` row "is a giveaway in the data the model reads". Measured, it is not
+# — the twin survives the cull holding the same label and the opposite answer.
+#
+# It also could not have survived this branch. The negative budget is fixed at
+# ~30 rows however large the pool grows, the cull takes about 30% of them, and
+# the plan ends at twenty scenarios — 1.5 negatives each before the cull. The
+# equality first went red at eleven scenarios, and no arrangement of the data
+# fixes it: raising the negatives to ~4 per scenario would mean making nearly
+# every `multi` row a negative, which is the class balance
+# `test_the_generator_emits_the_two_classes_near_evenly` exists to hold.
+#
+# So the claim is narrowed to the two things that are separately true, each
+# checked where it is actually decided. Neither is vacuous: the first goes red
+# if the rotation stops offering some scenario a negative, the second if the
+# cull ever takes half a pair or the decoy stops being emitted.
 
-    If these two sets differ, some read label is a free giveaway: seeing it
-    settles the answer without reading its content. Asserted on the kept
-    pile, because a label the filter removes every instance of is a giveaway
-    in the data the model reads however even the generator's output looked.
+def test_the_emitter_offers_every_origin_read_under_both_answers(rows):
+    """The emitter's half, checked before the cull, where it is the emitter's.
+
+    Every trainable origin read must be offered under a shared answer AND
+    under an independent one. This is the rotation's contract and it stays
+    satisfiable as the pool grows: the negatives cover the pool as long as
+    there is at least one per scenario. Asserting it on the kept pile instead
+    would be asserting the cull's behaviour under the emitter's name.
+    """
+    shared = _origin_labels(rows, "shared_origin")
+    negatives = _origin_labels(rows, "multi")
+    assert shared, "no shared_origin row carries an origin read"
+    assert negatives, "no multi row carries an origin read — the cue is alive"
+    assert shared == negatives
+
+
+def test_the_cull_never_leaves_an_origin_read_under_only_shared_answers(kept):
+    """The cue guarantee proper, in the data the model actually reads.
+
+    A read label is a giveaway only if, after the cull, it appears under a
+    shared answer and under no independent one ANYWHERE. Both independent
+    classes count: the `shared_origin_decoy` twin, which carries the label with
+    per-workload causes, and the surviving `multi` negatives. Counting only the
+    latter is what made the assertion this replaces go red over a label that
+    was never a giveaway.
+
+    This is what `drop_held_out` taking pairs whole buys, and nothing else in
+    the suite checks that it still does.
     """
     shared = _origin_labels(kept, "shared_origin")
-    independent = _origin_labels(kept, "multi")
-    assert shared, "no shared_origin row carries an origin read"
-    assert independent, "no multi row carries an origin read — the cue is alive"
-    assert shared == independent
+    independent = _origin_labels(kept, "shared_origin_decoy", "multi")
+    assert shared, "no shared_origin row survived the cull"
+    giveaways = sorted(shared - independent)
+    assert not giveaways, (
+        f"{len(giveaways)} origin read label(s) survive under a shared answer "
+        f"and under no independent one: {giveaways}")
 
 
 def _independent_share(rows):
@@ -318,6 +612,27 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
     assert len(generate.test_set()) == 263
 
 
+# Captured on `main` @ `ee2980e` and re-confirmed on this branch before any
+# edit. The 263 rows are the exam in its current shape, and this hash is not a
+# claim that every past number was measured against them: 0902 is the only
+# banked run scored against exactly this set in one go; 0901 covered the same
+# rows as two runs (253 plus the ten `shared_origin_decoy_probe` rows), which
+# is why its paired join reported `unpaired`; and 0830 predates those ten rows
+# entirely, covering only the other 253. What the hash buys is forward-looking
+# -- every number measured from here on stays comparable -- so a change that
+# moves it is wrong unless it means to retire the comparison. The row count
+# above cannot see a rewrite that keeps the count.
+EVAL_SET_SHA256 = "e8cbb549289ebaf07ba817dd3d32fdf70724c0ae80410eb47d2228a3b22b49de"
+
+
+def test_the_eval_set_is_byte_identical_to_the_one_every_scoreboard_used():
+    blob = json.dumps([generate.to_row(e) for e in generate.test_set()],
+                      sort_keys=True, ensure_ascii=False)
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    assert digest == EVAL_SET_SHA256, (
+        "the exam moved; every banked scoreboard comparison is now void")
+
+
 def test_no_eval_row_comes_from_the_trainable_pool():
     train = {p.key for p in propagation.trainable_scenarios()}
     for e in generate.test_set():
@@ -341,3 +656,93 @@ def test_training_still_contaminates_nothing(rows):
     held = {part for e in test for part in e.group.split("+")}
     for e in kept:
         assert not any(part in held for part in e.group.split("+")), e.group
+
+
+BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
+             # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
+             # the time per scenario, 5.7% across twenty -- a deterministic
+             # failure with correct data. 22 draws puts it at 1.4e-6 per
+             # scenario, 2.9e-5 across twenty.
+
+
+@pytest.fixture(scope="module")
+def big_rows():
+    return generate.generate(seed=SEED, size=BIG)
+
+
+def test_the_trainable_pool_exercises_every_issue_kind():
+    """A kind absent from the curriculum is a kind the shared-origin rule was
+    never taught over -- and `vocab.ISSUE_KINDS` is what the eval draws from.
+    """
+    seen = {v.issue for p in propagation.trainable_scenarios() for v in p.victims}
+    missing = sorted(set(vocab.ISSUE_KINDS) - seen)
+    assert not missing, f"no trainable scenario exercises: {missing}"
+
+
+def test_the_trainable_pool_holds_twenty_scenarios():
+    """Four scenarios is what the pool held when it scored 0.5 in-distribution
+    and 0.1 out. The count is asserted so shrinking it back is a deliberate
+    edit rather than a merge artefact.
+    """
+    assert len(propagation.trainable_scenarios()) == 20
+
+
+def test_every_trainable_scenario_is_taught_equally(big_rows):
+    """Equal shares are what make a constant answer chance-level: a scenario
+    the curriculum shows twice as often is one the model can afford to answer
+    by name.
+    """
+    keys = {p.key for p in propagation.trainable_scenarios()}
+    for case in ("shared_origin", "shared_origin_decoy"):
+        counts = Counter(e.meta["origin"] for e in big_rows if e.case == case)
+        assert set(counts) == keys, f"{case}: {sorted(keys ^ set(counts))}"
+        assert len(set(counts.values())) == 1, f"{case}: uneven shares {dict(counts)}"
+
+
+def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_rows):
+    """Declaring four variants is not the same as rendering them. If the draw
+    were keyed on something constant per scenario, every row would carry
+    variant 0 and the whole mechanism would be inert while its own unit test
+    still passed.
+
+    The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
+    random: this is a sampling check, and its strength is a function of `BIG`.
+    At 22 draws a correct pool trips it about once in 35,000 runs across the
+    whole pool. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
+    and the failure names a scenario whose data is fine.
+    """
+    by_key = {p.key: p for p in propagation.trainable_scenarios()}
+    seen = {k: set() for k in by_key}
+    for e in big_rows:
+        if e.case != "shared_origin":
+            continue
+        p = by_key[e.meta["origin"]]
+        for i, (broken, _healthy) in enumerate(p.origin_variants):
+            if broken.split("\n")[0] in e.user:
+                seen[p.key].add(i)
+    thin = {k: sorted(v) for k, v in seen.items() if len(v) < 3}
+    assert not thin, f"scenarios rendering fewer than 3 variants: {thin}"
+
+
+def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
+    """The flattening the slice exists for.
+
+    Measured on the four-scenario pool before this slice, at this test's own
+    `BIG`: 15 distinct causes, top one 0.263 and top three 0.609. A model that
+    answers the single most common cause on every shared-origin row was right a
+    quarter of the time. The bar is 0.12 and 0.30 -- both of which the old pool
+    failed by a wide margin, which is what makes this check non-vacuous.
+
+    The size is named because top three moves with it: 0.633 at 5500, 0.618 at
+    8000, 0.609 here, 0.602 at 20000, as the tail keeps gaining distinct causes.
+    Top one is stable at 0.263 across all four.
+    """
+    causes = Counter(cause
+                     for e in big_rows if e.case == "shared_origin"
+                     for cause in e.meta["expected"].values())
+    total = sum(causes.values())
+    top = causes.most_common(3)
+    assert top[0][1] / total <= 0.12, (
+        f"{top[0][0]!r} is {top[0][1] / total:.3f} of all shared-origin causes")
+    assert sum(n for _c, n in top) / total < 0.30, (
+        f"top three are {sum(n for _c, n in top) / total:.3f} of all causes")

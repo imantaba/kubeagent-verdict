@@ -526,6 +526,17 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     drawn, scope_value = _propagation_names(p, rng, count)
     # The pinned field is identical across `drawn`, so formatting the shared
     # strings against any one of them yields the one answer every row repeats.
+    # The discriminating read varies inside a scenario, so what separates the
+    # two halves is the relation the contents stand for rather than two literal
+    # strings the model can memorise. Drawn from the passed-in rng, before the
+    # `healthy` branch: `generate.py:156-159` draws ONE salt and builds a
+    # separate `random.Random(salt)` for each half, so both replay an identical
+    # stream and both draw the SAME variant -- exactly the way they already
+    # draw the same names. Only when the scenario declares variants; the eval
+    # six declare none and must consume the RNG exactly as they did before.
+    broken_origin, healthy_origin = p.origin_read[1], p.healthy_origin_content
+    if p.origin_variants:
+        broken_origin, healthy_origin = rng.choice(p.origin_variants)
     anchor = drawn[0]
     shared_cause = _fmt(p.shared_cause, anchor)
     shared_reason = _fmt(p.shared_reason, anchor)
@@ -535,7 +546,7 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     workloads, rows, decoys = [], [], []
     # The origin read leads: the evidence for the one cause is stated once,
     # not restated per victim, which is how a real gather would present it.
-    origin_content = p.healthy_origin_content if healthy else p.origin_read[1]
+    origin_content = healthy_origin if healthy else broken_origin
     reads = [c.EvidenceRead(label=_fmt(p.origin_read[0], anchor),
                             content=_fmt(origin_content, anchor))]
     for v, n in zip(p.victims[:count], drawn):
