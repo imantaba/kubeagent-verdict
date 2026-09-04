@@ -2262,8 +2262,8 @@ _T_NODE_CONNTRACK_FULL = Propagation(
             local_reason="the probe's own timeout window is tighter than the "
                         "dependency's typical response time",
             read=("get_events {ns}/{name}",
-                  "Warning  Unhealthy  11x  kubelet  Readiness probe failed: dial "
-                  "tcp: i/o timeout"),
+                  ("Warning  Unhealthy  11x  kubelet  Readiness probe failed: dial "
+                   "tcp: i/o timeout")),
             pass_confidence="medium",
         ),
         Victim(
