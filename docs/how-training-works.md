@@ -773,13 +773,15 @@ key and a different answer. The pool is now twenty-four.
 | `node-memory-pressure` | node-disk-pressure | `describe node` with a `MemoryPressure` condition | reclaiming / headroom |
 
 The held-out promise holds. The two pools share no scenario key and no answer
-sentence, and the tests that enforce both still pass. One cousin sits close
-to its exam answer in wording: the shared cause of `node-memory-pressure`
-differs from node-disk-pressure's mainly by the word "memory". The promise
-allows that, and the third outcome below says how to read it. The exam is
-still 263 questions with the same checksum. A test now also demands that
-every read kind the exam uses has a trained cousin, so the gap cannot quietly
-reopen.
+sentence, and the tests that enforce both still pass. One cousin sits closer
+to its exam answer than the others: the shared cause of `node-memory-pressure`
+has the same shape as node-disk-pressure's. Both say a node is under pressure,
+so it evicts pods and turns new ones away. The words differ, "memory" for
+"disk" and the kubelet named as the actor, so the two sentences are not the
+same. The promise allows that, and the third outcome below says how to read
+it. The exam is still 263 questions with the same checksum. A test now also
+demands that every read kind the exam uses has a trained cousin, so the gap
+cannot quietly reopen.
 
 What the next retrain will tell us:
 
@@ -787,10 +789,10 @@ What the next retrain will tell us:
 - **The three read-kind origins move but disk-pressure does not:** the
   habit of saying "shared" on a pressure condition needs its own lesson.
 - **Disk-pressure moves but the other three do not:** read it with care.
-  The memory cousin is the one whose answer is close to its exam answer, so
-  that result could mean "learned to read a pressure condition" or
-  "recognised a near copy". The other three cousins are far from their exam
-  answers, so their result is the cleaner signal.
+  The memory cousin is the one whose answer shares its shape with its exam
+  answer, so that result could mean "learned to read a pressure condition"
+  or "recognised a near copy". The other three cousins are far from their
+  exam answers, so their result is the cleaner signal.
 - **Nothing moves:** coverage was not the gap, and the next step looks at the
   loss or the recipe rather than the data.
 
