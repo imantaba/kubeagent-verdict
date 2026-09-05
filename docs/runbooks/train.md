@@ -470,6 +470,17 @@ alone runs **about 17½ hours** on a workstation — run it under
      still read separately, and the pair is still joined. `unpaired: 10`
      under the table is the tell that this happened.
 
+     When this decider fails and you need to know **which origin** the
+     model gets wrong, do not squint at the exam. It carries only one or
+     two pairs per origin — enough to score the model, too few to tell a
+     habit from bad luck. Generate the wide probe instead:
+     `kv-dataset --probe-wide out/probe-wide.jsonl` writes five twin pairs
+     per held-out origin (30 pairs, 60 rows) to its own file, and
+     `kv-eval --test out/probe-wide.jsonl --endpoint <url>` scores it.
+     The wide probe is a diagnostic instrument, not a release decider: its
+     numbers say where to aim the next fix. The frozen exam is still the
+     only thing a release argument may cite.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
      `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
      for a run scored against the exam as it stood before the
