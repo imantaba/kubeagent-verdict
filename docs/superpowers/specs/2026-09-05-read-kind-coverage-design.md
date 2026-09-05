@@ -29,8 +29,8 @@ per held-out origin and is diagnostic only; it is not part of the exam.
 |---|---|---|---|
 | node-not-ready | `describe node` | 5 of 5 | reads correctly |
 | registry-unreachable | `get_events` cluster-wide | 5 of 5 | reads correctly |
-| coredns-down | `describe kube-system/… (Deployment)` | 0 of 5 | never says "shared" |
-| storage-provisioner-down | `get_related storageclass` | 0 of 5 | never says "shared" |
+| coredns-down | `describe kube-system/… (Deployment)` | 1 of 5 | says "shared" on one pair in five |
+| storage-provisioner-down | `get_related storageclass` | 0 of 4 | never says "shared" (one pair could not be graded) |
 | networkpolicy-deny-all | `get_related networkpolicy` | 0 of 5 | never says "shared" |
 | node-disk-pressure | `describe node` with a pressure condition | 0 of 5 | says "shared" on both halves |
 
@@ -42,7 +42,7 @@ on read kinds it was never trained on.
 
 That is the gap this slice closes. Nothing in the trainable pool reads a
 kube-system Deployment through `describe kube-system/… (Deployment)`, a
-StorageClass, or a NetworkPolicy. Five trained scenarios read a node, but
+StorageClass, or a NetworkPolicy. Six trained scenarios read a node, but
 none shows a `…Pressure` condition line, so on node-disk-pressure the model
 falls back to the candidate menu and says "shared" whatever the read says.
 
@@ -100,9 +100,9 @@ cluster credentials file, a home-directory path, or an at-sign).
 - **Shared cause:** "the pod identity webhook has no ready replica, so every
   pod admitted since it went down started without its identity volume".
 - **Distractor:** "each workload's own service account lost its identity
-  annotation". **Distractor reason:** the annotations are present and
-  unchanged on every service account; the webhook that reads them has no
-  ready endpoint.
+  annotation". **Distractor reason:** the identity annotation is present and
+  unchanged on every service account involved, and the last edit to any of
+  those service accounts predates this incident by weeks.
 - **Victims (three):** a Deployment in `CrashLoopBackOff` (the app exits
   when no credential source is found; `high`); a StatefulSet in
   `Init:CrashLoopBackOff` (an init container fetches its config with the
@@ -119,7 +119,7 @@ cluster credentials file, a home-directory path, or an at-sign).
 ### ② `storageclass-pool-retired` — cousin of storage-provisioner-down
 
 - **Radius:** cluster (`scope_field=None`).
-- **Read label:** `get_related storageclass fast-ssd`.
+- **Read label:** `get_related storageclass ssd-premium`.
 - **What it teaches:** a StorageClass read. The exam's storage read shows the
   provisioner controller at `0/1 ready`. This cousin shows the controller at
   `1/1 ready, Running` on **both** halves; what differs is the pool line. A
@@ -129,12 +129,12 @@ cluster credentials file, a home-directory path, or an at-sign).
   exist.
 - **State words:** `retired` / `online`, on the first line:
   `Pool status: retired` / `Pool status: online`.
-- **Shared cause:** "the fast-ssd StorageClass points at a storage pool that
+- **Shared cause:** "the ssd-premium StorageClass points at a storage pool that
   was retired, so the provisioner refuses every new claim on that class".
 - **Distractor:** "the workloads' claims ask for a volume mode the class does
-  not support". **Distractor reason:** the claims use the same Filesystem mode
-  they bound with last month, and the provisioner's log names the pool, not
-  the mode.
+  not support". **Distractor reason:** every claim asks for the same
+  Filesystem volume mode it bound with last month, and Filesystem is the
+  mode the class has served since it was created.
 - **Victims (three):** a StatefulSet in `Unschedulable` (a new replica's claim
   never binds, so the pod has an unbound claim; `high`); a Deployment in
   `VolumeAttachError` (an existing volume in the retired pool cannot be
@@ -162,8 +162,8 @@ cluster credentials file, a home-directory path, or an at-sign).
 - **Shared cause:** "the egress allow-list policy in {ns} no longer matches
   the datastore pods, so every pod's connection to the datastore is dropped".
 - **Distractor:** "the datastore in {ns} has stopped accepting connections".
-  **Distractor reason:** the datastore's own probe passes and its connection
-  count is near zero; the packets never reach it.
+  **Distractor reason:** the datastore's own readiness probe passes on every
+  check, and a connection from outside {ns} reaches it and runs a query.
 - **Victims (three), each carrying `network_policies=("egress-allowlist",)`
   on both halves:** a Deployment in `CrashLoopBackOff` (exits when the
   datastore is unreachable; `high`); a StatefulSet in `Init:CrashLoopBackOff`
@@ -194,9 +194,8 @@ cluster credentials file, a home-directory path, or an at-sign).
   disk-pressure sentence, and it is not the disk scenario's distractor ("the
   cluster has run out of allocatable memory").
 - **Distractor:** "the workloads' own memory limits were lowered in the last
-  rollout". **Distractor reason:** the limits are unchanged since the
-  previous release; the kills come from the node's own out-of-memory handler,
-  not from the container limit.
+  rollout". **Distractor reason:** the container limits are unchanged since
+  the previous release, and the last rollout changed only the image tag.
 - **Victims (three):** a Deployment in `OOMKilled` (the kernel killed it
   during node-wide exhaustion; `high`); a StatefulSet in `ProbeFailure`
   (readiness times out while the node reclaims; `medium`); a DaemonSet in

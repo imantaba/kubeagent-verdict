@@ -707,20 +707,21 @@ def test_the_trainable_pool_holds_twenty_four_scenarios():
 
 
 def test_every_held_out_read_kind_has_a_trained_cousin():
-    """On the 0905 wide probe the model never said "shared" for the three
-    held-out origins whose discriminating read has no trained cousin of the
-    same kind -- a kube-system Deployment describe, a StorageClass
-    `get_related`, a NetworkPolicy `get_related` -- 0 of 15 pairs. And it said
+    """On the 0905 wide probe the model said "shared" on 1 of 15 pairs for the
+    three held-out origins whose discriminating read has no trained cousin of
+    the same kind -- a kube-system Deployment describe, a StorageClass
+    `get_related`, a NetworkPolicy `get_related` (one storage pair could not
+    be graded; the one pair it got right was coredns-down). And it said
     "shared" on both halves for node-disk-pressure, the one node scenario
     whose read turns on a pressure condition line, 0 of 5. Trained cousins it
     had seen scored 5 of 5. So the gap is the read kind, and this test pins
     the fix: every read kind the exam uses must appear, in shape, in the
     trainable pool.
 
-    Labels are matched by prefix and suffix so a renamed component or a
-    namespace slug cannot satisfy the check by accident. The memory cousin is
-    recognised by the condition line itself, exactly as the held-out node
-    reads spell it (three spaces).
+    Labels are matched by prefix, and the Deployment read by its suffix as
+    well, so a renamed component or a namespace slug cannot satisfy the check
+    by accident. The memory cousin is recognised by the condition line
+    itself: `MemoryPressure` followed by `True`, whatever the column spacing.
     """
     pool = propagation.trainable_scenarios()
     labels = [p.origin_read[0] for p in pool]
@@ -733,8 +734,8 @@ def test_every_held_out_read_kind_has_a_trained_cousin():
         missing.append("get_related storageclass ...")
     if not any(label.startswith("get_related networkpolicy ") for label in labels):
         missing.append("get_related networkpolicy ...")
-    if not any("MemoryPressure   True" in content for content in broken):
-        missing.append("describe node with a MemoryPressure   True condition")
+    if not any(re.search(r"MemoryPressure\s+True", content) for content in broken):
+        missing.append("describe node with a MemoryPressure True condition")
     assert not missing, f"no trainable cousin for: {missing}"
 
 
@@ -778,15 +779,16 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     """The flattening the slice exists for.
 
-    Measured on the four-scenario pool before this slice, at this test's own
-    `BIG`: 15 distinct causes, top one 0.263 and top three 0.609. A model that
+    Measured on the four-scenario pool before this slice, at `BIG` = 11000
+    (this test's size at the time): 15 distinct causes, top one 0.263 and top
+    three 0.609. A model that
     answers the single most common cause on every shared-origin row was right a
     quarter of the time. The bar is 0.12 and 0.30 -- both of which the old pool
     failed by a wide margin, which is what makes this check non-vacuous.
 
     The size is named because top three moves with it: 0.633 at 5500, 0.618 at
-    8000, 0.609 here, 0.602 at 20000, as the tail keeps gaining distinct causes.
-    Top one is stable at 0.263 across all four.
+    8000, 0.609 at 11000, 0.602 at 20000, as the tail keeps gaining distinct
+    causes. Top one is stable at 0.263 across all four.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"

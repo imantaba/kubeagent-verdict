@@ -2727,8 +2727,8 @@ _T_POD_IDENTITY_WEBHOOK = Propagation(
     distractor_cause="each workload's own service account lost its identity "
                      "annotation",
     distractor_reason="the identity annotation is present and unchanged on every "
-                      "service account involved; the webhook that reads it has no "
-                      "ready endpoint to act on it",
+                      "service account involved, and the last edit to any of those "
+                      "service accounts predates this incident by weeks",
     rationale="the workload started without its identity volume because the webhook "
               "that mounts it had no ready replica at admission time, which is true "
               "of every pod admitted since",
@@ -2840,33 +2840,33 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
     key="storageclass-pool-retired",
     blast_radius="cluster",
     scope_field=None,
-    origin="the fast-ssd StorageClass names a storage pool that was retired, so the "
+    origin="the ssd-premium StorageClass names a storage pool that was retired, so the "
            "provisioner refuses every claim on it",
-    shared_cause="the fast-ssd StorageClass points at a storage pool that was "
+    shared_cause="the ssd-premium StorageClass points at a storage pool that was "
                  "retired, so the provisioner refuses every new claim on that class",
     shared_reason="the class parameters name pool ssd-tier-a, the backend lists that "
                   "pool as retired, and the provisioner has bound 0 claims on "
-                  "fast-ssd since the pool went away while binding normally on "
+                  "ssd-premium since the pool went away while binding normally on "
                   "every other class",
     distractor_cause="the workloads' claims ask for a volume mode the class does not "
                      "support",
     distractor_reason="every claim asks for the same Filesystem volume mode it bound "
-                      "with last month, and the provisioner's refusal names the "
-                      "pool, not the mode",
-    rationale="the workload's storage on fast-ssd is refused because the class "
+                      "with last month, and Filesystem is the mode the class has "
+                      "served since it was created",
+    rationale="the workload's storage on ssd-premium is refused because the class "
               "points at a retired pool, which is true of every claim and volume on "
               "that class right now",
-    remedy="Point the fast-ssd StorageClass at a live pool (or recreate the class); "
+    remedy="Point the ssd-premium StorageClass at a live pool (or recreate the class); "
            "the flagged workloads and their claims need no change.",
     confidence="high",
     origin_read=(
-        "get_related storageclass fast-ssd",
+        "get_related storageclass ssd-premium",
         ("Pool status: retired\n"
          "provisioner: example.com/ssd-csi\n"
          "parameters: pool=ssd-tier-a, fstype=ext4\n"
          "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
          "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
-         "PersistentVolumes bound on fast-ssd in the last 20m: 0"),
+         "PersistentVolumes bound on ssd-premium in the last 20m: 0"),
     ),
     healthy_origin_content=(
         "Pool status: online\n"
@@ -2874,7 +2874,7 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
         "parameters: pool=ssd-tier-b, fstype=ext4\n"
         "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
         "backend pool ssd-tier-b: online, 412 volumes accepted\n"
-        "PersistentVolumes bound on fast-ssd in the last 20m: 9"
+        "PersistentVolumes bound on ssd-premium in the last 20m: 9"
     ),
     origin_state=("retired", "online"),
     origin_variants=(
@@ -2883,27 +2883,27 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
           "parameters: pool=ssd-tier-a, fstype=ext4\n"
           "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
           "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
-          "PersistentVolumes bound on fast-ssd in the last 20m: 0"),
+          "PersistentVolumes bound on ssd-premium in the last 20m: 0"),
          ("Pool status: online\n"
           "provisioner: example.com/ssd-csi\n"
           "parameters: pool=ssd-tier-b, fstype=ext4\n"
           "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
           "backend pool ssd-tier-b: online, 412 volumes accepted\n"
-          "PersistentVolumes bound on fast-ssd in the last 20m: 9")),
-        (("the storage backend reports the pool behind fast-ssd retired\n"
+          "PersistentVolumes bound on ssd-premium in the last 20m: 9")),
+        (("the storage backend reports the pool behind ssd-premium retired\n"
           "no claim on the class has bound for 3d\n"
           "the provisioner controller is healthy and refusing each request by name"),
-         ("the storage backend reports the pool behind fast-ssd online\n"
+         ("the storage backend reports the pool behind ssd-premium online\n"
           "claims on the class bind within seconds\n"
           "the provisioner controller is healthy and accepting each request")),
         (("Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is retired: "
-          "refusing every claim on StorageClass fast-ssd"),
+          "refusing every claim on StorageClass ssd-premium"),
          ("Normal  ProvisioningSucceeded  ssd-csi  pool ssd-tier-b is online: claim "
-          "on StorageClass fast-ssd bound in 4s")),
-        (("fast-ssd pool state: retired\n"
+          "on StorageClass ssd-premium bound in 4s")),
+        (("ssd-premium pool state: retired\n"
           "claims refused in the last 3d: 14\n"
           "provisioner controller: healthy"),
-         ("fast-ssd pool state: online\n"
+         ("ssd-premium pool state: online\n"
           "claims refused in the last 24h: 0\n"
           "provisioner controller: healthy")),
     ),
@@ -2919,14 +2919,14 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
                          "class will hand out",
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
                   ("Status: Pending\n"
-                   "StorageClass: fast-ssd\n"
+                   "StorageClass: ssd-premium\n"
                    "Events: Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is "
                    "retired, claim refused")),
             # The decoy half shows the pool online, so the refusal must be the
             # claim's own: its size, not the pool.
             healthy_read_content=(
                 "Status: Pending\n"
-                "StorageClass: fast-ssd\n"
+                "StorageClass: ssd-premium\n"
                 "Events: Warning  ProvisioningFailed  ssd-csi  requested size 2Ti "
                 "exceeds the class maximum of 1Ti"
             ),
@@ -2992,9 +2992,8 @@ _T_NETPOL_EGRESS_ALLOWLIST = Propagation(
                   "tier=data since the chart upgrade and the rule still says "
                   "tier=datastore",
     distractor_cause="the datastore in {ns} has stopped accepting connections",
-    distractor_reason="the datastore's own readiness probe passes and its connection "
-                      "count sits near zero; the packets are dropped before they "
-                      "reach it",
+    distractor_reason="the datastore's own readiness probe passes on every check, and "
+                      "a connection from outside {ns} reaches it and runs a query",
     rationale="the workload cannot reach the datastore because the egress policy that "
               "selects it matches no datastore pod any more, which is true of every "
               "pod in {ns} right now",
@@ -3120,8 +3119,7 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
     distractor_cause="the workloads' own memory limits were lowered in the last "
                      "rollout",
     distractor_reason="the container limits are unchanged since the previous release, "
-                      "and each kill is logged by the node's out-of-memory handler "
-                      "rather than by the container's own limit",
+                      "and the last rollout changed only the image tag",
     rationale="the kubelet on {node} is reclaiming memory from every pod it hosts, and "
               "this workload is one of them; the pressure is the node's, not the "
               "workload's",

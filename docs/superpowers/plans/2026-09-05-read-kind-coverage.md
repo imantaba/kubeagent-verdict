@@ -19,7 +19,7 @@
 - No secret, credential, private IP, internal hostname or real cluster name in any tracked file. Scenario text must not contain a dotted quad, `http://`, `https://`, the word `kubeconfig`, the string `/home/`, or `@` (the pool test bans these shapes). The training host is called "the training host" in every tracked file, never by name.
 - Python is always `.venv/bin/python` (3.12). Never the system `python3` (3.14). Pytest is `.venv/bin/python -m pytest`.
 - NEVER run `kv-train`, `kv-export`, `chaos/run.sh`, or any test with `-update`. This plan does not authorise a retrain. A retrain is a separate decision the user makes after the branch is merged.
-- `CASE_MIX` in `src/kubeagent_verdict/dataset/cases.py` is frozen. Do not touch it.
+- `CASE_MIX` in `src/kubeagent_verdict/dataset/generate.py` is frozen. Do not touch it.
 - The exam is frozen. `generate.test_set()[:253]` must still hash to `9f5fb341f620306d1d003d1617da613139f7bccf03cec768bd78539df75abb96` and all 263 rows to `9d59a8f881862bc9035605d206a2cc9269bf5b59300f8fb8af3a030aff04f1b9`. Two tests pin these. If either moves, stop: something is wrong.
 - The six held-out scenarios in `propagation.py` (`_SCENARIOS`, returned by `all_scenarios()`) are not edited. The model card, `contract.py`, the golden files and the scorer are not edited.
 - Simple voice in every doc line this plan writes: short sentences, plain words, numbers explained ("3 of 10 pairs"), the decision first.
@@ -1124,3 +1124,20 @@ git -c user.name=imantaba -c user.email=itn.taba@gmail.com commit -s -m "docs(tr
 ## Not in this plan
 
 The retrain, the export and the exam sitting are the second half of the user's choice, and they happen on the training host after this branch is merged. The spec's *After the branch* section holds the recipe. This plan does not run `kv-train`, `kv-export`, or `kv-eval`, and no task in it may. The launch is confirmed with the user in so many words before it happens.
+
+## Post-review corrections
+
+The whole-branch review corrected five things after the four tasks above
+were transcribed. The code, the tests, the training page and the spec carry
+the corrected text; the task blocks above keep the text as it was written.
+
+- Wide probe: coredns-down got 1 pair of 5 right, not 0. One
+  storage-provisioner-down pair could not be graded, so that row is 0 of 4.
+  Six trained scenarios read a node before this branch, not five.
+- The four new distractor reasons now hold on both halves of a pair, like
+  the twenty older records. The plan's versions asserted the broken world.
+- The StorageClass cousin is named `ssd-premium`, so the two pools share no
+  identifier.
+- The memory-cousin check matches `MemoryPressure` then `True` with any
+  spacing.
+- The curriculum-test docstring names the size its 0.609 was measured at.

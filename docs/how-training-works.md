@@ -702,11 +702,11 @@ instead of repeating one of a small handful of fixed strings. The right answer
 now depends on what the read actually says, not on which of a few familiar
 shapes the question is.
 
-What changed, measured on the built dataset at the time (the four percentages
-below are all taken at the same sample size, so they are directly comparable;
-they were measured on the twenty-scenario pool, and the pool tests re-check
-the two bars they stand on, 12% for one cause and 30% for the top three, on
-every commit):
+Here is what changed, measured on the built dataset at the time. The four
+percentages below were all taken at the same sample size, so they compare
+directly. They were measured on the twenty-scenario pool. The pool tests
+re-check the two bars they stand on, 12% for one cause and 30% for the top
+three, on every commit.
 
 - The pool: **4 scenarios → 20 scenarios**, and since the next section,
   **→ 24**.
@@ -747,18 +747,19 @@ held-out origin. It is diagnostic only and is not part of the exam.
 |---|---|---|---|
 | node-not-ready | `describe node` | 5 of 5 | reads correctly |
 | registry-unreachable | `get_events` cluster-wide | 5 of 5 | reads correctly |
-| coredns-down | `describe kube-system/… (Deployment)` | 0 of 5 | never says "shared" |
-| storage-provisioner-down | `get_related storageclass` | 0 of 5 | never says "shared" |
+| coredns-down | `describe kube-system/… (Deployment)` | 1 of 5 | says "shared" on one pair in five |
+| storage-provisioner-down | `get_related storageclass` | 0 of 4 | never says "shared" (one pair could not be graded) |
 | networkpolicy-deny-all | `get_related networkpolicy` | 0 of 5 | never says "shared" |
 | node-disk-pressure | `describe node` with a pressure condition | 0 of 5 | says "shared" on both halves |
 
 The pattern is the read kind. The two origins the model reads correctly use
 read kinds that trained scenarios also use. The four it fails use read kinds
 no trained scenario used: nothing in the pool described a kube-system
-Deployment, a StorageClass or a NetworkPolicy, and none of the five trained
-node scenarios showed a pressure condition line. Fresh, unseen pairs built
-from trained scenarios score 7 of 10, so the model can learn this trap. It
-fails only on shapes it has never seen.
+Deployment, a StorageClass or a NetworkPolicy, and none of the six trained
+node scenarios showed a pressure condition line. Across those four origins
+the model got 1 pair of 19 right. Fresh, unseen pairs built from trained
+scenarios score 7 of 10, so the model can learn this trap. It fails only on
+shapes it has never seen.
 
 The response is four new trained scenarios, one cousin per gap. Each uses the
 same kind of read as its held-out origin, in the same shape, with a different
@@ -772,15 +773,24 @@ key and a different answer. The pool is now twenty-four.
 | `node-memory-pressure` | node-disk-pressure | `describe node` with a `MemoryPressure` condition | reclaiming / headroom |
 
 The held-out promise holds. The two pools share no scenario key and no answer
-sentence, and the tests that enforce both still pass. The exam is still 263
-questions with the same checksum. A test now also demands that every read
-kind the exam uses has a trained cousin, so the gap cannot quietly reopen.
+sentence, and the tests that enforce both still pass. One cousin sits close
+to its exam answer in wording: the shared cause of `node-memory-pressure`
+differs from node-disk-pressure's mainly by the word "memory". The promise
+allows that, and the third outcome below says how to read it. The exam is
+still 263 questions with the same checksum. A test now also demands that
+every read kind the exam uses has a trained cousin, so the gap cannot quietly
+reopen.
 
 What the next retrain will tell us:
 
 - **Decider 5 met, all four origins move:** coverage was the gap.
-- **The three "never shared" origins move but disk-pressure does not:** the
+- **The three read-kind origins move but disk-pressure does not:** the
   habit of saying "shared" on a pressure condition needs its own lesson.
+- **Disk-pressure moves but the other three do not:** read it with care.
+  The memory cousin is the one whose answer is close to its exam answer, so
+  that result could mean "learned to read a pressure condition" or
+  "recognised a near copy". The other three cousins are far from their exam
+  answers, so their result is the cleaner signal.
 - **Nothing moves:** coverage was not the gap, and the next step looks at the
   loss or the recipe rather than the data.
 
