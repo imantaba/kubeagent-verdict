@@ -674,11 +674,12 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
-             # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
-             # the time per scenario, 5.7% across twenty -- a deterministic
+BIG = 13200  # 0.68s; 22 rows of each half per scenario at 24 scenarios
+             # (each half is BIG * 4 // 100 = 528 rows, and 528 / 24 = 22).
+             # Not 6600: 11 draws from 4 variants shows <3 distinct 0.3% of
+             # the time per scenario, 7% across twenty-four -- a deterministic
              # failure with correct data. 22 draws puts it at 1.4e-6 per
-             # scenario, 2.9e-5 across twenty.
+             # scenario, 3.4e-5 across twenty-four.
 
 
 @pytest.fixture(scope="module")
@@ -695,12 +696,47 @@ def test_the_trainable_pool_exercises_every_issue_kind():
     assert not missing, f"no trainable scenario exercises: {missing}"
 
 
-def test_the_trainable_pool_holds_twenty_scenarios():
+def test_the_trainable_pool_holds_twenty_four_scenarios():
     """Four scenarios is what the pool held when it scored 0.5 in-distribution
-    and 0.1 out. The count is asserted so shrinking it back is a deliberate
-    edit rather than a merge artefact.
+    and 0.1 out. Twenty is what it held when the 0905 run failed decider 5
+    (pairs 3 of 10, false "shared" on the decoy probe 2 of 10). The count is
+    asserted so shrinking it back is a deliberate edit rather than a merge
+    artefact.
     """
-    assert len(propagation.trainable_scenarios()) == 20
+    assert len(propagation.trainable_scenarios()) == 24
+
+
+def test_every_held_out_read_kind_has_a_trained_cousin():
+    """On the 0905 wide probe the model said "shared" on 1 of 15 pairs for the
+    three held-out origins whose discriminating read has no trained cousin of
+    the same kind -- a kube-system Deployment describe, a StorageClass
+    `get_related`, a NetworkPolicy `get_related` (one storage pair could not
+    be graded; the one pair it got right was coredns-down). And it said
+    "shared" on both halves for node-disk-pressure, the one node scenario
+    whose read turns on a pressure condition line, 0 of 5. Trained cousins it
+    had seen scored 5 of 5. So the gap is the read kind, and this test pins
+    the fix: every read kind the exam uses must appear, in shape, in the
+    trainable pool.
+
+    Labels are matched by prefix, and the Deployment read by its suffix as
+    well, so a renamed component or a namespace slug cannot satisfy the check
+    by accident. The memory cousin is recognised by the condition line
+    itself: `MemoryPressure` followed by `True`, whatever the column spacing.
+    """
+    pool = propagation.trainable_scenarios()
+    labels = [p.origin_read[0] for p in pool]
+    broken = [p.origin_read[1] for p in pool]
+    missing = []
+    if not any(label.startswith("describe kube-system/")
+               and label.endswith("(Deployment)") for label in labels):
+        missing.append("describe kube-system/... (Deployment)")
+    if not any(label.startswith("get_related storageclass ") for label in labels):
+        missing.append("get_related storageclass ...")
+    if not any(label.startswith("get_related networkpolicy ") for label in labels):
+        missing.append("get_related networkpolicy ...")
+    if not any(re.search(r"MemoryPressure\s+True", content) for content in broken):
+        missing.append("describe node with a MemoryPressure True condition")
+    assert not missing, f"no trainable cousin for: {missing}"
 
 
 def test_every_trainable_scenario_is_taught_equally(big_rows):
@@ -723,9 +759,9 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 
     The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
     random: this is a sampling check, and its strength is a function of `BIG`.
-    At 22 draws a correct pool trips it about once in 35,000 runs across the
-    whole pool. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
-    and the failure names a scenario whose data is fine.
+    At 22 draws a correct pool trips it about once in 29,000 runs across the
+    whole pool of twenty-four. Lowering `BIG` is not a free speed-up -- at 11
+    draws it is about 7%, and the failure names a scenario whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
     seen = {k: set() for k in by_key}
@@ -743,15 +779,16 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     """The flattening the slice exists for.
 
-    Measured on the four-scenario pool before this slice, at this test's own
-    `BIG`: 15 distinct causes, top one 0.263 and top three 0.609. A model that
+    Measured on the four-scenario pool before this slice, at `BIG` = 11000
+    (this test's size at the time): 15 distinct causes, top one 0.263 and top
+    three 0.609. A model that
     answers the single most common cause on every shared-origin row was right a
     quarter of the time. The bar is 0.12 and 0.30 -- both of which the old pool
     failed by a wide margin, which is what makes this check non-vacuous.
 
     The size is named because top three moves with it: 0.633 at 5500, 0.618 at
-    8000, 0.609 here, 0.602 at 20000, as the tail keeps gaining distinct causes.
-    Top one is stable at 0.263 across all four.
+    8000, 0.609 at 11000, 0.602 at 20000, as the tail keeps gaining distinct
+    causes. Top one is stable at 0.263 across all four.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"

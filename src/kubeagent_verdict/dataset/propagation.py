@@ -79,7 +79,7 @@ and across the pool; 2-4 victims with kinds from `vocab.ISSUE_KINDS`;
 `origin_variants` whose first entry is the legacy pair and whose first lines
 are literal and distinct; an `origin_state` word pair present in every variant
 of its own half and absent from the other; no banned identifier shape
-anywhere; and, across the pool, twenty scenarios taught in equal shares,
+anywhere; and, across the pool, twenty-four scenarios taught in equal shares,
 exercising all sixteen issue kinds, each rendering at least three of its
 variants, with no cause template over 12% and the top three under 30%.
 
@@ -2713,6 +2713,541 @@ _T_MIGRATION_LOCK = Propagation(
     ),
 )
 
+_T_POD_IDENTITY_WEBHOOK = Propagation(
+    key="pod-identity-webhook-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the pod identity webhook has no ready replica, so pods are admitted "
+           "without their identity volume",
+    shared_cause="the pod identity webhook has no ready replica, so every pod "
+                 "admitted since it went down started without its identity volume",
+    shared_reason="kube-system/pod-identity-webhook shows 0 of 2 replicas available "
+                  "and no ready endpoint, and its failure policy is Ignore, so "
+                  "admission went ahead without the mutation",
+    distractor_cause="each workload's own service account lost its identity "
+                     "annotation",
+    distractor_reason="the identity annotation is present and unchanged on every "
+                      "service account involved, and the last edit to any of those "
+                      "service accounts predates this incident by weeks",
+    rationale="the workload started without its identity volume because the webhook "
+              "that mounts it had no ready replica at admission time, which is true "
+              "of every pod admitted since",
+    remedy="Restore a ready replica of kube-system/pod-identity-webhook and restart "
+           "the flagged pods so they are admitted again; the workloads themselves "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/pod-identity-webhook (Deployment)",
+        ("Admission backend: down\n"
+         "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+         "Conditions:  Available False  MinimumReplicasUnavailable\n"
+         "Endpoints: 0 of 2 ready\n"
+         "failurePolicy: Ignore (pods admitted without the identity volume)\n"
+         "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 0/1 CrashLoopBackOff 7 restarts\n"
+         "Last log: admission listener failed to start: certificate secret not found"),
+    ),
+    healthy_origin_content=(
+        "Admission backend: serving\n"
+        "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+        "Conditions:  Available True  MinimumReplicasAvailable\n"
+        "Endpoints: 2 of 2 ready\n"
+        "failurePolicy: Ignore (no admission skipped in the last 24h)\n"
+        "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 1/1 Running 0 restarts\n"
+        "Last log: admission listener ready, mutating pods on create"
+    ),
+    origin_state=("down", "serving"),
+    origin_variants=(
+        (("Admission backend: down\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+          "Conditions:  Available False  MinimumReplicasUnavailable\n"
+          "Endpoints: 0 of 2 ready\n"
+          "failurePolicy: Ignore (pods admitted without the identity volume)\n"
+          "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 0/1 CrashLoopBackOff 7 restarts\n"
+          "Last log: admission listener failed to start: certificate secret not found"),
+         ("Admission backend: serving\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Conditions:  Available True  MinimumReplicasAvailable\n"
+          "Endpoints: 2 of 2 ready\n"
+          "failurePolicy: Ignore (no admission skipped in the last 24h)\n"
+          "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 1/1 Running 0 restarts\n"
+          "Last log: admission listener ready, mutating pods on create")),
+        (("kubelet events show the identity webhook down\n"
+          "every pod created in the last 40m was admitted without a mutation\n"
+          "both webhook replicas are crash-looping on startup"),
+         ("kubelet events show the identity webhook serving\n"
+          "every pod created in the last 24h was mutated on admission\n"
+          "both webhook replicas are Running with 0 restarts")),
+        (("Warning  WebhookUnavailable  admission  pod-identity-webhook down: "
+          "failurePolicy Ignore, mutation skipped for new pods"),
+         ("Normal  WebhookReady  admission  pod-identity-webhook serving: mutation "
+          "applied to new pods")),
+        (("Identity webhook status: down\n"
+          "ready endpoints: 0 of 2\n"
+          "last successful mutation: 40m ago"),
+         ("Identity webhook status: serving\n"
+          "ready endpoints: 2 of 2\n"
+          "last successful mutation: 3s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="no credential source found: identity token file is absent",
+            local_cause="this workload's own pod template opts out of identity "
+                        "injection with a disable annotation",
+            local_reason="the pod template carries the injection opt-out annotation, "
+                         "so no token volume is ever requested for it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: no credential source found, identity token "
+                   "file absent (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="config fetch refused: request carried no identity token",
+            local_cause="this StatefulSet's init container runs an image too old to "
+                        "read the mounted identity token",
+            local_reason="the init image predates token-file support and sends an "
+                         "unauthenticated request every attempt",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                   "container {init_container}: config fetch refused, no identity "
+                   "token presented")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this agent's own signing key rotated and its readiness "
+                        "handler still loads the previous key",
+            local_reason="the readiness handler logs a signing failure against the "
+                         "old key id on every probe",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                   "failed with statuscode: 503, body: token signing unavailable")),
+            pass_confidence="low",
+        ),
+    ),
+)
+
+_T_STORAGECLASS_POOL_RETIRED = Propagation(
+    key="storageclass-pool-retired",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the ssd-premium StorageClass names a storage pool that was retired, so the "
+           "provisioner refuses every claim on it",
+    shared_cause="the ssd-premium StorageClass points at a storage pool that was "
+                 "retired, so the provisioner refuses every new claim on that class",
+    shared_reason="the class parameters name pool ssd-tier-a, the backend lists that "
+                  "pool as retired, and the provisioner has bound 0 claims on "
+                  "ssd-premium since the pool went away while binding normally on "
+                  "every other class",
+    distractor_cause="the workloads' claims ask for a volume mode the class does not "
+                     "support",
+    distractor_reason="every claim asks for the same Filesystem volume mode it bound "
+                      "with last month, and Filesystem is the mode the class has "
+                      "served since it was created",
+    rationale="the workload's storage on ssd-premium is refused because the class "
+              "points at a retired pool, which is true of every claim and volume on "
+              "that class right now",
+    remedy="Point the ssd-premium StorageClass at a live pool (or recreate the class); "
+           "the flagged workloads and their claims need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass ssd-premium",
+        ("Pool status: retired\n"
+         "provisioner: example.com/ssd-csi\n"
+         "parameters: pool=ssd-tier-a, fstype=ext4\n"
+         "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+         "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
+         "PersistentVolumes bound on ssd-premium in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "Pool status: online\n"
+        "provisioner: example.com/ssd-csi\n"
+        "parameters: pool=ssd-tier-b, fstype=ext4\n"
+        "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+        "backend pool ssd-tier-b: online, 412 volumes accepted\n"
+        "PersistentVolumes bound on ssd-premium in the last 20m: 9"
+    ),
+    origin_state=("retired", "online"),
+    origin_variants=(
+        (("Pool status: retired\n"
+          "provisioner: example.com/ssd-csi\n"
+          "parameters: pool=ssd-tier-a, fstype=ext4\n"
+          "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+          "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
+          "PersistentVolumes bound on ssd-premium in the last 20m: 0"),
+         ("Pool status: online\n"
+          "provisioner: example.com/ssd-csi\n"
+          "parameters: pool=ssd-tier-b, fstype=ext4\n"
+          "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+          "backend pool ssd-tier-b: online, 412 volumes accepted\n"
+          "PersistentVolumes bound on ssd-premium in the last 20m: 9")),
+        (("the storage backend reports the pool behind ssd-premium retired\n"
+          "no claim on the class has bound for 3d\n"
+          "the provisioner controller is healthy and refusing each request by name"),
+         ("the storage backend reports the pool behind ssd-premium online\n"
+          "claims on the class bind within seconds\n"
+          "the provisioner controller is healthy and accepting each request")),
+        (("Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is retired: "
+          "refusing every claim on StorageClass ssd-premium"),
+         ("Normal  ProvisioningSucceeded  ssd-csi  pool ssd-tier-b is online: claim "
+          "on StorageClass ssd-premium bound in 4s")),
+        (("ssd-premium pool state: retired\n"
+          "claims refused in the last 3d: 14\n"
+          "provisioner controller: healthy"),
+         ("ssd-premium pool state: online\n"
+          "claims refused in the last 24h: 0\n"
+          "provisioner controller: healthy")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+            reason="pod has an unbound PersistentVolumeClaim and cannot be scheduled",
+            evidence="0/3 nodes are available: pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="this StatefulSet's volume claim template asks for more "
+                        "capacity than the class's per-volume maximum",
+            local_reason="the claim's requested size exceeds the largest volume the "
+                         "class will hand out",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Pending\n"
+                   "StorageClass: ssd-premium\n"
+                   "Events: Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is "
+                   "retired, claim refused")),
+            # The decoy half shows the pool online, so the refusal must be the
+            # claim's own: its size, not the pool.
+            healthy_read_content=(
+                "Status: Pending\n"
+                "StorageClass: ssd-premium\n"
+                "Events: Warning  ProvisioningFailed  ssd-csi  requested size 2Ti "
+                "exceeds the class maximum of 1Ti"
+            ),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed: backend refused the attach because "
+                     "the volume's pool is retired",
+            healthy_evidence="AttachVolume.Attach failed: volume is still marked "
+                             "attached to a node that no longer exists",
+            local_cause="this Deployment's volume is still attached to a node that "
+                        "was deleted before it detached",
+            local_reason="the volume's attachment record points at a node object "
+                         "that no longer exists",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                   "AttachVolume.Attach failed for volume {pvc}: pool ssd-tier-a is "
+                   "retired")),
+            healthy_read_content=(
+                "Warning  FailedAttachVolume  attachdetach-controller  "
+                "AttachVolume.Attach failed for volume {pvc}: volume is still "
+                "attached to a deleted node"
+            ),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="the Job's pod is waiting on a PersistentVolumeClaim that has not "
+                   "bound",
+            evidence="0/3 nodes are available: pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="this Job's claim uses WaitForFirstConsumer with a node "
+                        "selector that matches no zone the class serves",
+            local_reason="the claim is waiting on a first consumer whose node "
+                         "selector no zone of the class can satisfy",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                   "available: pod has unbound immediate PersistentVolumeClaims; "
+                   "claim refused by provisioner: pool retired")),
+            healthy_read_content=(
+                "Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                "available: pod has unbound immediate PersistentVolumeClaims; claim "
+                "is waiting for first consumer in a zone with no node"
+            ),
+            pass_confidence="low",
+        ),
+    ),
+)
+
+_T_NETPOL_EGRESS_ALLOWLIST = Propagation(
+    key="networkpolicy-egress-allowlist-stale",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's egress allow-list policy no longer matches the datastore "
+           "pods, so every pod's datastore traffic is dropped",
+    shared_cause="the egress allow-list policy in {ns} no longer matches the datastore "
+                 "pods, so every pod's connection to the datastore is dropped",
+    shared_reason="{ns}/egress-allowlist selects every pod in the namespace and its "
+                  "datastore rule matches 0 pods, because the datastore pods carry "
+                  "tier=data since the chart upgrade and the rule still says "
+                  "tier=datastore",
+    distractor_cause="the datastore in {ns} has stopped accepting connections",
+    distractor_reason="the datastore's own readiness probe passes on every check, and "
+                      "a connection from outside {ns} reaches it and runs a query",
+    rationale="the workload cannot reach the datastore because the egress policy that "
+              "selects it matches no datastore pod any more, which is true of every "
+              "pod in {ns} right now",
+    remedy="Update the datastore rule in {ns}/egress-allowlist to the pods' current "
+           "tier=data label; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-allowlist",
+        ("Datastore egress: blocked\n"
+         "podSelector: all pods in the namespace\n"
+         "policyTypes: Egress\n"
+         "egress rule 1: to podSelector tier=datastore  (matches 0 pods; datastore "
+         "pods carry tier=data since the chart upgrade)\n"
+         "egress rule 2: to namespaceSelector kube-system, port 53/UDP  (matches 2 "
+         "pods)\n"
+         "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "Datastore egress: allowed\n"
+        "podSelector: all pods in the namespace\n"
+        "policyTypes: Egress\n"
+        "egress rule 1: to podSelector tier=data  (matches 3 pods)\n"
+        "egress rule 2: to namespaceSelector kube-system, port 53/UDP  (matches 2 "
+        "pods)\n"
+        "pods selected: 6 of 6"
+    ),
+    origin_state=("blocked", "allowed"),
+    origin_variants=(
+        (("Datastore egress: blocked\n"
+          "podSelector: all pods in the namespace\n"
+          "policyTypes: Egress\n"
+          "egress rule 1: to podSelector tier=datastore  (matches 0 pods; datastore "
+          "pods carry tier=data since the chart upgrade)\n"
+          "egress rule 2: to namespaceSelector kube-system, port 53/UDP  (matches 2 "
+          "pods)\n"
+          "pods selected: 6 of 6"),
+         ("Datastore egress: allowed\n"
+          "podSelector: all pods in the namespace\n"
+          "policyTypes: Egress\n"
+          "egress rule 1: to podSelector tier=data  (matches 3 pods)\n"
+          "egress rule 2: to namespaceSelector kube-system, port 53/UDP  (matches 2 "
+          "pods)\n"
+          "pods selected: 6 of 6")),
+        (("the namespace egress policy leaves datastore traffic blocked\n"
+          "its datastore rule matches no pod since the chart upgrade relabelled them\n"
+          "DNS egress still matches and resolves"),
+         ("the namespace egress policy leaves datastore traffic allowed\n"
+          "its datastore rule matches all 3 datastore pods\n"
+          "DNS egress still matches and resolves")),
+        (("Warning  PolicyDrop  network-plugin  egress to datastore blocked by "
+          "egress-allowlist: rule selector tier=datastore matches 0 pods"),
+         ("Normal  PolicyAllow  network-plugin  egress to datastore allowed by "
+          "egress-allowlist: rule selector tier=data matches 3 pods")),
+        (("datastore path from this namespace: blocked\n"
+          "selector drift: rule says tier=datastore, pods say tier=data\n"
+          "connections dropped in the last 10m: 1284"),
+         ("datastore path from this namespace: allowed\n"
+          "selector drift: none, rule and pods both say tier=data\n"
+          "connections dropped in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="datastore connection timed out during startup",
+            local_cause="this workload's own datastore host setting still points at "
+                        "the previous release's service name",
+            local_reason="the connection string names a service that was renamed in "
+                         "the previous release",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the datastore timed out before "
+                   "the first query (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-allowlist",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-datastore gave up after 120s",
+            local_cause="this StatefulSet's init wait uses a 120s deadline shorter "
+                        "than the datastore's own startup time",
+            local_reason="the init container's deadline expires before the datastore "
+                         "reports ready on every attempt",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                   "container {init_container}: wait-for-datastore gave up after "
+                   "120s")),
+            pass_confidence="medium",
+            network_policies=("egress-allowlist",),
+        ),
+        Victim(
+            workload_kind="Deployment", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this workload's readiness check runs a datastore query with "
+                        "a 1s timeout that the query never meets",
+            local_reason="the readiness query's own timeout is shorter than the "
+                         "query's usual latency",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                   "failed with statuscode: 503, body: datastore check timed out")),
+            pass_confidence="low",
+            network_policies=("egress-allowlist",),
+        ),
+    ),
+)
+
+_T_NODE_MEMORY_PRESSURE = Propagation(
+    key="node-memory-pressure",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node is under memory pressure and its kubelet is evicting pods and "
+           "refusing new ones",
+    shared_cause="node {node} is under memory pressure, so the kubelet is evicting its "
+                 "largest pods and turning new ones away",
+    shared_reason="the kubelet on {node} has been in memory-pressure eviction for 12m, "
+                  "with the node's working set within 2 GiB of its 64 GiB allocatable "
+                  "and the memory-pressure taint keeping new pods off it",
+    distractor_cause="the workloads' own memory limits were lowered in the last "
+                     "rollout",
+    distractor_reason="the container limits are unchanged since the previous release, "
+                      "and the last rollout changed only the image tag",
+    rationale="the kubelet on {node} is reclaiming memory from every pod it hosts, and "
+              "this workload is one of them; the pressure is the node's, not the "
+              "workload's",
+    remedy="Relieve the memory pressure on {node} (drain the largest tenants or add "
+           "capacity) and let the evicted pods reschedule; the flagged workloads need "
+           "no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node} (memory)",
+        ("Memory: reclaiming\n"
+         "Conditions:\n"
+         "  MemoryPressure   True    KubeletHasInsufficientMemory   kubelet has "
+         "insufficient memory available\n"
+         "  Ready            True    KubeletReady                   kubelet is "
+         "posting ready status\n"
+         "Taints:  node.kubernetes.io/memory-pressure:NoSchedule\n"
+         "Allocatable memory: 64Gi\n"
+         "Working set: 61.8Gi (97%)\n"
+         "Evictions in the last 10m: 4"),
+    ),
+    healthy_origin_content=(
+        "Memory: headroom\n"
+        "Conditions:\n"
+        "  MemoryPressure   False   KubeletHasSufficientMemory     kubelet has "
+        "sufficient memory available\n"
+        "  Ready            True    KubeletReady                   kubelet is "
+        "posting ready status\n"
+        "Taints:  none\n"
+        "Allocatable memory: 64Gi\n"
+        "Working set: 23.4Gi (37%)\n"
+        "Evictions in the last 10m: 0"
+    ),
+    origin_state=("reclaiming", "headroom"),
+    origin_variants=(
+        (("Memory: reclaiming\n"
+          "Conditions:\n"
+          "  MemoryPressure   True    KubeletHasInsufficientMemory   kubelet has "
+          "insufficient memory available\n"
+          "  Ready            True    KubeletReady                   kubelet is "
+          "posting ready status\n"
+          "Taints:  node.kubernetes.io/memory-pressure:NoSchedule\n"
+          "Allocatable memory: 64Gi\n"
+          "Working set: 61.8Gi (97%)\n"
+          "Evictions in the last 10m: 4"),
+         ("Memory: headroom\n"
+          "Conditions:\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory     kubelet has "
+          "sufficient memory available\n"
+          "  Ready            True    KubeletReady                   kubelet is "
+          "posting ready status\n"
+          "Taints:  none\n"
+          "Allocatable memory: 64Gi\n"
+          "Working set: 23.4Gi (37%)\n"
+          "Evictions in the last 10m: 0")),
+        (("kubelet on the node is reclaiming memory from its pods\n"
+          "the working set has sat within 2Gi of allocatable for 12m\n"
+          "the memory-pressure taint is keeping new pods off it"),
+         ("kubelet on the node reports memory headroom\n"
+          "the working set has sat under 40% of allocatable all day\n"
+          "no pressure taint is set")),
+        (("Warning  EvictionThresholdMet  kubelet  memory: reclaiming, working set "
+          "above the eviction threshold, evicting pods"),
+         ("Normal  NodeHasSufficientMemory  kubelet  memory: headroom, working set "
+          "below every eviction threshold")),
+        (("node memory state: reclaiming\n"
+          "available: 1.9Gi of 64Gi\n"
+          "oom kills logged by the node in the last 10m: 6"),
+         ("node memory state: headroom\n"
+          "available: 40.6Gi of 64Gi\n"
+          "oom kills logged by the node in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="OOMKilled", issue="OOMKilled",
+            reason="container {container} was killed by the kernel out-of-memory "
+                   "handler",
+            evidence="last state terminated with reason OOMKilled, exit code 137",
+            local_cause="this workload's own request cache grows without bound until "
+                        "the kernel kills it",
+            local_reason="the container's working set climbs steadily from start to "
+                         "kill on every instance",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\n"
+                   "Last State: Terminated, Reason: OOMKilled, Exit Code: 137\n"
+                   "Events: Warning  SystemOOM  kubelet  System OOM encountered, "
+                   "victim process: {container}")),
+            # A node with memory headroom raises no system-wide OOM, so on the
+            # decoy half the kill comes from the container's own cgroup limit.
+            healthy_read_content=(
+                "Node: {node}\n"
+                "Last State: Terminated, Reason: OOMKilled, Exit Code: 137\n"
+                "Events: Warning  OOMKilling  kubelet  memory cgroup out of memory: "
+                "killed process in container {container} at its own limit"
+            ),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: context deadline exceeded after 2s",
+            local_cause="this StatefulSet's readiness handler runs a full index scan "
+                        "that outgrows its 2s probe timeout as the data set grows",
+            local_reason="the probe handler's own scan time has grown past the probe "
+                         "timeout with the data set",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: Get "
+                   "readiness endpoint: context deadline exceeded after 2s")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="last state terminated with exit code 137",
+            log_cause="process killed by signal 9 while flushing its buffer",
+            local_cause="this agent's own liveness check kills it whenever a flush "
+                        "runs longer than the check's 5s deadline",
+            local_reason="the container's liveness probe fails during each long flush "
+                         "and the kubelet kills it every time",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: process received signal 9 mid-flush and "
+                   "restarted (3 of 3 sampled restarts)")),
+            pass_confidence="low",
+        ),
+    ),
+)
+
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
                        _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
@@ -2720,7 +3255,9 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_CSI_NODE_DRIVER, _T_NODE_PID_PRESSURE,
                        _T_NODE_RUNTIME_RESTARTING, _T_NODE_CLOCK_SKEW,
                        _T_NODE_CONNTRACK_FULL, _T_LIMITRANGE_LOWERED,
-                       _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK)
+                       _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK,
+                       _T_POD_IDENTITY_WEBHOOK, _T_STORAGECLASS_POOL_RETIRED,
+                       _T_NETPOL_EGRESS_ALLOWLIST, _T_NODE_MEMORY_PRESSURE)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:

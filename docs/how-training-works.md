@@ -636,6 +636,14 @@ enough to tell them apart.
   thing that decider asks of it.
 - Publishing: nothing is published, and nothing may be. The exam has now been
   scored and the model did not pass it.
+- Second training run (0905), on the twenty-scenario textbook from the
+  section *Widening the curriculum* below: **done, exported to
+  `dist-retrain-0905/`, and refused on decider 5** — pairs 3 of 10 against a
+  bar of 7, false "shared" on the decoy probe 2 of 10 against a bar of 1. The
+  exam did not move, so the failure is the model's own. The response is four
+  new trained scenarios, one per read kind the exam uses and training did
+  not; the section *Covering the exam's read kinds* below says why. Still
+  nothing is published.
 
 ### Why it failed, measured rather than guessed
 
@@ -687,16 +695,21 @@ shapes the question is, and answer from that, rather than read the one line
 the answer actually turns on.
 
 The response is not a further training run. It is a change to the textbook a
-future run would use. The shared-origin curriculum now has twenty scenarios
-instead of four, and inside each one the discriminating read itself varies
-from lesson to lesson instead of repeating one of a small handful of fixed
-strings. The right answer now depends on what the read actually says, not on
-which of a few familiar shapes the question is.
+future run would use. This change took the shared-origin curriculum from four
+scenarios to twenty (the section after this one takes it to twenty-four), and
+inside each one the discriminating read itself varies from lesson to lesson
+instead of repeating one of a small handful of fixed strings. The right answer
+now depends on what the read actually says, not on which of a few familiar
+shapes the question is.
 
-What changed, measured on the built dataset (the four percentages below are
-all taken at the same sample size, so they are directly comparable):
+Here is what changed, measured on the built dataset at the time. The four
+percentages below were all taken at the same sample size, so they compare
+directly. They were measured on the twenty-scenario pool. The pool tests
+re-check the two bars they stand on, 12% for one cause and 30% for the top
+three, on every commit.
 
-- The pool: **4 scenarios → 20 scenarios**.
+- The pool: **4 scenarios → 20 scenarios**, and since the next section,
+  **→ 24**.
 - Coverage: every kind of failure in kubeagent's catalog is now exercised
   somewhere in the pool — all sixteen; eleven of the sixteen were missing before.
 - Concentration: the single most common shared cause fell from **26.3% to
@@ -705,11 +718,86 @@ all taken at the same sample size, so they are directly comparable):
 - The exam: unchanged — still 263 questions, still the same checksum, still 0
   of 263 contaminated. A future score is still comparable to every past one.
 
-What this does **not** say: that the model reads better, scores higher, or has
-learned anything. No retrain has run, and this page does not authorise one.
-This is a measurement of the textbook, not of a student — whether a wider,
-less repetitive curriculum actually moves the paired shared-origin score is a
-question only a retrain can answer.
+What this did **not** say: that the model reads better. That question needed
+a retrain, and one then ran on this twenty-scenario textbook (the 0905 run).
+It did not move decider 5: pairs **3 of 10** against a bar of 7, and false
+"shared" on the decoy probe **2 of 10** against a bar of 1. So a wider, less
+repetitive textbook was not enough on its own. A wider probe then located
+the gap. The next section says what it found and what changed in response.
+
+### Covering the exam's read kinds
+
+The 0905 run sat the frozen exam and was refused on decider 5. In simple
+terms, decider 5 asks: when two workloads share one upstream cause, does the
+model read the origin before it says "shared"? Two probes of 10 questions
+each score it, plus a paired join of the two.
+
+| Check | Bar | 0905 result |
+|---|---|---|
+| False "shared" on the decoy probe (the origin read is healthy) | at most 1 of 10 | **2 of 10** |
+| Pairs where both halves are right | at least 7 of 10 | **3 of 10** |
+| False "shared" on the multi-workload probe | at most 1 of 19 | 1 of 19 (met) |
+
+The exam did not move, so the failure is the model's own.
+
+A wider probe then asked *which* origins fail. It draws five fresh pairs per
+held-out origin. It is diagnostic only and is not part of the exam.
+
+| Held-out origin | Read kind the exam uses | Pairs right | What the model did |
+|---|---|---|---|
+| node-not-ready | `describe node` | 5 of 5 | reads correctly |
+| registry-unreachable | `get_events` cluster-wide | 5 of 5 | reads correctly |
+| coredns-down | `describe kube-system/… (Deployment)` | 1 of 5 | says "shared" on one pair in five |
+| storage-provisioner-down | `get_related storageclass` | 0 of 4 | never says "shared" (one pair could not be graded) |
+| networkpolicy-deny-all | `get_related networkpolicy` | 0 of 5 | never says "shared" |
+| node-disk-pressure | `describe node` with a pressure condition | 0 of 5 | says "shared" on both halves |
+
+The pattern is the read kind. The two origins the model reads correctly use
+read kinds that trained scenarios also use. The four it fails use read kinds
+no trained scenario used: nothing in the pool described a kube-system
+Deployment, a StorageClass or a NetworkPolicy, and none of the six trained
+node scenarios showed a pressure condition line. Across those four origins
+the model got 1 pair of 19 right. Fresh, unseen pairs built from trained
+scenarios score 7 of 10, so the model can learn this trap. It fails only on
+shapes it has never seen.
+
+The response is four new trained scenarios, one cousin per gap. Each uses the
+same kind of read as its held-out origin, in the same shape, with a different
+key and a different answer. The pool is now twenty-four.
+
+| Trained cousin | Held-out origin it covers | Read kind | State words |
+|---|---|---|---|
+| `pod-identity-webhook-down` | coredns-down | `describe kube-system/… (Deployment)` | down / serving |
+| `storageclass-pool-retired` | storage-provisioner-down | `get_related storageclass` | retired / online |
+| `networkpolicy-egress-allowlist-stale` | networkpolicy-deny-all | `get_related networkpolicy` | blocked / allowed |
+| `node-memory-pressure` | node-disk-pressure | `describe node` with a `MemoryPressure` condition | reclaiming / headroom |
+
+The held-out promise holds. The two pools share no scenario key and no answer
+sentence, and the tests that enforce both still pass. One cousin sits closer
+to its exam answer than the others: the shared cause of `node-memory-pressure`
+has the same shape as node-disk-pressure's. Both say a node is under pressure,
+so it evicts pods and turns new ones away. The words differ, "memory" for
+"disk" and the kubelet named as the actor, so the two sentences are not the
+same. The promise allows that, and the third outcome below says how to read
+it. The exam is still 263 questions with the same checksum. A test now also
+demands that every read kind the exam uses has a trained cousin, so the gap
+cannot quietly reopen.
+
+What the next retrain will tell us:
+
+- **Decider 5 met, all four origins move:** coverage was the gap.
+- **The three read-kind origins move but disk-pressure does not:** the
+  habit of saying "shared" on a pressure condition needs its own lesson.
+- **Disk-pressure moves but the other three do not:** read it with care.
+  The memory cousin is the one whose answer shares its shape with its exam
+  answer, so that result could mean "learned to read a pressure condition"
+  or "recognised a near copy". The other three cousins are far from their
+  exam answers, so their result is the cleaner signal.
+- **Nothing moves:** coverage was not the gap, and the next step looks at the
+  loss or the recipe rather than the data.
+
+This page does not authorise that retrain. It records what the textbook now
+holds and why.
 
 ---
 
