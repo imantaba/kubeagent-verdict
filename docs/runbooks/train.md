@@ -481,6 +481,17 @@ alone runs **about 17½ hours** on a workstation — run it under
      numbers say where to aim the next fix. The frozen exam is still the
      only thing a release argument may cite.
 
+     One date matters when you compare decoy numbers across runs. On
+     2026-09-05 two of the ten decoy rows changed by one line each. Their
+     inventory said a pod was unschedulable because of the disk-pressure
+     taint, while the node read in the same prompt showed no taint at all,
+     so the prompt argued against its own "separate" label and the model
+     believed the inventory. The fix (`healthy_evidence` on the victim)
+     makes that line agree with the reads. The first 253 rows did not move,
+     so every number on the 253 is still comparable; the two decoy
+     measures above are not comparable across that date. Both facts are
+     pinned by hash in `tests/test_shared_origin_training.py`.
+
    - **Is the answer the prompt's own `suggested fix` line handed back?**
      `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
      for a run scored against the exam as it stood before the

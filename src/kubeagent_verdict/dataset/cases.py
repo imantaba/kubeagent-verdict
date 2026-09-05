@@ -458,10 +458,11 @@ def _propagation_names(p: prop.Propagation, rng: random.Random,
     return drawn, scope_value
 
 
-def _victim_finding(v: prop.Victim, n: Names) -> c.Finding:
+def _victim_finding(v: prop.Victim, n: Names, healthy: bool = False) -> c.Finding:
     sug = _suggestion(v.issue, n)
+    evidence = (v.healthy_evidence or v.evidence) if healthy else v.evidence
     return c.Finding(
-        issue=v.issue, reason=_fmt(v.reason, n), evidence=_fmt(v.evidence, n),
+        issue=v.issue, reason=_fmt(v.reason, n), evidence=_fmt(evidence, n),
         log_cause=_fmt(v.log_cause, n) if v.log_cause else "",
         next_step=sug.next_step, command=sug.command,
     )
@@ -498,9 +499,12 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     broken for its `healthy_read_content`, and takes the opposite answer: each
     workload's own local cause, under the ordinary "separate reasons" summary.
     Everything else is held fixed on purpose -- the same rng draw gives the
-    same names, so the inventory and the candidate menus come out
-    byte-identical and the reads carry identical labels in identical order.
-    Only what the reads SAY differs, which is the only thing that may decide
+    same names, so the candidate menus come out byte-identical, the reads
+    carry identical labels in identical order, and so does the inventory,
+    with one exception: a finding whose `evidence` names the origin's fact
+    renders its `healthy_evidence` instead, so the inventory cannot assert
+    what the reads deny. Only what the reads SAY differs, plus that one
+    evidence line, and the reads are still the only thing that may decide
     the answer.
 
     The menu is NOT re-tagged. The local cause keeps `attributed` and the
@@ -560,7 +564,8 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         )
         workloads.append(c.Workload(
             namespace=n.ns, name=n.name, kind=v.workload_kind, ready=0, desired=2,
-            status=v.status, restarts=n.restarts, findings=(_victim_finding(v, n),),
+            status=v.status, restarts=n.restarts,
+            findings=(_victim_finding(v, n, healthy=healthy),),
             candidates=menu, confidence=v.pass_confidence,
             network_policies=tuple(_fmt(x, n) for x in v.network_policies)))
         content = (v.healthy_read_content or v.read[1]) if healthy else v.read[1]
@@ -717,11 +722,12 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
     reading nothing, and passes both halves of decider 5 doing it.
 
     This is the counter-example. Drawn from the SAME rng salt as its twin, so
-    the two rows are a minimal contrast: identical inventory, identical
-    candidate menus, identical read labels in identical order. Only the
-    contents differ -- the origin read shows the component healthy, and each
-    victim read that would have asserted otherwise shows its local symptom
-    instead. The correct answer becomes each workload's own local cause, under
+    the two rows are a minimal contrast: identical candidate menus, identical
+    read labels in identical order, and an identical inventory except where a
+    finding's evidence would have named the origin's fact (`healthy_evidence`
+    on the victim). Only the contents differ -- the origin read shows the
+    component healthy, and each victim read that would have asserted
+    otherwise shows its local symptom instead. The correct answer becomes each workload's own local cause, under
     the ordinary "N workloads are failing for separate reasons" summary.
 
     That gives the pair teeth on three axes:
