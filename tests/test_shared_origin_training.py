@@ -674,11 +674,12 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-BIG = 11000  # 0.54s; 22 rows of each half per scenario at 20 scenarios.
-             # Not 5500: 11 draws from 4 variants shows <3 distinct 0.3% of
-             # the time per scenario, 5.7% across twenty -- a deterministic
+BIG = 13200  # 0.69s; 22 rows of each half per scenario at 24 scenarios
+             # (each half is BIG * 4 // 100 = 528 rows, and 528 / 24 = 22).
+             # Not 6600: 11 draws from 4 variants shows <3 distinct 0.3% of
+             # the time per scenario, 7% across twenty-four -- a deterministic
              # failure with correct data. 22 draws puts it at 1.4e-6 per
-             # scenario, 2.9e-5 across twenty.
+             # scenario, 3.4e-5 across twenty-four.
 
 
 @pytest.fixture(scope="module")
@@ -757,9 +758,9 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
 
     The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
     random: this is a sampling check, and its strength is a function of `BIG`.
-    At 22 draws a correct pool trips it about once in 35,000 runs across the
-    whole pool. Lowering `BIG` is not a free speed-up -- at 11 draws it is 5.7%,
-    and the failure names a scenario whose data is fine.
+    At 22 draws a correct pool trips it about once in 29,000 runs across the
+    whole pool of twenty-four. Lowering `BIG` is not a free speed-up -- at 11
+    draws it is about 7%, and the failure names a scenario whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
     seen = {k: set() for k in by_key}
