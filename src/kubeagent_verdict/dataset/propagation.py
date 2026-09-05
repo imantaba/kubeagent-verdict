@@ -2978,6 +2978,7 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
         ),
     ),
 )
+
 _T_NETPOL_EGRESS_ALLOWLIST = Propagation(
     key="networkpolicy-egress-allowlist-stale",
     blast_radius="namespace",

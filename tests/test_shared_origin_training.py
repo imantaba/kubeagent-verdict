@@ -674,7 +674,7 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-BIG = 13200  # 0.69s; 22 rows of each half per scenario at 24 scenarios
+BIG = 13200  # 0.68s; 22 rows of each half per scenario at 24 scenarios
              # (each half is BIG * 4 // 100 = 528 rows, and 528 / 24 = 22).
              # Not 6600: 11 draws from 4 variants shows <3 distinct 0.3% of
              # the time per scenario, 7% across twenty-four -- a deterministic
