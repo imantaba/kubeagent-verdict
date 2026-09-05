@@ -695,12 +695,46 @@ def test_the_trainable_pool_exercises_every_issue_kind():
     assert not missing, f"no trainable scenario exercises: {missing}"
 
 
-def test_the_trainable_pool_holds_twenty_scenarios():
+def test_the_trainable_pool_holds_twenty_four_scenarios():
     """Four scenarios is what the pool held when it scored 0.5 in-distribution
-    and 0.1 out. The count is asserted so shrinking it back is a deliberate
-    edit rather than a merge artefact.
+    and 0.1 out. Twenty is what it held when the 0905 run failed decider 5
+    (pairs 3 of 10, false "shared" on the decoy probe 2 of 10). The count is
+    asserted so shrinking it back is a deliberate edit rather than a merge
+    artefact.
     """
-    assert len(propagation.trainable_scenarios()) == 20
+    assert len(propagation.trainable_scenarios()) == 24
+
+
+def test_every_held_out_read_kind_has_a_trained_cousin():
+    """On the 0905 wide probe the model never said "shared" for the three
+    held-out origins whose discriminating read has no trained cousin of the
+    same kind -- a kube-system Deployment describe, a StorageClass
+    `get_related`, a NetworkPolicy `get_related` -- 0 of 15 pairs. And it said
+    "shared" on both halves for node-disk-pressure, the one node scenario
+    whose read turns on a pressure condition line, 0 of 5. Trained cousins it
+    had seen scored 5 of 5. So the gap is the read kind, and this test pins
+    the fix: every read kind the exam uses must appear, in shape, in the
+    trainable pool.
+
+    Labels are matched by prefix and suffix so a renamed component or a
+    namespace slug cannot satisfy the check by accident. The memory cousin is
+    recognised by the condition line itself, exactly as the held-out node
+    reads spell it (three spaces).
+    """
+    pool = propagation.trainable_scenarios()
+    labels = [p.origin_read[0] for p in pool]
+    broken = [p.origin_read[1] for p in pool]
+    missing = []
+    if not any(label.startswith("describe kube-system/")
+               and label.endswith("(Deployment)") for label in labels):
+        missing.append("describe kube-system/... (Deployment)")
+    if not any(label.startswith("get_related storageclass ") for label in labels):
+        missing.append("get_related storageclass ...")
+    if not any(label.startswith("get_related networkpolicy ") for label in labels):
+        missing.append("get_related networkpolicy ...")
+    if not any("MemoryPressure   True" in content for content in broken):
+        missing.append("describe node with a MemoryPressure   True condition")
+    assert not missing, f"no trainable cousin for: {missing}"
 
 
 def test_every_trainable_scenario_is_taught_equally(big_rows):
