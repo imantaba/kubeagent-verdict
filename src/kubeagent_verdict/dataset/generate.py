@@ -408,6 +408,50 @@ def shared_origin_decoy_probes() -> list[Example]:
     return out
 
 
+def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
+    """EVAL-ONLY, DIAGNOSTIC-ONLY: five twin pairs per held-out origin.
+
+    The frozen exam carries one or two shared-origin pairs per origin --
+    enough to score a model, too few to diagnose one. "It always fails on
+    CoreDNS" resting on two pairs could be a coin landing badly twice. This
+    widened set answers the diagnostic question: when the model gets an
+    origin wrong, does it get that origin wrong every time? Five pairs per
+    origin make a per-origin verdict rest on five observations.
+
+    It goes to its own file, never into `test_set()`, and its numbers gate
+    no release. Fresh salts keep every pair distinct from the frozen exam's
+    pairs; the SAME salt on both halves keeps each pair a minimal contrast
+    (same names, same menus, same read labels -- only the read contents and
+    the answer differ). Widths alternate between the full victim set and a
+    two-victim subset where the scenario has a victim to spare. A repeated
+    pair key would silently merge two pairs in the paired scoring, so a
+    collision raises instead of shrinking the set.
+    """
+    from kubeagent_verdict.dataset import cases, propagation
+
+    out: list[Example] = []
+    seen: dict[str, str] = {}
+    for p in propagation.all_scenarios():
+        for i in range(pairs_per_origin):
+            width = 2 if i % 2 == 1 and len(p.victims) >= 3 else None
+            probe = cases.shared_origin_probe(
+                p, _entry_rng("shared-origin-wide", p.key, str(i)),
+                victims=width)
+            decoy = cases.shared_origin_decoy_probe(
+                p, _entry_rng("shared-origin-wide", p.key, str(i)),
+                victims=width)
+            key = "|".join(sorted(probe.meta["expected"]))
+            if key in seen:
+                raise ValueError(
+                    f"wide-probe pair key collision: {seen[key]} and "
+                    f"{p.key}#{i} both drew {key!r}; a collision would "
+                    "merge two pairs in the paired scoring")
+            seen[key] = f"{p.key}#{i}"
+            out.append(probe)
+            out.append(decoy)
+    return out
+
+
 def test_set() -> list[Example]:
     """The whole held-out evaluation set: corpus-grounded + curriculum + probes."""
     return corpus_test_set() + held_out_case_set() + probe_sets()
