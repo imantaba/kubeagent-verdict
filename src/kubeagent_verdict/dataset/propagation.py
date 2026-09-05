@@ -2713,6 +2713,272 @@ _T_MIGRATION_LOCK = Propagation(
     ),
 )
 
+_T_POD_IDENTITY_WEBHOOK = Propagation(
+    key="pod-identity-webhook-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the pod identity webhook has no ready replica, so pods are admitted "
+           "without their identity volume",
+    shared_cause="the pod identity webhook has no ready replica, so every pod "
+                 "admitted since it went down started without its identity volume",
+    shared_reason="kube-system/pod-identity-webhook shows 0 of 2 replicas available "
+                  "and no ready endpoint, and its failure policy is Ignore, so "
+                  "admission went ahead without the mutation",
+    distractor_cause="each workload's own service account lost its identity "
+                     "annotation",
+    distractor_reason="the identity annotation is present and unchanged on every "
+                      "service account involved; the webhook that reads it has no "
+                      "ready endpoint to act on it",
+    rationale="the workload started without its identity volume because the webhook "
+              "that mounts it had no ready replica at admission time, which is true "
+              "of every pod admitted since",
+    remedy="Restore a ready replica of kube-system/pod-identity-webhook and restart "
+           "the flagged pods so they are admitted again; the workloads themselves "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/pod-identity-webhook (Deployment)",
+        ("Admission backend: down\n"
+         "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+         "Conditions:  Available False  MinimumReplicasUnavailable\n"
+         "Endpoints: 0 of 2 ready\n"
+         "failurePolicy: Ignore (pods admitted without the identity volume)\n"
+         "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 0/1 CrashLoopBackOff 7 restarts\n"
+         "Last log: admission listener failed to start: certificate secret not found"),
+    ),
+    healthy_origin_content=(
+        "Admission backend: serving\n"
+        "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+        "Conditions:  Available True  MinimumReplicasAvailable\n"
+        "Endpoints: 2 of 2 ready\n"
+        "failurePolicy: Ignore (no admission skipped in the last 24h)\n"
+        "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 1/1 Running 0 restarts\n"
+        "Last log: admission listener ready, mutating pods on create"
+    ),
+    origin_state=("down", "serving"),
+    origin_variants=(
+        (("Admission backend: down\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+          "Conditions:  Available False  MinimumReplicasUnavailable\n"
+          "Endpoints: 0 of 2 ready\n"
+          "failurePolicy: Ignore (pods admitted without the identity volume)\n"
+          "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 0/1 CrashLoopBackOff 7 restarts\n"
+          "Last log: admission listener failed to start: certificate secret not found"),
+         ("Admission backend: serving\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Conditions:  Available True  MinimumReplicasAvailable\n"
+          "Endpoints: 2 of 2 ready\n"
+          "failurePolicy: Ignore (no admission skipped in the last 24h)\n"
+          "Pods: pod-identity-webhook-6c9d7f4b8-q2xnv 1/1 Running 0 restarts\n"
+          "Last log: admission listener ready, mutating pods on create")),
+        (("kubelet events show the identity webhook down\n"
+          "every pod created in the last 40m was admitted without a mutation\n"
+          "both webhook replicas are crash-looping on startup"),
+         ("kubelet events show the identity webhook serving\n"
+          "every pod created in the last 24h was mutated on admission\n"
+          "both webhook replicas are Running with 0 restarts")),
+        (("Warning  WebhookUnavailable  admission  pod-identity-webhook down: "
+          "failurePolicy Ignore, mutation skipped for new pods"),
+         ("Normal  WebhookReady  admission  pod-identity-webhook serving: mutation "
+          "applied to new pods")),
+        (("Identity webhook status: down\n"
+          "ready endpoints: 0 of 2\n"
+          "last successful mutation: 40m ago"),
+         ("Identity webhook status: serving\n"
+          "ready endpoints: 2 of 2\n"
+          "last successful mutation: 3s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="no credential source found: identity token file is absent",
+            local_cause="this workload's own pod template opts out of identity "
+                        "injection with a disable annotation",
+            local_reason="the pod template carries the injection opt-out annotation, "
+                         "so no token volume is ever requested for it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: no credential source found, identity token "
+                   "file absent (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="config fetch refused: request carried no identity token",
+            local_cause="this StatefulSet's init container runs an image too old to "
+                        "read the mounted identity token",
+            local_reason="the init image predates token-file support and sends an "
+                         "unauthenticated request every attempt",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                   "container {init_container}: config fetch refused, no identity "
+                   "token presented")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this agent's own signing key rotated and its readiness "
+                        "handler still loads the previous key",
+            local_reason="the readiness handler logs a signing failure against the "
+                         "old key id on every probe",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                   "failed with statuscode: 503, body: token signing unavailable")),
+            pass_confidence="low",
+        ),
+    ),
+)
+
+_T_STORAGECLASS_POOL_RETIRED = Propagation(
+    key="storageclass-pool-retired",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the fast-ssd StorageClass names a storage pool that was retired, so the "
+           "provisioner refuses every claim on it",
+    shared_cause="the fast-ssd StorageClass points at a storage pool that was "
+                 "retired, so the provisioner refuses every new claim on that class",
+    shared_reason="the class parameters name pool ssd-tier-a, the backend lists that "
+                  "pool as retired, and the provisioner has bound 0 claims on "
+                  "fast-ssd since the pool went away while binding normally on "
+                  "every other class",
+    distractor_cause="the workloads' claims ask for a volume mode the class does not "
+                     "support",
+    distractor_reason="every claim asks for the same Filesystem volume mode it bound "
+                      "with last month, and the provisioner's refusal names the "
+                      "pool, not the mode",
+    rationale="the workload's storage on fast-ssd is refused because the class "
+              "points at a retired pool, which is true of every claim and volume on "
+              "that class right now",
+    remedy="Point the fast-ssd StorageClass at a live pool (or recreate the class); "
+           "the flagged workloads and their claims need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass fast-ssd",
+        ("Pool status: retired\n"
+         "provisioner: example.com/ssd-csi\n"
+         "parameters: pool=ssd-tier-a, fstype=ext4\n"
+         "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+         "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
+         "PersistentVolumes bound on fast-ssd in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "Pool status: online\n"
+        "provisioner: example.com/ssd-csi\n"
+        "parameters: pool=ssd-tier-b, fstype=ext4\n"
+        "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+        "backend pool ssd-tier-b: online, 412 volumes accepted\n"
+        "PersistentVolumes bound on fast-ssd in the last 20m: 9"
+    ),
+    origin_state=("retired", "online"),
+    origin_variants=(
+        (("Pool status: retired\n"
+          "provisioner: example.com/ssd-csi\n"
+          "parameters: pool=ssd-tier-a, fstype=ext4\n"
+          "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+          "backend pool ssd-tier-a: retired 3d ago, 0 volumes accepted\n"
+          "PersistentVolumes bound on fast-ssd in the last 20m: 0"),
+         ("Pool status: online\n"
+          "provisioner: example.com/ssd-csi\n"
+          "parameters: pool=ssd-tier-b, fstype=ext4\n"
+          "controller ssd-csi/ssd-csi-controller: 1/1 ready, Running\n"
+          "backend pool ssd-tier-b: online, 412 volumes accepted\n"
+          "PersistentVolumes bound on fast-ssd in the last 20m: 9")),
+        (("the storage backend reports the pool behind fast-ssd retired\n"
+          "no claim on the class has bound for 3d\n"
+          "the provisioner controller is healthy and refusing each request by name"),
+         ("the storage backend reports the pool behind fast-ssd online\n"
+          "claims on the class bind within seconds\n"
+          "the provisioner controller is healthy and accepting each request")),
+        (("Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is retired: "
+          "refusing every claim on StorageClass fast-ssd"),
+         ("Normal  ProvisioningSucceeded  ssd-csi  pool ssd-tier-b is online: claim "
+          "on StorageClass fast-ssd bound in 4s")),
+        (("fast-ssd pool state: retired\n"
+          "claims refused in the last 3d: 14\n"
+          "provisioner controller: healthy"),
+         ("fast-ssd pool state: online\n"
+          "claims refused in the last 24h: 0\n"
+          "provisioner controller: healthy")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+            reason="pod has an unbound PersistentVolumeClaim and cannot be scheduled",
+            evidence="0/3 nodes are available: pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="this StatefulSet's volume claim template asks for more "
+                        "capacity than the class's per-volume maximum",
+            local_reason="the claim's requested size exceeds the largest volume the "
+                         "class will hand out",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Pending\n"
+                   "StorageClass: fast-ssd\n"
+                   "Events: Warning  ProvisioningFailed  ssd-csi  pool ssd-tier-a is "
+                   "retired, claim refused")),
+            # The decoy half shows the pool online, so the refusal must be the
+            # claim's own: its size, not the pool.
+            healthy_read_content=(
+                "Status: Pending\n"
+                "StorageClass: fast-ssd\n"
+                "Events: Warning  ProvisioningFailed  ssd-csi  requested size 2Ti "
+                "exceeds the class maximum of 1Ti"
+            ),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed: backend refused the attach because "
+                     "the volume's pool is retired",
+            healthy_evidence="AttachVolume.Attach failed: volume is still marked "
+                             "attached to a node that no longer exists",
+            local_cause="this Deployment's volume is still attached to a node that "
+                        "was deleted before it detached",
+            local_reason="the volume's attachment record points at a node object "
+                         "that no longer exists",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                   "AttachVolume.Attach failed for volume {pvc}: pool ssd-tier-a is "
+                   "retired")),
+            healthy_read_content=(
+                "Warning  FailedAttachVolume  attachdetach-controller  "
+                "AttachVolume.Attach failed for volume {pvc}: volume is still "
+                "attached to a deleted node"
+            ),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="the Job's pod is waiting on a PersistentVolumeClaim that has not "
+                   "bound",
+            evidence="0/3 nodes are available: pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="this Job's claim uses WaitForFirstConsumer with a node "
+                        "selector that matches no zone the class serves",
+            local_reason="the claim is waiting on a first consumer whose node "
+                         "selector no zone of the class can satisfy",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                   "available: pod has unbound immediate PersistentVolumeClaims; "
+                   "claim refused by provisioner: pool retired")),
+            healthy_read_content=(
+                "Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                "available: pod has unbound immediate PersistentVolumeClaims; claim "
+                "is waiting for first consumer in a zone with no node"
+            ),
+            pass_confidence="low",
+        ),
+    ),
+)
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
                        _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
@@ -2720,7 +2986,8 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_CSI_NODE_DRIVER, _T_NODE_PID_PRESSURE,
                        _T_NODE_RUNTIME_RESTARTING, _T_NODE_CLOCK_SKEW,
                        _T_NODE_CONNTRACK_FULL, _T_LIMITRANGE_LOWERED,
-                       _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK)
+                       _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK,
+                       _T_POD_IDENTITY_WEBHOOK, _T_STORAGECLASS_POOL_RETIRED)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
