@@ -159,6 +159,13 @@ class Victim:
     # eval victims need none: their evidence is a local symptom that reads the
     # same either way.
     healthy_read_content: str = ""
+    # The SAME finding's evidence in the world where the origin is fine. Empty
+    # means `evidence` is already true there and is reused verbatim. Needed
+    # only where `evidence` itself names the origin's fact -- an untolerated
+    # taint the healthy node no longer carries -- because the finding block is
+    # rendered on BOTH halves of a twin pair, and a healthy half whose
+    # inventory asserts the origin is broken argues against its own label.
+    healthy_evidence: str = ""
     log_cause: str = ""
     # The deterministic pass's OWN grade for its (wrong) local attribution.
     # Varied within a scenario on purpose — see the module docstring on
@@ -555,6 +562,7 @@ _DISK_PRESSURE = Propagation(
             workload_kind="Deployment", status="Pending", issue="Unschedulable",
             reason="0/3 nodes are available",
             evidence="1 node(s) had untolerated taint node.kubernetes.io/disk-pressure",
+            healthy_evidence="1 node(s) had untolerated taint dedicated=gpu",
             local_cause="the pod is missing a toleration for a tainted node",
             local_reason="the scheduler names an untolerated taint",
             read=("get_events {ns}/{name}",

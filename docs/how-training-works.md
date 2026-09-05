@@ -504,6 +504,11 @@ training and validation files regenerate unchanged, byte for byte. So this did
 not move the goalposts mid-measurement: the run in flight is still judged on
 its own frozen 253, and the 263-question exam is what the next model faces.
 
+One later correction (2026-09-05) changed two of the ten new rows by one line
+each: their inventory named the disk-pressure taint in a world whose node read
+showed none, so the prompt argued against its own label. The 253 did not move,
+and the test file pins both facts by hash.
+
 ---
 
 ## Part 3 — Why we are training again

@@ -14,9 +14,11 @@ This is elsewhere. `shared_origin_decoy_probe` renders the SAME six scenarios
 with the origin read showing the component healthy, and the correct answer
 becomes each workload's own local cause under the ordinary "N workloads are
 failing for separate reasons" summary. The two rows draw the same names from
-the same seed, so the pair is a minimal contrast: identical inventory,
-identical candidate menus, identical evidence LABELS in identical order. Only
-what the reads SAY differs.
+the same seed, so the pair is a minimal contrast: identical candidate menus,
+identical evidence LABELS in identical order, and an identical inventory except
+where a finding's evidence would have named the origin's fact (the victim's
+`healthy_evidence` renders there instead). Only what the reads SAY differs,
+plus that one line.
 
 That gives the pair teeth on three axes at once, and the second is the one
 that matters most:
@@ -115,14 +117,26 @@ def test_every_eval_scenario_declares_a_healthy_origin_read():
 def test_the_pair_shows_the_same_workloads_with_the_same_menus(decoys, probes):
     """The claim that makes the pair a contrast rather than two questions.
 
-    If the inventory or the candidate menu moved even slightly between the
-    two, a model could separate them on something other than the evidence and
-    every conclusion drawn from the pair would be about that something.
+    If the inventory or the candidate menu moved between the two on anything
+    but the evidence, a model could separate them on that something and every
+    conclusion drawn from the pair would be about it. The one move allowed is
+    a finding line whose victim declares a `healthy_evidence`: without it the
+    healthy half's inventory would assert the origin is broken and argue
+    against its own label.
     """
+    from kubeagent_verdict.dataset import propagation as prop
+
     for d, p in zip(decoys, probes):
         ds, ps = _sections(d.user), _sections(p.user)
-        assert ds["inventory"] == ps["inventory"], d.meta["origin"]
         assert ds["candidates"] == ps["candidates"], d.meta["origin"]
+        assert len(ds["inventory"]) == len(ps["inventory"]), d.meta["origin"]
+        moved = [(a, b) for a, b in zip(ps["inventory"], ds["inventory"]) if a != b]
+        scenario = next(x for x in prop.all_scenarios() if x.key == d.meta["origin"])
+        allowed = [v for v in scenario.victims if v.healthy_evidence]
+        assert len(moved) == len(allowed), (d.meta["origin"], moved)
+        for (a, b), v in zip(moved, allowed):
+            assert "issue:" in a and "issue:" in b, (d.meta["origin"], a, b)
+            assert v.healthy_evidence.split("{")[0] in b, (d.meta["origin"], b)
 
 
 def test_the_pair_reads_the_same_things_in_the_same_order(decoys, probes):
