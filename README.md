@@ -163,10 +163,11 @@ reasoning failure and not a parsing one.
 This is a negative control, not a regression. The slice was written to fail
 the shipped model: an eval change that could not fail the model it replaced
 is not a fix. Teaching the correction was separate work, and it has since
-been done — `shared_origin` is 4% of the curriculum as of the training pool
-described above. No model trained on it has been scored yet, so the
-correction is unmeasured, and every number on this page comes from a model
-that never saw the shape.
+been done — `shared_origin` is 8% of the curriculum now, with its healthy-read
+decoy twin at another 8%. Two models trained on the earlier 4% share were
+scored on the exam and both failed the shared-origin decider; the raise to
+8% is the response. Every number on this page still comes from a model that
+never saw the shape.
 
 ## License
 

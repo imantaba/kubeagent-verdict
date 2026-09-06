@@ -25,7 +25,7 @@ defend. Masked-exact needs no threshold and is a set lookup.
 
 The counts below are PINNED, not bounded. A pinned count detects sharing
 disappearing as well as appearing -- so when contradiction_probe's confound
-is closed, 17/19 becomes 0/19, this fails, and the entry gets deleted
+is closed, 16/19 becomes 0/19, this fails, and the entry gets deleted
 deliberately rather than remembered. Same discipline as a golden file: a
 curriculum change that moves these fails the test and the new numbers get
 re-declared on purpose.
@@ -68,7 +68,14 @@ DECLARED = {
     # entry-lookup table. Negative control v4 measured the known-broken first
     # tune at 1.0 cause / 0.0 decoy here. When that confound is closed this
     # becomes 0/19 and this entry must be deleted, not updated.
-    "contradiction_probe": (17, 19),
+    # It read 17/19 while `attributed` held 26% of the mix. Raising the two
+    # shared-origin halves from 4% to 8% took the budget out of `attributed`,
+    # which moved every later random draw, and one `none_of_these` training
+    # row that used to draw the same node name as an exam read
+    # (unschedulable=false on the same worker) now draws another. That is
+    # one read falling out by chance, not the confound closing: 16 of 19
+    # are still reused verbatim.
+    "contradiction_probe": (16, 19),
     # THIS ROW IS THE POINT OF THE ALLOWLIST. Its rows come from
     # dataset.propagation, not the catalog, so it shares nothing -- which is
     # what shows the guard discriminates rather than rubber-stamping.
@@ -141,9 +148,9 @@ def _fake(user: str) -> generate.Example:
 
 
 # `_reads` carries two refusals, and BOTH are unreachable on today's tree --
-# measured over every row the guard can reach, 4667 kept + 263 test = 4930,
+# measured over every row the guard can reach, 4787 kept + 263 test = 5050,
 # all of which render a delimited, non-empty evidence block. That is the
-# superset: the allowlist test below actually calls `_reads` on 4753 of them,
+# superset: the allowlist test below actually calls `_reads` on 4883 of them,
 # because it reads only the six DECLARED slices out of the test set.
 # Unreachable is exactly why they need tests: deleting
 # either assert changes no other test's outcome, so without these two the

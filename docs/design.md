@@ -253,12 +253,12 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~26% | Pick the candidate **verbatim**; calibrate confidence |
+| Candidate attributed, evidence supports it | ~18% | Pick the candidate **verbatim**; calibrate confidence |
 | `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
-| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~4% | Naming the SAME cause on every row when the evidence says one thing broke |
-| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~4% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
+| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~8% | Naming the SAME cause on every row when the evidence says one thing broke |
+| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~8% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -275,8 +275,14 @@ audit recomputed it.
 `shared_origin` took its four points from `multi` rather than from the mix
 growing, and that is a deliberate cost. The two are the same release decider's
 two halves: `separate_reasons_rate` fails when the model can never see a shared
-origin, and `false_shared_rate` fails when it claims one everywhere. `multi`
-stays the larger of the two.
+origin, and `false_shared_rate` fails when it claims one everywhere. The
+share has since doubled to 8%, paid out of `attributed`, so that every
+trainable scenario keeps at least 12 pairs in train after the validation
+split; a test pins that floor at the build recipe (seed 17, size 5500). The
+shared answer stays the minority answer to a multi-workload question: in the
+pile the model reads it is about one in three of the `multi`,
+`shared_origin` and `shared_origin_decoy` rows together, and a test fails
+above 0.40.
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
 from the six the `shared_origin_probe` eval slice draws from — disjoint in key
@@ -306,9 +312,10 @@ tags in identical order, identical read labels in identical order — so the
 victims are held byte-identical and symptom coherence cannot separate the
 classes. Every trainable scenario is taught under both answers, and nothing
 about the scenario predicts the label. `drop_held_out` takes pairs whole,
-since both halves share a group key, so the 169/169 core survives the filter
-exactly. The residual lean is now the surviving `multi` negatives, which have
-no positive twin: the kept pile reads ~0.62 toward the INDEPENDENT answer,
+since both halves share a group key, so the paired core (440 against 440 at
+the build size) survives the filter exactly. The residual lean is now the
+surviving `multi` negatives, which have no positive twin: the kept pile reads
+~0.57 toward the INDEPENDENT answer,
 the opposite direction from the ~62/38 toward shared recorded before, and no
 longer confounded with anything the model can read off the victims. Those
 negatives are kept rather than balanced away — a healthy read over arbitrary

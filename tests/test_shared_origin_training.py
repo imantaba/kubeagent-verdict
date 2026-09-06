@@ -418,19 +418,35 @@ def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
         assert e.meta["origin"] in train, e.meta["origin"]
 
 
-def test_multi_survives_as_the_majority_of_multi_workload_rows(kept):
+def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     """Decider 5 has two halves and this change can only break the other one.
 
-    `false_shared_rate` is 0.0 today. If shared origins stop being the
-    minority answer the model swings to claiming them everywhere, and the
+    `false_shared_rate` is the mirror of `separate_reasons_rate`. If the
+    shared answer becomes the usual answer to a multi-workload question, the
+    model can swing to claiming a shared origin everywhere, and the
     scoreboard trades one failure for its mirror.
 
+    This used to demand that `multi` alone outnumber `shared_origin`. That
+    was a proxy from before the decoy twin existed: the twin answers
+    "separate reasons" over the same workloads, so it is the direct
+    counterweight and counts on the same side as `multi`. The proxy went red
+    when the shared-origin share rose from 4 to 8 so that every scenario
+    keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
+    the claim it stood for did not. The claim is stated directly now: the
+    shared answer is 0.34 of the multi-workload rows at 8/8, and the cap of
+    0.40 leaves room for one more raise but fails as soon as `multi` falls
+    below a fifth of `shared_origin`.
+
     Measured on the kept pile, not the generator's output: `drop_held_out`
-    takes `multi` rows and no `shared_origin` rows, so a mix that looks
-    safely majority-`multi` as emitted is not necessarily majority-`multi`
-    by the time it reaches the optimizer.
+    takes `multi` rows and no `shared_origin` rows, so a mix that looks safe
+    as emitted is not necessarily safe by the time it reaches the optimizer.
     """
-    assert len(_by_case(kept, "multi")) > len(_by_case(kept, "shared_origin"))
+    shared = len(_by_case(kept, "shared_origin"))
+    separate = (len(_by_case(kept, "multi"))
+                + len(_by_case(kept, "shared_origin_decoy")))
+    assert shared, "the filter took every shared_origin row"
+    share = shared / (shared + separate)
+    assert share <= 0.40, f"shared answer is {share:.3f} of multi-workload rows"
 
 
 # ------------------------------------------------- the structural-cue killer
@@ -516,12 +532,12 @@ def _independent_share(rows):
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.657.
+    """What the EMITTER controls, and it is no longer a coin flip: 0.595.
 
     Two sources feed the independent side now. The paired half is exact by
     construction -- every `shared_origin` row is emitted with a
     `shared_origin_decoy` twin from the same salt, so those two contribute
-    169/169 and cannot drift. On top of that sit the surviving
+    64/64 at this module's SIZE and cannot drift. On top of that sit the surviving
     every-third-`multi` negatives, which have no positive counterpart, and
     they are the whole of the lean.
 
@@ -544,15 +560,17 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     remedy it had not paid for: "closing the gap the rest of the way means
     emitting more counter-examples, which moves dataset bytes". That was
     paid. `shared_origin_decoy` emits one counter-example per positive from
-    the same salt, and the lean now runs the other way -- 0.619 toward the
-    independent answer, from the `multi` negatives that have no twin.
+    the same salt, and the lean now runs the other way -- 0.565 toward the
+    independent answer, from the `multi` negatives that have no twin. It read
+    0.619 while the halves held 4% each; doubling them to 8% moved it toward
+    even, and the band's floor is now close.
 
     The direction matters less than what it is no longer confounded with.
     Before, the two classes differed in their victims as well as in their
     read, so symptom coherence separated them without reading the origin at
     all; the paired half holds the victims byte-identical, so it cannot.
     `drop_held_out` splits on group keys and both halves of a pair share
-    one, so it takes pairs whole and the 169/169 core survives the filter
+    one, so it takes pairs whole and the paired core survives the filter
     exactly -- the residual lean is the negatives, not the filter.
 
     The band still fails loudly at the state this module was written to end

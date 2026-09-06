@@ -42,20 +42,30 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
         f.writelines(json.dumps(to_row(ex), ensure_ascii=False) + "\n" for ex in examples)
 
 
-# `multi` gave up four points to `shared_origin` rather than the mix growing:
-# `false_shared_rate` is the other half of the same release decider, and a model
-# that learns to claim a shared origin everywhere has traded one failure for its
-# mirror. `multi` stays the larger of the two, asserted by test.
+# `multi` gave up four points to `shared_origin` when the case was added,
+# rather than the mix growing: `false_shared_rate` is the other half of the
+# same release decider, and a model that learns to claim a shared origin
+# everywhere has traded one failure for its mirror. The shared answer stays
+# the minority among multi-workload rows, asserted by test: every
+# `shared_origin` row has a `shared_origin_decoy` twin that answers "separate
+# reasons", and `multi` answers the same.
 # `shared_origin` and `shared_origin_decoy` MUST hold equal shares. They are
 # not two cases but two halves of one: every row of the first is emitted with a
 # twin from the same salt, differing only in what the origin read says. An
 # unequal share would mean some scenarios appear under a single answer, and
 # scenario identity would predict the label again for exactly those -- which is
-# the shortcut the pairing exists to remove. The budget for the second half
-# came out of `attributed`, which is the filler case and absorbs the remainder
-# anyway; `multi` and `shared_origin` keep the 11/4 they were set to.
-CASE_MIX = (("attributed", 26), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 11), ("shared_origin", 4), ("shared_origin_decoy", 4),
+# the shortcut the pairing exists to remove.
+# Both halves sit at 8. They started at 4, which gave each of the 24 trainable
+# scenarios about 9 pairs at the build size (seed 17, size 5500). The
+# validation split takes groups by hash, not by count, so some scenarios
+# reached the optimizer with 5 pairs. The model trained on that pile said
+# "shared" on 6 of the exam's 10 decoy rows. At 8 every scenario keeps at
+# least 14 pairs in train; 7 left one scenario at 11.
+# tests/test_shared_origin_floor.py pins the floor at 12. The budget for both
+# raises came out of `attributed`, which is the filler case and absorbs the
+# remainder anyway.
+CASE_MIX = (("attributed", 18), ("none_of_these", 15), ("own_cause", 10),
+            ("multi", 11), ("shared_origin", 8), ("shared_origin_decoy", 8),
             ("truncated", 5), ("injection", 10),
             ("empty_candidates", 5), ("wrong_attribution", 10))
 
@@ -124,8 +134,9 @@ def generate(seed: int, size: int) -> list[Example]:
         # of the same one.
         #
         # They also have no positive twin, so they are the whole of the
-        # residual lean: the paired core is exactly 169/169 and the kept pile
-        # reads ~0.62 toward the INDEPENDENT answer. That is the opposite
+        # residual lean: the paired core is exactly even (440/440 at the
+        # build size) and the kept pile reads ~0.57 toward the INDEPENDENT
+        # answer. That is the opposite
         # direction from the ~62/38 toward SHARED this comment used to
         # record, and it is un-confounded now, which is the part that
         # mattered. `drop_held_out` still takes about a third of these (a
