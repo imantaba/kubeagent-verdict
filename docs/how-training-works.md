@@ -81,7 +81,7 @@ proportions, and each kind teaches one specific skill:
 
 | Question type | Share | The skill it teaches |
 |---|---|---|
-| `attributed` | 26% | The obvious candidate is right — pick it, word for word |
+| `attributed` | 18% | The obvious candidate is right — pick it, word for word |
 | `none_of_these` | 15% | Sometimes *every* offered candidate is wrong. Say so. |
 | `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
 | `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
@@ -89,8 +89,8 @@ proportions, and each kind teaches one specific skill:
 | `multi` | 11% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
 | `empty_candidates` | 5% | Nothing is actually wrong. Do not invent a problem. |
-| `shared_origin` | 4% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
-| `shared_origin_decoy` | 4% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
+| `shared_origin` | 8% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
+| `shared_origin_decoy` | 8% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
 
 Those last two rows are new, and they are one row really: every
 `shared_origin` question is generated together with its `shared_origin_decoy`
@@ -315,8 +315,9 @@ not change at all.**
 
 **Change 1 — a new lesson type, from its own private scenarios.**
 
-`shared_origin` is now 4% of the curriculum: several workloads, one upstream
-cause, the same answer on every row.
+`shared_origin` entered the curriculum at 4% (it is 8% now; Change 4 below
+says why): several workloads, one upstream cause, the same answer on every
+row.
 
 The obvious way to build it would have been to reuse the six scenarios the exam
 already uses, with different names drawn. That would have been a trap. The
@@ -385,8 +386,38 @@ everything independent (the failure we had); teach too much and the model
 starts blaming one cause for genuinely unrelated failures — which is the *same
 decider*, failing from the other side. `false_shared_rate` is currently a clean
 0.0 and we are not willing to trade one failure for its mirror. So
-`shared_origin` is deliberately the smaller of the two, and a test enforces
-that `multi` stays larger.
+the shared answer is deliberately the minority answer to a multi-workload
+question, and a test enforces that. It used to demand that `multi` alone
+outnumber `shared_origin`. The decoy twin answers "separate reasons" too,
+so the test now counts it on the same side as `multi`: `shared_origin` is
+about one in three of the multi-workload rows the model reads, and the test
+fails above 0.40.
+
+**Change 4 — more pairs per scenario.**
+
+The 4% share gave each of the 24 trainable scenarios about 9 pairs at the
+build size. The validation split takes whole groups by hash, not by count,
+so some scenarios lost 4 of their 9 pairs to validation and reached the
+optimizer with 5. The model trained on that pile said "shared" on 6 of the
+exam's 10 decoy rows, so it had learned "shared by default" on the scenarios
+it saw least.
+
+Both halves are 8% now. The budget came out of `attributed` again (26% →
+18%), and `multi` stayed at 11%. Every trainable scenario keeps at least 14
+pairs in train after the split; a test pins the floor at 12 for the build
+recipe (seed 17, size 5500). 7% was tried first and left one scenario at 11.
+
+| | 4% build | 8% build |
+|---|---|---|
+| `shared_origin` pairs, as generated | 220 | 440 |
+| fewest pairs one scenario keeps in train | 5 | 14 |
+| training questions | 4,282 | 4,314 |
+| validation | 436 | 473 |
+| **exam (test.jsonl)** | **263** | **263 — byte-identical** |
+
+Among the questions that carry a cluster-wide read, the pile the model reads
+now holds 440 shared against 573 separate, 43 / 57. The numbers in the rest
+of this part describe the pile as it was when the pairing landed.
 
 ### What the change did to the data
 
@@ -414,8 +445,8 @@ Two things are worth writing down plainly, because both are easy to miss and
 both would let us claim more than we have earned.
 
 **One — there is still a lean, and it now runs the other way.** Among the
-questions that carry a cluster-wide read, the pile the model reads holds
-**169 shared against 275 separate — 38 / 62.** Before the pairing it was
+questions that carry a cluster-wide read, the pile the model read at the
+time held **169 shared against 275 separate — 38 / 62.** Before the pairing it was
 62 / 38 toward *shared*; before any of this work it was 100 / 0.
 
 The direction matters less than what the lean is no longer tangled up with.
