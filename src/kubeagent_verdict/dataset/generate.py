@@ -64,10 +64,16 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # tests/test_shared_origin_floor.py pins the floor at 12. The budget for both
 # raises came out of `attributed`, which is the filler case and absorbs the
 # remainder anyway.
-CASE_MIX = (("attributed", 18), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 11), ("shared_origin", 8), ("shared_origin_decoy", 8),
-            ("truncated", 5), ("injection", 10),
-            ("empty_candidates", 5), ("wrong_attribution", 10))
+# 2026-09-08: both halves move again, from 8% to 12%, and `attributed` gives
+# up the 8 points (18% -> 10%). The 0907 model failed decider 5 with 15 of 24
+# scenarios holding only two victims and no exam layout in training. The
+# pool doubles to 48 scenarios in this slice; at 12% and size 8000 each half
+# is 960 rows, 20 pairs per scenario, about 18 in train after the split.
+# tests/test_shared_origin_floor.py still pins the floor at 12.
+CASE_MIX = (("attributed", 10), ("none_of_these", 15), ("own_cause", 10),
+            ("multi", 11), ("shared_origin", 12), ("shared_origin_decoy", 12),
+            ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
+            ("wrong_attribution", 10))
 
 # The held-out test set draws one example per (trainable entry, case) for each
 # of these. `multi` is excluded deliberately: its group is a "+"-join of two to
@@ -134,7 +140,7 @@ def generate(seed: int, size: int) -> list[Example]:
         # of the same one.
         #
         # They also have no positive twin, so they are the whole of the
-        # residual lean: the paired core is exactly even (440/440 at the
+        # residual lean: the paired core is exactly even (960/960 at the
         # build size) and the kept pile reads ~0.57 toward the INDEPENDENT
         # answer. That is the opposite
         # direction from the ~62/38 toward SHARED this comment used to

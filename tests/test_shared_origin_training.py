@@ -433,7 +433,7 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
     the claim it stood for did not. The claim is stated directly now: the
-    shared answer is 0.34 of the multi-workload rows at 8/8, and the cap of
+    shared answer is 0.373 of the multi-workload rows at 8/8, and the cap of
     0.40 leaves room for one more raise but fails as soon as `multi` falls
     below a fifth of `shared_origin`.
 
@@ -532,7 +532,7 @@ def _independent_share(rows):
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.595.
+    """What the EMITTER controls, and it is no longer a coin flip: 0.568.
 
     Two sources feed the independent side now. The paired half is exact by
     construction -- every `shared_origin` row is emitted with a
@@ -560,7 +560,7 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     remedy it had not paid for: "closing the gap the rest of the way means
     emitting more counter-examples, which moves dataset bytes". That was
     paid. `shared_origin_decoy` emits one counter-example per positive from
-    the same salt, and the lean now runs the other way -- 0.565 toward the
+    the same salt, and the lean now runs the other way -- 0.551 toward the
     independent answer, from the `multi` negatives that have no twin. It read
     0.619 while the halves held 4% each; doubling them to 8% moved it toward
     even, and the band's floor is now close.
@@ -576,9 +576,13 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     The band still fails loudly at the state this module was written to end
     — 1.00/0.00, no counter-examples at all — and now also fails if the
     pairing ever emits one-sidedly.
+
+    The floor moved from 0.55 to 0.52 on 2026-09-08 when the halves went to
+    12%: the kept pile then read 0.551 at this size and 0.546 at the build
+    size, and 0.52 keeps three points of room below both.
     """
     share = _independent_share(kept)
-    assert 0.55 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
+    assert 0.52 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
 
 
 def test_a_negative_multi_row_shows_the_component_healthy(rows):
@@ -692,17 +696,29 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-BIG = 13200  # 0.68s; 22 rows of each half per scenario at 24 scenarios
-             # (each half is BIG * 4 // 100 = 528 rows, and 528 / 24 = 22).
-             # Not 6600: 11 draws from 4 variants shows <3 distinct 0.3% of
-             # the time per scenario, 7% across twenty-four -- a deterministic
-             # failure with correct data. 22 draws puts it at 1.4e-6 per
-             # scenario, 3.4e-5 across twenty-four.
+DRAWS = 33  # shared_origin rows per scenario at BIG; see the note below.
+BIG = 275 * len(propagation.trainable_scenarios())
+# Each shared_origin half is BIG * 12 // 100 rows, and the generator deals
+# them round-robin over the pool, so every scenario gets exactly DRAWS rows
+# per half (275 * 12 // 100 == 33). The pool grows in this slice, and the
+# constant grows with it: 6600 rows at twenty-four scenarios, 13200 at
+# forty-eight. Why 33 and not 11: the variant-rendering check below is a
+# sampling check. With 4 variants drawn uniformly, P(fewer than 3 distinct
+# in n draws) = (6 * 2**n - 8) / 4**n, and a fifth variant only lowers
+# it. At n=11 that is 0.3% per scenario and 7% across twenty-four -- a
+# deterministic failure with correct data. At n=33 it is 7.0e-10 per
+# scenario, 3.4e-8 across forty-eight.
 
 
 @pytest.fixture(scope="module")
 def big_rows():
     return generate.generate(seed=SEED, size=BIG)
+
+
+def test_big_deals_exactly_draws_rows_per_scenario():
+    """`BIG` promises DRAWS shared_origin rows per scenario. Check it."""
+    pool = len(propagation.trainable_scenarios())
+    assert generate.counts_for(BIG)["shared_origin"] == DRAWS * pool
 
 
 def test_the_trainable_pool_exercises_every_issue_kind():
@@ -776,10 +792,11 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
     still passed.
 
     The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
-    random: this is a sampling check, and its strength is a function of `BIG`.
-    At 22 draws a correct pool trips it about once in 29,000 runs across the
-    whole pool of twenty-four. Lowering `BIG` is not a free speed-up -- at 11
-    draws it is about 7%, and the failure names a scenario whose data is fine.
+    random: this is a sampling check, and its strength is a function of
+    `DRAWS`. At 33 draws a correct pool trips it about once in thirty
+    million runs across a pool of forty-eight. Lowering `BIG` is not a free
+    speed-up -- at 11 draws it is about 7%, and the failure names a scenario
+    whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
     seen = {k: set() for k in by_key}
