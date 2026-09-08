@@ -1318,6 +1318,21 @@ _T_SECRET_KEY_RENAMED = Propagation(
                 "in this replica's own manifest (3 of 3 sampled restarts)"),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CreateContainerConfigError",
+            issue="Init:CreateContainerConfigError",
+            reason="init container {init_container} could not build its environment",
+            evidence="secret key not found for env var API_TOKEN",
+            local_cause="this Job's own init container reads the key name from a "
+                        "chart value that was set with a typo in its own values file",
+            local_reason="the init container's own envFrom names the key with a "
+                         "typo that appears in no other workload's manifest",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nInit Containers:\n  {init_container}: waiting, "
+                   "CreateContainerConfigError\nEvents: Warning  Failed  kubelet  "
+                   "Error: secret key not found for env var API_TOKEN")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -1417,6 +1432,19 @@ _T_AUTOSCALER_CAPACITY = Propagation(
                 "Warning  NotTriggerScaleUp  cluster-autoscaler  no scale-up "
                 "would help: pod requests exceed the largest node type"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 3 Insufficient cpu",
+            local_cause="this StatefulSet's own CPU request was raised in its last "
+                        "rollout to more cores than any node in the pool has",
+            local_reason="the StatefulSet's own pod spec asks for 12 cores and the "
+                         "largest node in the pool has 8",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                   "available: 3 Insufficient cpu")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -1622,6 +1650,21 @@ _T_BASE_IMAGE_TAG = Propagation(
                    "\"/app/server\": stat /app/server: no such file or directory")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="exec format error at init entrypoint",
+            local_cause="this Job's own init image was built for a different CPU "
+                        "architecture than the nodes run",
+            local_reason="the init container's own image manifest lists only an "
+                         "arm64 layer and every node is amd64",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init container exited at startup, exec "
+                   "format error (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
     ),
 )
 
@@ -1713,6 +1756,22 @@ _T_PVC_MULTI_ATTACH = Propagation(
                   ("Warning  FailedMount  6x  kubelet  Unable to attach or mount "
                    "volumes: unmounted volumes=[data], timed out waiting for the "
                    "condition")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container {container}: timed out preparing "
+                     "volume {pvc}",
+            local_cause="this Deployment's own start hook copies data into its "
+                        "volume and the copy runs past the kubelet's start deadline",
+            local_reason="the container's own postStart copy moves 40 GiB on every "
+                         "start and the kubelet's start timeout is 2 minutes",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed "
+                   "to start container {container}: timed out preparing volume "
+                   "{pvc}")),
             pass_confidence="medium",
         ),
     ),
@@ -1811,6 +1870,22 @@ _T_CNI_IP_POOL = Propagation(
                 "Warning  FailedScheduling  default-scheduler  0/12 nodes are "
                 "available: 12 node(s) had no free secondary network interface "
                 "slot for this pod."),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox: IPAM returned no address for "
+                     "this pod",
+            local_cause="this StatefulSet's own pod annotation pins an address "
+                        "from a range that was removed from the IPAM config",
+            local_reason="the pod's own address annotation names a range the IPAM "
+                         "config no longer lists",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedCreatePodSandBox  kubelet  "
+                   "Failed to create pod sandbox: plugin type cni failed: IPAM "
+                   "returned no address for this pod")),
             pass_confidence="medium",
         ),
     ),
@@ -2484,6 +2559,21 @@ _T_LIMITRANGE_LOWERED = Propagation(
                    "    Exit Code:  137")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="heap reservation failed: cannot allocate memory",
+            local_cause="this StatefulSet's own heap flag is set above the "
+                        "container's memory limit, so its runtime refuses to start",
+            local_reason="the container's own maximum heap flag is larger than its "
+                         "memory limit, a mismatch inside its own manifest",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: heap reservation failed, cannot allocate "
+                   "memory (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -2601,6 +2691,21 @@ _T_EGRESS_PROXY_DOWN = Propagation(
                    "handshake completes (4 of 4 sampled restarts)")),
             pass_confidence="high",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="seed download through the proxy failed",
+            local_cause="this Job's own init container downloads its seed data "
+                        "from a host that was decommissioned last month",
+            local_reason="the init container's own download address names a host "
+                         "that no longer resolves anywhere",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init download through the proxy failed "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -2697,6 +2802,21 @@ _T_NS_PVC_FULL = Propagation(
                 "Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
                 "health check endpoint returns 503 under its own load"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="write to output path failed: no space left on device",
+            local_cause="this agent's own scratch directory sits on a small tmpfs "
+                        "mount that each rotation overflows",
+            local_reason="the agent's own tmpfs mount is 64 MiB and its rotation "
+                         "writes 80 MiB before deleting the old file",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: write to its output path failed, no space "
+                   "left on device (3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2801,6 +2921,19 @@ _T_MIGRATION_LOCK = Propagation(
                 "container {container}: schema version check failed on "
                 "startup"),
             pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this StatefulSet's own readiness endpoint stays not-ready "
+                        "through a warm-up that outlasts its probe's failure threshold",
+            local_reason="the container's own warm-up log shows 4 minutes of "
+                         "loading and its probe gives up after 90 seconds",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP "
+                   "probe failed with statuscode: 503")),
+            pass_confidence="medium",
         ),
     ),
 )
