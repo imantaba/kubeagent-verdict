@@ -486,9 +486,9 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
     the claim it stood for did not. The claim is stated directly now: the
-    shared answer is 0.368 of the multi-workload rows at 12/12, and the cap of
-    0.40 leaves room for one more raise but fails as soon as `multi` falls
-    below a fifth of `shared_origin`.
+    shared answer is 0.368 of the multi-workload rows at 12/12 (0.384 at the
+    build size), and the cap of 0.40 leaves no room for another raise: the
+    next one must move `multi` up with it.
 
     Measured on the kept pile, not the generator's output: `drop_held_out`
     takes `multi` rows and no `shared_origin` rows, so a mix that looks safe
@@ -630,7 +630,7 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     remedy it had not paid for: "closing the gap the rest of the way means
     emitting more counter-examples, which moves dataset bytes". That was
     paid. `shared_origin_decoy` emits one counter-example per positive from
-    the same salt, and the lean now runs the other way -- 0.551 toward the
+    the same salt, and the lean now runs the other way -- 0.556 toward the
     independent answer, from the `multi` negatives that have no twin. It read
     0.619 while the halves held 4% each; doubling them to 8% moved it toward
     even, and the band's floor is now close.

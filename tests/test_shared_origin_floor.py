@@ -11,6 +11,12 @@ This test pins a floor at the build recipe itself, after the split and after
 `drop_held_out`, because that is the pile the model reads. The floor is 12
 rows of each half per scenario. A share that looks generous as emitted is
 not the number that matters; the surviving count is.
+
+On 2026-09-08 the recipe moved to size 8000, both halves to 12 percent, and
+the pool to forty-eight scenarios. That is 960 rows per half, 20 pairs per
+scenario before the split. The smallest scenario keeps 13 pairs in train
+and the largest 20. The floor stays at 12: the extra room is the point,
+because the split still takes groups by hash, not by count.
 """
 from collections import Counter
 
@@ -19,7 +25,7 @@ import pytest
 from kubeagent_verdict.dataset import generate
 from kubeagent_verdict.dataset import propagation as prop
 
-SEED, SIZE = 17, 5500  # the runbook's build recipe
+SEED, SIZE = 17, 8000  # the runbook's build recipe
 FLOOR = 12
 
 SHARED = "shared_origin"

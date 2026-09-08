@@ -141,7 +141,7 @@ def generate(seed: int, size: int) -> list[Example]:
         #
         # They also have no positive twin, so they are the whole of the
         # residual lean: the paired core is exactly even (960/960 at the
-        # build size) and the kept pile reads ~0.57 toward the INDEPENDENT
+        # build size) and the kept pile reads ~0.55 toward the INDEPENDENT
         # answer. That is the opposite
         # direction from the ~62/38 toward SHARED this comment used to
         # record, and it is un-confounded now, which is the part that

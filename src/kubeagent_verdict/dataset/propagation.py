@@ -23,7 +23,7 @@ the correction — an eval change that could not fail the model it replaced is
 not a fix. It failed on 2026-08-30, `separate_reasons_rate` 1.0 on all ten
 probe rows, and the trainable pool is the answer to that.
 
-Each scenario is one ORIGIN and two to four VICTIMS. A victim renders as an
+Each scenario is one ORIGIN and three or four VICTIMS. A victim renders as an
 ordinary flagged workload with an ordinary pod-level symptom and an ordinary,
 locally-plausible candidate carrying `attributed` — because that is what
 kubeagent's deterministic pass really produces. Its attribution runs per
@@ -73,13 +73,13 @@ the second group cost a defect to learn.
 
 Enforced: the key's shape and its disjointness from the eval six; both cause
 strings unique across the pool; every `local_cause` unique within the scenario
-and across the pool; 2-4 victims with kinds from `vocab.ISSUE_KINDS`;
+and across the pool; 3-4 victims with kinds from `vocab.ISSUE_KINDS`;
 `pass_confidence` varying within the scenario; `scope_field` agreeing with
 `blast_radius`; a non-empty `healthy_origin_content`; at least four
 `origin_variants` whose first entry is the legacy pair and whose first lines
 are literal and distinct; an `origin_state` word pair present in every variant
 of its own half and absent from the other; no banned identifier shape
-anywhere; and, across the pool, twenty-four scenarios taught in equal shares,
+anywhere; and, across the pool, forty-eight scenarios taught in equal shares,
 exercising all sixteen issue kinds, each rendering at least three of its
 variants, with no cause template over 12% and the top three under 30%.
 
