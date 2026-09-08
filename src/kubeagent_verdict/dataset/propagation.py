@@ -4364,6 +4364,475 @@ _T_NODE_CORRUPT_OVERLAY = Propagation(
     ),
 )
 
+_T_EXTERNAL_SECRETS_DOWN = Propagation(
+    key="external-secrets-operator-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the external-secrets operator is down, so the Secrets it syncs are no "
+           "longer created and pods that mount them cannot start",
+    shared_cause="the external-secrets operator is down, so the Secrets it syncs are "
+                 "no longer created and pods that mount them cannot start",
+    shared_reason="kube-system/external-secrets shows 0 of 1 replicas available with "
+                  "its pod in CrashLoopBackOff after 7 restarts, its last log says "
+                  "the secret store is unreachable, and every ExternalSecret it owns "
+                  "has been SecretSyncedError since",
+    distractor_cause="the workloads' own Secret names were changed in the last chart "
+                     "release",
+    distractor_reason="the Secret names in the pod specs match the ExternalSecret "
+                      "targets exactly and neither has changed in weeks",
+    rationale="the Secret this workload mounts is created by the external-secrets "
+              "operator, and the operator has been down since its store became "
+              "unreachable; the workload's own spec is unchanged",
+    remedy="Restore the external-secrets operator (fix its store credentials or "
+           "endpoint) and let it sync; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/external-secrets (Deployment)",
+        ("Secret store from the operator's view: unreachable\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      external-secrets-5d8c7b9f6-t4k2p   0/1  CrashLoopBackOff  "
+         "7 restarts\n"
+         "Last log:  secret store unreachable: giving up after 5 attempts"),
+    ),
+    healthy_origin_content=(
+        "Secret store from the operator's view: reconciled\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      external-secrets-5d8c7b9f6-t4k2p   1/1  Running  0 restarts\n"
+        "Last log:  reconciled 42 ExternalSecrets, 0 errors"
+    ),
+    origin_state=("unreachable", "reconciled"),
+    origin_variants=(
+        (("Secret store from the operator's view: unreachable\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      external-secrets-5d8c7b9f6-t4k2p   0/1  CrashLoopBackOff  "
+          "7 restarts\n"
+          "Last log:  secret store unreachable: giving up after 5 attempts"),
+         ("Secret store from the operator's view: reconciled\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      external-secrets-5d8c7b9f6-t4k2p   1/1  Running  0 restarts\n"
+          "Last log:  reconciled 42 ExternalSecrets, 0 errors")),
+        (("the external-secrets operator reports its store unreachable\n"
+          "the operator pod has crashed 7 times in 12m\n"
+          "42 ExternalSecrets are in SecretSyncedError"),
+         ("the external-secrets operator reports every ExternalSecret reconciled\n"
+          "the operator pod has been Running for 9d\n"
+          "0 ExternalSecrets are in error")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "external-secrets (store unreachable)"),
+         ("Normal  Started  kubelet  Started container external-secrets (store "
+          "reconciled)")),
+        (("operator status: unreachable store\n"
+          "ExternalSecrets in error: 42 of 42\n"
+          "last successful sync: 14m ago"),
+         ("operator status: reconciled\n"
+          "ExternalSecrets in error: 0 of 42\n"
+          "last successful sync: 20s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="CreateContainerConfigError",
+            issue="CreateContainerConfigError",
+            reason="container {container} could not build its environment",
+            evidence="secret \"{name}-credentials\" not found",
+            local_cause="this Deployment's own pod spec references a Secret whose "
+                        "name was misspelled in its last rollout",
+            local_reason="the envFrom entry names a Secret one letter off from the "
+                         "one that exists in the namespace",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: secret \"{name}-credentials\" "
+                  "not found")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CreateContainerConfigError",
+            issue="Init:CreateContainerConfigError",
+            reason="init container {init_container} could not build its environment",
+            evidence="couldn't find key DB_PASSWORD in Secret {ns}/{name}-db",
+            local_cause="this Job's own init container asks for a Secret key that its "
+                        "chart renamed in the last release",
+            local_reason="the init step reads DB_PASSWORD and the chart now writes "
+                         "DATABASE_PASSWORD",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}: waiting, "
+                  "CreateContainerConfigError\nEvents: Warning  Failed  kubelet  "
+                  "Error: couldn't find key DB_PASSWORD in Secret")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="MountVolume.SetUp failed for volume \"tls\": secret "
+                     "\"{name}-tls\" not found",
+            local_cause="this StatefulSet's own TLS Secret was deleted by a cleanup "
+                        "job that matched its label by mistake",
+            local_reason="the cleanup job's selector matched the StatefulSet's Secret "
+                         "label and removed it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedMount  kubelet  "
+                  "MountVolume.SetUp failed for volume \"tls\": secret not found")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NETWORK_OPERATOR_DOWN = Propagation(
+    key="network-operator-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the network operator keeps being OOM-killed, so the pod overlay network "
+           "is no longer reconciled",
+    shared_cause="the network operator keeps being OOM-killed, so the pod overlay "
+                 "network is no longer reconciled and pods on different nodes cannot "
+                 "reach each other",
+    shared_reason="kube-system/network-operator shows 0 of 1 replicas available with "
+                  "its pod OOMKilled 5 times at its 512Mi limit, its last log says "
+                  "the overlay reconcile halted, and cross-node pod traffic has been "
+                  "failing since",
+    distractor_cause="the workloads' own Services lost their endpoints in a rollout",
+    distractor_reason="every Service involved lists its ready endpoints and the "
+                      "endpoints answer from the same node; only cross-node calls "
+                      "fail",
+    rationale="cross-node pod traffic depends on the overlay the network operator "
+              "reconciles, and the operator has been OOM-killed out of running; "
+              "this workload's peers are on other nodes",
+    remedy="Raise the network operator's memory limit (or fix the leak) so it stays "
+           "Running and reconciles the overlay; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/network-operator (Deployment)",
+        ("Overlay reconcile from the operator's view: halted\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      network-operator-7b6d9c8f5-q2m8x   0/1  OOMKilled  5 restarts\n"
+         "Last log:  overlay reconcile halted: killed at 512Mi"),
+    ),
+    healthy_origin_content=(
+        "Overlay reconcile from the operator's view: idle\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      network-operator-7b6d9c8f5-q2m8x   1/1  Running  0 restarts\n"
+        "Last log:  overlay reconcile idle: 3 nodes in sync"
+    ),
+    origin_state=("halted", "idle"),
+    origin_variants=(
+        (("Overlay reconcile from the operator's view: halted\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      network-operator-7b6d9c8f5-q2m8x   0/1  OOMKilled  5 restarts\n"
+          "Last log:  overlay reconcile halted: killed at 512Mi"),
+         ("Overlay reconcile from the operator's view: idle\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      network-operator-7b6d9c8f5-q2m8x   1/1  Running  0 restarts\n"
+          "Last log:  overlay reconcile idle: 3 nodes in sync")),
+        (("the network operator reports its overlay reconcile halted\n"
+          "the operator pod was OOM-killed 5 times at its 512Mi limit\n"
+          "cross-node pod traffic has failed for 15m"),
+         ("the network operator reports its overlay reconcile idle\n"
+          "the operator pod has been Running for 6d within its limit\n"
+          "cross-node pod traffic flows normally")),
+        (("Warning  OOMKilling  kubelet  Memory cgroup out of memory: killed process "
+          "network-operator (overlay reconcile halted)"),
+         ("Normal  Started  kubelet  Started container network-operator (overlay "
+          "reconcile idle, 3 nodes in sync)")),
+        (("overlay reconcile loop: halted\n"
+          "nodes out of sync: 3 of 3\n"
+          "operator OOM kills in the last hour: 5"),
+         ("overlay reconcile loop: idle\n"
+          "nodes out of sync: 0 of 3\n"
+          "operator OOM kills in the last hour: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dependency check to a peer on another "
+                     "node timed out",
+            local_cause="this Deployment's own readiness check calls a peer address "
+                        "that was retired in the last release",
+            local_reason="the check dials a peer hostname that no Service publishes "
+                         "any more",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: dependency "
+                  "check timed out")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="cluster join failed: peer on another node unreachable after 30s",
+            local_cause="this StatefulSet's own peer list still names a member that "
+                        "was scaled away last week",
+            local_reason="the join step waits on a member ordinal that no longer "
+                         "exists",
+            read=("get_log_causes {ns}/{pod}",
+                  "classified cause: peer join timed out (3 of 3 sampled restarts)"),
+            log_cause="peer join timed out",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="wait-for-db: dial tcp: i/o timeout reaching a pod on another "
+                     "node",
+            local_cause="this Job's own init container dials the database by a pod "
+                        "IP it cached from a previous run",
+            local_reason="the init step reads a stale address file instead of the "
+                         "Service name",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init wait for the database timed out "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init wait for the database timed out",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CERT_MANAGER_DOWN = Propagation(
+    key="cert-manager-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="cert-manager is down, so certificates near expiry are not renewed and "
+           "the workloads serving them fail their TLS checks once they lapse",
+    shared_cause="cert-manager is down, so certificates near expiry are not renewed "
+                 "and the workloads serving them fail their TLS checks once they "
+                 "lapse",
+    shared_reason="cert-manager/cert-manager shows 0 of 1 replicas available with its "
+                  "pod in CrashLoopBackOff after 11 restarts, its last log says it "
+                  "lost its leader lease, and 9 Certificates have passed their "
+                  "renewal time without a new Secret",
+    distractor_cause="the workloads' own TLS Secrets were overwritten by a manual "
+                     "kubectl apply",
+    distractor_reason="the TLS Secrets carry the same serial they had a month ago and "
+                      "no manual write is in the audit log",
+    rationale="the certificate this workload serves is renewed by cert-manager, and "
+              "cert-manager has been down past the renewal window; the workload's "
+              "own config is unchanged",
+    remedy="Restore cert-manager (let it reacquire its leader lease) and let it renew "
+           "the lapsed Certificates; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe cert-manager/cert-manager (Deployment)",
+        ("Leader lease from the controller's view: lost\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      cert-manager-6f9b8d7c5-w7r3n   0/1  CrashLoopBackOff  "
+         "11 restarts\n"
+         "Last log:  lost leader lease, exiting"),
+    ),
+    healthy_origin_content=(
+        "Leader lease from the controller's view: holding\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      cert-manager-6f9b8d7c5-w7r3n   1/1  Running  0 restarts\n"
+        "Last log:  holding leader lease, 0 certificates pending"
+    ),
+    origin_state=("lost", "holding"),
+    origin_variants=(
+        (("Leader lease from the controller's view: lost\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      cert-manager-6f9b8d7c5-w7r3n   0/1  CrashLoopBackOff  "
+          "11 restarts\n"
+          "Last log:  lost leader lease, exiting"),
+         ("Leader lease from the controller's view: holding\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      cert-manager-6f9b8d7c5-w7r3n   1/1  Running  0 restarts\n"
+          "Last log:  holding leader lease, 0 certificates pending")),
+        (("cert-manager reports its leader lease lost\n"
+          "the controller pod has crashed 11 times in 40m\n"
+          "9 Certificates are past their renewal time"),
+         ("cert-manager reports it is holding its leader lease\n"
+          "the controller pod has been Running for 12d\n"
+          "0 Certificates are past their renewal time")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "cert-manager (leader lease lost)"),
+         ("Normal  Started  kubelet  Started container cert-manager (holding leader "
+          "lease)")),
+        (("controller lease: lost\n"
+          "Certificates past renewal: 9 of 31\n"
+          "last renewal issued: 3h ago"),
+         ("controller lease: holding\n"
+          "Certificates past renewal: 0 of 31\n"
+          "last renewal issued: 6m ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: tls: certificate has expired",
+            local_cause="this Deployment's own probe pins a CA bundle that was "
+                        "rotated out of the trust store last quarter",
+            local_reason="the probe's CA file is a copy from before the routine "
+                         "rotation and no longer validates anything",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: tls: "
+                  "certificate has expired")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="tls: failed to load server certificate: certificate has expired",
+            local_cause="this StatefulSet's own server certificate is self-signed "
+                        "with a one-year validity nobody tracked",
+            local_reason="the certificate was generated by hand a year ago and never "
+                         "enrolled for renewal",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: server certificate expired "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="server certificate expired",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="metrics push failed: x509: certificate has expired or is not "
+                     "yet valid",
+            local_cause="this agent's own client certificate is issued by a private "
+                        "CA outside the cluster with a lapsed intermediate",
+            local_reason="the agent's certificate chains to an intermediate that "
+                         "expired last night",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: client certificate rejected as expired "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="client certificate rejected as expired",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_METRICS_SERVER_DOWN = Propagation(
+    key="metrics-server-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="metrics-server is down, so every autoscaler is frozen at its last size",
+    shared_cause="metrics-server is down, so every autoscaler is frozen at its last "
+                 "size and overloaded pods are not scaled out",
+    shared_reason="kube-system/metrics-server shows 0 of 1 replicas available with "
+                  "its pod in CrashLoopBackOff after 8 restarts, its last log says "
+                  "node metric scrapes time out, and every HorizontalPodAutoscaler "
+                  "reports FailedGetResourceMetric",
+    distractor_cause="the workloads' own autoscalers were deleted in the last chart "
+                     "release",
+    distractor_reason="every HorizontalPodAutoscaler is present and its target "
+                      "reference is unchanged; each one reports it cannot read "
+                      "metrics",
+    rationale="this workload is overloaded because its autoscaler cannot read "
+              "metrics, and it cannot read them because metrics-server is down; "
+              "the same is true of every autoscaled workload",
+    remedy="Restore kube-system/metrics-server (fix its kubelet scrape timeout) and "
+           "let the autoscalers resume; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/metrics-server (Deployment)",
+        ("Node metrics from the server's view: unable to fetch\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      metrics-server-8c7d6b9f4-h5n2k   0/1  CrashLoopBackOff  "
+         "8 restarts\n"
+         "Last log:  unable to fetch node metrics: scrape timeout"),
+    ),
+    healthy_origin_content=(
+        "Node metrics from the server's view: scraped\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      metrics-server-8c7d6b9f4-h5n2k   1/1  Running  0 restarts\n"
+        "Last log:  scraped 3 nodes, 41 pods"
+    ),
+    origin_state=("unable", "scraped"),
+    origin_variants=(
+        (("Node metrics from the server's view: unable to fetch\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      metrics-server-8c7d6b9f4-h5n2k   0/1  CrashLoopBackOff  "
+          "8 restarts\n"
+          "Last log:  unable to fetch node metrics: scrape timeout"),
+         ("Node metrics from the server's view: scraped\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      metrics-server-8c7d6b9f4-h5n2k   1/1  Running  0 restarts\n"
+          "Last log:  scraped 3 nodes, 41 pods")),
+        (("metrics-server reports it is unable to fetch node metrics\n"
+          "the server pod has crashed 8 times in 25m\n"
+          "every HorizontalPodAutoscaler reports FailedGetResourceMetric"),
+         ("metrics-server reports it scraped every node\n"
+          "the server pod has been Running for 20d\n"
+          "every HorizontalPodAutoscaler reads its metrics normally")),
+        (("Warning  FailedGetResourceMetric  horizontal-pod-autoscaler  unable to "
+          "fetch metrics from resource metrics API"),
+         ("Normal  SuccessfulRescale  horizontal-pod-autoscaler  metrics scraped, "
+          "New size: 4; reason: cpu resource utilization above target")),
+        (("metrics API: unable to serve\n"
+          "autoscalers frozen: 17 of 17\n"
+          "last successful scrape: 25m ago"),
+         ("metrics API: scraped and serving\n"
+          "autoscalers frozen: 0 of 17\n"
+          "last successful scrape: 15s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503 "
+                     "(overloaded, queue depth 4000)",
+            local_cause="this Deployment's own request queue is unbounded and a "
+                        "single slow client can fill it",
+            local_reason="the queue has no cap and one client is holding 4000 "
+                         "requests open",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="OOMKilled",
+            issue="OOMKilled",
+            reason="container {container} was killed by the kernel out-of-memory "
+                   "handler",
+            evidence="container exceeded its memory limit under load that would have "
+                     "been spread across more replicas",
+            local_cause="this StatefulSet's own in-memory index doubles on every "
+                        "compaction and never releases the old copy",
+            local_reason="the index keeps both copies after compaction and grows "
+                         "until the kernel kills it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: memory limit exceeded under load "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="memory limit exceeded under load",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="scrape target overloaded: collector restarted after 30s of "
+                     "backpressure",
+            local_cause="this agent's own scrape interval was set to one second in "
+                        "its last config push",
+            local_reason="the agent scrapes every target every second and restarts "
+                         "when its buffer fills",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: collector restarted under backpressure "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="collector restarted under backpressure",
+            pass_confidence="high",
+        ),
+    ),
+)
+
 
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
@@ -4378,7 +4847,9 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_NODE_NETWORK_UNAVAILABLE, _T_NODE_KERNEL_DEADLOCK,
                        _T_NODE_READONLY_FILESYSTEM,
                        _T_NODE_FREQUENT_KUBELET_RESTART, _T_NODE_CORDONED_DRAINING,
-                       _T_NODE_CORRUPT_OVERLAY)
+                       _T_NODE_CORRUPT_OVERLAY, _T_EXTERNAL_SECRETS_DOWN,
+                       _T_NETWORK_OPERATOR_DOWN, _T_CERT_MANAGER_DOWN,
+                       _T_METRICS_SERVER_DOWN)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:

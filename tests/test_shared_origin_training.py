@@ -530,21 +530,38 @@ def _origin_labels(rows, *cases):
 # checked where it is actually decided. Neither is vacuous: the first goes red
 # if the rotation stops offering some scenario a negative, the second if the
 # cull ever takes half a pair or the decoy stops being emitted.
+#
+# 2026-09-08: the emitter's half runs at BIG now; its docstring says why.
 
-def test_the_emitter_offers_every_origin_read_under_both_answers(rows):
+def test_the_emitter_offers_every_origin_read_under_both_answers(big_rows):
     """The emitter's half, checked before the cull, where it is the emitter's.
 
     Every trainable origin read must be offered under a shared answer AND
-    under an independent one. This is the rotation's contract and it stays
-    satisfiable as the pool grows: the negatives cover the pool as long as
-    there is at least one per scenario. Asserting it on the kept pile instead
-    would be asserting the cull's behaviour under the emitter's name.
+    under an independent one. The negatives rotate over the pool one `multi`
+    row in three, so the rotation completes only when the build holds at
+    least three `multi` rows per scenario. `SIZE` stopped holding that at
+    thirty-one scenarios; `BIG` holds it many times over. Asserting it on
+    the kept pile instead would be asserting the cull's behaviour under the
+    emitter's name.
     """
-    shared = _origin_labels(rows, "shared_origin")
-    negatives = _origin_labels(rows, "multi")
+    shared = _origin_labels(big_rows, "shared_origin")
+    negatives = _origin_labels(big_rows, "multi")
     assert shared, "no shared_origin row carries an origin read"
     assert negatives, "no multi row carries an origin read — the cue is alive"
     assert shared == negatives
+
+
+def test_the_small_build_offers_no_negative_the_shared_half_lacks(rows):
+    """The small build's share of the same contract.
+
+    Every negative label is one the shared half also offers, so no label
+    appears under the independent answer alone. Coverage the other way
+    needs more rows than `SIZE` holds and is checked at `BIG` above.
+    """
+    shared = _origin_labels(rows, "shared_origin")
+    negatives = _origin_labels(rows, "multi")
+    assert negatives, "no multi row carries an origin read — the cue is alive"
+    assert negatives <= shared
 
 
 def test_the_cull_never_leaves_an_origin_read_under_only_shared_answers(kept):
@@ -795,7 +812,7 @@ def test_the_trainable_pool_exercises_every_issue_kind():
 
 # The pool grows by group across Tasks 5–9. Twenty-four is what it held when
 # the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
-EXPECTED_POOL = 30
+EXPECTED_POOL = 34
 
 
 def test_the_trainable_pool_holds_the_planned_count():
