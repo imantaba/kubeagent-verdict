@@ -891,6 +891,21 @@ _T_KUBE_PROXY = Propagation(
                 "probe timed out after 1s, successThreshold 5 not met"),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-service: dial tcp: connection timed out",
+            local_cause="this StatefulSet's init container waits on a Service name "
+                        "that was renamed in the last chart release",
+            local_reason="the init container's own log names a Service that no "
+                         "longer exists in {ns}",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: wait for a dependency Service timed out "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
     ),
 )
 
@@ -1895,6 +1910,23 @@ _T_CSI_NODE_DRIVER = Propagation(
                    "of 3 sampled restarts)")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume {pvc}: timed out "
+                     "waiting for the external attacher",
+            local_cause="this Job's own claim references a volume handle that was "
+                        "deleted from the storage backend last week",
+            local_reason="the backend lists no volume with the handle this Job's "
+                         "PersistentVolume names",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Bound\nVolume: pv-{pvc}\nEvents: Warning  "
+                   "FailedAttachVolume  attachdetach-controller  "
+                   "AttachVolume.Attach failed for volume {pvc}: timed out "
+                   "waiting for the external attacher")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -1992,6 +2024,21 @@ _T_NODE_PID_PRESSURE = Propagation(
                   ("classified cause: fork of a new subprocess failed, resource "
                    "temporarily unavailable (3 of 3 sampled restarts)")),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="worker pool start failed: cannot allocate thread",
+            local_cause="this StatefulSet's own thread pool size was raised past "
+                        "the container's pids limit in the last config change",
+            local_reason="the container's own pids limit is lower than the thread "
+                         "count its config now asks for",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: thread creation failed, cannot allocate "
+                   "resources (3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2096,6 +2143,21 @@ _T_NODE_RUNTIME_RESTARTING = Propagation(
                 "warming"),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: context deadline exceeded",
+            local_cause="this Job's own container runs a start hook that blocks "
+                        "for longer than the kubelet's start deadline",
+            local_reason="the container's own postStart hook waits on a remote "
+                         "call with no timeout, and the kubelet gives up on it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed "
+                   "to create containerd task: context deadline exceeded while "
+                   "starting {container}")),
+            pass_confidence="high",
+        ),
     ),
 )
 
@@ -2193,6 +2255,21 @@ _T_NODE_CLOCK_SKEW = Propagation(
                    "certificate has expired or is not yet valid")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="token validation failed: token is not yet valid",
+            local_cause="this Job's own init container checks a token that a "
+                        "misconfigured issuer minted with a future not-before time",
+            local_reason="the token's own not-before claim is ten minutes ahead, "
+                         "set by the issuer's config, on every node it is checked",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: token rejected, not yet valid "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
     ),
 )
 
@@ -2288,6 +2365,21 @@ _T_NODE_CONNTRACK_FULL = Propagation(
                   ("classified cause: outbound connection attempts timing out (3 of "
                    "3 sampled restarts)")),
             pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="outbound dial failed after 5 retries",
+            local_cause="this agent's own connection pool opens a new socket per "
+                        "sample and never closes the old ones",
+            local_reason="the agent's own open socket count climbs to its file "
+                         "descriptor limit right before each restart",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: outbound dial failed, too many open "
+                   "connections (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
         ),
     ),
 )

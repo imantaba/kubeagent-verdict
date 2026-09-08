@@ -227,6 +227,15 @@ def test_pass_confidence_varies_within_every_trainable_scenario():
         assert len(grades) > 1, f"{p.key}: every victim carries {grades}"
 
 
+def test_every_trainable_scenario_has_at_least_three_victims():
+    """The 0907 model failed decider 5 on three-victim decoy halves it had
+    never seen: 15 of 24 trainable scenarios held two victims, so the
+    generator could only ever render two. Three is the floor now."""
+    thin = {p.key: len(p.victims) for p in propagation.trainable_scenarios()
+            if len(p.victims) < 3}
+    assert thin == {}, f"scenarios with fewer than three victims: {thin}"
+
+
 def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
     """The mechanised half of constraint 10.
 
