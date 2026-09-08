@@ -61,7 +61,8 @@ def test_counts_for_follows_the_mix():
                       "shared_origin_decoy": 120, "truncated": 50,
                       "injection": 100, "empty_candidates": 50,
                       "wrong_attribution": 100}
-    assert sum(generate.counts_for(997).values()) == 997
+    assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
+    # 997 is the awkward size: it is prime, so every share truncates.
     for size in (10, 100, 997, 1000, 4232):
         c = generate.counts_for(size)
         assert c["shared_origin"] == c["shared_origin_decoy"], size

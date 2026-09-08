@@ -315,10 +315,10 @@ not change at all.**
 
 **Change 1 — a new lesson type, from its own private scenarios.**
 
-`shared_origin` entered the curriculum at 4% (it is 12% now; Change 4 below
+`shared_origin` entered the curriculum at 4% (it is 12% now: Change 4 below
 says how it reached 8%, and the last section of Part 3 says why it went on
-to 12%. Change 4 says why): several workloads, one upstream cause, the
-same answer on every row.
+to 12%): several workloads, one upstream cause, the same answer on every
+row.
 
 The obvious way to build it would have been to reuse the six scenarios the exam
 already uses, with different names drawn. That would have been a trap. The
@@ -850,8 +850,10 @@ Two deciders failed.
 | 5c. Pairs where both halves are right | at least 7 of 10 | **4 of 9** |
 
 The other deciders were met. Beside the exam, the wide probe scored 19 of
-30 pairs and the cousin probe scored 30 of 30. So the model read the origin
-on the scenarios it had studied, and missed on the ones it had not.
+30 pairs. An earlier cousin probe of 30 pairs, made before `kv-dataset
+--probe-cousins` existed, scored 30 of 30. The new 48-pair cousin probe
+has no 0907 score yet. So the model read the origin on the scenarios it
+had studied, and missed on the ones it had not.
 
 The broken answer was on a node-disk-pressure decoy half with three
 victims. Every cause in it was right. The shape was wrong: the model wrote

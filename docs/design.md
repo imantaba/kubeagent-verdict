@@ -281,8 +281,9 @@ share has since doubled to 8% and then risen to 12%, paid out of
 pairs in train after the validation split; a test pins that floor at the
 build recipe (seed 17, size 8000). The shared answer stays the minority
 answer to a multi-workload question: in the pile the model reads it is
-about 0.38 of the `multi`, `shared_origin` and `shared_origin_decoy` rows
-together, and a test fails above 0.40.
+about 38 of every 100 of the `multi`, `shared_origin` and
+`shared_origin_decoy` rows together, and a test fails above 40 of every
+100.
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
 from the six the `shared_origin_probe` eval slice draws from — disjoint in key

@@ -8,9 +8,10 @@ pinned lock file:
 That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
 resolve to today. The full pipeline is CPU-only, and the training step
-alone runs **about 28 hours** at the size-8000 build below (the 0907 run
-took about 8 seconds per example pass, and 16 or 32 threads gave the same
-wall time, so time scales with rows and nothing else) — run it under
+alone runs **about 28 hours** at the size-8000 build below (the 0907 run,
+the 7 September test run whose model this retrain replaces, took about 8
+seconds per example pass, and 16 or 32 threads gave the same wall time,
+so time scales with rows and nothing else) — run it under
 `nohup` and watch `out/adapter-checkpoint/progress.json` (step 3;
 **not** `train_log.json`, which does not exist until the run is over).
 
