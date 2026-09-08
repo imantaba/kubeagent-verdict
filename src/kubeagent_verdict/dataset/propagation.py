@@ -5312,6 +5312,630 @@ _T_RUNTIME_CLASS_REMOVED = Propagation(
     ),
 )
 
+_T_CSI_CONTROLLER_OOMKILLED = Propagation(
+    key="csi-controller-oomkilled",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the block-ssd CSI controller is OOM-killed on every start, so no claim "
+           "on that class gets a volume",
+    shared_cause="the block-ssd CSI controller is OOM-killed on every start, so no "
+                 "claim on that class gets a volume",
+    shared_reason="storage-system/block-ssd-csi-controller shows 0 of 2 ready with "
+                  "both pods OOMKilled, its last restart 40s ago with exit 137, and "
+                  "0 PersistentVolumes have bound on block-ssd in the last 20m",
+    distractor_cause="the workloads' own claims were recreated with the wrong access "
+                     "mode in the last chart release",
+    distractor_reason="the claims ask for the same access mode they always did and "
+                      "the class supports it; the provisioner has simply not "
+                      "answered any of them",
+    rationale="this workload's claim is on the block-ssd class, and that class's "
+              "controller is OOM-killed before it can provision anything; the "
+              "workload's own claim is unchanged",
+    remedy="Raise the block-ssd CSI controller's memory limit (or fix its leak) so "
+           "it stays up and provisions; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass block-ssd",
+        ("block-ssd controller state: OOMKilled on every start\n"
+         "provisioner: example.com/block-ssd-csi\n"
+         "controller storage-system/block-ssd-csi-controller: 0/2 ready, OOMKilled\n"
+         "last restart: 40s ago, exit 137\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "block-ssd controller state: Running\n"
+        "provisioner: example.com/block-ssd-csi\n"
+        "controller storage-system/block-ssd-csi-controller: 2/2 ready, Running\n"
+        "last restart: none in 7d\n"
+        "PersistentVolumes bound in the last 20m: 5"
+    ),
+    origin_state=("OOMKilled", "Running"),
+    origin_variants=(
+        (("block-ssd controller state: OOMKilled on every start\n"
+          "provisioner: example.com/block-ssd-csi\n"
+          "controller storage-system/block-ssd-csi-controller: 0/2 ready, "
+          "OOMKilled\n"
+          "last restart: 40s ago, exit 137\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("block-ssd controller state: Running\n"
+          "provisioner: example.com/block-ssd-csi\n"
+          "controller storage-system/block-ssd-csi-controller: 2/2 ready, Running\n"
+          "last restart: none in 7d\n"
+          "PersistentVolumes bound in the last 20m: 5")),
+        (("the block-ssd CSI controller is OOMKilled at its 256Mi limit on every "
+          "start\n"
+          "both controller pods have exit 137 in their last termination\n"
+          "no block-ssd claim has bound in 20m"),
+         ("the block-ssd CSI controller has been Running within its limit for 7d\n"
+          "both controller pods report 0 restarts\n"
+          "5 block-ssd claims bound in the last 20m")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "block-ssd-csi-controller (OOMKilled, exit 137)"),
+         ("Normal  Started  kubelet  Started container block-ssd-csi-controller "
+          "(Running, 2 of 2 ready)")),
+        (("class block-ssd provisioner health: OOMKilled\n"
+          "controller pods ready: 0 of 2\n"
+          "claims waiting on this class: 5, bound in 20m: 0"),
+         ("class block-ssd provisioner health: Running\n"
+          "controller pods ready: 2 of 2\n"
+          "claims waiting on this class: 0, bound in 20m: 5")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim asks for a storage class name "
+                        "with a typo, so no provisioner picks it up",
+            local_reason="the claim names a class one letter off from any class in "
+                         "the cluster",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this StatefulSet's own volumeClaimTemplate asks for 10 TiB, "
+                        "more than the class's per-volume cap",
+            local_reason="the template requests a size the class will never "
+                         "provision",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.MountDevice failed for volume \"{pvc}\": the "
+                     "controller has not published the volume",
+            local_cause="this Job's own pod mounts the same claim twice with "
+                        "conflicting mount options",
+            local_reason="two volumeMounts name the same claim, one read-only and "
+                         "one read-write, and the second mount fails",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.MountDevice failed for volume "
+                  "\"{pvc}\": mount failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CSI_CONTROLLER_UNSCHEDULABLE = Propagation(
+    key="csi-controller-unschedulable",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the archive-hdd CSI controller cannot be scheduled, so claims on that "
+           "class are never provisioned",
+    shared_cause="the archive-hdd CSI controller cannot be scheduled, so claims on "
+                 "that class are never provisioned",
+    shared_reason="storage-system/archive-hdd-csi-controller shows 0 of 1 ready and "
+                  "Pending because its node selector storage-tier=archive matches "
+                  "no node, and 0 PersistentVolumes have bound on archive-hdd in "
+                  "the last 20m",
+    distractor_cause="the workloads' own claim templates were switched to a class "
+                     "name with a typo in the last chart release",
+    distractor_reason="the claims name archive-hdd exactly and the class exists; "
+                      "its controller has no node to run on",
+    rationale="this workload's claim is on the archive-hdd class, and that class's "
+              "controller is Pending with no node matching its selector, so "
+              "nothing on the class is provisioned; the workload's own claim is "
+              "unchanged",
+    remedy="Label a node storage-tier=archive (or fix the controller's node "
+           "selector) so the archive-hdd controller can run; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass archive-hdd",
+        ("archive-hdd controller placement: its node selector matches no node\n"
+         "provisioner: example.com/archive-hdd-csi\n"
+         "controller storage-system/archive-hdd-csi-controller: 0/1 ready, Pending "
+         "(node selector matches no node)\n"
+         "node selector: storage-tier=archive\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "archive-hdd controller placement: Running on its archive node\n"
+        "provisioner: example.com/archive-hdd-csi\n"
+        "controller storage-system/archive-hdd-csi-controller: 1/1 ready, Running\n"
+        "node selector: storage-tier=archive (1 node)\n"
+        "PersistentVolumes bound in the last 20m: 3"
+    ),
+    origin_state=("matches no node", "Running"),
+    origin_variants=(
+        (("archive-hdd controller placement: its node selector matches no node\n"
+          "provisioner: example.com/archive-hdd-csi\n"
+          "controller storage-system/archive-hdd-csi-controller: 0/1 ready, "
+          "Pending (node selector matches no node)\n"
+          "node selector: storage-tier=archive\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("archive-hdd controller placement: Running on its archive node\n"
+          "provisioner: example.com/archive-hdd-csi\n"
+          "controller storage-system/archive-hdd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "node selector: storage-tier=archive (1 node)\n"
+          "PersistentVolumes bound in the last 20m: 3")),
+        (("the archive-hdd CSI controller is Pending because its node selector "
+          "matches no node\n"
+          "the label storage-tier=archive is on 0 of 3 nodes since the last node "
+          "pool rollout\n"
+          "no archive-hdd claim has bound in 20m"),
+         ("the archive-hdd CSI controller is Running on the node labelled "
+          "storage-tier=archive\n"
+          "the label is on 1 of 3 nodes\n"
+          "3 archive-hdd claims bound in the last 20m")),
+        (("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "3 node(s) didn't match Pod's node affinity/selector "
+          "(archive-hdd-csi-controller: selector matches no node)"),
+         ("Normal  Scheduled  default-scheduler  Successfully assigned "
+          "storage-system/archive-hdd-csi-controller to the archive node "
+          "(Running)")),
+        (("class archive-hdd provisioner placement: matches no node\n"
+          "controller pods ready: 0 of 1\n"
+          "claims waiting on this class: 3, bound in 20m: 0"),
+         ("class archive-hdd provisioner placement: Running, 1 node matched\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 0, bound in 20m: 3")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim pins a volume by name that "
+                        "another claim already holds",
+            local_reason="the claim's volumeName points at a PersistentVolume bound "
+                         "to a different claim",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Job's own claim asks for ReadWriteMany on a class that "
+                        "only offers ReadWriteOnce",
+            local_reason="the claim's access mode is one the class cannot provide",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="init step waited 120s for its data volume and gave up",
+            local_cause="this StatefulSet's own init container polls a volume path "
+                        "that its last chart release renamed, so it never sees the "
+                        "disk that is mounted",
+            local_reason="the init step waits on a path the chart no longer mounts "
+                         "the disk at",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init step gave up waiting for its data volume "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init step gave up waiting for its data volume",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_PROVISIONER_CREDENTIALS_ROTATED = Propagation(
+    key="provisioner-credentials-rotated",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the encrypted-ssd provisioner's backend credentials were rotated, so the "
+           "backend refuses every new volume request",
+    shared_cause="the encrypted-ssd provisioner's backend credentials were rotated, "
+                 "so the backend refuses every new volume request",
+    shared_reason="storage-system/encrypted-ssd-csi-controller is 1 of 1 ready, but "
+                  "its last provision error says the backend refused credentials "
+                  "(401), and 0 PersistentVolumes have bound on encrypted-ssd in "
+                  "the last 20m",
+    distractor_cause="the workloads' own service accounts lost the storage role in "
+                     "the last RBAC change",
+    distractor_reason="claims need no service account role to bind, and the refusal "
+                      "comes from the storage backend, not the API server",
+    rationale="this workload's claim is on the encrypted-ssd class, and that "
+              "class's backend refuses the provisioner's credentials, so no claim "
+              "on it binds; the workload's own claim is unchanged",
+    remedy="Update the encrypted-ssd provisioner's backend secret with the rotated "
+           "credentials and restart it; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass encrypted-ssd",
+        ("encrypted-ssd backend provision errors: refused credentials on every "
+         "call\n"
+         "provisioner: example.com/encrypted-ssd-csi\n"
+         "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+         "Running\n"
+         "last provision error: backend refused credentials (401)\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "encrypted-ssd backend provision errors: none\n"
+        "provisioner: example.com/encrypted-ssd-csi\n"
+        "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+        "Running\n"
+        "last provision error: none\n"
+        "PersistentVolumes bound in the last 20m: 6"
+    ),
+    origin_state=("refused credentials", "none"),
+    origin_variants=(
+        (("encrypted-ssd backend provision errors: refused credentials on every "
+          "call\n"
+          "provisioner: example.com/encrypted-ssd-csi\n"
+          "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "last provision error: backend refused credentials (401)\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("encrypted-ssd backend provision errors: none\n"
+          "provisioner: example.com/encrypted-ssd-csi\n"
+          "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "last provision error: none\n"
+          "PersistentVolumes bound in the last 20m: 6")),
+        (("the encrypted-ssd controller is up but its backend has refused "
+          "credentials on all 6 provision calls in 20m\n"
+          "the backend rotated its access credentials overnight and the provisioner still "
+          "holds the old ones\n"
+          "no encrypted-ssd claim has bound since"),
+         ("the encrypted-ssd controller is up and its backend accepted all 6 "
+          "provision calls in 20m\n"
+          "provision errors in that window: none\n"
+          "6 encrypted-ssd claims bound in the last 20m")),
+        (("Warning  ProvisioningFailed  example.com/encrypted-ssd-csi  failed to "
+          "provision volume: backend refused credentials (401)"),
+         ("Normal  ProvisioningSucceeded  example.com/encrypted-ssd-csi  "
+          "Successfully provisioned volume (errors in 20m: none)")),
+        (("class encrypted-ssd backend auth: refused credentials\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 6, bound in 20m: 0"),
+         ("class encrypted-ssd backend auth: accepted, errors none\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 0, bound in 20m: 6")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim was created in the wrong "
+                        "namespace by its chart, so the pod never finds it",
+            local_reason="the chart rendered the claim into a different namespace "
+                         "than the Deployment",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this StatefulSet's own claim template sets a selector that "
+                        "no PersistentVolume label matches",
+            local_reason="the template's selector asks for a volume label nothing "
+                         "in the cluster carries",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the backend "
+                     "did not complete the attach",
+            local_cause="this Job's own claim is bound to a volume still attached to "
+                        "a node that was deleted without detaching",
+            local_reason="the volume's attachment record names a node that no "
+                         "longer exists",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_STORAGE_BACKEND_FULL = Propagation(
+    key="storage-backend-full",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the bulk-nvme storage backend is out of space, so the provisioner cannot "
+           "carve a new volume for any claim on that class",
+    shared_cause="the bulk-nvme storage backend is out of space, so the provisioner "
+                 "cannot carve a new volume for any claim on that class",
+    shared_reason="storage-system/bulk-nvme-csi-controller is 1 of 1 ready, but the "
+                  "backend reports out of space with 0 GiB free of 4 TiB, and 0 "
+                  "PersistentVolumes have bound on bulk-nvme in the last 20m",
+    distractor_cause="the workloads' own claims ask for more space than their "
+                     "namespace quota allows",
+    distractor_reason="every namespace involved has quota to spare, and the claims "
+                      "were admitted; the backend has no space to fill them",
+    rationale="this workload's claim is on the bulk-nvme class, and that class's "
+              "backend has no free space to provision from; the workload's own "
+              "claim is unchanged",
+    remedy="Free or add capacity on the bulk-nvme backend (delete released volumes "
+           "or extend the pool); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass bulk-nvme",
+        ("bulk-nvme backend: out of space\n"
+         "provisioner: example.com/bulk-nvme-csi\n"
+         "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+         "backend capacity: out of space (0 GiB free of 4 TiB)\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "bulk-nvme backend: space remaining\n"
+        "provisioner: example.com/bulk-nvme-csi\n"
+        "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+        "backend capacity: space remaining 1.9 TiB of 4 TiB\n"
+        "PersistentVolumes bound in the last 20m: 4"
+    ),
+    origin_state=("out of space", "space remaining"),
+    origin_variants=(
+        (("bulk-nvme backend: out of space\n"
+          "provisioner: example.com/bulk-nvme-csi\n"
+          "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+          "backend capacity: out of space (0 GiB free of 4 TiB)\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("bulk-nvme backend: space remaining\n"
+          "provisioner: example.com/bulk-nvme-csi\n"
+          "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+          "backend capacity: space remaining 1.9 TiB of 4 TiB\n"
+          "PersistentVolumes bound in the last 20m: 4")),
+        (("the bulk-nvme backend is out of space: 0 GiB free of 4 TiB\n"
+          "the controller is up and every provision call fails on capacity\n"
+          "no bulk-nvme claim has bound in 20m"),
+         ("the bulk-nvme backend has space remaining: 1.9 TiB free of 4 TiB\n"
+          "the controller is up and every provision call in 20m succeeded\n"
+          "4 bulk-nvme claims bound in the last 20m")),
+        (("Warning  ProvisioningFailed  example.com/bulk-nvme-csi  failed to "
+          "provision volume: backend out of space (0 GiB free)"),
+         ("Normal  ProvisioningSucceeded  example.com/bulk-nvme-csi  Successfully "
+          "provisioned volume (space remaining 1.9 TiB)")),
+        (("class bulk-nvme backend capacity: out of space\n"
+          "free: 0 GiB of 4 TiB\n"
+          "claims waiting on this class: 4, bound in 20m: 0"),
+         ("class bulk-nvme backend capacity: space remaining\n"
+          "free: 1.9 TiB of 4 TiB\n"
+          "claims waiting on this class: 0, bound in 20m: 4")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim asks for a size below the "
+                        "class's minimum, which the provisioner rejects",
+            local_reason="the claim requests 100Mi and the class provisions nothing "
+                         "under 1Gi",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Job's own claim names a snapshot as its data source "
+                        "that was pruned by the retention policy",
+            local_reason="the claim's dataSource points at a VolumeSnapshot that no "
+                         "longer exists",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the backend "
+                     "could not allocate the attach",
+            local_cause="this StatefulSet's own volume was resized past the "
+                        "backend's per-volume cap and the failed resize left it "
+                        "detached",
+            local_reason="the claim's last resize was refused by the backend and "
+                         "the volume has not reattached since",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CSI_DRIVER_VERSION_MISMATCH = Propagation(
+    key="csi-driver-version-mismatch",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the replicated-ssd CSI controller was upgraded ahead of its node "
+           "plugins, so volumes it provisions cannot be staged on any node",
+    shared_cause="the replicated-ssd CSI controller was upgraded ahead of its node "
+                 "plugins, so volumes it provisions cannot be staged on any node",
+    shared_reason="storage-system/replicated-ssd-csi-controller is 1 of 1 ready at "
+                  "driver API v2 while every node plugin is still at v1, and of the "
+                  "5 PersistentVolumes bound on replicated-ssd in the last 20m, 0 "
+                  "have been staged on any node",
+    distractor_cause="the workloads' own pods were moved to nodes without the CSI "
+                     "node plugin in the last node pool rollout",
+    distractor_reason="every node runs the replicated-ssd node plugin and reports "
+                      "it healthy; the plugin is a version the controller no longer "
+                      "speaks to",
+    rationale="this workload's volume is on the replicated-ssd class, and that "
+              "class's controller provisions volumes its older node plugins cannot "
+              "stage; the workload's own volume spec is unchanged",
+    remedy="Roll the replicated-ssd node plugin DaemonSet to the controller's "
+           "version (or roll the controller back); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass replicated-ssd",
+        ("replicated-ssd driver versions: mismatch between controller and node "
+         "plugins\n"
+         "provisioner: example.com/replicated-ssd-csi\n"
+         "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+         "Running\n"
+         "driver API: controller v2, node plugins v1 (mismatch)\n"
+         "PersistentVolumes bound in the last 20m: 5, staged on a node: 0"),
+    ),
+    healthy_origin_content=(
+        "replicated-ssd driver versions: in step\n"
+        "provisioner: example.com/replicated-ssd-csi\n"
+        "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+        "Running\n"
+        "driver API: controller v2, node plugins v2, in step\n"
+        "PersistentVolumes bound in the last 20m: 5, staged on a node: 5"
+    ),
+    origin_state=("mismatch", "in step"),
+    origin_variants=(
+        (("replicated-ssd driver versions: mismatch between controller and node "
+          "plugins\n"
+          "provisioner: example.com/replicated-ssd-csi\n"
+          "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "driver API: controller v2, node plugins v1 (mismatch)\n"
+          "PersistentVolumes bound in the last 20m: 5, staged on a node: 0"),
+         ("replicated-ssd driver versions: in step\n"
+          "provisioner: example.com/replicated-ssd-csi\n"
+          "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "driver API: controller v2, node plugins v2, in step\n"
+          "PersistentVolumes bound in the last 20m: 5, staged on a node: 5")),
+        (("the replicated-ssd controller speaks driver API v2 and every node "
+          "plugin still speaks v1: a mismatch\n"
+          "the controller was upgraded 25m ago and the node plugin DaemonSet was "
+          "not\n"
+          "5 volumes bound since then, 0 staged on any node"),
+         ("the replicated-ssd controller and every node plugin speak driver API "
+          "v2, in step\n"
+          "both were upgraded together 3d ago\n"
+          "5 volumes bound in 20m, all 5 staged")),
+        (("Warning  FailedMount  kubelet  MountVolume.MountDevice failed: node "
+          "plugin v1 cannot stage a v2 volume (driver version mismatch)"),
+         ("Normal  SuccessfulMountVolume  kubelet  MapVolume.MapPodDevice "
+          "succeeded (driver versions in step, v2/v2)")),
+        (("class replicated-ssd driver API: mismatch\n"
+          "controller: v2, node plugins: v1 on 3 of 3 nodes\n"
+          "volumes bound in 20m: 5, staged: 0"),
+         ("class replicated-ssd driver API: in step\n"
+          "controller: v2, node plugins: v2 on 3 of 3 nodes\n"
+          "volumes bound in 20m: 5, staged: 5")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.MountDevice failed for volume \"{pvc}\": the node "
+                     "plugin could not stage the volume",
+            local_cause="this Deployment's own volume mount asks for a mount option "
+                        "the driver does not support",
+            local_reason="the claim's mountOptions carry a flag the driver rejects "
+                         "at stage",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.MountDevice failed for volume "
+                  "\"{pvc}\": stage failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the node "
+                     "plugin did not acknowledge the attach",
+            local_cause="this StatefulSet's own volume was left attached to a node "
+                        "that was removed from the cluster before its pod moved",
+            local_reason="the volume's attachment still names the removed node and "
+                         "the new node cannot take it",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: the data volume was not staged "
+                     "before the container's start deadline",
+            local_cause="this Job's own container entrypoint runs a filesystem check "
+                        "that fails on the volume's unclean journal",
+            local_reason="the entrypoint's fsck refuses the volume and exits before "
+                         "the main process starts",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container \"{container}\": data volume not ready")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
 
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
@@ -5330,7 +5954,10 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_NETWORK_OPERATOR_DOWN, _T_CERT_MANAGER_DOWN,
                        _T_METRICS_SERVER_DOWN, _T_SHARED_NFS_SERVER_DOWN,
                        _T_CLUSTER_MAINTENANCE_TAINT, _T_SHARED_GATEWAY_REFUSING,
-                       _T_RUNTIME_CLASS_REMOVED)
+                       _T_RUNTIME_CLASS_REMOVED, _T_CSI_CONTROLLER_OOMKILLED,
+                       _T_CSI_CONTROLLER_UNSCHEDULABLE,
+                       _T_PROVISIONER_CREDENTIALS_ROTATED, _T_STORAGE_BACKEND_FULL,
+                       _T_CSI_DRIVER_VERSION_MISMATCH)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:

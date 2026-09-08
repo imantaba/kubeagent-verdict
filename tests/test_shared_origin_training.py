@@ -812,7 +812,7 @@ def test_the_trainable_pool_exercises_every_issue_kind():
 
 # The pool grows by group across Tasks 5–9. Twenty-four is what it held when
 # the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
-EXPECTED_POOL = 38
+EXPECTED_POOL = 43
 
 
 def test_the_trainable_pool_holds_the_planned_count():
