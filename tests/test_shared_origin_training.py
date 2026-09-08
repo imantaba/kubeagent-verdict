@@ -639,20 +639,30 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
 
 
 def test_a_negative_multi_row_shows_the_component_healthy(rows):
-    """Same label, opposite content — otherwise the label is still the answer."""
-    healthy = {p.origin_read[0]: p.healthy_origin_content
-               for p in propagation.trainable_scenarios()}
-    broken = {p.origin_read[1] for p in propagation.trainable_scenarios()}
+    """Same label, opposite content — otherwise the label is still the answer.
+
+    Several scenarios share one read label: every node scenario in the
+    exam's layout heads `describe node {node}`. So the healthy first lines
+    are collected per label, and a row must show one of them. A dict of one
+    content per label kept only the last scenario registered and failed
+    every other scenario's negative row.
+    """
+    healthy = {}
+    for p in propagation.trainable_scenarios():
+        first = p.healthy_origin_content.split("\n")[0]
+        healthy.setdefault(p.origin_read[0], set()).add(first)
+    broken = {p.origin_read[1].split("\n")[0]
+              for p in propagation.trainable_scenarios()}
     seen = 0
     for e in _by_case(rows, "multi"):
         if "origin_read_label" not in e.meta:
             continue
         seen += 1
         assert e.meta["origin_healthy"] is True
-        content = healthy[e.meta["origin_read_label"]]
-        assert content.split("\n")[0] in e.user
+        first_lines = healthy[e.meta["origin_read_label"]]
+        assert any(line in e.user for line in first_lines), e.meta
         for b in broken:
-            assert b.split("\n")[0] not in e.user
+            assert b not in e.user
     assert seen
 
 
@@ -783,14 +793,16 @@ def test_the_trainable_pool_exercises_every_issue_kind():
     assert not missing, f"no trainable scenario exercises: {missing}"
 
 
-def test_the_trainable_pool_holds_twenty_four_scenarios():
-    """Four scenarios is what the pool held when it scored 0.5 in-distribution
-    and 0.1 out. Twenty is what it held when the 0905 run failed decider 5
-    (pairs 3 of 10, false "shared" on the decoy probe 2 of 10). The count is
-    asserted so shrinking it back is a deliberate edit rather than a merge
-    artefact.
-    """
-    assert len(propagation.trainable_scenarios()) == 24
+# The pool grows by group across Tasks 5–9. Twenty-four is what it held when
+# the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
+EXPECTED_POOL = 30
+
+
+def test_the_trainable_pool_holds_the_planned_count():
+    """The pool is pinned so a scenario cannot fall out of the tuple unseen."""
+    pool = propagation.trainable_scenarios()
+    assert len(pool) == EXPECTED_POOL
+    assert len({p.key for p in pool}) == EXPECTED_POOL
 
 
 def test_every_held_out_read_kind_has_a_trained_cousin():

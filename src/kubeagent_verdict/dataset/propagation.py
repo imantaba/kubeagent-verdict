@@ -3604,6 +3604,766 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
     ),
 )
 
+_T_NODE_NETWORK_UNAVAILABLE = Propagation(
+    key="node-network-unavailable",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node lost its route to the pod network, so no pod placed there can get "
+           "a sandbox",
+    shared_cause="node {node} has no route to the pod network, so no pod placed there "
+                 "can get a sandbox",
+    shared_reason="{node} reports NetworkUnavailable True with reason NoRouteCreated, "
+                  "the network-unavailable taint is on the node, and every pod that "
+                  "landed there in the last 9m is stuck creating its sandbox",
+    distractor_cause="the CNI plugin binary was removed from these pods' images in the "
+                     "last rebuild",
+    distractor_reason="the CNI plugin is installed on the node, not in a workload "
+                      "image, and the failing pods were built from unrelated images",
+    rationale="the node has no route to the pod network, so the kubelet cannot give "
+              "any pod on it a network sandbox; this workload is one of the pods "
+              "placed there, and its own spec is unchanged",
+    remedy="Restore the pod-network route on {node} (restart the network agent or "
+           "re-run the route controller) and let the stuck pods retry; the flagged "
+           "workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Pod network route on this node: missing\n"
+         "Conditions:\n"
+         "  NetworkUnavailable   True    NoRouteCreated   route to the pod network is "
+         "missing\n"
+         "  Ready                True    KubeletReady     kubelet is posting ready "
+         "status\n"
+         "Taints:  node.kubernetes.io/network-unavailable:NoSchedule"),
+    ),
+    healthy_origin_content=(
+        "Pod network route on this node: installed\n"
+        "Conditions:\n"
+        "  NetworkUnavailable   False   RouteCreated     route to the pod network is "
+        "installed\n"
+        "  Ready                True    KubeletReady     kubelet is posting ready "
+        "status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("missing", "installed"),
+    origin_variants=(
+        (("Pod network route on this node: missing\n"
+          "Conditions:\n"
+          "  NetworkUnavailable   True    NoRouteCreated   route to the pod network is "
+          "missing\n"
+          "  Ready                True    KubeletReady     kubelet is posting ready "
+          "status\n"
+          "Taints:  node.kubernetes.io/network-unavailable:NoSchedule"),
+         ("Pod network route on this node: installed\n"
+          "Conditions:\n"
+          "  NetworkUnavailable   False   RouteCreated     route to the pod network is "
+          "installed\n"
+          "  Ready                True    KubeletReady     kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("the route controller reports this node's pod-network route missing\n"
+          "no sandbox has been created on the node for 9m\n"
+          "the network-unavailable taint is set"),
+         ("the route controller reports this node's pod-network route installed\n"
+          "sandboxes are being created on the node normally\n"
+          "no network-unavailable taint is set")),
+        (("Warning  NetworkNotReady  kubelet  pod network route missing: cannot set up "
+          "a sandbox on this node"),
+         ("Normal  NetworkReady  kubelet  pod network route installed: sandboxes are "
+          "being set up on this node")),
+        (("route state: missing\n"
+          "sandboxes created in the last 10m: 0 of 14 attempts\n"
+          "kubelet has logged NetworkPluginNotReady for 9m"),
+         ("route state: installed\n"
+          "sandboxes created in the last 10m: 14 of 14 attempts\n"
+          "kubelet has logged no network plugin error")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox: network plugin returned error: no "
+                     "route to the pod network",
+            local_cause="this Deployment's own pod spec asks for a host network it is "
+                        "not allowed to use",
+            local_reason="the pod spec sets hostNetwork true and the namespace's "
+                         "pod security policy rejects it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedCreatePodSandBox  kubelet  "
+                  "Failed to create pod sandbox: network plugin returned error")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 1 node(s) had untolerated taint "
+                     "node.kubernetes.io/network-unavailable, 2 Insufficient memory",
+            local_cause="this StatefulSet's own memory request was doubled in its last "
+                        "rollout past what the two remaining nodes can offer",
+            local_reason="the pod asks for 24Gi and the two schedulable nodes have "
+                         "16Gi free each",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: 1 node(s) had an untolerated taint, 2 Insufficient memory")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dial tcp: connect: network is unreachable",
+            local_cause="this agent's own readiness probe checks a port the last config "
+                        "change moved",
+            local_reason="the probe dials 9100 and the agent now listens on 9101",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: dial tcp: "
+                  "connect: network is unreachable")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_KERNEL_DEADLOCK = Propagation(
+    key="node-kernel-deadlock",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's kernel has a deadlocked task, so every container operation on "
+           "it hangs",
+    shared_cause="the kernel on node {node} has a deadlocked task, so every container "
+                 "operation on that node hangs",
+    shared_reason="{node} reports KernelDeadlock True with a task hung for more than "
+                  "120 seconds, and every container start, exec and probe on the node "
+                  "has stalled since",
+    distractor_cause="the container runtime on the node was upgraded to a build that "
+                     "hangs on cgroup v2",
+    distractor_reason="the runtime version on the node is unchanged since last month "
+                      "and the same build runs fine on its peers",
+    rationale="a hung kernel task on {node} is blocking every container operation the "
+              "kubelet issues there; this workload is on that node, and its hang is "
+              "the node's, not its own",
+    remedy="Reboot {node} (or drain it and let the hung task clear) and let its pods "
+           "reschedule; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Kernel task state on this node: hung\n"
+         "Conditions:\n"
+         "  KernelDeadlock   True    KernelHasDeadlock   a task has hung for more than "
+         "120 seconds\n"
+         "  Ready            True    KubeletReady        kubelet is posting ready "
+         "status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Kernel task state on this node: responsive\n"
+        "Conditions:\n"
+        "  KernelDeadlock   False   KernelHasNoDeadlock   every task is responsive\n"
+        "  Ready            True    KubeletReady          kubelet is posting ready "
+        "status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("hung", "responsive"),
+    origin_variants=(
+        (("Kernel task state on this node: hung\n"
+          "Conditions:\n"
+          "  KernelDeadlock   True    KernelHasDeadlock   a task has hung for more than "
+          "120 seconds\n"
+          "  Ready            True    KubeletReady        kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>"),
+         ("Kernel task state on this node: responsive\n"
+          "Conditions:\n"
+          "  KernelDeadlock   False   KernelHasNoDeadlock   every task is responsive\n"
+          "  Ready            True    KubeletReady          kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports a kernel task hung on this node\n"
+          "container starts and execs on the node have stalled for 6m\n"
+          "the kubelet is still posting ready status"),
+         ("the node problem detector reports every kernel task responsive on this "
+          "node\n"
+          "container starts and execs on the node complete normally\n"
+          "the kubelet is posting ready status")),
+        (("Warning  KernelDeadlock  node-problem-detector  task hung for 120s: "
+          "INFO: task containerd-shim:4821 blocked for more than 120 seconds"),
+         ("Normal  KernelResponsive  node-problem-detector  every task responsive: no "
+          "blocked task in the last 30m")),
+        (("kernel watchdog: hung\n"
+          "blocked tasks: 3\n"
+          "oldest blocked task age: 6m14s"),
+         ("kernel watchdog: responsive\n"
+          "blocked tasks: 0\n"
+          "oldest blocked task age: n/a")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: context deadline exceeded",
+            local_cause="this Deployment's own entrypoint waits on a lock file that a "
+                        "previous run left behind",
+            local_reason="the container's start script blocks on a stale lock in its "
+                         "own working directory",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: context deadline exceeded")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: command timed out after 5s",
+            local_cause="this StatefulSet's own exec probe runs a query that no longer "
+                        "finishes inside its 5s timeout",
+            local_reason="the probe query scans a table that has grown past what the "
+                         "timeout allows",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: command timed "
+                  "out after 5s")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="Liveness probe failed: command timed out; container will be "
+                     "restarted",
+            local_cause="this agent's own liveness hook forks a helper that blocks on "
+                        "a pipe nobody reads",
+            local_reason="the hook's helper writes to a pipe with no reader and the "
+                         "hook waits on it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: liveness command timed out, killed by kubelet "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="liveness command timed out, killed by kubelet",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_READONLY_FILESYSTEM = Propagation(
+    key="node-readonly-filesystem",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's root filesystem remounted read-only after an I/O error, so no "
+           "container there can write to disk",
+    shared_cause="the root filesystem on node {node} is mounted read-only, so no "
+                 "container there can write to disk",
+    shared_reason="{node} reports ReadonlyFilesystem True after an I/O error, and "
+                  "every container on the node that writes to its own filesystem has "
+                  "failed since the remount 8m ago",
+    distractor_cause="the workloads' own images were rebuilt with a read-only root "
+                     "filesystem setting",
+    distractor_reason="the pod specs declare no readOnlyRootFilesystem and the images "
+                      "are unchanged since last week",
+    rationale="the root filesystem on {node} is read-only, so every container write on "
+              "the node fails; this workload writes on start and is one of them",
+    remedy="Repair the disk behind {node}'s root filesystem and remount it writable "
+           "(or replace the node) and let the pods reschedule; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Root filesystem on this node: read-only\n"
+         "Conditions:\n"
+         "  ReadonlyFilesystem   True    FilesystemIsReadOnly   root filesystem "
+         "remounted read-only after an I/O error\n"
+         "  Ready                True    KubeletReady           kubelet is posting "
+         "ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Root filesystem on this node: writable\n"
+        "Conditions:\n"
+        "  ReadonlyFilesystem   False   FilesystemIsNotReadOnly   root filesystem is "
+        "writable\n"
+        "  Ready                True    KubeletReady              kubelet is posting "
+        "ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("read-only", "writable"),
+    origin_variants=(
+        (("Root filesystem on this node: read-only\n"
+          "Conditions:\n"
+          "  ReadonlyFilesystem   True    FilesystemIsReadOnly   root filesystem "
+          "remounted read-only after an I/O error\n"
+          "  Ready                True    KubeletReady           kubelet is posting "
+          "ready status\n"
+          "Taints:  <none>"),
+         ("Root filesystem on this node: writable\n"
+          "Conditions:\n"
+          "  ReadonlyFilesystem   False   FilesystemIsNotReadOnly   root filesystem is "
+          "writable\n"
+          "  Ready                True    KubeletReady              kubelet is posting "
+          "ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports this node's root filesystem read-only\n"
+          "the remount followed an I/O error 8m ago\n"
+          "every container write on the node has failed since"),
+         ("the node problem detector reports this node's root filesystem writable\n"
+          "no I/O error has been logged on the node\n"
+          "container writes on the node succeed")),
+        (("Warning  FilesystemIsReadOnly  node-problem-detector  root filesystem "
+          "remounted read-only: EXT4-fs error on sda1"),
+         ("Normal  FilesystemIsWritable  node-problem-detector  root filesystem "
+          "writable: no error on sda1 in the last 24h")),
+        (("mount state of the root filesystem: read-only\n"
+          "I/O errors on the root device in the last 1h: 37\n"
+          "container writes failing on the node: all"),
+         ("mount state of the root filesystem: writable\n"
+          "I/O errors on the root device in the last 1h: 0\n"
+          "container writes failing on the node: none")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="open /var/run/app.pid: input/output error",
+            local_cause="this Deployment's own container writes its pid file to a path "
+                        "its image marks immutable",
+            local_reason="the image sets the pid directory immutable at build time and "
+                         "the entrypoint still writes there",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: write to the container filesystem failed "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="write to the container filesystem failed",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: mkdir /run/containerd: "
+                     "input/output error",
+            local_cause="this Job's own container image is corrupt in the registry "
+                        "and fails to unpack",
+            local_reason="the image manifest lists a layer whose digest does not "
+                         "match its content",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: input/output error")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.SetUp failed for volume {pvc}: mkdir on the node's "
+                     "kubelet directory: input/output error",
+            local_cause="this StatefulSet's own claim asks for a filesystem type the "
+                        "node's kernel cannot mount",
+            local_reason="the claim's storage class sets fsType xfs and the node "
+                         "image ships no xfs module",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Bound\nVolume: pv-{pvc}\nEvents: Warning  FailedMount  "
+                  "kubelet  MountVolume.SetUp failed for volume {pvc}")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_FREQUENT_KUBELET_RESTART = Propagation(
+    key="node-frequent-kubelet-restart",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's kubelet keeps restarting, so its pods keep losing probes and "
+           "container starts",
+    shared_cause="the kubelet on node {node} keeps restarting, so its pods keep losing "
+                 "probes and container starts",
+    shared_reason="{node} reports FrequentKubeletRestart True with 6 kubelet restarts "
+                  "in 20 minutes, and every probe and container start on the node "
+                  "has been interrupted at least once in that window",
+    distractor_cause="the workloads' own probes were tightened in the last chart "
+                     "release",
+    distractor_reason="the probe settings are unchanged since last month and the same "
+                      "settings pass on pods scheduled to other nodes",
+    rationale="the kubelet on {node} is flapping, so every probe and container start "
+              "it owns is cut short; this workload is on that node and its own "
+              "spec is unchanged",
+    remedy="Stop the kubelet restart loop on {node} (read its journal, fix the "
+           "crashing config or reprovision the node); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Kubelet on this node: flapping\n"
+         "Conditions:\n"
+         "  FrequentKubeletRestart   True    FrequentKubeletRestart     kubelet is "
+         "flapping: 6 restarts in 20 minutes\n"
+         "  Ready                    True    KubeletReady               kubelet is "
+         "posting ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Kubelet on this node: steady\n"
+        "Conditions:\n"
+        "  FrequentKubeletRestart   False   NoFrequentKubeletRestart   kubelet is "
+        "steady: 0 restarts in 20 minutes\n"
+        "  Ready                    True    KubeletReady               kubelet is "
+        "posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("flapping", "steady"),
+    origin_variants=(
+        (("Kubelet on this node: flapping\n"
+          "Conditions:\n"
+          "  FrequentKubeletRestart   True    FrequentKubeletRestart     kubelet is "
+          "flapping: 6 restarts in 20 minutes\n"
+          "  Ready                    True    KubeletReady               kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>"),
+         ("Kubelet on this node: steady\n"
+          "Conditions:\n"
+          "  FrequentKubeletRestart   False   NoFrequentKubeletRestart   kubelet is "
+          "steady: 0 restarts in 20 minutes\n"
+          "  Ready                    True    KubeletReady               kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports the kubelet on this node flapping\n"
+          "the kubelet has restarted 6 times in the last 20m\n"
+          "each restart cut every probe and container start on the node short"),
+         ("the node problem detector reports the kubelet on this node steady\n"
+          "the kubelet has not restarted in the last 20m\n"
+          "probes and container starts on the node complete normally")),
+        (("Warning  FrequentKubeletRestart  node-problem-detector  kubelet flapping: "
+          "6 restarts in 20m, last exit status 1"),
+         ("Normal  KubeletSteady  node-problem-detector  kubelet steady: 0 restarts in "
+          "20m, uptime 31d")),
+        (("kubelet service state: flapping\n"
+          "restarts in the last 20m: 6\n"
+          "seconds since the last kubelet start: 48"),
+         ("kubelet service state: steady\n"
+          "restarts in the last 20m: 0\n"
+          "seconds since the last kubelet start: 2678400")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: probe interrupted by kubelet restart",
+            local_cause="this Deployment's own readiness handler returns 503 until a "
+                        "cache warm-up that takes longer than its probe allows",
+            local_reason="the handler reports not-ready for 90s after start and the "
+                         "probe fails it after 30s",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="container was killed: kubelet restarted mid-start",
+            local_cause="this agent's own config reload handler exits the process "
+                        "whenever its watched file is rewritten",
+            local_reason="the config file is rewritten every few minutes by a sidecar "
+                         "and each rewrite exits the agent",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: process exited on config reload "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="process exited on config reload",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: kubelet connection reset during "
+                     "container create",
+            local_cause="this Job's own container command names a binary the image "
+                        "does not ship",
+            local_reason="the command runs a tool that was dropped from the image "
+                         "in its last rebuild",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container {container}")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_CORDONED_DRAINING = Propagation(
+    key="node-cordoned-draining",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node is cordoned and draining, so its pods are being evicted and "
+           "nothing new lands there",
+    shared_cause="node {node} is cordoned and draining, so its pods are being evicted "
+                 "and nothing new lands there",
+    shared_reason="{node} is marked unschedulable with the unschedulable taint, a "
+                  "drain has been evicting its pods for 7m, and every pod that "
+                  "needs that node is either evicted or waiting on it",
+    distractor_cause="the cluster is out of capacity and the pending pods are waiting "
+                     "on the autoscaler",
+    distractor_reason="the other nodes have room and the autoscaler reports no "
+                      "scale-up in progress",
+    rationale="{node} is cordoned and being drained, so its pods are evicted and any "
+              "pod pinned to it waits; this workload's trouble is the drain, not its "
+              "own spec",
+    remedy="Finish or cancel the drain of {node} and uncordon it when it is ready; "
+           "the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Scheduling on this node: cordoned\n"
+         "Unschedulable: true\n"
+         "Conditions:\n"
+         "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+         "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+         "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+         "Taints:  node.kubernetes.io/unschedulable:NoSchedule\n"
+         "Events: Normal  NodeNotSchedulable  kubelet  this node is cordoned and "
+         "draining"),
+    ),
+    healthy_origin_content=(
+        "Scheduling on this node: accepting\n"
+        "Unschedulable: false\n"
+        "Conditions:\n"
+        "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+        "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+        "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+        "Taints:  <none>\n"
+        "Events: Normal  NodeSchedulable  kubelet  this node is accepting pods"
+    ),
+    origin_state=("cordoned", "accepting"),
+    origin_variants=(
+        (("Scheduling on this node: cordoned\n"
+          "Unschedulable: true\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  node.kubernetes.io/unschedulable:NoSchedule\n"
+          "Events: Normal  NodeNotSchedulable  kubelet  this node is cordoned and "
+          "draining"),
+         ("Scheduling on this node: accepting\n"
+          "Unschedulable: false\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Events: Normal  NodeSchedulable  kubelet  this node is accepting pods")),
+        (("the node was cordoned 7m ago and a drain is evicting its pods\n"
+          "12 pods have been evicted from it so far\n"
+          "nothing new is being scheduled onto it"),
+         ("the node is accepting pods and no drain is running\n"
+          "0 pods have been evicted from it in the last hour\n"
+          "new pods are scheduled onto it normally")),
+        (("Normal  NodeNotSchedulable  kubelet  node cordoned: drain started by the "
+          "maintenance controller"),
+         ("Normal  NodeSchedulable  kubelet  node accepting pods: schedulable again per the "
+          "maintenance controller")),
+        (("drain status: cordoned\n"
+          "pods evicted so far: 12 of 18\n"
+          "time since cordon: 7m"),
+         ("drain status: accepting pods\n"
+          "pods evicted so far: 0 of 0\n"
+          "time since cordon: n/a")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) "
+                     "had volume node affinity conflict",
+            local_cause="this StatefulSet's own volume is pinned to a zone none of "
+                        "the schedulable nodes are in",
+            local_reason="the claim's volume lives in one zone and the nodes with room "
+                         "are all in the other",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: 1 node(s) were unschedulable, 2 node(s) had volume node "
+                  "affinity conflict")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="pod evicted by drain; replacement started on another node and "
+                     "was evicted again",
+            local_cause="this Deployment's own pod disruption budget allows zero "
+                        "disruptions, so every routine eviction is retried forever",
+            local_reason="the budget sets maxUnavailable 0 with a single replica, so "
+                         "no eviction can ever succeed cleanly",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: process received SIGTERM and exited "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="process received SIGTERM and exited",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="wait-for-node: this pod's node affinity target is not "
+                     "schedulable",
+            local_cause="this Job's own init container waits for a node label that "
+                        "the last node pool rollout renamed",
+            local_reason="the init step polls for a node label that no node carries "
+                         "since the rename",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init wait for a node label timed out "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init wait for a node label timed out",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_CORRUPT_OVERLAY = Propagation(
+    key="node-corrupt-overlay",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's container layer store is corrupt, so containers there cannot "
+           "start from cached image layers",
+    shared_cause="the container layer store on node {node} is corrupt, so containers "
+                 "there cannot start from cached image layers",
+    shared_reason="{node} reports CorruptDockerOverlay2 True with unreadable cached "
+                  "layers, and every container start on the node that reuses a cached "
+                  "layer has failed since 11m ago",
+    distractor_cause="the registry served a broken image layer to every pull in the "
+                     "last hour",
+    distractor_reason="the same images start normally on the other nodes, which pulled "
+                      "them from the same registry in the same hour",
+    rationale="the layer store on {node} is corrupt, so any container that starts "
+              "from a cached layer there fails; this workload's image is cached on "
+              "that node and its own build is sound",
+    remedy="Clear the corrupt layer store on {node} (wipe the overlay2 directory and "
+           "restart the runtime, or replace the node); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Layer store on this node: corrupt\n"
+         "Conditions:\n"
+         "  CorruptDockerOverlay2   True    CorruptDockerOverlay2     overlay2 layer "
+         "store is corrupt: cached layers unreadable\n"
+         "  Ready                   True    KubeletReady              kubelet is "
+         "posting ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Layer store on this node: intact\n"
+        "Conditions:\n"
+        "  CorruptDockerOverlay2   False   NoCorruptDockerOverlay2   overlay2 layer "
+        "store is intact\n"
+        "  Ready                   True    KubeletReady              kubelet is "
+        "posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("corrupt", "intact"),
+    origin_variants=(
+        (("Layer store on this node: corrupt\n"
+          "Conditions:\n"
+          "  CorruptDockerOverlay2   True    CorruptDockerOverlay2     overlay2 layer "
+          "store is corrupt: cached layers unreadable\n"
+          "  Ready                   True    KubeletReady              kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>"),
+         ("Layer store on this node: intact\n"
+          "Conditions:\n"
+          "  CorruptDockerOverlay2   False   NoCorruptDockerOverlay2   overlay2 layer "
+          "store is intact\n"
+          "  Ready                   True    KubeletReady              kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports this node's overlay2 store corrupt\n"
+          "cached image layers on the node are unreadable\n"
+          "container starts that reuse a cached layer fail there"),
+         ("the node problem detector reports this node's overlay2 store intact\n"
+          "cached image layers on the node read normally\n"
+          "container starts that reuse a cached layer succeed there")),
+        (("Warning  CorruptDockerOverlay2  node-problem-detector  layer store corrupt: "
+          "failed to read layer diff, input/output error"),
+         ("Normal  OverlayHealthy  node-problem-detector  layer store intact: all "
+          "cached layers verified")),
+        (("overlay2 store state: corrupt\n"
+          "unreadable cached layers: 41 of 212\n"
+          "container starts failed on this node in the last 10m: 19"),
+         ("overlay2 store state: intact\n"
+          "unreadable cached layers: 0 of 212\n"
+          "container starts failed on this node in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: failed to mount rootfs: "
+                     "input/output error",
+            local_cause="this Deployment's own image was pushed with a layer that "
+                        "its build never finished writing",
+            local_reason="the image's last layer is truncated in the registry and "
+                         "fails to unpack anywhere",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: failed to mount rootfs")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="exec: unable to load shared library: input/output error",
+            local_cause="this StatefulSet's own image links a library its final "
+                        "build stage never copied in",
+            local_reason="the entrypoint loads a library that is absent from the "
+                         "image's final layer",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: shared library failed to load at start "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="shared library failed to load at start",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="init: read /etc/app/schema.sql: input/output error",
+            local_cause="this Job's own init container reads a seed file that its "
+                        "image ships as an empty placeholder",
+            local_reason="the seed file in the init image is zero bytes and the init "
+                         "step fails to parse it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init read of a bundled file failed "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init read of a bundled file failed",
+            pass_confidence="high",
+        ),
+    ),
+)
+
 
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
@@ -3614,7 +4374,11 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_NODE_CONNTRACK_FULL, _T_LIMITRANGE_LOWERED,
                        _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK,
                        _T_POD_IDENTITY_WEBHOOK, _T_STORAGECLASS_POOL_RETIRED,
-                       _T_NETPOL_EGRESS_ALLOWLIST, _T_NODE_MEMORY_PRESSURE)
+                       _T_NETPOL_EGRESS_ALLOWLIST, _T_NODE_MEMORY_PRESSURE,
+                       _T_NODE_NETWORK_UNAVAILABLE, _T_NODE_KERNEL_DEADLOCK,
+                       _T_NODE_READONLY_FILESYSTEM,
+                       _T_NODE_FREQUENT_KUBELET_RESTART, _T_NODE_CORDONED_DRAINING,
+                       _T_NODE_CORRUPT_OVERLAY)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
