@@ -271,11 +271,12 @@ _EXAM_LAYOUT_MARKERS = {
     "pod-identity-webhook-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
     "shared-dependency-scaled-to-zero": ("Replicas:  ", "Pods:      ",
                                          "Last log:  "),
-    "namespace-egress-proxy-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
+    "namespace-egress-proxy-down": ("Replicas:  ", " total | ", "Pods:      ",
+                                    "Last log:  "),
     "storageclass-pool-retired": ("provisioner: ",
                                   "PersistentVolumes bound in the last 20m: "),
     "networkpolicy-egress-allowlist-stale": ("podSelector: ", "policyTypes: ",
-                                             "egress: ", "pods selected: "),
+                                             "\negress: ", "pods selected: "),
 }
 
 
