@@ -855,6 +855,20 @@ _T_KUBE_PROXY = Propagation(
          ("Service route sync: fresh\n"
           "endpoint changes queued and unapplied: 0\n"
           "kube-proxy logged its last sync 3s ago")),
+        (("node view of kube-proxy: stale\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "kube-proxy: Service routes stale (last sync 11m ago)"),
+         ("node view of kube-proxy: fresh\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "kube-proxy: Service routes fresh (last sync 12s ago)")),
     ),
     victims=(
         Victim(
@@ -1056,6 +1070,15 @@ _T_SCALED_TO_ZERO = Propagation(
          ("the session Deployment holds 5 replicas\n"
           "current pods: 5 Running\n"
           "5 endpoints are registered for its Service")),
+        (("Deployment scale state: replicas to 0\n"
+          "Replicas:  0 desired | 0 updated | 0 total | 0 available | 0 unavailable\n"
+          "Pods:      <none>\n"
+          "Last log:  deployment scaled replicas to 0 (manual)"),
+         ("Deployment scale state: 2 of 2 Running\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Pods:      session-5b7c9d6f4-k3p8w   1/1  Running  0 restarts\n"
+          "           session-5b7c9d6f4-r9x2n   1/1  Running  0 restarts\n"
+          "Last log:  serving, 2 of 2 Running")),
     ),
     victims=(
         Victim(
@@ -1953,6 +1976,20 @@ _T_CSI_NODE_DRIVER = Propagation(
          ("CSI node driver status: healthy\n"
           "restart count: 0\n"
           "last known-good state: current")),
+        (("node view of the CSI plugin: crashed\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "CSI node plugin: crashed (CrashLoopBackOff, 4 restarts)"),
+         ("node view of the CSI plugin: healthy\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "CSI node plugin: healthy (Running, 0 restarts)")),
     ),
     victims=(
         Victim(
@@ -2067,6 +2104,16 @@ _T_NODE_PID_PRESSURE = Propagation(
          ("PID table status: available\n"
           "remaining PID budget: 27000\n"
           "kubelet has logged no fork failures in the last hour")),
+        (("PID condition on this node: exhausted\n"
+          "Conditions:\n"
+          "  PIDPressure      True    KubeletHasInsufficientPID   process table exhausted\n"
+          "  Ready            True    KubeletReady                kubelet is posting ready status\n"
+          "Taints:  node.kubernetes.io/pid-pressure:NoSchedule"),
+         ("PID condition on this node: available\n"
+          "Conditions:\n"
+          "  PIDPressure      False   KubeletHasSufficientPID     pids available\n"
+          "  Ready            True    KubeletReady                kubelet is posting ready status\n"
+          "Taints:  <none>")),
     ),
     victims=(
         Victim(
@@ -2183,6 +2230,19 @@ _T_NODE_RUNTIME_RESTARTING = Propagation(
          ("containerd status: stable\n"
           "last crash: none recorded\n"
           "uptime since last crash: over a week")),
+        (("kubelet view of the runtime: restarting\n"
+          "Conditions:\n"
+          "  Ready            False   KubeletNotReady   "
+          "container runtime is restarting (PLEG is not healthy)\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  node.kubernetes.io/not-ready:NoSchedule"),
+         ("kubelet view of the runtime: stable\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   container runtime is stable\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>")),
     ),
     victims=(
         Victim(
@@ -2300,6 +2360,20 @@ _T_NODE_CLOCK_SKEW = Propagation(
          ("time sync status: synced\n"
           "drift measured: under 1s\n"
           "last successful sync: 4s ago")),
+        (("clock state on this node: skewed\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "System clock: skewed by 6m42s against the cluster time source"),
+         ("clock state on this node: synced\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "System clock: synced (offset 4ms)")),
     ),
     victims=(
         Victim(
@@ -2411,6 +2485,20 @@ _T_NODE_CONNTRACK_FULL = Propagation(
          ("conntrack status: clear\n"
           "free entries: 253952\n"
           "insertion failures logged in the last 5m: 0")),
+        (("node view of conntrack: full\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Conntrack: full (262144 of 262144 entries)"),
+         ("node view of conntrack: clear\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Conntrack: clear (31200 of 262144 entries)")),
     ),
     victims=(
         Victim(
@@ -2656,6 +2744,18 @@ _T_EGRESS_PROXY_DOWN = Propagation(
          ("the egress proxy every flagged workload routes through: steady\n"
           "Deployment {ns}/egress-proxy: 3 of 3 available\n"
           "routed through by every workload flagged here")),
+        (("proxy rollout state: restarting\n"
+          "Replicas:  3 desired | 3 updated | 3 total | 0 available | 3 unavailable\n"
+          "Pods:      egress-proxy-7f4d8c9b5-a2k7m   0/1  CrashLoopBackOff  12 restarts\n"
+          "           egress-proxy-7f4d8c9b5-q8w3r   0/1  CrashLoopBackOff  12 restarts\n"
+          "           egress-proxy-7f4d8c9b5-z5n1t   0/1  CrashLoopBackOff  12 restarts\n"
+          "Last log:  restarting: proxy config invalid"),
+         ("proxy rollout state: steady\n"
+          "Replicas:  3 desired | 3 updated | 3 total | 3 available | 0 unavailable\n"
+          "Pods:      egress-proxy-7f4d8c9b5-a2k7m   1/1  Running  0 restarts\n"
+          "           egress-proxy-7f4d8c9b5-q8w3r   1/1  Running  0 restarts\n"
+          "           egress-proxy-7f4d8c9b5-z5n1t   1/1  Running  0 restarts\n"
+          "Last log:  steady, 0 errors in 1h")),
     ),
     victims=(
         Victim(
@@ -3012,6 +3112,16 @@ _T_POD_IDENTITY_WEBHOOK = Propagation(
          ("Identity webhook status: serving\n"
           "ready endpoints: 2 of 2\n"
           "last successful mutation: 3s ago")),
+        (("webhook Deployment: down\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+          "Pods:      pod-identity-webhook-6c9d7f8b4-x2k9q   0/1  CrashLoopBackOff  6 restarts\n"
+          "           pod-identity-webhook-6c9d7f8b4-m4v7t   0/1  CrashLoopBackOff  6 restarts\n"
+          "Last log:  webhook down: listener failed to bind"),
+         ("webhook Deployment: serving\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Pods:      pod-identity-webhook-6c9d7f8b4-x2k9q   1/1  Running  0 restarts\n"
+          "           pod-identity-webhook-6c9d7f8b4-m4v7t   1/1  Running  0 restarts\n"
+          "Last log:  serving admission requests, 0 errors")),
     ),
     victims=(
         Victim(
@@ -3131,6 +3241,16 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
          ("ssd-premium pool state: online\n"
           "claims refused in the last 24h: 0\n"
           "provisioner controller: healthy")),
+        (("ssd-premium class: retired\n"
+          "provisioner: example.com/ssd-csi\n"
+          "controller storage-system/ssd-csi-controller: 1/1 ready, Running\n"
+          "pool ssd-tier-a status: retired\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("ssd-premium class: online\n"
+          "provisioner: example.com/ssd-csi\n"
+          "controller storage-system/ssd-csi-controller: 1/1 ready, Running\n"
+          "pool ssd-tier-b status: online\n"
+          "PersistentVolumes bound in the last 20m: 5")),
     ),
     victims=(
         Victim(
@@ -3278,6 +3398,18 @@ _T_NETPOL_EGRESS_ALLOWLIST = Propagation(
          ("datastore path from this namespace: allowed\n"
           "selector drift: none, rule and pods both say tier=data\n"
           "connections dropped in the last 10m: 0")),
+        (("policy match state: blocked\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to tier=datastore tcp/5432 (datastore pods now carry tier=data)\n"
+          "connections to datastore: blocked\n"
+          "pods selected: 6 of 6"),
+         ("policy match state: allowed\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to tier=data tcp/5432\n"
+          "connections to datastore: allowed\n"
+          "pods selected: 6 of 6")),
     ),
     victims=(
         Victim(
@@ -3372,7 +3504,7 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
         "sufficient memory available\n"
         "  Ready            True    KubeletReady                   kubelet is "
         "posting ready status\n"
-        "Taints:  none\n"
+        "Taints:  <none>\n"
         "Allocatable memory: 64Gi\n"
         "Working set: 23.4Gi (37%)\n"
         "Evictions in the last 10m: 0"
@@ -3395,7 +3527,7 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
           "sufficient memory available\n"
           "  Ready            True    KubeletReady                   kubelet is "
           "posting ready status\n"
-          "Taints:  none\n"
+          "Taints:  <none>\n"
           "Allocatable memory: 64Gi\n"
           "Working set: 23.4Gi (37%)\n"
           "Evictions in the last 10m: 0")),

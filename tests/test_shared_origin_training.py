@@ -259,6 +259,50 @@ def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
                 f"{p.key}: the healthy swap still carries {broken_token!r}")
 
 
+# The exam's six reads use real kubectl layouts. These markers, with the
+# exam's own spacing, say "this half is laid out the way the exam is".
+_EXAM_LAYOUT_MARKERS = {
+    "node-pid-pressure": ("Conditions:\n", "Taints:  "),
+    "kube-proxy-degraded": ("Conditions:\n", "Taints:  "),
+    "csi-node-driver-crashed": ("Conditions:\n", "Taints:  "),
+    "node-runtime-restarting": ("Conditions:\n", "Taints:  "),
+    "node-clock-skew": ("Conditions:\n", "Taints:  "),
+    "node-conntrack-full": ("Conditions:\n", "Taints:  "),
+    "pod-identity-webhook-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
+    "shared-dependency-scaled-to-zero": ("Replicas:  ", "Pods:      ",
+                                         "Last log:  "),
+    "namespace-egress-proxy-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
+    "storageclass-pool-retired": ("provisioner: ",
+                                  "PersistentVolumes bound in the last 20m: "),
+    "networkpolicy-egress-allowlist-stale": ("podSelector: ", "policyTypes: ",
+                                             "egress: ", "pods selected: "),
+}
+
+
+def test_the_eleven_named_scenarios_carry_an_exam_layout_variant():
+    """The 0907 model read `describe node` in the exam and had never seen a
+    `Conditions:` table with a `Taints:` line in training. Each scenario
+    named here shares a read kind with one of the six exam origins, and
+    must carry at least one variant laid out the way the exam is."""
+    by_key = {p.key: p for p in propagation.trainable_scenarios()}
+    missing = []
+    for key, markers in _EXAM_LAYOUT_MARKERS.items():
+        halves = [h for pair in by_key[key].origin_variants for h in pair]
+        if not any(all(m in half for m in markers) for half in halves):
+            missing.append(key)
+    assert missing == [], f"scenarios without an exam-layout variant: {missing}"
+
+
+def test_node_memory_pressure_spells_no_taint_the_way_kubectl_does():
+    """kubectl prints `Taints:  <none>`. The record said `Taints:  none`."""
+    p = {q.key: q for q in propagation.trainable_scenarios()}["node-memory-pressure"]
+    assert "Taints:  <none>" in p.healthy_origin_content
+    assert "Taints:  none" not in p.healthy_origin_content
+    healthy_halves = "\n".join(h for _b, h in p.origin_variants)
+    assert "Taints:  none" not in healthy_halves
+    assert p.origin_variants[0][1] == p.healthy_origin_content
+
+
 _QUANTITY = re.compile(r"\d+[A-Za-z]*")
 
 
