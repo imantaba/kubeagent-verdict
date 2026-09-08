@@ -868,8 +868,8 @@ _T_KUBE_PROXY = Propagation(
             # Service, so the victim's supposedly-separate cause told the same
             # story as the shared one, and the decoy half lost its teaching
             # point. It also spoke `SHARED_CLAIM_PHRASES`' "upstream" inside a
-            # correct separate-reasons answer. This scenario has exactly two
-            # victims, so `p.victims[:count]` always draws this one.
+            # correct separate-reasons answer. This victim sits first in the
+            # tuple, so `p.victims[:count]` always draws it.
             local_cause="the workload's own config still dials a retired Service address",
             local_reason="every outbound call is refused immediately",
             read=("get_log_causes {ns}/{pod}",
