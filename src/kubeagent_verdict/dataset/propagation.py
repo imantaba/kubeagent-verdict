@@ -5936,6 +5936,631 @@ _T_CSI_DRIVER_VERSION_MISMATCH = Propagation(
     ),
 )
 
+_T_NETPOL_DNS_EGRESS_MISSING = Propagation(
+    key="networkpolicy-dns-egress-missing",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's egress policy has no DNS rule, so every pod's name "
+           "lookups are dropped",
+    shared_cause="the egress policy in {ns} allows no DNS traffic, so every pod "
+                 "there fails to resolve any name",
+    shared_reason="{ns}/egress-to-app selects every pod in the namespace with "
+                  "policyTypes Egress and one rule, to app=backend on tcp/8080; "
+                  "it has no rule to kube-system on udp/53, so DNS is not "
+                  "allowed for any of the 6 selected pods",
+    distractor_cause="the workloads' own DNS settings were changed to a "
+                     "nameserver outside the cluster in the last chart release",
+    distractor_reason="every pod still uses the cluster DNS service address from "
+                      "its dnsPolicy ClusterFirst; the queries leave the pod and "
+                      "are dropped at the policy",
+    rationale="the workload cannot resolve any name because the egress policy "
+              "that selects it has no DNS rule, and that is true of every pod "
+              "in {ns} right now",
+    remedy="Add an egress rule to {ns}/egress-to-app allowing udp/53 to "
+           "kube-system; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-app",
+        ("DNS egress allowed: no\n"
+         "podSelector: empty (selects every pod in the namespace)\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=backend tcp/8080\n"
+         "DNS udp/53 allowed: no\n"
+         "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "DNS egress allowed: yes\n"
+        "podSelector: empty (selects every pod in the namespace)\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=backend tcp/8080\n"
+        "egress: allow to kube-system udp/53\n"
+        "DNS udp/53 allowed: yes\n"
+        "pods selected: 6 of 6"
+    ),
+    origin_state=("allowed: no", "allowed: yes"),
+    origin_variants=(
+        (("DNS egress allowed: no\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=backend tcp/8080\n"
+          "DNS udp/53 allowed: no\n"
+          "pods selected: 6 of 6"),
+         ("DNS egress allowed: yes\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=backend tcp/8080\n"
+          "egress: allow to kube-system udp/53\n"
+          "DNS udp/53 allowed: yes\n"
+          "pods selected: 6 of 6")),
+        (("the namespace egress policy selects all 6 pods and lists one rule, to "
+          "the backend on tcp/8080\n"
+          "DNS to kube-system udp/53 allowed: no\n"
+          "name lookups from every selected pod time out"),
+         ("the namespace egress policy selects all 6 pods and lists two rules, "
+          "to the backend and to kube-system udp/53\n"
+          "DNS to kube-system udp/53 allowed: yes\n"
+          "name lookups from every selected pod answer in under 5ms")),
+        (("Warning  PolicyDrop  network-plugin  DNS query to kube-system udp/53 "
+          "dropped by egress-to-app (DNS allowed: no)"),
+         ("Normal  PolicyAllow  network-plugin  DNS query to kube-system udp/53 "
+          "passed egress-to-app (DNS allowed: yes)")),
+        (("egress-to-app DNS rule: missing, allowed: no\n"
+          "selected pods: 6 of 6\n"
+          "dropped udp/53 packets in the last 10m: 2410"),
+         ("egress-to-app DNS rule: present, allowed: yes\n"
+          "selected pods: 6 of 6\n"
+          "dropped udp/53 packets in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="name resolution failed on start",
+            local_cause="this Deployment's own pod spec sets dnsPolicy None with an "
+                        "empty nameserver list, so it has nowhere to send a query",
+            local_reason="the pod's own dnsConfig lists no nameserver at all",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: name resolution failed on start (3 of 3 "
+                  "sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-app",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: peer lookup failed",
+            local_cause="this StatefulSet's own readiness check resolves a hostname "
+                        "with a typo that no zone serves",
+            local_reason="the probe's own peer hostname is misspelled in the "
+                         "StatefulSet's config",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: peer lookup failed")),
+            pass_confidence="medium",
+            network_policies=("egress-to-app",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-backend could not resolve the backend name",
+            local_cause="this Job's own init container looks up a search domain "
+                        "that its chart dropped from the pod's dnsConfig",
+            local_reason="the init step queries a short name whose search domain "
+                         "the pod no longer carries",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-backend could not resolve "
+                  "the backend name")),
+            pass_confidence="high",
+            network_policies=("egress-to-app",),
+        ),
+    ),
+)
+
+_T_NETPOL_NAMESPACE_LABEL_DRIFTED = Propagation(
+    key="networkpolicy-namespace-label-drifted",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's broker egress policy names the messaging namespace by a "
+           "label that was renamed, so no pod can reach the broker",
+    shared_cause="the egress policy in {ns} names the messaging namespace by a "
+                 "label that was renamed, so no pod there can reach the message "
+                 "broker",
+    shared_reason="{ns}/egress-to-messaging selects app=orders pods, 3 of 6, with "
+                  "one Egress rule to namespaceSelector team=messaging on "
+                  "tcp/5672; that selector matches 0 namespaces since the "
+                  "messaging namespace was relabelled, so broker traffic from "
+                  "every selected pod is dropped",
+    distractor_cause="the message broker has stopped accepting connections from "
+                     "every namespace",
+    distractor_reason="the broker's own readiness passes and a pod in another "
+                      "namespace publishes to it without error",
+    rationale="the workload cannot reach the broker because the egress policy "
+              "that selects it matches no namespace any more, and that is true "
+              "of every selected pod in {ns} right now",
+    remedy="Update the namespaceSelector in {ns}/egress-to-messaging to the "
+           "messaging namespace's current label; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-messaging",
+        ("Broker namespace match: no namespace carries the rule's label\n"
+         "podSelector: app=orders\n"
+         "policyTypes: Egress\n"
+         "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+         "namespaces matched: 0 (matches no namespace; label renamed)\n"
+         "pods selected: 3 of 6"),
+    ),
+    healthy_origin_content=(
+        "Broker namespace match: the messaging namespace\n"
+        "podSelector: app=orders\n"
+        "policyTypes: Egress\n"
+        "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+        "namespaces matched: 1 (the messaging namespace)\n"
+        "pods selected: 3 of 6"
+    ),
+    origin_state=("no namespace", "messaging namespace"),
+    origin_variants=(
+        (("Broker namespace match: no namespace carries the rule's label\n"
+          "podSelector: app=orders\n"
+          "policyTypes: Egress\n"
+          "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+          "namespaces matched: 0 (matches no namespace; label renamed)\n"
+          "pods selected: 3 of 6"),
+         ("Broker namespace match: the messaging namespace\n"
+          "podSelector: app=orders\n"
+          "policyTypes: Egress\n"
+          "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+          "namespaces matched: 1 (the messaging namespace)\n"
+          "pods selected: 3 of 6")),
+        (("the broker egress rule's namespaceSelector matches no namespace\n"
+          "the label team=messaging was renamed to owner=messaging 40m ago\n"
+          "broker connections from the 3 selected pods: all dropped"),
+         ("the broker egress rule's namespaceSelector matches the messaging "
+          "namespace\n"
+          "the label team=messaging is present on it\n"
+          "broker connections from the 3 selected pods: all open")),
+        (("Warning  PolicyDrop  network-plugin  egress to tcp/5672 dropped by "
+          "egress-to-messaging: namespaceSelector matches no namespace"),
+         ("Normal  PolicyAllow  network-plugin  egress to tcp/5672 passed "
+          "egress-to-messaging: namespaceSelector matches the messaging namespace")),
+        (("egress-to-messaging target: no namespace matched\n"
+          "selected pods: 3 of 6\n"
+          "dropped tcp/5672 connections in the last 10m: 96"),
+         ("egress-to-messaging target: the messaging namespace, 1 matched\n"
+          "selected pods: 3 of 6\n"
+          "dropped tcp/5672 connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="broker connection timed out during startup",
+            local_cause="this Deployment's own broker setting names a virtual host "
+                        "that was deleted from the broker last week",
+            local_reason="the connection setting's vhost no longer exists on the "
+                         "broker",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the broker timed out before the "
+                  "first publish (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-messaging",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-broker gave up after 120s",
+            local_cause="this Job's own init container waits on a broker queue that "
+                        "was renamed in the last release",
+            local_reason="the init step polls a queue name the broker no longer "
+                         "declares",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-broker gave up after 120s")),
+            pass_confidence="medium",
+            network_policies=("egress-to-messaging",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: broker check timed out",
+            local_cause="this StatefulSet's own readiness check publishes a test "
+                        "message with credentials the broker revoked",
+            local_reason="the probe's own broker login was revoked in the broker's "
+                         "last user cleanup",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: broker check timed out")),
+            pass_confidence="high",
+            network_policies=("egress-to-messaging",),
+        ),
+    ),
+)
+
+_T_NETPOL_PORT_MISMATCH = Propagation(
+    key="networkpolicy-port-mismatch",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's cache egress policy opens the cache's old port, so "
+           "every connection to its new port is dropped",
+    shared_cause="the egress policy in {ns} opens the cache's old port, so every "
+                 "connection to its new port is dropped",
+    shared_reason="{ns}/egress-to-cache selects role=worker pods, 5 of 6, with one "
+                  "Egress rule to app=cache on tcp/6379, while the cache now "
+                  "listens on tcp/6380; the port does not match, so every "
+                  "connection from the selected pods is dropped",
+    distractor_cause="the workloads' own cache client settings still name the "
+                     "cache's old port",
+    distractor_reason="the clients dial tcp/6380, the port the cache now listens "
+                      "on; it is the policy that still says tcp/6379",
+    rationale="the workload cannot reach the cache because the egress policy that "
+              "selects it opens a port the cache no longer listens on, and that "
+              "is true of every selected pod in {ns} right now",
+    remedy="Change the cache rule in {ns}/egress-to-cache from tcp/6379 to "
+           "tcp/6380; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-cache",
+        ("Cache port match: no\n"
+         "podSelector: role=worker\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=cache tcp/6379\n"
+         "cache listening port: 6380\n"
+         "port match: no\n"
+         "pods selected: 5 of 6"),
+    ),
+    healthy_origin_content=(
+        "Cache port match: yes\n"
+        "podSelector: role=worker\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=cache tcp/6380\n"
+        "cache listening port: 6380\n"
+        "port match: yes\n"
+        "pods selected: 5 of 6"
+    ),
+    origin_state=("port match: no", "port match: yes"),
+    origin_variants=(
+        (("Cache port match: no\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=cache tcp/6379\n"
+          "cache listening port: 6380\n"
+          "port match: no\n"
+          "pods selected: 5 of 6"),
+         ("Cache port match: yes\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=cache tcp/6380\n"
+          "cache listening port: 6380\n"
+          "port match: yes\n"
+          "pods selected: 5 of 6")),
+        (("the cache egress rule opens tcp/6379 and the cache listens on "
+          "tcp/6380, port match: no\n"
+          "the cache moved ports in its last rollout and the policy was not "
+          "updated\n"
+          "cache connections from the 5 selected pods: all dropped"),
+         ("the cache egress rule opens tcp/6380 and the cache listens on "
+          "tcp/6380, port match: yes\n"
+          "the policy was updated with the cache's last rollout\n"
+          "cache connections from the 5 selected pods: all open")),
+        (("Warning  PolicyDrop  network-plugin  egress to app=cache tcp/6380 "
+          "dropped by egress-to-cache (rule opens tcp/6379, port match: no)"),
+         ("Normal  PolicyAllow  network-plugin  egress to app=cache tcp/6380 "
+          "passed egress-to-cache (rule opens tcp/6380, port match: yes)")),
+        (("egress-to-cache rule port: 6379, cache port: 6380, port match: no\n"
+          "selected pods: 5 of 6\n"
+          "dropped cache connections in the last 10m: 3120"),
+         ("egress-to-cache rule port: 6380, cache port: 6380, port match: yes\n"
+          "selected pods: 5 of 6\n"
+          "dropped cache connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="cache connection timed out during startup",
+            local_cause="this Deployment's own cache client pins a protocol version "
+                        "the cache stopped serving in its last upgrade",
+            local_reason="the client's own protocol setting is one the cache no "
+                         "longer answers",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the cache timed out before the "
+                  "first command (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-cache",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: cache check timed out",
+            local_cause="this StatefulSet's own readiness check pings the cache with "
+                        "an auth token that expired",
+            local_reason="the probe's own cache token passed its expiry last night",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: cache check timed out")),
+            pass_confidence="medium",
+            network_policies=("egress-to-cache",),
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="cache write-behind queue overflowed, exiting to flush",
+            log_cause="cache write-behind queue overflowed",
+            local_cause="this agent's own cache connection pool is sized larger than "
+                        "the cache's per-client connection cap",
+            local_reason="the agent's own pool opens more connections than the cache "
+                         "admits and the extras stall its queue",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: cache write-behind queue overflowed (3 of 3 "
+                  "sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-cache",),
+        ),
+    ),
+)
+
+_T_NETPOL_ALLOW_SELECTOR_TYPO = Propagation(
+    key="networkpolicy-allow-selector-typo",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's frontend allow policy has a typo in its pod selector, "
+           "so it selects nothing and the default-deny blocks every frontend pod",
+    shared_cause="the {ns} frontend allow policy has a typo in its pod selector, "
+                 "so it selects nothing and the namespace's default-deny blocks "
+                 "every frontend pod's egress",
+    shared_reason="{ns}/allow-frontend-egress carries podSelector role=fronted, "
+                  "which selects 0 of 6 pods, while the pods carry role=frontend; "
+                  "its one Egress rule to app=api on tcp/443 applies to nobody, "
+                  "and the namespace's default-deny egress applies to all 6",
+    distractor_cause="the workloads' own images lost their CA bundle in the last "
+                     "rebuild",
+    distractor_reason="the API's certificate verifies from a pod in another "
+                      "namespace running the same image; the connection from "
+                      "{ns} never leaves the pod",
+    rationale="the workload cannot reach the API because the policy meant to allow "
+              "it selects no pod, so the default-deny applies, and that is true "
+              "of every frontend pod in {ns} right now",
+    remedy="Fix the podSelector in {ns}/allow-frontend-egress from role=fronted "
+           "to role=frontend; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/allow-frontend-egress",
+        ("Frontend selector: selects no pod\n"
+         "podSelector: role=fronted (selects no pod)\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=api tcp/443\n"
+         "pods selected: 0 of 6\n"
+         "baseline: default-deny egress applies to the 6 unselected pods"),
+    ),
+    healthy_origin_content=(
+        "Frontend selector: every frontend pod\n"
+        "podSelector: role=frontend (selects every frontend pod)\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=api tcp/443\n"
+        "pods selected: 6 of 6\n"
+        "baseline: default-deny egress applies to 0 unselected pods"
+    ),
+    origin_state=("selects no pod", "every frontend pod"),
+    origin_variants=(
+        (("Frontend selector: selects no pod\n"
+          "podSelector: role=fronted (selects no pod)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=api tcp/443\n"
+          "pods selected: 0 of 6\n"
+          "baseline: default-deny egress applies to the 6 unselected pods"),
+         ("Frontend selector: every frontend pod\n"
+          "podSelector: role=frontend (selects every frontend pod)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=api tcp/443\n"
+          "pods selected: 6 of 6\n"
+          "baseline: default-deny egress applies to 0 unselected pods")),
+        (("the frontend allow policy's selector says role=fronted and selects no "
+          "pod\n"
+          "the 6 frontend pods carry role=frontend\n"
+          "with nothing selected, the namespace default-deny drops their egress"),
+         ("the frontend allow policy's selector says role=frontend and selects "
+          "every frontend pod\n"
+          "all 6 frontend pods carry role=frontend\n"
+          "their egress to the API passes the allow rule")),
+        (("Warning  PolicyDrop  network-plugin  egress to app=api tcp/443 dropped "
+          "by default-deny: allow-frontend-egress selects no pod (role=fronted)"),
+         ("Normal  PolicyAllow  network-plugin  egress to app=api tcp/443 passed "
+          "allow-frontend-egress: selector matches every frontend pod")),
+        (("allow-frontend-egress selector: role=fronted, selects no pod\n"
+          "frontend pods under default-deny: 6 of 6\n"
+          "dropped tcp/443 connections in the last 10m: 870"),
+         ("allow-frontend-egress selector: role=frontend, every frontend pod\n"
+          "frontend pods under default-deny: 0 of 6\n"
+          "dropped tcp/443 connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="API connection timed out during startup",
+            local_cause="this Deployment's own API client pins a TLS version the "
+                        "API stopped accepting last month",
+            local_reason="the client's own TLS floor is one the API no longer "
+                         "negotiates",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the API timed out before the "
+                  "first request (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("allow-frontend-egress",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: API check timed out",
+            local_cause="this StatefulSet's own readiness check sends the API a "
+                        "token from a service account that was deleted",
+            local_reason="the probe's own service account no longer exists, so its "
+                         "token is rejected",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: API check timed out")),
+            pass_confidence="medium",
+            network_policies=("allow-frontend-egress",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-api gave up after 120s",
+            local_cause="this Job's own init container calls the API through a proxy "
+                        "setting that names a proxy nobody runs any more",
+            local_reason="the init step's own proxy variable points at a host that "
+                         "was decommissioned",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-api gave up after 120s")),
+            pass_confidence="high",
+            network_policies=("allow-frontend-egress",),
+        ),
+    ),
+)
+
+_T_NETPOL_INGRESS_DENY_ALL = Propagation(
+    key="networkpolicy-ingress-deny-all",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="a deny-all ingress policy selects every pod in the namespace, so no "
+           "inbound connection reaches any of them",
+    shared_cause="a deny-all ingress policy in {ns} blocks every inbound "
+                 "connection, so pods there that need their peers or their "
+                 "callers cannot become ready",
+    shared_reason="{ns}/deny-all-ingress selects every pod in the namespace, 6 of "
+                  "6, with policyTypes Ingress and an empty ingress list, so all "
+                  "ingress is denied to every pod",
+    distractor_cause="the workloads' own readiness ports were changed in the last "
+                     "chart release",
+    distractor_reason="the probe ports match the containers' listening ports; the "
+                      "probes fail because nothing inbound reaches the pods",
+    rationale="the workload cannot take any inbound connection because a deny-all "
+              "ingress policy selects it, and that is true of every pod in {ns} "
+              "right now",
+    remedy="Narrow or delete {ns}/deny-all-ingress and add allow rules for the "
+           "peers and callers each pod needs; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/deny-all-ingress",
+        ("Ingress into this namespace: all ingress denied\n"
+         "podSelector: empty (selects every pod in the namespace)\n"
+         "policyTypes: Ingress\n"
+         "ingress: [] (no rules — all ingress denied)\n"
+         "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "Ingress into this namespace: allow from the scheduler, on one pod\n"
+        "podSelector: app=legacy-batch\n"
+        "policyTypes: Ingress\n"
+        "ingress: allow from podSelector app=scheduler\n"
+        "pods selected: 1 of 6"
+    ),
+    origin_state=("all ingress denied", "allow from"),
+    origin_variants=(
+        (("Ingress into this namespace: all ingress denied\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Ingress\n"
+          "ingress: [] (no rules — all ingress denied)\n"
+          "pods selected: 6 of 6"),
+         ("Ingress into this namespace: allow from the scheduler, on one pod\n"
+          "podSelector: app=legacy-batch\n"
+          "policyTypes: Ingress\n"
+          "ingress: allow from podSelector app=scheduler\n"
+          "pods selected: 1 of 6")),
+        (("the ingress policy selects all 6 pods and lists no rule, so all "
+          "ingress denied\n"
+          "peer and caller connections into every pod are dropped\n"
+          "the policy was applied 30m ago by a cluster-wide hardening job"),
+         ("the ingress policy selects 1 of 6 pods and lists one rule, allow from "
+          "the scheduler\n"
+          "peer and caller connections into the other 5 pods are untouched\n"
+          "the policy has not changed in 30d")),
+        (("Warning  PolicyDrop  network-plugin  ingress to every pod dropped by "
+          "deny-all-ingress: no rules, all ingress denied"),
+         ("Normal  PolicyAllow  network-plugin  ingress to app=legacy-batch passed "
+          "deny-all-ingress: allow from app=scheduler")),
+        (("deny-all-ingress scope: 6 of 6 pods, all ingress denied\n"
+          "inbound connections dropped in the last 10m: 4280\n"
+          "pods with a passing readiness probe: 0 of 6"),
+         ("deny-all-ingress scope: 1 of 6 pods, allow from app=scheduler\n"
+          "inbound connections dropped in the last 10m: 0\n"
+          "pods with a passing readiness probe: 6 of 6")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="cluster join got no reply from any peer",
+            local_cause="this Deployment's own cluster-join step expects a reply on a "
+                        "port its container never opens",
+            local_reason="the join step's own reply port is not in the container's "
+                         "listen list",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: cluster join got no reply from any peer (3 of "
+                  "3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("deny-all-ingress",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: peer handshake did not complete",
+            local_cause="this StatefulSet's own readiness check waits on a quorum "
+                        "vote its own config sets one member too high",
+            local_reason="the quorum size in the StatefulSet's config is one more "
+                         "than its replica count",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: peer handshake did not "
+                  "complete")),
+            pass_confidence="medium",
+            network_policies=("deny-all-ingress",),
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="watchdog: no scrape received in 60s, restarting",
+            log_cause="watchdog saw no scrape in 60s",
+            local_cause="this agent's own watchdog restarts it whenever its metrics "
+                        "endpoint goes 60s without a scrape, and the scrape "
+                        "interval is 90s",
+            local_reason="the agent's own watchdog window is shorter than the "
+                         "scrape interval it is configured with",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: watchdog saw no scrape in 60s (3 of 3 sampled "
+                  "restarts)")),
+            pass_confidence="high",
+            network_policies=("deny-all-ingress",),
+        ),
+    ),
+)
+
 
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
@@ -5957,7 +6582,9 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_RUNTIME_CLASS_REMOVED, _T_CSI_CONTROLLER_OOMKILLED,
                        _T_CSI_CONTROLLER_UNSCHEDULABLE,
                        _T_PROVISIONER_CREDENTIALS_ROTATED, _T_STORAGE_BACKEND_FULL,
-                       _T_CSI_DRIVER_VERSION_MISMATCH)
+                       _T_CSI_DRIVER_VERSION_MISMATCH, _T_NETPOL_DNS_EGRESS_MISSING,
+                       _T_NETPOL_NAMESPACE_LABEL_DRIFTED, _T_NETPOL_PORT_MISMATCH,
+                       _T_NETPOL_ALLOW_SELECTOR_TYPO, _T_NETPOL_INGRESS_DENY_ALL)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:

@@ -812,7 +812,7 @@ def test_the_trainable_pool_exercises_every_issue_kind():
 
 # The pool grows by group across Tasks 5–9. Twenty-four is what it held when
 # the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
-EXPECTED_POOL = 43
+EXPECTED_POOL = 48
 
 
 def test_the_trainable_pool_holds_the_planned_count():
@@ -820,6 +820,57 @@ def test_the_trainable_pool_holds_the_planned_count():
     pool = propagation.trainable_scenarios()
     assert len(pool) == EXPECTED_POOL
     assert len({p.key for p in pool}) == EXPECTED_POOL
+
+
+# One marker per exam read layout, and the fewest trainable scenarios that
+# must teach it. A scenario counts once per layout when its read label
+# starts the way the exam's does and any half of any of its origin
+# variants carries the marker text. The floors are the spec's; the
+# measured counts after the coverage branch are node 13, deployment 7,
+# events 4, storageclass 6, networkpolicy 6.
+EXAM_LAYOUT_FLOORS = {
+    "node": 13,
+    "deployment": 4,
+    "events": 4,
+    "storageclass": 6,
+    "networkpolicy": 6,
+}
+
+
+def _teaches_layout(p, layout: str) -> bool:
+    label = p.origin_read[0]
+    halves = [p.origin_read[1], p.healthy_origin_content]
+    for broken, healthy in p.origin_variants:
+        halves.extend((broken, healthy))
+    if layout == "node":
+        return (label.startswith("describe node ")
+                and any("Conditions:" in h and "Taints:" in h for h in halves))
+    if layout == "deployment":
+        return (label.startswith("describe ") and label.endswith("(Deployment)")
+                and any("Replicas:" in h for h in halves))
+    if layout == "events":
+        return label.startswith("get_events (cluster-wide, reason=")
+    if layout == "storageclass":
+        return (label.startswith("get_related storageclass")
+                and any("bound in the last" in h for h in halves))
+    if layout == "networkpolicy":
+        return (label.startswith("get_related networkpolicy")
+                and any("podSelector:" in h for h in halves))
+    raise ValueError(layout)
+
+
+def test_every_exam_layout_has_a_trained_floor():
+    """The 0907 model read five exam layouts it had seen once or never in
+    training. Each layout now has a floor: the fewest trainable scenarios
+    that carry the exam's read shape. A drop below a floor is a regression
+    the pool count cannot see, because it counts scenarios, not shapes."""
+    short = {}
+    for layout, floor in EXAM_LAYOUT_FLOORS.items():
+        keys = sorted(p.key for p in propagation.trainable_scenarios()
+                      if _teaches_layout(p, layout))
+        if len(keys) < floor:
+            short[layout] = (len(keys), floor, keys)
+    assert not short, f"layouts under their floor (count, floor, keys): {short}"
 
 
 def test_every_held_out_read_kind_has_a_trained_cousin():
