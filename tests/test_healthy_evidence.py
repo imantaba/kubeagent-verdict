@@ -13,16 +13,23 @@ the healthy half, the way `healthy_read_content` already works for reads.
 """
 
 import random
+import re
 
 from kubeagent_verdict.dataset import cases
 from kubeagent_verdict.dataset import propagation as prop
 
 TAINT = "node.kubernetes.io/disk-pressure"
+NETWORK_TAINT = "node.kubernetes.io/network-unavailable"
 EVIDENCE_MARK = "== BEGIN evidence =="
+
+# A maximal run of these characters, at least 6 long, is a "token" for the
+# fault-token sweep below.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9._/=-]{6,}")
 
 
 def _scenario(key: str) -> prop.Propagation:
-    return next(p for p in prop.all_scenarios() if p.key == key)
+    return next(p for p in (*prop.trainable_scenarios(), *prop.all_scenarios())
+                if p.key == key)
 
 
 def _before_reads(user: str) -> str:
@@ -82,3 +89,78 @@ def test_the_broken_half_never_renders_the_healthy_evidence():
         for v in p.victims:
             if v.healthy_evidence and "{" not in v.healthy_evidence:
                 assert v.healthy_evidence not in probe.user, (p.key, v.healthy_evidence)
+
+
+def _tokens(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text))
+
+
+def _looks_like_a_label(token: str) -> bool:
+    """A Kubernetes taint/label key (`domain.tld/name`) or a `key=value` pair.
+
+    Refinement of the raw token rule: the plain "appears only in broken
+    content" test also caught generic prose that happens to differ between a
+    scenario's broken and healthy wording -- "failed" vs. "succeeded",
+    "MountVolume.MountDevice" vs. "MapVolume.MapPodDevice", an errno string
+    like "input/output" that a truncated image layer could print too. None
+    of those name a fact specific to the origin; a taint or label key does,
+    which is exactly what both known bugs (node-disk-pressure and
+    node-network-unavailable) leaked into their decoy's inventory.
+    """
+    return "=" in token or ("." in token and "/" in token)
+
+
+def _fault_tokens(p: prop.Propagation) -> set[str]:
+    """Label-shaped tokens present in a broken origin-read content but no
+    healthy one.
+
+    `origin_read[1]` is the frozen content every scenario carries;
+    `origin_variants` (trainable pool only) pairs a broken content with its
+    healthy twin. `healthy_origin_content` is the single healthy read every
+    scenario carries. A fault token is one that names the origin's broken
+    state and never appears in any of that scenario's healthy content.
+    """
+    broken = [p.origin_read[1], *(variant[0] for variant in p.origin_variants)]
+    healthy = [p.healthy_origin_content, *(variant[1] for variant in p.origin_variants)]
+    broken_tokens: set[str] = set()
+    for content in broken:
+        broken_tokens |= _tokens(content)
+    healthy_tokens: set[str] = set()
+    for content in healthy:
+        healthy_tokens |= _tokens(content)
+    return {t for t in broken_tokens - healthy_tokens if _looks_like_a_label(t)}
+
+
+def test_a_victim_whose_evidence_names_a_fault_token_declares_healthy_evidence():
+    """A decoy's inventory must never assert a fact only the broken origin has.
+
+    Sweeps every victim of every trainable and held-out scenario. If a
+    victim's `evidence` contains one of its scenario's fault tokens, that
+    victim must declare `healthy_evidence`, and `healthy_evidence` must
+    contain none of those tokens -- the same rule item 1 fixes by hand for
+    `node-network-unavailable` victim 1.
+    """
+    for p in (*prop.trainable_scenarios(), *prop.all_scenarios()):
+        fault_tokens = _fault_tokens(p)
+        for i, v in enumerate(p.victims):
+            hit = [t for t in fault_tokens if t in v.evidence]
+            if not hit:
+                continue
+            assert v.healthy_evidence, (
+                f"{p.key} victim {i}: evidence contains fault token {hit[0]!r} "
+                "but declares no healthy_evidence")
+            for t in fault_tokens:
+                assert t not in v.healthy_evidence, (
+                    f"{p.key} victim {i}: healthy_evidence still contains "
+                    f"fault token {t!r}")
+
+
+def test_the_network_unavailable_decoy_inventory_no_longer_names_the_taint():
+    probe, decoy = _pair(_scenario("node-network-unavailable"))
+    assert NETWORK_TAINT in _before_reads(probe.user)
+    assert NETWORK_TAINT not in _before_reads(decoy.user)
+
+
+def test_the_network_unavailable_healthy_finding_names_a_different_taint():
+    _, decoy = _pair(_scenario("node-network-unavailable"))
+    assert "dedicated=gpu" in _before_reads(decoy.user)

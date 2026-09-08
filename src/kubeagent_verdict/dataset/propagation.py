@@ -3702,6 +3702,8 @@ _T_NODE_NETWORK_UNAVAILABLE = Propagation(
             reason="no node has room for the pod",
             evidence="0/3 nodes are available: 1 node(s) had untolerated taint "
                      "node.kubernetes.io/network-unavailable, 2 Insufficient memory",
+            healthy_evidence="0/3 nodes are available: 1 node(s) had untolerated taint "
+                             "dedicated=gpu, 2 Insufficient memory",
             local_cause="this StatefulSet's own memory request was doubled in its last "
                         "rollout past what the two remaining nodes can offer",
             local_reason="the pod asks for 24Gi and the two schedulable nodes have "
