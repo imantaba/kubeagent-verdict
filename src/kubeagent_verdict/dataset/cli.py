@@ -1,8 +1,10 @@
 """kv-dataset: render the training dataset. Task 8 adds split/test/manifest.
 
-`--probe-wide FILE` is a separate mode: it writes only the widened
-shared-origin probe (a standalone diagnostic file, deterministic, never part
-of the exam) and exits. It needs no seed and touches no other file.
+`--probe-wide FILE` and `--probe-cousins FILE` are separate modes: each
+writes only its standalone diagnostic file (deterministic, never part of the
+exam) and exits. Neither needs a seed and neither touches any other file.
+The wide probe asks the six held-out origins five times each; the cousin
+probe asks each trainable scenario once.
 """
 
 from __future__ import annotations
@@ -24,6 +26,11 @@ def main() -> None:
         help="write the widened shared-origin probe (five twin pairs per "
              "held-out origin; diagnostic only, gates no release) to FILE "
              "and exit; --seed/--size/--out are not used")
+    p.add_argument(
+        "--probe-cousins", type=Path, metavar="FILE",
+        help="write the cousin probe (one twin pair per trainable "
+             "scenario, full width; diagnostic only, gates no release) to "
+             "FILE and exit; --seed/--size/--out are not used")
     args = p.parse_args()
     if args.probe_wide is not None:
         rows = generate.shared_origin_wide_probes()
@@ -32,8 +39,16 @@ def main() -> None:
         print(f"wrote {len(rows)} rows ({len(rows) // 2} twin pairs) "
               f"to {args.probe_wide}")
         return
+    if args.probe_cousins is not None:
+        rows = generate.shared_origin_cousin_probes()
+        args.probe_cousins.parent.mkdir(parents=True, exist_ok=True)
+        generate.write_jsonl(args.probe_cousins, rows)
+        print(f"wrote {len(rows)} rows ({len(rows) // 2} twin pairs) "
+              f"to {args.probe_cousins}")
+        return
     if args.seed is None or args.size is None or args.out is None:
-        p.error("--seed, --size and --out are required (unless --probe-wide)")
+        p.error("--seed, --size and --out are required "
+                "(unless --probe-wide or --probe-cousins)")
     args.out.mkdir(parents=True, exist_ok=True)
     examples = generate.generate(seed=args.seed, size=args.size)
     train, val = generate.split(examples, seed=args.seed)

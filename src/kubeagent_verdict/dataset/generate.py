@@ -469,6 +469,47 @@ def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     return out
 
 
+def shared_origin_cousin_probes(pairs_per_origin: int = 1) -> list[Example]:
+    """EVAL-ONLY, DIAGNOSTIC-ONLY: one fresh twin pair per TRAINABLE origin.
+
+    The wide probe asks the six held-out origins five times each. This one
+    asks the other question: on the scenarios the model studied, does it
+    read the origin at all? One pair per trainable scenario, at full width,
+    so every decoy half carries three or four verdicts, which is the shape
+    the 0907 model broke its JSON on.
+
+    It is in-distribution on purpose. A model that scores well here and
+    fails the exam has a coverage gap; one that fails here has a recipe
+    problem. It goes to its own file, never into `test_set()`, and its
+    numbers gate no release. Fresh salts keep every pair distinct from the
+    training rows' draws; the SAME salt on both halves keeps each pair a
+    minimal contrast. A repeated pair key would silently merge two pairs in
+    the paired scoring, so a collision raises instead of shrinking the set.
+    """
+    from kubeagent_verdict.dataset import cases, propagation
+
+    out: list[Example] = []
+    seen: dict[str, str] = {}
+    for p in propagation.trainable_scenarios():
+        for i in range(pairs_per_origin):
+            probe = cases.shared_origin_probe(
+                p, _entry_rng("shared-origin-cousin", p.key, str(i)),
+                victims=None)
+            decoy = cases.shared_origin_decoy_probe(
+                p, _entry_rng("shared-origin-cousin", p.key, str(i)),
+                victims=None)
+            key = "|".join(sorted(probe.meta["expected"]))
+            if key in seen:
+                raise ValueError(
+                    f"cousin-probe pair key collision: {seen[key]} and "
+                    f"{p.key}#{i} both drew {key!r}; a collision would "
+                    "merge two pairs in the paired scoring")
+            seen[key] = f"{p.key}#{i}"
+            out.append(probe)
+            out.append(decoy)
+    return out
+
+
 def test_set() -> list[Example]:
     """The whole held-out evaluation set: corpus-grounded + curriculum + probes."""
     return corpus_test_set() + held_out_case_set() + probe_sets()
