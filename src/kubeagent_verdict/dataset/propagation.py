@@ -4834,6 +4834,485 @@ _T_METRICS_SERVER_DOWN = Propagation(
 )
 
 
+_T_SHARED_NFS_SERVER_DOWN = Propagation(
+    key="shared-nfs-server-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the shared NFS server is down, so every pod that mounts a volume from "
+           "it is stuck at mount",
+    shared_cause="the shared NFS server is down, so every pod that mounts a volume "
+                 "from it is stuck at mount",
+    shared_reason="9 pods across 4 namespaces report the same FailedMount error, "
+                  "mount.nfs timed out, and every one of them names the same NFS "
+                  "server; that server has answered no mount in 20m",
+    distractor_cause="the workloads' own volume specs were rewritten to the wrong "
+                     "export path in the last chart release",
+    distractor_reason="the export paths in the failing pods' specs match what the "
+                      "server published last week, and the error is a timeout, not "
+                      "a missing export",
+    rationale="this workload's volume is served by the shared NFS server, and that "
+              "server has stopped answering mounts for every pod that uses it; the "
+              "workload's own volume spec is unchanged",
+    remedy="Bring the shared NFS server back (or fail over to its replica) and let "
+           "the kubelets retry their mounts; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedMount)",
+        ("NFS mount failures across the cluster: timed out against one server\n"
+         "9 pods across 4 namespaces report the same error:\n"
+         "  MountVolume.SetUp failed: mount.nfs: Connection timed out\n"
+         "distinct NFS servers in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "NFS mount failures across the cluster: one per failing pod, no server in "
+        "common\n"
+        "pods reporting a mount error name no NFS server in common, and\n"
+        "no two of them fail the same way: wrong fs type, permission denied,\n"
+        "no such export\n"
+        "distinct NFS servers in the failing set: one per failing pod"
+    ),
+    origin_state=("timed out", "one per failing pod"),
+    origin_variants=(
+        (("NFS mount failures across the cluster: timed out against one server\n"
+          "9 pods across 4 namespaces report the same error:\n"
+          "  MountVolume.SetUp failed: mount.nfs: Connection timed out\n"
+          "distinct NFS servers in the failing set: 1"),
+         ("NFS mount failures across the cluster: one per failing pod, no server in "
+          "common\n"
+          "pods reporting a mount error name no NFS server in common, and\n"
+          "no two of them fail the same way: wrong fs type, permission denied,\n"
+          "no such export\n"
+          "distinct NFS servers in the failing set: one per failing pod")),
+        (("every FailedMount event in the last 20m names the same NFS server\n"
+          "each of the 9 mounts timed out after 30s\n"
+          "the server has answered no mount request since the failures began"),
+         ("the FailedMount events in the last 20m name a different server each: "
+          "one per failing pod\n"
+          "each mount fails for its own reason: a wrong fs type, a denied "
+          "permission, a missing export\n"
+          "every named server answers mount requests")),
+        (("Warning  FailedMount  kubelet  MountVolume.SetUp failed: mount.nfs: "
+          "Connection timed out (same server for 9 of 9 failing pods)"),
+         ("Warning  FailedMount  kubelet  MountVolume.SetUp failed: mount.nfs: no "
+          "such export (servers named: one per failing pod)")),
+        (("NFS server in common across failing mounts: 1\n"
+          "mount outcome for every pod that uses it: timed out\n"
+          "failing pods: 9 in 4 namespaces"),
+         ("NFS server in common across failing mounts: 0, one per failing pod\n"
+          "mount outcome: a different error for each pod\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.SetUp failed for volume \"{pvc}\": mount.nfs: "
+                     "mount failed",
+            local_cause="this Deployment's own volume names an NFS export path that "
+                        "was renamed on the server last week",
+            local_reason="the pod spec still mounts the old export path and the "
+                         "server now publishes it under a new name",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.SetUp failed for volume "
+                  "\"{pvc}\": mount.nfs: mount failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the NFS CSI "
+                     "node plugin reported the attach as failed",
+            local_cause="this StatefulSet's own volume attachment is pinned to a "
+                        "node that was rebuilt without the NFS client package",
+            local_reason="the attachment names a node whose image lost the NFS "
+                         "client in the last rebuild",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: mount source for the agent's "
+                     "shared volume is not ready",
+            local_cause="this agent's own hostPath mount points at a directory the "
+                        "node image no longer ships",
+            local_reason="the DaemonSet mounts a host directory that the last node "
+                         "image dropped",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container \"{container}\": mount source not ready")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CLUSTER_MAINTENANCE_TAINT = Propagation(
+    key="cluster-maintenance-taint",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="every node carries a maintenance taint no workload tolerates, so no new "
+           "pod can be scheduled anywhere",
+    shared_cause="every node carries a maintenance taint no workload tolerates, so "
+                 "no new pod can be scheduled anywhere",
+    shared_reason="12 pods across 5 namespaces report the same FailedScheduling "
+                  "error, 0/3 nodes available because all 3 carry an untolerated "
+                  "maintenance taint, and no pending pod has tolerated it",
+    distractor_cause="the workloads' own tolerations were dropped in the last chart "
+                     "release",
+    distractor_reason="the pending pods never carried a toleration for this taint, "
+                      "because the taint did not exist before the maintenance "
+                      "window opened",
+    rationale="this workload cannot be scheduled because every node carries the "
+              "maintenance taint, and no pod in the cluster can be scheduled for "
+              "the same reason; the workload's own spec is unchanged",
+    remedy="Remove the maintenance taint from the nodes once the window closes (or "
+           "untaint one node now); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedScheduling)",
+        ("Untolerated taint across the cluster: maintenance, on every node\n"
+         "12 pods across 5 namespaces report the same error:\n"
+         "  0/3 nodes are available: 3 node(s) had untolerated taint "
+         "{{maintenance: true}}\n"
+         "distinct taints in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Untolerated taint across the cluster: none\n"
+        "pods reporting a scheduling failure name no taint in common, and\n"
+        "no two of them fail the same way: insufficient cpu, node affinity "
+        "mismatch,\n"
+        "unbound claim\n"
+        "distinct taints in the failing set: none"
+    ),
+    origin_state=("maintenance", "none"),
+    origin_variants=(
+        (("Untolerated taint across the cluster: maintenance, on every node\n"
+          "12 pods across 5 namespaces report the same error:\n"
+          "  0/3 nodes are available: 3 node(s) had untolerated taint "
+          "{{maintenance: true}}\n"
+          "distinct taints in the failing set: 1"),
+         ("Untolerated taint across the cluster: none\n"
+          "pods reporting a scheduling failure name no taint in common, and\n"
+          "no two of them fail the same way: insufficient cpu, node affinity "
+          "mismatch,\n"
+          "unbound claim\n"
+          "distinct taints in the failing set: none")),
+        (("every FailedScheduling event in the last 20m names the maintenance "
+          "taint\n"
+          "all 3 nodes carry it and no pending pod tolerates it\n"
+          "pods pending on it: 12 in 5 namespaces"),
+         ("the FailedScheduling events in the last 20m name a taint in common: "
+          "none\n"
+          "each pending pod waits for its own reason: cpu, affinity, a claim\n"
+          "pods pending: 3 in 3 namespaces")),
+        (("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "3 node(s) had an untolerated maintenance taint (12 of 12 pending pods)"),
+         ("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "1 Insufficient cpu, 2 node(s) didn't match affinity (shared taint: "
+          "none)")),
+        (("taint shared by every pending pod: maintenance\n"
+          "nodes carrying it: 3 of 3\n"
+          "pending pods that tolerate it: 0 of 12"),
+         ("taint shared by every pending pod: none\n"
+          "nodes carrying an untolerated taint: 0 of 3\n"
+          "pending pods: 3, each for its own reason")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this Deployment's own required node affinity names an "
+                        "instance type the pool no longer has",
+            local_reason="the affinity rule asks for a node label no node in the "
+                         "pool carries since the last resize",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: no node fits this pod")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this StatefulSet's own pod anti-affinity forbids two "
+                        "replicas per node and it now asks for more replicas than "
+                        "there are nodes",
+            local_reason="the anti-affinity rule leaves no node for the fourth "
+                         "replica of a three-node cluster",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nEvents: Warning  FailedScheduling  "
+                  "default-scheduler  0/3 nodes are available: no node fits this "
+                  "pod")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this Job's own resource request asks for a GPU that no node "
+                        "in the cluster has",
+            local_reason="the pod requests one GPU and the cluster has no GPU node",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: no node fits this pod")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_SHARED_GATEWAY_REFUSING = Propagation(
+    key="shared-gateway-refusing",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the shared API gateway refuses connections, so every pod whose readiness "
+           "check calls through it fails its probe",
+    shared_cause="the shared API gateway refuses connections, so every pod whose "
+                 "readiness check calls through it fails its probe",
+    shared_reason="14 pods across 6 namespaces report the same Unhealthy error, "
+                  "readiness probe failed because the API gateway refused the "
+                  "connection, and every one of them names the same gateway",
+    distractor_cause="the workloads' own readiness probes were pointed at the wrong "
+                     "path in the last rollout",
+    distractor_reason="the probe paths are unchanged and answer when called "
+                      "directly; only the hop through the gateway fails",
+    rationale="this workload's readiness check calls through the shared API "
+              "gateway, and the gateway is refusing every connection; the "
+              "workload's own probe is unchanged",
+    remedy="Restore the shared API gateway (restart it or roll back its last "
+           "config) and let the probes pass; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=Unhealthy)",
+        ("Gateway named by failing readiness probes: one, and it refused every "
+         "call\n"
+         "14 pods across 6 namespaces report the same error:\n"
+         "  Readiness probe failed: API gateway: connection refused\n"
+         "distinct gateways in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Gateway named by failing readiness probes: one per failing pod\n"
+        "pods reporting a readiness failure name no gateway in common, and\n"
+        "no two of them fail the same way: HTTP 500, timeout, missing path\n"
+        "distinct gateways in the failing set: one per failing pod"
+    ),
+    origin_state=("refused", "one per failing pod"),
+    origin_variants=(
+        (("Gateway named by failing readiness probes: one, and it refused every "
+          "call\n"
+          "14 pods across 6 namespaces report the same error:\n"
+          "  Readiness probe failed: API gateway: connection refused\n"
+          "distinct gateways in the failing set: 1"),
+         ("Gateway named by failing readiness probes: one per failing pod\n"
+          "pods reporting a readiness failure name no gateway in common, and\n"
+          "no two of them fail the same way: HTTP 500, timeout, missing path\n"
+          "distinct gateways in the failing set: one per failing pod")),
+        (("every Unhealthy event in the last 20m names the same API gateway\n"
+          "the gateway refused all 14 probe calls\n"
+          "the gateway's own listener has accepted nothing since"),
+         ("the Unhealthy events in the last 20m name a different gateway each: "
+          "one per failing pod\n"
+          "each probe fails for its own reason: a 500, a timeout, a missing path\n"
+          "every named gateway accepts connections")),
+        (("Warning  Unhealthy  kubelet  Readiness probe failed: API gateway: "
+          "connection refused (same gateway for 14 of 14 failing pods)"),
+         ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe failed "
+          "with statuscode: 500 (gateways named: one per failing pod)")),
+        (("API gateway in common across failing probes: 1\n"
+          "outcome of every probe call through it: refused\n"
+          "failing pods: 14 in 6 namespaces"),
+         ("API gateway in common across failing probes: 0, one per failing pod\n"
+          "outcome: a different error for each pod\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this Deployment's own readiness path was renamed in its "
+                        "last image and the probe still calls the old one",
+            local_reason="the probe asks for a path the new image answers with 404 "
+                         "and the handler reports that as not ready",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dependency check did not pass",
+            local_cause="this StatefulSet's own readiness check calls a sidecar that "
+                        "its last rollout removed from the pod",
+            local_reason="the check dials a sidecar port that nothing in the pod "
+                         "listens on any more",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nReady: False\nEvents: Warning  Unhealthy  kubelet  "
+                  "Readiness probe failed: dependency check did not pass")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="first outbound call failed on start, exiting",
+            local_cause="this Job's own container exits on its first failed outbound call "
+                        "because its retry budget is set to zero",
+            local_reason="the retry count is 0, so one failed call ends the process",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: first outbound call failed on start "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="first outbound call failed on start",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_RUNTIME_CLASS_REMOVED = Propagation(
+    key="runtime-class-removed",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the sandboxed RuntimeClass handler was removed from the nodes, so every "
+           "pod that asks for it fails to create its sandbox",
+    shared_cause="the sandboxed RuntimeClass handler was removed from the nodes, so "
+                 "every pod that asks for it fails to create its sandbox",
+    shared_reason="8 pods across 4 namespaces report the same FailedCreatePodSandBox "
+                  "error, no runtime for the sandboxed handler is configured, and "
+                  "every one of them asks for that one handler",
+    distractor_cause="the workloads' own pod specs gained a runtimeClassName in the "
+                     "last chart release",
+    distractor_reason="the failing pods have asked for the sandboxed class for "
+                      "months and ran fine until the node runtime config changed",
+    rationale="this workload asks for the sandboxed RuntimeClass, and the nodes no "
+              "longer have a handler for it; every pod that asks for the same "
+              "class fails the same way and the workload's own spec is unchanged",
+    remedy="Restore the sandboxed handler in the container runtime config on every "
+           "node (or roll back the runtime config change); the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedCreatePodSandBox)",
+        ("Sandbox handler across the cluster: no runtime for the sandboxed class\n"
+         "8 pods across 4 namespaces report the same error:\n"
+         "  Failed to create pod sandbox: no runtime for \"sandboxed\" is "
+         "configured\n"
+         "distinct runtime handlers in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Sandbox handler across the cluster: one per failing pod\n"
+        "pods reporting a sandbox failure name no handler in common, and\n"
+        "no two of them fail the same way: cgroup limit, seccomp profile "
+        "missing,\n"
+        "hostPort in use\n"
+        "distinct runtime handlers in the failing set: one per failing pod"
+    ),
+    origin_state=("no runtime", "one per failing pod"),
+    origin_variants=(
+        (("Sandbox handler across the cluster: no runtime for the sandboxed class\n"
+          "8 pods across 4 namespaces report the same error:\n"
+          "  Failed to create pod sandbox: no runtime for \"sandboxed\" is "
+          "configured\n"
+          "distinct runtime handlers in the failing set: 1"),
+         ("Sandbox handler across the cluster: one per failing pod\n"
+          "pods reporting a sandbox failure name no handler in common, and\n"
+          "no two of them fail the same way: cgroup limit, seccomp profile "
+          "missing,\n"
+          "hostPort in use\n"
+          "distinct runtime handlers in the failing set: one per failing pod")),
+        (("every FailedCreatePodSandBox event in the last 20m names the sandboxed "
+          "handler\n"
+          "the nodes report no runtime configured for it since the last runtime "
+          "config push\n"
+          "pods failing on it: 8 in 4 namespaces"),
+         ("the FailedCreatePodSandBox events in the last 20m name a handler in "
+          "common: none, one per failing pod\n"
+          "each sandbox fails for its own reason: a cgroup limit, a missing "
+          "seccomp profile, a busy hostPort\n"
+          "every handler the nodes list is configured")),
+        (("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+          "no runtime for \"sandboxed\" is configured (8 of 8 failing pods)"),
+         ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+          "hostPort 8080 already in use (handlers named: one per failing pod)")),
+        (("runtime handler in common across failing sandboxes: 1, sandboxed\n"
+          "handler state on the nodes: no runtime configured\n"
+          "failing pods: 8 in 4 namespaces"),
+         ("runtime handler in common across failing sandboxes: 0, one per failing "
+          "pod\n"
+          "handler state on the nodes: every listed handler configured\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this Deployment's own pod spec asks for a seccomp profile "
+                        "the node image never shipped",
+            local_reason="the securityContext names a localhost seccomp profile "
+                         "that no node has on disk",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod "
+                  "sandbox: sandbox creation failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this StatefulSet's own container requests a hostPort that "
+                        "another pod on every node already holds",
+            local_reason="the hostPort it asks for is taken on each node by a "
+                         "DaemonSet that arrived last week",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nRuntimeClassName: sandboxed\nEvents: Warning  "
+                  "FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+                  "sandbox creation failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this Job's own pod spec sets a cgroup parent that does not "
+                        "exist on the nodes",
+            local_reason="the pod asks for a cgroup parent path the nodes' cgroup "
+                         "tree does not contain",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod "
+                  "sandbox: sandbox creation failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
                        _T_AUTOSCALER_CAPACITY, _T_SIDECAR_INJECTOR,
@@ -4849,7 +5328,9 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_NODE_FREQUENT_KUBELET_RESTART, _T_NODE_CORDONED_DRAINING,
                        _T_NODE_CORRUPT_OVERLAY, _T_EXTERNAL_SECRETS_DOWN,
                        _T_NETWORK_OPERATOR_DOWN, _T_CERT_MANAGER_DOWN,
-                       _T_METRICS_SERVER_DOWN)
+                       _T_METRICS_SERVER_DOWN, _T_SHARED_NFS_SERVER_DOWN,
+                       _T_CLUSTER_MAINTENANCE_TAINT, _T_SHARED_GATEWAY_REFUSING,
+                       _T_RUNTIME_CLASS_REMOVED)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
