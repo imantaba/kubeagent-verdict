@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kubeagent_verdict.dataset.propagation import Propagation
 
 
 @dataclass(frozen=True)
@@ -64,10 +69,16 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # tests/test_shared_origin_floor.py pins the floor at 12. The budget for both
 # raises came out of `attributed`, which is the filler case and absorbs the
 # remainder anyway.
-CASE_MIX = (("attributed", 18), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 11), ("shared_origin", 8), ("shared_origin_decoy", 8),
-            ("truncated", 5), ("injection", 10),
-            ("empty_candidates", 5), ("wrong_attribution", 10))
+# 2026-09-08: both halves move again, from 8% to 12%, and `attributed` gives
+# up the 8 points (18% -> 10%). The 0907 model failed decider 5 with 15 of 24
+# scenarios holding only two victims and no exam layout in training. The
+# pool doubles to 48 scenarios in this slice; at 12% and size 8000 each half
+# is 960 rows, 20 pairs per scenario, about 18 in train after the split.
+# tests/test_shared_origin_floor.py still pins the floor at 12.
+CASE_MIX = (("attributed", 10), ("none_of_these", 15), ("own_cause", 10),
+            ("multi", 11), ("shared_origin", 12), ("shared_origin_decoy", 12),
+            ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
+            ("wrong_attribution", 10))
 
 # The held-out test set draws one example per (trainable entry, case) for each
 # of these. `multi` is excluded deliberately: its group is a "+"-join of two to
@@ -134,8 +145,8 @@ def generate(seed: int, size: int) -> list[Example]:
         # of the same one.
         #
         # They also have no positive twin, so they are the whole of the
-        # residual lean: the paired core is exactly even (440/440 at the
-        # build size) and the kept pile reads ~0.57 toward the INDEPENDENT
+        # residual lean: the paired core is exactly even (960/960 at the
+        # build size) and the kept pile reads ~0.55 toward the INDEPENDENT
         # answer. That is the opposite
         # direction from the ~62/38 toward SHARED this comment used to
         # record, and it is un-confounded now, which is the part that
@@ -419,6 +430,40 @@ def shared_origin_decoy_probes() -> list[Example]:
     return out
 
 
+def _shared_origin_twin_pairs(origins: Sequence[Propagation], pairs_per_origin: int,
+                              salt: str, width_of: Callable[[Propagation, int], int | None],
+                              error_prefix: str) -> list[Example]:
+    """Build twin pairs (a probe row and its decoy) over a list of origins.
+
+    Both halves of a pair use the same salted rng, so they draw identical
+    names and differ only in what the origin read says. `width_of(p, i)`
+    picks the victim count for pair `i` of origin `p`; returning `None`
+    means the full victim set. A repeated expected-workload key would merge
+    two pairs in the paired scoring, so it raises instead.
+    """
+    from kubeagent_verdict.dataset import cases
+
+    out: list[Example] = []
+    seen: dict[str, str] = {}
+    for p in origins:
+        for i in range(pairs_per_origin):
+            width = width_of(p, i)
+            probe = cases.shared_origin_probe(
+                p, _entry_rng(salt, p.key, str(i)), victims=width)
+            decoy = cases.shared_origin_decoy_probe(
+                p, _entry_rng(salt, p.key, str(i)), victims=width)
+            key = "|".join(sorted(probe.meta["expected"]))
+            if key in seen:
+                raise ValueError(
+                    f"{error_prefix} pair key collision: {seen[key]} and "
+                    f"{p.key}#{i} both drew {key!r}; a collision would "
+                    "merge two pairs in the paired scoring")
+            seen[key] = f"{p.key}#{i}"
+            out.append(probe)
+            out.append(decoy)
+    return out
+
+
 def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     """EVAL-ONLY, DIAGNOSTIC-ONLY: five twin pairs per held-out origin.
 
@@ -438,29 +483,36 @@ def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     pair key would silently merge two pairs in the paired scoring, so a
     collision raises instead of shrinking the set.
     """
-    from kubeagent_verdict.dataset import cases, propagation
+    from kubeagent_verdict.dataset import propagation
 
-    out: list[Example] = []
-    seen: dict[str, str] = {}
-    for p in propagation.all_scenarios():
-        for i in range(pairs_per_origin):
-            width = 2 if i % 2 == 1 and len(p.victims) >= 3 else None
-            probe = cases.shared_origin_probe(
-                p, _entry_rng("shared-origin-wide", p.key, str(i)),
-                victims=width)
-            decoy = cases.shared_origin_decoy_probe(
-                p, _entry_rng("shared-origin-wide", p.key, str(i)),
-                victims=width)
-            key = "|".join(sorted(probe.meta["expected"]))
-            if key in seen:
-                raise ValueError(
-                    f"wide-probe pair key collision: {seen[key]} and "
-                    f"{p.key}#{i} both drew {key!r}; a collision would "
-                    "merge two pairs in the paired scoring")
-            seen[key] = f"{p.key}#{i}"
-            out.append(probe)
-            out.append(decoy)
-    return out
+    return _shared_origin_twin_pairs(
+        propagation.all_scenarios(), pairs_per_origin, "shared-origin-wide",
+        lambda p, i: 2 if i % 2 == 1 and len(p.victims) >= 3 else None,
+        "wide-probe")
+
+
+def shared_origin_cousin_probes(pairs_per_origin: int = 1) -> list[Example]:
+    """EVAL-ONLY, DIAGNOSTIC-ONLY: one fresh twin pair per TRAINABLE origin.
+
+    The wide probe asks the six held-out origins five times each. This one
+    asks the other question: on the scenarios the model studied, does it
+    read the origin at all? One pair per trainable scenario, at full width,
+    so every decoy half carries three or four verdicts, which is the shape
+    the 0907 model broke its JSON on.
+
+    It is in-distribution on purpose. A model that scores well here and
+    fails the exam has a coverage gap; one that fails here has a recipe
+    problem. It goes to its own file, never into `test_set()`, and its
+    numbers gate no release. Fresh salts keep every pair distinct from the
+    training rows' draws; the SAME salt on both halves keeps each pair a
+    minimal contrast. A repeated pair key would silently merge two pairs in
+    the paired scoring, so a collision raises instead of shrinking the set.
+    """
+    from kubeagent_verdict.dataset import propagation
+
+    return _shared_origin_twin_pairs(
+        propagation.trainable_scenarios(), pairs_per_origin,
+        "shared-origin-cousin", lambda p, i: None, "cousin-probe")
 
 
 def test_set() -> list[Example]:

@@ -71,18 +71,24 @@ def _workloads(example):
 
 
 def _pairs(rows):
-    """Twin rows, matched on the workload set they share.
+    """Twin rows, matched by emission order and checked by group.
 
-    Sound for the same reason the scorer's pairing is: the halves are rendered
-    from one salt so they name the same workloads, and separate pairs draw
-    separate salts so no two pairs collide. Asserted below rather than assumed.
+    The emitter writes each pair as two consecutive rows from one salt, so
+    the n-th `shared_origin` row and the n-th `shared_origin_decoy` row are
+    twins. The group check is what makes that sound: twins carry one group
+    string, which names the origin and its workloads. Matching on the
+    workload set alone stopped being unique when the mix moved: two origins
+    can draw the same two workloads by chance, and then a row loses its
+    twin to a stranger.
     """
-    shared = {_workloads(e): e for e in _by_case(rows, SHARED)}
-    decoy = {_workloads(e): e for e in _by_case(rows, DECOY)}
-    assert len(shared) == len(_by_case(rows, SHARED)), "workload sets collide"
-    assert len(decoy) == len(_by_case(rows, DECOY)), "workload sets collide"
-    assert set(shared) == set(decoy), "a row has no twin"
-    return [(shared[k], decoy[k]) for k in shared]
+    shared = _by_case(rows, SHARED)
+    decoy = _by_case(rows, DECOY)
+    assert shared, "no shared_origin rows"
+    assert len(shared) == len(decoy), "a row has no twin"
+    for a, b in zip(shared, decoy):
+        assert a.group == b.group, "rows out of step: not twins"
+        assert _workloads(a) == _workloads(b), "twins name different workloads"
+    return list(zip(shared, decoy))
 
 
 # ------------------------------------------------------- the mix pairs it up

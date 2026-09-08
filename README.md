@@ -25,7 +25,7 @@ it byte-identically (tested).
     # evaluated against, not whatever pyproject.toml's loose lower bounds
     # resolve to today
 
-    kv-dataset --seed 17 --size 5500 --out out/dataset
+    kv-dataset --seed 17 --size 8000 --out out/dataset
     kv-train   --dataset out/dataset --out out/adapter
     kv-export  --adapter out/adapter --workdir out/export --out dist/
     kv-eval    --test out/dataset/test.jsonl --model kubeagent-verdict --out out/eval
@@ -62,12 +62,13 @@ v0.1.0, over the 243-row corpus-derived test set at temperature 0, with
 the untuned Qwen3-0.6B base as the floor. The full per-slice tables are in
 `docs/model-card.md`.
 
-Dataset: `kv-dataset --seed 17 --size 5500`, derived from the chaos
-corpus snapshot in `data/corpus/` — kubeagent `chaos-matrix` run id
-`32548862821`, dated 2026-08-22. **The shipped weights were trained on a
-dataset generated at commit `8bd9d28`, before three generator fixes
-landed**, so re-running that command on this tree produces a different,
-corrected dataset (4155/432/253 against the 4312/451/205 the weights saw).
+Dataset: `kv-dataset --seed 17 --size 8000` on this tree, derived from the
+chaos corpus snapshot in `data/corpus/` — kubeagent `chaos-matrix` run id
+`32548862821`, dated 2026-08-22. **The shipped weights were trained at size
+5500 on a dataset generated at commit `8bd9d28`, before three generator
+fixes landed**, so re-running that older size-5500 command on this tree
+produces a different, corrected dataset (4155/432/253 against the
+4312/451/205 the weights saw). The build size for the next model is 8000.
 The consequence is measured, not estimated, and is the contamination
 disclosed below. The test set's last 10 rows are `shared_origin_probe`,
 added after v0.1.0 was scored; it took nothing from train or val, which are
@@ -166,8 +167,10 @@ is not a fix. Teaching the correction was separate work, and it has since
 been done — `shared_origin` is 8% of the curriculum now, with its healthy-read
 decoy twin at another 8%. Two models trained on the earlier 4% share were
 scored on the exam and both failed the shared-origin decider; the raise to
-8% is the response. Every number on this page still comes from a model that
-never saw the shape.
+8% is the response. Since then the share went to 12% each, the pool of
+trained scenarios went from 24 to 48, and the build size went from 5500 to
+8000, all for the final retrain. Every number on this page still comes from
+a model that never saw the shape.
 
 ## License
 

@@ -227,6 +227,15 @@ def test_pass_confidence_varies_within_every_trainable_scenario():
         assert len(grades) > 1, f"{p.key}: every victim carries {grades}"
 
 
+def test_every_trainable_scenario_has_at_least_three_victims():
+    """The 0907 model failed decider 5 on three-victim decoy halves it had
+    never seen: 15 of 24 trainable scenarios held two victims, so the
+    generator could only ever render two. Three is the floor now."""
+    thin = {p.key: len(p.victims) for p in propagation.trainable_scenarios()
+            if len(p.victims) < 3}
+    assert thin == {}, f"scenarios with fewer than three victims: {thin}"
+
+
 def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
     """The mechanised half of constraint 10.
 
@@ -248,6 +257,51 @@ def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
                 f"{p.key}: a victim read carries {broken_token!r} with no healthy swap")
             assert broken_token not in v.healthy_read_content, (
                 f"{p.key}: the healthy swap still carries {broken_token!r}")
+
+
+# The exam's six reads use real kubectl layouts. These markers, with the
+# exam's own spacing, say "this half is laid out the way the exam is".
+_EXAM_LAYOUT_MARKERS = {
+    "node-pid-pressure": ("Conditions:\n", "Taints:  "),
+    "kube-proxy-degraded": ("Conditions:\n", "Taints:  "),
+    "csi-node-driver-crashed": ("Conditions:\n", "Taints:  "),
+    "node-runtime-restarting": ("Conditions:\n", "Taints:  "),
+    "node-clock-skew": ("Conditions:\n", "Taints:  "),
+    "node-conntrack-full": ("Conditions:\n", "Taints:  "),
+    "pod-identity-webhook-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
+    "shared-dependency-scaled-to-zero": ("Replicas:  ", "Pods:      ",
+                                         "Last log:  "),
+    "namespace-egress-proxy-down": ("Replicas:  ", " total | ", "Pods:      ",
+                                    "Last log:  "),
+    "storageclass-pool-retired": ("provisioner: ",
+                                  "PersistentVolumes bound in the last 20m: "),
+    "networkpolicy-egress-allowlist-stale": ("podSelector: ", "policyTypes: ",
+                                             "\negress: ", "pods selected: "),
+}
+
+
+def test_the_eleven_named_scenarios_carry_an_exam_layout_variant():
+    """The 0907 model read `describe node` in the exam and had never seen a
+    `Conditions:` table with a `Taints:` line in training. Each scenario
+    named here shares a read kind with one of the six exam origins, and
+    must carry at least one variant laid out the way the exam is."""
+    by_key = {p.key: p for p in propagation.trainable_scenarios()}
+    missing = []
+    for key, markers in _EXAM_LAYOUT_MARKERS.items():
+        halves = [h for pair in by_key[key].origin_variants for h in pair]
+        if not any(all(m in half for m in markers) for half in halves):
+            missing.append(key)
+    assert missing == [], f"scenarios without an exam-layout variant: {missing}"
+
+
+def test_node_memory_pressure_spells_no_taint_the_way_kubectl_does():
+    """kubectl prints `Taints:  <none>`. The record said `Taints:  none`."""
+    p = {q.key: q for q in propagation.trainable_scenarios()}["node-memory-pressure"]
+    assert "Taints:  <none>" in p.healthy_origin_content
+    assert "Taints:  none" not in p.healthy_origin_content
+    healthy_halves = "\n".join(h for _b, h in p.origin_variants)
+    assert "Taints:  none" not in healthy_halves
+    assert p.origin_variants[0][1] == p.healthy_origin_content
 
 
 _QUANTITY = re.compile(r"\d+[A-Za-z]*")
@@ -433,9 +487,9 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
     the claim it stood for did not. The claim is stated directly now: the
-    shared answer is 0.34 of the multi-workload rows at 8/8, and the cap of
-    0.40 leaves room for one more raise but fails as soon as `multi` falls
-    below a fifth of `shared_origin`.
+    shared answer is 0.368 of the multi-workload rows at 12/12 (0.384 at the
+    build size), and the cap of 0.40 leaves no room for another raise: the
+    next one must move `multi` up with it.
 
     Measured on the kept pile, not the generator's output: `drop_held_out`
     takes `multi` rows and no `shared_origin` rows, so a mix that looks safe
@@ -477,21 +531,38 @@ def _origin_labels(rows, *cases):
 # checked where it is actually decided. Neither is vacuous: the first goes red
 # if the rotation stops offering some scenario a negative, the second if the
 # cull ever takes half a pair or the decoy stops being emitted.
+#
+# 2026-09-08: the emitter's half runs at BIG now; its docstring says why.
 
-def test_the_emitter_offers_every_origin_read_under_both_answers(rows):
+def test_the_emitter_offers_every_origin_read_under_both_answers(big_rows):
     """The emitter's half, checked before the cull, where it is the emitter's.
 
     Every trainable origin read must be offered under a shared answer AND
-    under an independent one. This is the rotation's contract and it stays
-    satisfiable as the pool grows: the negatives cover the pool as long as
-    there is at least one per scenario. Asserting it on the kept pile instead
-    would be asserting the cull's behaviour under the emitter's name.
+    under an independent one. The negatives rotate over the pool one `multi`
+    row in three, so the rotation completes only when the build holds at
+    least three `multi` rows per scenario. `SIZE` stopped holding that at
+    thirty-one scenarios; `BIG` holds it many times over. Asserting it on
+    the kept pile instead would be asserting the cull's behaviour under the
+    emitter's name.
     """
-    shared = _origin_labels(rows, "shared_origin")
-    negatives = _origin_labels(rows, "multi")
+    shared = _origin_labels(big_rows, "shared_origin")
+    negatives = _origin_labels(big_rows, "multi")
     assert shared, "no shared_origin row carries an origin read"
     assert negatives, "no multi row carries an origin read — the cue is alive"
     assert shared == negatives
+
+
+def test_the_small_build_offers_no_negative_the_shared_half_lacks(rows):
+    """The small build's share of the same contract.
+
+    Every negative label is one the shared half also offers, so no label
+    appears under the independent answer alone. Coverage the other way
+    needs more rows than `SIZE` holds and is checked at `BIG` above.
+    """
+    shared = _origin_labels(rows, "shared_origin")
+    negatives = _origin_labels(rows, "multi")
+    assert negatives, "no multi row carries an origin read — the cue is alive"
+    assert negatives <= shared
 
 
 def test_the_cull_never_leaves_an_origin_read_under_only_shared_answers(kept):
@@ -532,12 +603,12 @@ def _independent_share(rows):
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.595.
+    """What the EMITTER controls, and it is no longer a coin flip: 0.568.
 
     Two sources feed the independent side now. The paired half is exact by
     construction -- every `shared_origin` row is emitted with a
     `shared_origin_decoy` twin from the same salt, so those two contribute
-    64/64 at this module's SIZE and cannot drift. On top of that sit the surviving
+    96/96 at this module's SIZE and cannot drift. On top of that sit the surviving
     every-third-`multi` negatives, which have no positive counterpart, and
     they are the whole of the lean.
 
@@ -560,7 +631,7 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     remedy it had not paid for: "closing the gap the rest of the way means
     emitting more counter-examples, which moves dataset bytes". That was
     paid. `shared_origin_decoy` emits one counter-example per positive from
-    the same salt, and the lean now runs the other way -- 0.565 toward the
+    the same salt, and the lean now runs the other way -- 0.556 toward the
     independent answer, from the `multi` negatives that have no twin. It read
     0.619 while the halves held 4% each; doubling them to 8% moved it toward
     even, and the band's floor is now close.
@@ -576,26 +647,40 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     The band still fails loudly at the state this module was written to end
     — 1.00/0.00, no counter-examples at all — and now also fails if the
     pairing ever emits one-sidedly.
+
+    The floor moved from 0.55 to 0.52 on 2026-09-08 when the halves went to
+    12%: the kept pile then read 0.556 at this size and 0.546 at the build
+    size, and 0.52 keeps three points of room below both.
     """
     share = _independent_share(kept)
-    assert 0.55 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
+    assert 0.52 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
 
 
 def test_a_negative_multi_row_shows_the_component_healthy(rows):
-    """Same label, opposite content — otherwise the label is still the answer."""
-    healthy = {p.origin_read[0]: p.healthy_origin_content
-               for p in propagation.trainable_scenarios()}
-    broken = {p.origin_read[1] for p in propagation.trainable_scenarios()}
+    """Same label, opposite content — otherwise the label is still the answer.
+
+    Several scenarios share one read label: every node scenario in the
+    exam's layout heads `describe node {node}`. So the healthy first lines
+    are collected per label, and a row must show one of them. A dict of one
+    content per label kept only the last scenario registered and failed
+    every other scenario's negative row.
+    """
+    healthy = {}
+    for p in propagation.trainable_scenarios():
+        first = p.healthy_origin_content.split("\n")[0]
+        healthy.setdefault(p.origin_read[0], set()).add(first)
+    broken = {p.origin_read[1].split("\n")[0]
+              for p in propagation.trainable_scenarios()}
     seen = 0
     for e in _by_case(rows, "multi"):
         if "origin_read_label" not in e.meta:
             continue
         seen += 1
         assert e.meta["origin_healthy"] is True
-        content = healthy[e.meta["origin_read_label"]]
-        assert content.split("\n")[0] in e.user
+        first_lines = healthy[e.meta["origin_read_label"]]
+        assert any(line in e.user for line in first_lines), e.meta
         for b in broken:
-            assert b.split("\n")[0] not in e.user
+            assert b not in e.user
     assert seen
 
 
@@ -692,17 +777,29 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-BIG = 13200  # 0.68s; 22 rows of each half per scenario at 24 scenarios
-             # (each half is BIG * 4 // 100 = 528 rows, and 528 / 24 = 22).
-             # Not 6600: 11 draws from 4 variants shows <3 distinct 0.3% of
-             # the time per scenario, 7% across twenty-four -- a deterministic
-             # failure with correct data. 22 draws puts it at 1.4e-6 per
-             # scenario, 3.4e-5 across twenty-four.
+DRAWS = 33  # shared_origin rows per scenario at BIG; see the note below.
+BIG = 275 * len(propagation.trainable_scenarios())
+# Each shared_origin half is BIG * 12 // 100 rows, and the generator deals
+# them round-robin over the pool, so every scenario gets exactly DRAWS rows
+# per half (275 * 12 // 100 == 33). The pool grows in this slice, and the
+# constant grows with it: 6600 rows at twenty-four scenarios, 13200 at
+# forty-eight. Why 33 and not 11: the variant-rendering check below is a
+# sampling check. With 4 variants drawn uniformly, P(fewer than 3 distinct
+# in n draws) = (6 * 2**n - 8) / 4**n, and a fifth variant only lowers
+# it. At n=11 that is 0.3% per scenario and 7% across twenty-four -- a
+# deterministic failure with correct data. At n=33 it is 7.0e-10 per
+# scenario, 3.4e-8 across forty-eight.
 
 
 @pytest.fixture(scope="module")
 def big_rows():
     return generate.generate(seed=SEED, size=BIG)
+
+
+def test_big_deals_exactly_draws_rows_per_scenario():
+    """`BIG` promises DRAWS shared_origin rows per scenario. Check it."""
+    pool = len(propagation.trainable_scenarios())
+    assert generate.counts_for(BIG)["shared_origin"] == DRAWS * pool
 
 
 def test_the_trainable_pool_exercises_every_issue_kind():
@@ -714,14 +811,67 @@ def test_the_trainable_pool_exercises_every_issue_kind():
     assert not missing, f"no trainable scenario exercises: {missing}"
 
 
-def test_the_trainable_pool_holds_twenty_four_scenarios():
-    """Four scenarios is what the pool held when it scored 0.5 in-distribution
-    and 0.1 out. Twenty is what it held when the 0905 run failed decider 5
-    (pairs 3 of 10, false "shared" on the decoy probe 2 of 10). The count is
-    asserted so shrinking it back is a deliberate edit rather than a merge
-    artefact.
-    """
-    assert len(propagation.trainable_scenarios()) == 24
+# The pool grows by group across Tasks 5–9. Twenty-four is what it held when
+# the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
+EXPECTED_POOL = 48
+
+
+def test_the_trainable_pool_holds_the_planned_count():
+    """The pool is pinned so a scenario cannot fall out of the tuple unseen."""
+    pool = propagation.trainable_scenarios()
+    assert len(pool) == EXPECTED_POOL
+    assert len({p.key for p in pool}) == EXPECTED_POOL
+
+
+# One marker per exam read layout, and the fewest trainable scenarios that
+# must teach it. A scenario counts once per layout when its read label
+# starts the way the exam's does and any half of any of its origin
+# variants carries the marker text. The floors are the spec's; the
+# measured counts after the coverage branch are node 13, deployment 7,
+# events 4, storageclass 6, networkpolicy 6.
+EXAM_LAYOUT_FLOORS = {
+    "node": 13,
+    "deployment": 4,
+    "events": 4,
+    "storageclass": 6,
+    "networkpolicy": 6,
+}
+
+
+def _teaches_layout(p, layout: str) -> bool:
+    label = p.origin_read[0]
+    halves = [p.origin_read[1], p.healthy_origin_content]
+    for broken, healthy in p.origin_variants:
+        halves.extend((broken, healthy))
+    if layout == "node":
+        return (label.startswith("describe node ")
+                and any("Conditions:" in h and "Taints:" in h for h in halves))
+    if layout == "deployment":
+        return (label.startswith("describe ") and label.endswith("(Deployment)")
+                and any("Replicas:" in h for h in halves))
+    if layout == "events":
+        return label.startswith("get_events (cluster-wide, reason=")
+    if layout == "storageclass":
+        return (label.startswith("get_related storageclass")
+                and any("bound in the last" in h for h in halves))
+    if layout == "networkpolicy":
+        return (label.startswith("get_related networkpolicy")
+                and any("podSelector:" in h for h in halves))
+    raise ValueError(layout)
+
+
+def test_every_exam_layout_has_a_trained_floor():
+    """The 0907 model read five exam layouts it had seen once or never in
+    training. Each layout now has a floor: the fewest trainable scenarios
+    that carry the exam's read shape. A drop below a floor is a regression
+    the pool count cannot see, because it counts scenarios, not shapes."""
+    short = {}
+    for layout, floor in EXAM_LAYOUT_FLOORS.items():
+        keys = sorted(p.key for p in propagation.trainable_scenarios()
+                      if _teaches_layout(p, layout))
+        if len(keys) < floor:
+            short[layout] = (len(keys), floor, keys)
+    assert not short, f"layouts under their floor (count, floor, keys): {short}"
 
 
 def test_every_held_out_read_kind_has_a_trained_cousin():
@@ -776,10 +926,11 @@ def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_row
     still passed.
 
     The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
-    random: this is a sampling check, and its strength is a function of `BIG`.
-    At 22 draws a correct pool trips it about once in 29,000 runs across the
-    whole pool of twenty-four. Lowering `BIG` is not a free speed-up -- at 11
-    draws it is about 7%, and the failure names a scenario whose data is fine.
+    random: this is a sampling check, and its strength is a function of
+    `DRAWS`. At 33 draws a correct pool trips it about once in thirty
+    million runs across a pool of forty-eight. Lowering `BIG` is not a free
+    speed-up -- at 11 draws it is about 7%, and the failure names a scenario
+    whose data is fine.
     """
     by_key = {p.key: p for p in propagation.trainable_scenarios()}
     seen = {k: set() for k in by_key}

@@ -24,7 +24,7 @@ from kubeagent_verdict.dataset import generate
 # The release configuration, from docs/runbooks/train.md. Contamination is a
 # function of seed and size, so a number measured at any other configuration
 # says nothing about what ships.
-SEED, SIZE = 17, 5500
+SEED, SIZE = 17, 8000
 
 
 def _parts(examples: list) -> set[str]:
@@ -56,7 +56,7 @@ def test_the_filter_is_actually_doing_work():
     collisions for an unrelated reason, and a vacuous green is the exact
     failure mode this slice exists to prevent.
 
-    Asserted as `> 0`, never as the measured 913: that figure is a function
+    Asserted as `> 0`, never as the measured 971: that figure is a function
     of seed and size, and pinning it would fail the test on an innocent
     curriculum change while proving nothing extra.
     """

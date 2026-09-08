@@ -25,7 +25,7 @@ defend. Masked-exact needs no threshold and is a set lookup.
 
 The counts below are PINNED, not bounded. A pinned count detects sharing
 disappearing as well as appearing -- so when contradiction_probe's confound
-is closed, 16/19 becomes 0/19, this fails, and the entry gets deleted
+is closed, 17/19 becomes 0/19, this fails, and the entry gets deleted
 deliberately rather than remembered. Same discipline as a golden file: a
 curriculum change that moves these fails the test and the new numbers get
 re-declared on purpose.
@@ -40,7 +40,7 @@ from kubeagent_verdict.dataset import generate
 
 # The release configuration. These counts are deterministic at exactly this
 # seed and size and mean nothing at any other.
-SEED, SIZE = 17, 5500
+SEED, SIZE = 17, 8000
 
 # contract.section() writes "== BEGIN <name> ==\n<body>\n== END <name> ==\n\n";
 # render_evidence() writes one "== <label> ==\n<content>\n\n" per read inside it.
@@ -75,7 +75,13 @@ DECLARED = {
     # (unschedulable=false on the same worker) now draws another. That is
     # one read falling out by chance, not the confound closing: 16 of 19
     # are still reused verbatim.
-    "contradiction_probe": (16, 19),
+    # The mix rose again after that, from 8% to 12% on both shared-origin
+    # halves, and the pool has since grown to forty-eight scenarios;
+    # together they shifted another `none_of_these` draw and this row now
+    # reads 17/19. The build size moving to 8000, this task's own change,
+    # does not touch it: it already read 17/19 at size 5500 with the same
+    # mix and pool, so the size is not what moved this row.
+    "contradiction_probe": (17, 19),
     # THIS ROW IS THE POINT OF THE ALLOWLIST. Its rows come from
     # dataset.propagation, not the catalog, so it shares nothing -- which is
     # what shows the guard discriminates rather than rubber-stamping.
@@ -148,9 +154,9 @@ def _fake(user: str) -> generate.Example:
 
 
 # `_reads` carries two refusals, and BOTH are unreachable on today's tree --
-# measured over every row the guard can reach, 4787 kept + 263 test = 5050,
+# measured over every row the guard can reach, 7029 kept + 263 test = 7292,
 # all of which render a delimited, non-empty evidence block. That is the
-# superset: the allowlist test below actually calls `_reads` on 4883 of them,
+# superset: the allowlist test below actually calls `_reads` on 7125 of them,
 # because it reads only the six DECLARED slices out of the test set.
 # Unreachable is exactly why they need tests: deleting
 # either assert changes no other test's outcome, so without these two the
@@ -177,7 +183,7 @@ def test_reads_splits_a_well_formed_block_into_its_reads():
     The allowlist test below catches that perturbation too, so this is not
     the only net. It is the cheap, local one: it fails in milliseconds and
     names `_reads`, where the allowlist test fails only after generating the
-    whole 5500-row corpus and splitting it, and then names a count. It also
+    whole 8000-row corpus and splitting it, and then names a count. It also
     pins the split's exact shape -- the trailing blank line belongs to the
     read before it -- which the allowlist test only sees through a hash."""
     body = "== pod ==\nfirst read\n\n== events ==\nsecond read\n"

@@ -23,7 +23,7 @@ the correction — an eval change that could not fail the model it replaced is
 not a fix. It failed on 2026-08-30, `separate_reasons_rate` 1.0 on all ten
 probe rows, and the trainable pool is the answer to that.
 
-Each scenario is one ORIGIN and two to four VICTIMS. A victim renders as an
+Each scenario is one ORIGIN and three or four VICTIMS. A victim renders as an
 ordinary flagged workload with an ordinary pod-level symptom and an ordinary,
 locally-plausible candidate carrying `attributed` — because that is what
 kubeagent's deterministic pass really produces. Its attribution runs per
@@ -73,13 +73,13 @@ the second group cost a defect to learn.
 
 Enforced: the key's shape and its disjointness from the eval six; both cause
 strings unique across the pool; every `local_cause` unique within the scenario
-and across the pool; 2-4 victims with kinds from `vocab.ISSUE_KINDS`;
+and across the pool; 3-4 victims with kinds from `vocab.ISSUE_KINDS`;
 `pass_confidence` varying within the scenario; `scope_field` agreeing with
 `blast_radius`; a non-empty `healthy_origin_content`; at least four
 `origin_variants` whose first entry is the legacy pair and whose first lines
 are literal and distinct; an `origin_state` word pair present in every variant
 of its own half and absent from the other; no banned identifier shape
-anywhere; and, across the pool, twenty-four scenarios taught in equal shares,
+anywhere; and, across the pool, forty-eight scenarios taught in equal shares,
 exercising all sixteen issue kinds, each rendering at least three of its
 variants, with no cause template over 12% and the top three under 30%.
 
@@ -855,6 +855,20 @@ _T_KUBE_PROXY = Propagation(
          ("Service route sync: fresh\n"
           "endpoint changes queued and unapplied: 0\n"
           "kube-proxy logged its last sync 3s ago")),
+        (("node view of kube-proxy: stale\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "kube-proxy: Service routes stale (last sync 11m ago)"),
+         ("node view of kube-proxy: fresh\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "kube-proxy: Service routes fresh (last sync 12s ago)")),
     ),
     victims=(
         Victim(
@@ -868,8 +882,8 @@ _T_KUBE_PROXY = Propagation(
             # Service, so the victim's supposedly-separate cause told the same
             # story as the shared one, and the decoy half lost its teaching
             # point. It also spoke `SHARED_CLAIM_PHRASES`' "upstream" inside a
-            # correct separate-reasons answer. This scenario has exactly two
-            # victims, so `p.victims[:count]` always draws this one.
+            # correct separate-reasons answer. This victim sits first in the
+            # tuple, so `p.victims[:count]` always draws it.
             local_cause="the workload's own config still dials a retired Service address",
             local_reason="every outbound call is refused immediately",
             read=("get_log_causes {ns}/{pod}",
@@ -890,6 +904,21 @@ _T_KUBE_PROXY = Propagation(
                 "Warning  Unhealthy  14x  kubelet  Readiness probe failed: "
                 "probe timed out after 1s, successThreshold 5 not met"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-service: dial tcp: connection timed out",
+            local_cause="this StatefulSet's init container waits on a Service name "
+                        "that was renamed in the last chart release",
+            local_reason="the init container's own log names a Service that no "
+                         "longer exists in {ns}",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: wait for a dependency Service timed out "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -1041,6 +1070,15 @@ _T_SCALED_TO_ZERO = Propagation(
          ("the session Deployment holds 5 replicas\n"
           "current pods: 5 Running\n"
           "5 endpoints are registered for its Service")),
+        (("Deployment scale state: replicas to 0\n"
+          "Replicas:  0 desired | 0 updated | 0 total | 0 available | 0 unavailable\n"
+          "Pods:      <none>\n"
+          "Last log:  deployment scaled replicas to 0 (manual)"),
+         ("Deployment scale state: 2 of 2 Running\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Pods:      session-5b7c9d6f4-k3p8w   1/1  Running  0 restarts\n"
+          "           session-5b7c9d6f4-r9x2n   1/1  Running  0 restarts\n"
+          "Last log:  serving, 2 of 2 Running")),
     ),
     victims=(
         Victim(
@@ -1303,6 +1341,21 @@ _T_SECRET_KEY_RENAMED = Propagation(
                 "in this replica's own manifest (3 of 3 sampled restarts)"),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CreateContainerConfigError",
+            issue="Init:CreateContainerConfigError",
+            reason="init container {init_container} could not build its environment",
+            evidence="secret key not found for env var API_TOKEN",
+            local_cause="this Job's own init container reads the key name from a "
+                        "chart value that was set with a typo in its own values file",
+            local_reason="the init container's own envFrom names the key with a "
+                         "typo that appears in no other workload's manifest",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nInit Containers:\n  {init_container}: waiting, "
+                   "CreateContainerConfigError\nEvents: Warning  Failed  kubelet  "
+                   "Error: secret key not found for env var API_TOKEN")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -1402,6 +1455,19 @@ _T_AUTOSCALER_CAPACITY = Propagation(
                 "Warning  NotTriggerScaleUp  cluster-autoscaler  no scale-up "
                 "would help: pod requests exceed the largest node type"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 3 Insufficient cpu",
+            local_cause="this StatefulSet's own CPU request was raised in its last "
+                        "rollout to more cores than any node in the pool has",
+            local_reason="the StatefulSet's own pod spec asks for 12 cores and the "
+                         "largest node in the pool has 8",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                   "available: 3 Insufficient cpu")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -1607,6 +1673,21 @@ _T_BASE_IMAGE_TAG = Propagation(
                    "\"/app/server\": stat /app/server: no such file or directory")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="exec format error at init entrypoint",
+            local_cause="this Job's own init image was built for a different CPU "
+                        "architecture than the nodes run",
+            local_reason="the init container's own image manifest lists only an "
+                         "arm64 layer and every node is amd64",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init container exited at startup, exec "
+                   "format error (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+        ),
     ),
 )
 
@@ -1698,6 +1779,22 @@ _T_PVC_MULTI_ATTACH = Propagation(
                   ("Warning  FailedMount  6x  kubelet  Unable to attach or mount "
                    "volumes: unmounted volumes=[data], timed out waiting for the "
                    "condition")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container {container}: timed out preparing "
+                     "volume {pvc}",
+            local_cause="this Deployment's own start hook copies data into its "
+                        "volume and the copy runs past the kubelet's start deadline",
+            local_reason="the container's own postStart copy moves 40 GiB on every "
+                         "start and the kubelet's start timeout is 2 minutes",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed "
+                   "to start container {container}: timed out preparing volume "
+                   "{pvc}")),
             pass_confidence="medium",
         ),
     ),
@@ -1798,6 +1895,22 @@ _T_CNI_IP_POOL = Propagation(
                 "slot for this pod."),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="StatefulSet", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox: IPAM returned no address for "
+                     "this pod",
+            local_cause="this StatefulSet's own pod annotation pins an address "
+                        "from a range that was removed from the IPAM config",
+            local_reason="the pod's own address annotation names a range the IPAM "
+                         "config no longer lists",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedCreatePodSandBox  kubelet  "
+                   "Failed to create pod sandbox: plugin type cni failed: IPAM "
+                   "returned no address for this pod")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -1863,6 +1976,20 @@ _T_CSI_NODE_DRIVER = Propagation(
          ("CSI node driver status: healthy\n"
           "restart count: 0\n"
           "last known-good state: current")),
+        (("node view of the CSI plugin: crashed\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "CSI node plugin: crashed (CrashLoopBackOff, 4 restarts)"),
+         ("node view of the CSI plugin: healthy\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "CSI node plugin: healthy (Running, 0 restarts)")),
     ),
     victims=(
         Victim(
@@ -1893,6 +2020,23 @@ _T_CSI_NODE_DRIVER = Propagation(
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: read from an unmounted data path failed (3 "
                    "of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume {pvc}: timed out "
+                     "waiting for the external attacher",
+            local_cause="this Job's own claim references a volume handle that was "
+                        "deleted from the storage backend last week",
+            local_reason="the backend lists no volume with the handle this Job's "
+                         "PersistentVolume names",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Bound\nVolume: pv-{pvc}\nEvents: Warning  "
+                   "FailedAttachVolume  attachdetach-controller  "
+                   "AttachVolume.Attach failed for volume {pvc}: timed out "
+                   "waiting for the external attacher")),
             pass_confidence="medium",
         ),
     ),
@@ -1960,6 +2104,16 @@ _T_NODE_PID_PRESSURE = Propagation(
          ("PID table status: available\n"
           "remaining PID budget: 27000\n"
           "kubelet has logged no fork failures in the last hour")),
+        (("PID condition on this node: exhausted\n"
+          "Conditions:\n"
+          "  PIDPressure      True    KubeletHasInsufficientPID   process table exhausted\n"
+          "  Ready            True    KubeletReady                kubelet is posting ready status\n"
+          "Taints:  node.kubernetes.io/pid-pressure:NoSchedule"),
+         ("PID condition on this node: available\n"
+          "Conditions:\n"
+          "  PIDPressure      False   KubeletHasSufficientPID     pids available\n"
+          "  Ready            True    KubeletReady                kubelet is posting ready status\n"
+          "Taints:  <none>")),
     ),
     victims=(
         Victim(
@@ -1992,6 +2146,21 @@ _T_NODE_PID_PRESSURE = Propagation(
                   ("classified cause: fork of a new subprocess failed, resource "
                    "temporarily unavailable (3 of 3 sampled restarts)")),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="worker pool start failed: cannot allocate thread",
+            local_cause="this StatefulSet's own thread pool size was raised past "
+                        "the container's pids limit in the last config change",
+            local_reason="the container's own pids limit is lower than the thread "
+                         "count its config now asks for",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: thread creation failed, cannot allocate "
+                   "resources (3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2061,6 +2230,19 @@ _T_NODE_RUNTIME_RESTARTING = Propagation(
          ("containerd status: stable\n"
           "last crash: none recorded\n"
           "uptime since last crash: over a week")),
+        (("kubelet view of the runtime: restarting\n"
+          "Conditions:\n"
+          "  Ready            False   KubeletNotReady   "
+          "container runtime is restarting (PLEG is not healthy)\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  node.kubernetes.io/not-ready:NoSchedule"),
+         ("kubelet view of the runtime: stable\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   container runtime is stable\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>")),
     ),
     victims=(
         Victim(
@@ -2095,6 +2277,21 @@ _T_NODE_RUNTIME_RESTARTING = Propagation(
                 "probe error: command exited 1 while the local cache was still "
                 "warming"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: context deadline exceeded",
+            local_cause="this Job's own container runs a start hook that blocks "
+                        "for longer than the kubelet's start deadline",
+            local_reason="the container's own postStart hook waits on a remote "
+                         "call with no timeout, and the kubelet gives up on it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed "
+                   "to create containerd task: context deadline exceeded while "
+                   "starting {container}")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2163,6 +2360,20 @@ _T_NODE_CLOCK_SKEW = Propagation(
          ("time sync status: synced\n"
           "drift measured: under 1s\n"
           "last successful sync: 4s ago")),
+        (("clock state on this node: skewed\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "System clock: skewed by 6m42s against the cluster time source"),
+         ("clock state on this node: synced\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "System clock: synced (offset 4ms)")),
     ),
     victims=(
         Victim(
@@ -2192,6 +2403,21 @@ _T_NODE_CLOCK_SKEW = Propagation(
                   ("Warning  Unhealthy  9x  kubelet  Readiness probe failed: x509: "
                    "certificate has expired or is not yet valid")),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="token validation failed: token is not yet valid",
+            local_cause="this Job's own init container checks a token that a "
+                        "misconfigured issuer minted with a future not-before time",
+            local_reason="the token's own not-before claim is ten minutes ahead, "
+                         "set by the issuer's config, on every node it is checked",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: token rejected, not yet valid "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2259,6 +2485,20 @@ _T_NODE_CONNTRACK_FULL = Propagation(
          ("conntrack status: clear\n"
           "free entries: 253952\n"
           "insertion failures logged in the last 5m: 0")),
+        (("node view of conntrack: full\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Conntrack: full (262144 of 262144 entries)"),
+         ("node view of conntrack: clear\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Conntrack: clear (31200 of 262144 entries)")),
     ),
     victims=(
         Victim(
@@ -2288,6 +2528,21 @@ _T_NODE_CONNTRACK_FULL = Propagation(
                   ("classified cause: outbound connection attempts timing out (3 of "
                    "3 sampled restarts)")),
             pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="outbound dial failed after 5 retries",
+            local_cause="this agent's own connection pool opens a new socket per "
+                        "sample and never closes the old ones",
+            local_reason="the agent's own open socket count climbs to its file "
+                         "descriptor limit right before each restart",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: outbound dial failed, too many open "
+                   "connections (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
         ),
     ),
 )
@@ -2392,6 +2647,21 @@ _T_LIMITRANGE_LOWERED = Propagation(
                    "    Exit Code:  137")),
             pass_confidence="medium",
         ),
+        Victim(
+            workload_kind="StatefulSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="heap reservation failed: cannot allocate memory",
+            local_cause="this StatefulSet's own heap flag is set above the "
+                        "container's memory limit, so its runtime refuses to start",
+            local_reason="the container's own maximum heap flag is larger than its "
+                         "memory limit, a mismatch inside its own manifest",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: heap reservation failed, cannot allocate "
+                   "memory (3 of 3 sampled restarts)")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -2474,6 +2744,18 @@ _T_EGRESS_PROXY_DOWN = Propagation(
          ("the egress proxy every flagged workload routes through: steady\n"
           "Deployment {ns}/egress-proxy: 3 of 3 available\n"
           "routed through by every workload flagged here")),
+        (("proxy rollout state: restarting\n"
+          "Replicas:  3 desired | 3 updated | 3 total | 0 available | 3 unavailable\n"
+          "Pods:      egress-proxy-7f4d8c9b5-a2k7m   0/1  CrashLoopBackOff  12 restarts\n"
+          "           egress-proxy-7f4d8c9b5-q8w3r   0/1  CrashLoopBackOff  12 restarts\n"
+          "           egress-proxy-7f4d8c9b5-z5n1t   0/1  CrashLoopBackOff  12 restarts\n"
+          "Last log:  restarting: proxy config invalid"),
+         ("proxy rollout state: steady\n"
+          "Replicas:  3 desired | 3 updated | 3 total | 3 available | 0 unavailable\n"
+          "Pods:      egress-proxy-7f4d8c9b5-a2k7m   1/1  Running  0 restarts\n"
+          "           egress-proxy-7f4d8c9b5-q8w3r   1/1  Running  0 restarts\n"
+          "           egress-proxy-7f4d8c9b5-z5n1t   1/1  Running  0 restarts\n"
+          "Last log:  steady, 0 errors in 1h")),
     ),
     victims=(
         Victim(
@@ -2508,6 +2790,21 @@ _T_EGRESS_PROXY_DOWN = Propagation(
                   ("classified cause: outbound connections failing before the "
                    "handshake completes (4 of 4 sampled restarts)")),
             pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="seed download through the proxy failed",
+            local_cause="this Job's own init container downloads its seed data "
+                        "from a host that was decommissioned last month",
+            local_reason="the init container's own download address names a host "
+                         "that no longer resolves anywhere",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init download through the proxy failed "
+                   "(3 of 3 sampled restarts)")),
+            pass_confidence="medium",
         ),
     ),
 )
@@ -2605,6 +2902,21 @@ _T_NS_PVC_FULL = Propagation(
                 "Warning  Unhealthy  8x  kubelet  Readiness probe failed: "
                 "health check endpoint returns 503 under its own load"),
             pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="last state terminated with exit code 1",
+            log_cause="write to output path failed: no space left on device",
+            local_cause="this agent's own scratch directory sits on a small tmpfs "
+                        "mount that each rotation overflows",
+            local_reason="the agent's own tmpfs mount is 64 MiB and its rotation "
+                         "writes 80 MiB before deleting the old file",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: write to its output path failed, no space "
+                   "left on device (3 of 3 sampled restarts)")),
+            pass_confidence="high",
         ),
     ),
 )
@@ -2710,6 +3022,19 @@ _T_MIGRATION_LOCK = Propagation(
                 "startup"),
             pass_confidence="high",
         ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this StatefulSet's own readiness endpoint stays not-ready "
+                        "through a warm-up that outlasts its probe's failure threshold",
+            local_reason="the container's own warm-up log shows 4 minutes of "
+                         "loading and its probe gives up after 90 seconds",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP "
+                   "probe failed with statuscode: 503")),
+            pass_confidence="medium",
+        ),
     ),
 )
 
@@ -2787,6 +3112,16 @@ _T_POD_IDENTITY_WEBHOOK = Propagation(
          ("Identity webhook status: serving\n"
           "ready endpoints: 2 of 2\n"
           "last successful mutation: 3s ago")),
+        (("webhook Deployment: down\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 0 available | 2 unavailable\n"
+          "Pods:      pod-identity-webhook-6c9d7f8b4-x2k9q   0/1  CrashLoopBackOff  6 restarts\n"
+          "           pod-identity-webhook-6c9d7f8b4-m4v7t   0/1  CrashLoopBackOff  6 restarts\n"
+          "Last log:  webhook down: listener failed to bind"),
+         ("webhook Deployment: serving\n"
+          "Replicas:  2 desired | 2 updated | 2 total | 2 available | 0 unavailable\n"
+          "Pods:      pod-identity-webhook-6c9d7f8b4-x2k9q   1/1  Running  0 restarts\n"
+          "           pod-identity-webhook-6c9d7f8b4-m4v7t   1/1  Running  0 restarts\n"
+          "Last log:  serving admission requests, 0 errors")),
     ),
     victims=(
         Victim(
@@ -2906,6 +3241,16 @@ _T_STORAGECLASS_POOL_RETIRED = Propagation(
          ("ssd-premium pool state: online\n"
           "claims refused in the last 24h: 0\n"
           "provisioner controller: healthy")),
+        (("ssd-premium class: retired\n"
+          "provisioner: example.com/ssd-csi\n"
+          "controller storage-system/ssd-csi-controller: 1/1 ready, Running\n"
+          "pool ssd-tier-a status: retired\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("ssd-premium class: online\n"
+          "provisioner: example.com/ssd-csi\n"
+          "controller storage-system/ssd-csi-controller: 1/1 ready, Running\n"
+          "pool ssd-tier-b status: online\n"
+          "PersistentVolumes bound in the last 20m: 5")),
     ),
     victims=(
         Victim(
@@ -3053,6 +3398,18 @@ _T_NETPOL_EGRESS_ALLOWLIST = Propagation(
          ("datastore path from this namespace: allowed\n"
           "selector drift: none, rule and pods both say tier=data\n"
           "connections dropped in the last 10m: 0")),
+        (("policy match state: blocked\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to tier=datastore tcp/5432 (datastore pods now carry tier=data)\n"
+          "connections to datastore: blocked\n"
+          "pods selected: 6 of 6"),
+         ("policy match state: allowed\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to tier=data tcp/5432\n"
+          "connections to datastore: allowed\n"
+          "pods selected: 6 of 6")),
     ),
     victims=(
         Victim(
@@ -3147,7 +3504,7 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
         "sufficient memory available\n"
         "  Ready            True    KubeletReady                   kubelet is "
         "posting ready status\n"
-        "Taints:  none\n"
+        "Taints:  <none>\n"
         "Allocatable memory: 64Gi\n"
         "Working set: 23.4Gi (37%)\n"
         "Evictions in the last 10m: 0"
@@ -3170,7 +3527,7 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
           "sufficient memory available\n"
           "  Ready            True    KubeletReady                   kubelet is "
           "posting ready status\n"
-          "Taints:  none\n"
+          "Taints:  <none>\n"
           "Allocatable memory: 64Gi\n"
           "Working set: 23.4Gi (37%)\n"
           "Evictions in the last 10m: 0")),
@@ -3247,6 +3604,2965 @@ _T_NODE_MEMORY_PRESSURE = Propagation(
     ),
 )
 
+_T_NODE_NETWORK_UNAVAILABLE = Propagation(
+    key="node-network-unavailable",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node lost its route to the pod network, so no pod placed there can get "
+           "a sandbox",
+    shared_cause="node {node} has no route to the pod network, so no pod placed there "
+                 "can get a sandbox",
+    shared_reason="{node} reports NetworkUnavailable True with reason NoRouteCreated, "
+                  "the network-unavailable taint is on the node, and every pod that "
+                  "landed there in the last 9m is stuck creating its sandbox",
+    distractor_cause="the CNI plugin binary was removed from these pods' images in the "
+                     "last rebuild",
+    distractor_reason="the CNI plugin is installed on the node, not in a workload "
+                      "image, and the failing pods were built from unrelated images",
+    rationale="the node has no route to the pod network, so the kubelet cannot give "
+              "any pod on it a network sandbox; this workload is one of the pods "
+              "placed there, and its own spec is unchanged",
+    remedy="Restore the pod-network route on {node} (restart the network agent or "
+           "re-run the route controller) and let the stuck pods retry; the flagged "
+           "workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Pod network route on this node: missing\n"
+         "Conditions:\n"
+         "  NetworkUnavailable   True    NoRouteCreated   route to the pod network is "
+         "missing\n"
+         "  Ready                True    KubeletReady     kubelet is posting ready "
+         "status\n"
+         "Taints:  node.kubernetes.io/network-unavailable:NoSchedule"),
+    ),
+    healthy_origin_content=(
+        "Pod network route on this node: installed\n"
+        "Conditions:\n"
+        "  NetworkUnavailable   False   RouteCreated     route to the pod network is "
+        "installed\n"
+        "  Ready                True    KubeletReady     kubelet is posting ready "
+        "status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("missing", "installed"),
+    origin_variants=(
+        (("Pod network route on this node: missing\n"
+          "Conditions:\n"
+          "  NetworkUnavailable   True    NoRouteCreated   route to the pod network is "
+          "missing\n"
+          "  Ready                True    KubeletReady     kubelet is posting ready "
+          "status\n"
+          "Taints:  node.kubernetes.io/network-unavailable:NoSchedule"),
+         ("Pod network route on this node: installed\n"
+          "Conditions:\n"
+          "  NetworkUnavailable   False   RouteCreated     route to the pod network is "
+          "installed\n"
+          "  Ready                True    KubeletReady     kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("the route controller reports this node's pod-network route missing\n"
+          "no sandbox has been created on the node for 9m\n"
+          "the network-unavailable taint is set"),
+         ("the route controller reports this node's pod-network route installed\n"
+          "sandboxes are being created on the node normally\n"
+          "no network-unavailable taint is set")),
+        (("Warning  NetworkNotReady  kubelet  pod network route missing: cannot set up "
+          "a sandbox on this node"),
+         ("Normal  NetworkReady  kubelet  pod network route installed: sandboxes are "
+          "being set up on this node")),
+        (("route state: missing\n"
+          "sandboxes created in the last 10m: 0 of 14 attempts\n"
+          "kubelet has logged NetworkPluginNotReady for 9m"),
+         ("route state: installed\n"
+          "sandboxes created in the last 10m: 14 of 14 attempts\n"
+          "kubelet has logged no network plugin error")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox: network plugin returned error: no "
+                     "route to the pod network",
+            local_cause="this Deployment's own pod spec asks for a host network it is "
+                        "not allowed to use",
+            local_reason="the pod spec sets hostNetwork true and the namespace's "
+                         "pod security policy rejects it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedCreatePodSandBox  kubelet  "
+                  "Failed to create pod sandbox: network plugin returned error")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 1 node(s) had untolerated taint "
+                     "node.kubernetes.io/network-unavailable, 2 Insufficient memory",
+            healthy_evidence="0/3 nodes are available: 1 node(s) had untolerated taint "
+                             "dedicated=gpu, 2 Insufficient memory",
+            local_cause="this StatefulSet's own memory request was doubled in its last "
+                        "rollout past what the two remaining nodes can offer",
+            local_reason="the pod asks for 24Gi and the two schedulable nodes have "
+                         "16Gi free each",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: 1 node(s) had an untolerated taint, 2 Insufficient memory")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dial tcp: connect: network is unreachable",
+            local_cause="this agent's own readiness probe checks a port the last config "
+                        "change moved",
+            local_reason="the probe dials 9100 and the agent now listens on 9101",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: dial tcp: "
+                  "connect: network is unreachable")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_KERNEL_DEADLOCK = Propagation(
+    key="node-kernel-deadlock",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's kernel has a deadlocked task, so every container operation on "
+           "it hangs",
+    shared_cause="the kernel on node {node} has a deadlocked task, so every container "
+                 "operation on that node hangs",
+    shared_reason="{node} reports KernelDeadlock True with a task hung for more than "
+                  "120 seconds, and every container start, exec and probe on the node "
+                  "has stalled since",
+    distractor_cause="the container runtime on the node was upgraded to a build that "
+                     "hangs on cgroup v2",
+    distractor_reason="the runtime version on the node is unchanged since last month "
+                      "and the same build runs fine on its peers",
+    rationale="a hung kernel task on {node} is blocking every container operation the "
+              "kubelet issues there; this workload is on that node, and its hang is "
+              "the node's, not its own",
+    remedy="Reboot {node} (or drain it and let the hung task clear) and let its pods "
+           "reschedule; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Kernel task state on this node: hung\n"
+         "Conditions:\n"
+         "  KernelDeadlock   True    KernelHasDeadlock   a task has hung for more than "
+         "120 seconds\n"
+         "  Ready            True    KubeletReady        kubelet is posting ready "
+         "status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Kernel task state on this node: responsive\n"
+        "Conditions:\n"
+        "  KernelDeadlock   False   KernelHasNoDeadlock   every task is responsive\n"
+        "  Ready            True    KubeletReady          kubelet is posting ready "
+        "status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("hung", "responsive"),
+    origin_variants=(
+        (("Kernel task state on this node: hung\n"
+          "Conditions:\n"
+          "  KernelDeadlock   True    KernelHasDeadlock   a task has hung for more than "
+          "120 seconds\n"
+          "  Ready            True    KubeletReady        kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>"),
+         ("Kernel task state on this node: responsive\n"
+          "Conditions:\n"
+          "  KernelDeadlock   False   KernelHasNoDeadlock   every task is responsive\n"
+          "  Ready            True    KubeletReady          kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports a kernel task hung on this node\n"
+          "container starts and execs on the node have stalled for 6m\n"
+          "the kubelet is still posting ready status"),
+         ("the node problem detector reports every kernel task responsive on this "
+          "node\n"
+          "container starts and execs on the node complete normally\n"
+          "the kubelet is posting ready status")),
+        (("Warning  KernelDeadlock  node-problem-detector  task hung for 120s: "
+          "INFO: task containerd-shim:4821 blocked for more than 120 seconds"),
+         ("Normal  KernelResponsive  node-problem-detector  every task responsive: no "
+          "blocked task in the last 30m")),
+        (("kernel watchdog: hung\n"
+          "blocked tasks: 3\n"
+          "oldest blocked task age: 6m14s"),
+         ("kernel watchdog: responsive\n"
+          "blocked tasks: 0\n"
+          "oldest blocked task age: n/a")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: context deadline exceeded",
+            local_cause="this Deployment's own entrypoint waits on a lock file that a "
+                        "previous run left behind",
+            local_reason="the container's start script blocks on a stale lock in its "
+                         "own working directory",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: context deadline exceeded")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: command timed out after 5s",
+            local_cause="this StatefulSet's own exec probe runs a query that no longer "
+                        "finishes inside its 5s timeout",
+            local_reason="the probe query scans a table that has grown past what the "
+                         "timeout allows",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: command timed "
+                  "out after 5s")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="Liveness probe failed: command timed out; container will be "
+                     "restarted",
+            local_cause="this agent's own liveness hook forks a helper that blocks on "
+                        "a pipe nobody reads",
+            local_reason="the hook's helper writes to a pipe with no reader and the "
+                         "hook waits on it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: liveness command timed out, killed by kubelet "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="liveness command timed out, killed by kubelet",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_READONLY_FILESYSTEM = Propagation(
+    key="node-readonly-filesystem",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's root filesystem remounted read-only after an I/O error, so no "
+           "container there can write to disk",
+    shared_cause="the root filesystem on node {node} is mounted read-only, so no "
+                 "container there can write to disk",
+    shared_reason="{node} reports ReadonlyFilesystem True after an I/O error, and "
+                  "every container on the node that writes to its own filesystem has "
+                  "failed since the remount 8m ago",
+    distractor_cause="the workloads' own images were rebuilt with a read-only root "
+                     "filesystem setting",
+    distractor_reason="the pod specs declare no readOnlyRootFilesystem and the images "
+                      "are unchanged since last week",
+    rationale="the root filesystem on {node} is read-only, so every container write on "
+              "the node fails; this workload writes on start and is one of them",
+    remedy="Repair the disk behind {node}'s root filesystem and remount it writable "
+           "(or replace the node) and let the pods reschedule; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Root filesystem on this node: read-only\n"
+         "Conditions:\n"
+         "  ReadonlyFilesystem   True    FilesystemIsReadOnly   root filesystem "
+         "remounted read-only after an I/O error\n"
+         "  Ready                True    KubeletReady           kubelet is posting "
+         "ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Root filesystem on this node: writable\n"
+        "Conditions:\n"
+        "  ReadonlyFilesystem   False   FilesystemIsNotReadOnly   root filesystem is "
+        "writable\n"
+        "  Ready                True    KubeletReady              kubelet is posting "
+        "ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("read-only", "writable"),
+    origin_variants=(
+        (("Root filesystem on this node: read-only\n"
+          "Conditions:\n"
+          "  ReadonlyFilesystem   True    FilesystemIsReadOnly   root filesystem "
+          "remounted read-only after an I/O error\n"
+          "  Ready                True    KubeletReady           kubelet is posting "
+          "ready status\n"
+          "Taints:  <none>"),
+         ("Root filesystem on this node: writable\n"
+          "Conditions:\n"
+          "  ReadonlyFilesystem   False   FilesystemIsNotReadOnly   root filesystem is "
+          "writable\n"
+          "  Ready                True    KubeletReady              kubelet is posting "
+          "ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports this node's root filesystem read-only\n"
+          "the remount followed an I/O error 8m ago\n"
+          "every container write on the node has failed since"),
+         ("the node problem detector reports this node's root filesystem writable\n"
+          "no I/O error has been logged on the node\n"
+          "container writes on the node succeed")),
+        (("Warning  FilesystemIsReadOnly  node-problem-detector  root filesystem "
+          "remounted read-only: EXT4-fs error on sda1"),
+         ("Normal  FilesystemIsWritable  node-problem-detector  root filesystem "
+          "writable: no error on sda1 in the last 24h")),
+        (("mount state of the root filesystem: read-only\n"
+          "I/O errors on the root device in the last 1h: 37\n"
+          "container writes failing on the node: all"),
+         ("mount state of the root filesystem: writable\n"
+          "I/O errors on the root device in the last 1h: 0\n"
+          "container writes failing on the node: none")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="open /var/run/app.pid: input/output error",
+            local_cause="this Deployment's own container writes its pid file to a path "
+                        "its image marks immutable",
+            local_reason="the image sets the pid directory immutable at build time and "
+                         "the entrypoint still writes there",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: write to the container filesystem failed "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="write to the container filesystem failed",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: mkdir /run/containerd: "
+                     "input/output error",
+            local_cause="this Job's own container image is corrupt in the registry "
+                        "and fails to unpack",
+            local_reason="the image manifest lists a layer whose digest does not "
+                         "match its content",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: input/output error")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.SetUp failed for volume {pvc}: mkdir on the node's "
+                     "kubelet directory: input/output error",
+            local_cause="this StatefulSet's own claim asks for a filesystem type the "
+                        "node's kernel cannot mount",
+            local_reason="the claim's storage class sets fsType xfs and the node "
+                         "image ships no xfs module",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Bound\nVolume: pv-{pvc}\nEvents: Warning  FailedMount  "
+                  "kubelet  MountVolume.SetUp failed for volume {pvc}")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_FREQUENT_KUBELET_RESTART = Propagation(
+    key="node-frequent-kubelet-restart",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's kubelet keeps restarting, so its pods keep losing probes and "
+           "container starts",
+    shared_cause="the kubelet on node {node} keeps restarting, so its pods keep losing "
+                 "probes and container starts",
+    shared_reason="{node} reports FrequentKubeletRestart True with 6 kubelet restarts "
+                  "in 20 minutes, and every probe and container start on the node "
+                  "has been interrupted at least once in that window",
+    distractor_cause="the workloads' own probes were tightened in the last chart "
+                     "release",
+    distractor_reason="the probe settings are unchanged since last month and the same "
+                      "settings pass on pods scheduled to other nodes",
+    rationale="the kubelet on {node} is flapping, so every probe and container start "
+              "it owns is cut short; this workload is on that node and its own "
+              "spec is unchanged",
+    remedy="Stop the kubelet restart loop on {node} (read its journal, fix the "
+           "crashing config or reprovision the node); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Kubelet on this node: flapping\n"
+         "Conditions:\n"
+         "  FrequentKubeletRestart   True    FrequentKubeletRestart     kubelet is "
+         "flapping: 6 restarts in 20 minutes\n"
+         "  Ready                    True    KubeletReady               kubelet is "
+         "posting ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Kubelet on this node: steady\n"
+        "Conditions:\n"
+        "  FrequentKubeletRestart   False   NoFrequentKubeletRestart   kubelet is "
+        "steady: 0 restarts in 20 minutes\n"
+        "  Ready                    True    KubeletReady               kubelet is "
+        "posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("flapping", "steady"),
+    origin_variants=(
+        (("Kubelet on this node: flapping\n"
+          "Conditions:\n"
+          "  FrequentKubeletRestart   True    FrequentKubeletRestart     kubelet is "
+          "flapping: 6 restarts in 20 minutes\n"
+          "  Ready                    True    KubeletReady               kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>"),
+         ("Kubelet on this node: steady\n"
+          "Conditions:\n"
+          "  FrequentKubeletRestart   False   NoFrequentKubeletRestart   kubelet is "
+          "steady: 0 restarts in 20 minutes\n"
+          "  Ready                    True    KubeletReady               kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports the kubelet on this node flapping\n"
+          "the kubelet has restarted 6 times in the last 20m\n"
+          "each restart cut every probe and container start on the node short"),
+         ("the node problem detector reports the kubelet on this node steady\n"
+          "the kubelet has not restarted in the last 20m\n"
+          "probes and container starts on the node complete normally")),
+        (("Warning  FrequentKubeletRestart  node-problem-detector  kubelet flapping: "
+          "6 restarts in 20m, last exit status 1"),
+         ("Normal  KubeletSteady  node-problem-detector  kubelet steady: 0 restarts in "
+          "20m, uptime 31d")),
+        (("kubelet service state: flapping\n"
+          "restarts in the last 20m: 6\n"
+          "seconds since the last kubelet start: 48"),
+         ("kubelet service state: steady\n"
+          "restarts in the last 20m: 0\n"
+          "seconds since the last kubelet start: 2678400")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: probe interrupted by kubelet restart",
+            local_cause="this Deployment's own readiness handler returns 503 until a "
+                        "cache warm-up that takes longer than its probe allows",
+            local_reason="the handler reports not-ready for 90s after start and the "
+                         "probe fails it after 30s",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="container was killed: kubelet restarted mid-start",
+            local_cause="this agent's own config reload handler exits the process "
+                        "whenever its watched file is rewritten",
+            local_reason="the config file is rewritten every few minutes by a sidecar "
+                         "and each rewrite exits the agent",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: process exited on config reload "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="process exited on config reload",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: kubelet connection reset during "
+                     "container create",
+            local_cause="this Job's own container command names a binary the image "
+                        "does not ship",
+            local_reason="the command runs a tool that was dropped from the image "
+                         "in its last rebuild",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container {container}")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_CORDONED_DRAINING = Propagation(
+    key="node-cordoned-draining",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node is cordoned and draining, so its pods are being evicted and "
+           "nothing new lands there",
+    shared_cause="node {node} is cordoned and draining, so its pods are being evicted "
+                 "and nothing new lands there",
+    shared_reason="{node} is marked unschedulable with the unschedulable taint, a "
+                  "drain has been evicting its pods for 7m, and every pod that "
+                  "needs that node is either evicted or waiting on it",
+    distractor_cause="the cluster is out of capacity and the pending pods are waiting "
+                     "on the autoscaler",
+    distractor_reason="the other nodes have room and the autoscaler reports no "
+                      "scale-up in progress",
+    rationale="{node} is cordoned and being drained, so its pods are evicted and any "
+              "pod pinned to it waits; this workload's trouble is the drain, not its "
+              "own spec",
+    remedy="Finish or cancel the drain of {node} and uncordon it when it is ready; "
+           "the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Scheduling on this node: cordoned\n"
+         "Unschedulable: true\n"
+         "Conditions:\n"
+         "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+         "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+         "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+         "Taints:  node.kubernetes.io/unschedulable:NoSchedule\n"
+         "Events: Normal  NodeNotSchedulable  kubelet  this node is cordoned and "
+         "draining"),
+    ),
+    healthy_origin_content=(
+        "Scheduling on this node: accepting\n"
+        "Unschedulable: false\n"
+        "Conditions:\n"
+        "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+        "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+        "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+        "Taints:  <none>\n"
+        "Events: Normal  NodeSchedulable  kubelet  this node is accepting pods"
+    ),
+    origin_state=("cordoned", "accepting"),
+    origin_variants=(
+        (("Scheduling on this node: cordoned\n"
+          "Unschedulable: true\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  node.kubernetes.io/unschedulable:NoSchedule\n"
+          "Events: Normal  NodeNotSchedulable  kubelet  this node is cordoned and "
+          "draining"),
+         ("Scheduling on this node: accepting\n"
+          "Unschedulable: false\n"
+          "Conditions:\n"
+          "  Ready            True    KubeletReady   kubelet is posting ready status\n"
+          "  MemoryPressure   False   KubeletHasSufficientMemory\n"
+          "  DiskPressure     False   KubeletHasNoDiskPressure\n"
+          "Taints:  <none>\n"
+          "Events: Normal  NodeSchedulable  kubelet  this node is accepting pods")),
+        (("the node was cordoned 7m ago and a drain is evicting its pods\n"
+          "12 pods have been evicted from it so far\n"
+          "nothing new is being scheduled onto it"),
+         ("the node is accepting pods and no drain is running\n"
+          "0 pods have been evicted from it in the last hour\n"
+          "new pods are scheduled onto it normally")),
+        (("Normal  NodeNotSchedulable  kubelet  node cordoned: drain started by the "
+          "maintenance controller"),
+         ("Normal  NodeSchedulable  kubelet  node accepting pods: schedulable again per the "
+          "maintenance controller")),
+        (("drain status: cordoned\n"
+          "pods evicted so far: 12 of 18\n"
+          "time since cordon: 7m"),
+         ("drain status: accepting pods\n"
+          "pods evicted so far: 0 of 0\n"
+          "time since cordon: n/a")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) "
+                     "had volume node affinity conflict",
+            local_cause="this StatefulSet's own volume is pinned to a zone none of "
+                        "the schedulable nodes are in",
+            local_reason="the claim's volume lives in one zone and the nodes with room "
+                         "are all in the other",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: 1 node(s) were unschedulable, 2 node(s) had volume node "
+                  "affinity conflict")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Deployment",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="pod evicted by drain; replacement started on another node and "
+                     "was evicted again",
+            local_cause="this Deployment's own pod disruption budget allows zero "
+                        "disruptions, so every routine eviction is retried forever",
+            local_reason="the budget sets maxUnavailable 0 with a single replica, so "
+                         "no eviction can ever succeed cleanly",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: process received SIGTERM and exited "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="process received SIGTERM and exited",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="wait-for-node: this pod's node affinity target is not "
+                     "schedulable",
+            local_cause="this Job's own init container waits for a node label that "
+                        "the last node pool rollout renamed",
+            local_reason="the init step polls for a node label that no node carries "
+                         "since the rename",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init wait for a node label timed out "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init wait for a node label timed out",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NODE_CORRUPT_OVERLAY = Propagation(
+    key="node-corrupt-overlay",
+    blast_radius="node",
+    scope_field="node",
+    origin="the node's container layer store is corrupt, so containers there cannot "
+           "start from cached image layers",
+    shared_cause="the container layer store on node {node} is corrupt, so containers "
+                 "there cannot start from cached image layers",
+    shared_reason="{node} reports CorruptDockerOverlay2 True with unreadable cached "
+                  "layers, and every container start on the node that reuses a cached "
+                  "layer has failed since 11m ago",
+    distractor_cause="the registry served a broken image layer to every pull in the "
+                     "last hour",
+    distractor_reason="the same images start normally on the other nodes, which pulled "
+                      "them from the same registry in the same hour",
+    rationale="the layer store on {node} is corrupt, so any container that starts "
+              "from a cached layer there fails; this workload's image is cached on "
+              "that node and its own build is sound",
+    remedy="Clear the corrupt layer store on {node} (wipe the overlay2 directory and "
+           "restart the runtime, or replace the node); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe node {node}",
+        ("Layer store on this node: corrupt\n"
+         "Conditions:\n"
+         "  CorruptDockerOverlay2   True    CorruptDockerOverlay2     overlay2 layer "
+         "store is corrupt: cached layers unreadable\n"
+         "  Ready                   True    KubeletReady              kubelet is "
+         "posting ready status\n"
+         "Taints:  <none>"),
+    ),
+    healthy_origin_content=(
+        "Layer store on this node: intact\n"
+        "Conditions:\n"
+        "  CorruptDockerOverlay2   False   NoCorruptDockerOverlay2   overlay2 layer "
+        "store is intact\n"
+        "  Ready                   True    KubeletReady              kubelet is "
+        "posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_state=("corrupt", "intact"),
+    origin_variants=(
+        (("Layer store on this node: corrupt\n"
+          "Conditions:\n"
+          "  CorruptDockerOverlay2   True    CorruptDockerOverlay2     overlay2 layer "
+          "store is corrupt: cached layers unreadable\n"
+          "  Ready                   True    KubeletReady              kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>"),
+         ("Layer store on this node: intact\n"
+          "Conditions:\n"
+          "  CorruptDockerOverlay2   False   NoCorruptDockerOverlay2   overlay2 layer "
+          "store is intact\n"
+          "  Ready                   True    KubeletReady              kubelet is "
+          "posting ready status\n"
+          "Taints:  <none>")),
+        (("the node problem detector reports this node's overlay2 store corrupt\n"
+          "cached image layers on the node are unreadable\n"
+          "container starts that reuse a cached layer fail there"),
+         ("the node problem detector reports this node's overlay2 store intact\n"
+          "cached image layers on the node read normally\n"
+          "container starts that reuse a cached layer succeed there")),
+        (("Warning  CorruptDockerOverlay2  node-problem-detector  layer store corrupt: "
+          "failed to read layer diff, input/output error"),
+         ("Normal  OverlayHealthy  node-problem-detector  layer store intact: all "
+          "cached layers verified")),
+        (("overlay2 store state: corrupt\n"
+          "unreadable cached layers: 41 of 212\n"
+          "container starts failed on this node in the last 10m: 19"),
+         ("overlay2 store state: intact\n"
+          "unreadable cached layers: 0 of 212\n"
+          "container starts failed on this node in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to create containerd task: failed to mount rootfs: "
+                     "input/output error",
+            local_cause="this Deployment's own image was pushed with a layer that "
+                        "its build never finished writing",
+            local_reason="the image's last layer is truncated in the registry and "
+                         "fails to unpack anywhere",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "create containerd task: failed to mount rootfs")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="exec: unable to load shared library: input/output error",
+            local_cause="this StatefulSet's own image links a library its final "
+                        "build stage never copied in",
+            local_reason="the entrypoint loads a library that is absent from the "
+                         "image's final layer",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: shared library failed to load at start "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="shared library failed to load at start",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="init: read /etc/app/schema.sql: input/output error",
+            local_cause="this Job's own init container reads a seed file that its "
+                        "image ships as an empty placeholder",
+            local_reason="the seed file in the init image is zero bytes and the init "
+                         "step fails to parse it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init read of a bundled file failed "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init read of a bundled file failed",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_EXTERNAL_SECRETS_DOWN = Propagation(
+    key="external-secrets-operator-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the external-secrets operator is down, so the Secrets it syncs are no "
+           "longer created and pods that mount them cannot start",
+    shared_cause="the external-secrets operator is down, so the Secrets it syncs are "
+                 "no longer created and pods that mount them cannot start",
+    shared_reason="kube-system/external-secrets shows 0 of 1 replicas available with "
+                  "its pod in CrashLoopBackOff after 7 restarts, its last log says "
+                  "the secret store is unreachable, and every ExternalSecret it owns "
+                  "has been SecretSyncedError since",
+    distractor_cause="the workloads' own Secret names were changed in the last chart "
+                     "release",
+    distractor_reason="the Secret names in the pod specs match the ExternalSecret "
+                      "targets exactly and neither has changed in weeks",
+    rationale="the Secret this workload mounts is created by the external-secrets "
+              "operator, and the operator has been down since its store became "
+              "unreachable; the workload's own spec is unchanged",
+    remedy="Restore the external-secrets operator (fix its store credentials or "
+           "endpoint) and let it sync; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/external-secrets (Deployment)",
+        ("Secret store from the operator's view: unreachable\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      external-secrets-5d8c7b9f6-t4k2p   0/1  CrashLoopBackOff  "
+         "7 restarts\n"
+         "Last log:  secret store unreachable: giving up after 5 attempts"),
+    ),
+    healthy_origin_content=(
+        "Secret store from the operator's view: reconciled\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      external-secrets-5d8c7b9f6-t4k2p   1/1  Running  0 restarts\n"
+        "Last log:  reconciled 42 ExternalSecrets, 0 errors"
+    ),
+    origin_state=("unreachable", "reconciled"),
+    origin_variants=(
+        (("Secret store from the operator's view: unreachable\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      external-secrets-5d8c7b9f6-t4k2p   0/1  CrashLoopBackOff  "
+          "7 restarts\n"
+          "Last log:  secret store unreachable: giving up after 5 attempts"),
+         ("Secret store from the operator's view: reconciled\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      external-secrets-5d8c7b9f6-t4k2p   1/1  Running  0 restarts\n"
+          "Last log:  reconciled 42 ExternalSecrets, 0 errors")),
+        (("the external-secrets operator reports its store unreachable\n"
+          "the operator pod has crashed 7 times in 12m\n"
+          "42 ExternalSecrets are in SecretSyncedError"),
+         ("the external-secrets operator reports every ExternalSecret reconciled\n"
+          "the operator pod has been Running for 9d\n"
+          "0 ExternalSecrets are in error")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "external-secrets (store unreachable)"),
+         ("Normal  Started  kubelet  Started container external-secrets (store "
+          "reconciled)")),
+        (("operator status: unreachable store\n"
+          "ExternalSecrets in error: 42 of 42\n"
+          "last successful sync: 14m ago"),
+         ("operator status: reconciled\n"
+          "ExternalSecrets in error: 0 of 42\n"
+          "last successful sync: 20s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="CreateContainerConfigError",
+            issue="CreateContainerConfigError",
+            reason="container {container} could not build its environment",
+            evidence="secret \"{name}-credentials\" not found",
+            local_cause="this Deployment's own pod spec references a Secret whose "
+                        "name was misspelled in its last rollout",
+            local_reason="the envFrom entry names a Secret one letter off from the "
+                         "one that exists in the namespace",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: secret \"{name}-credentials\" "
+                  "not found")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CreateContainerConfigError",
+            issue="Init:CreateContainerConfigError",
+            reason="init container {init_container} could not build its environment",
+            evidence="couldn't find key DB_PASSWORD in Secret {ns}/{name}-db",
+            local_cause="this Job's own init container asks for a Secret key that its "
+                        "chart renamed in the last release",
+            local_reason="the init step reads DB_PASSWORD and the chart now writes "
+                         "DATABASE_PASSWORD",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}: waiting, "
+                  "CreateContainerConfigError\nEvents: Warning  Failed  kubelet  "
+                  "Error: couldn't find key DB_PASSWORD in Secret")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="MountVolume.SetUp failed for volume \"tls\": secret "
+                     "\"{name}-tls\" not found",
+            local_cause="this StatefulSet's own TLS Secret was deleted by a cleanup "
+                        "job that matched its label by mistake",
+            local_reason="the cleanup job's selector matched the StatefulSet's Secret "
+                         "label and removed it",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  FailedMount  kubelet  "
+                  "MountVolume.SetUp failed for volume \"tls\": secret not found")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NETWORK_OPERATOR_DOWN = Propagation(
+    key="network-operator-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the network operator keeps being OOM-killed, so the pod overlay network "
+           "is no longer reconciled",
+    shared_cause="the network operator keeps being OOM-killed, so the pod overlay "
+                 "network is no longer reconciled and pods on different nodes cannot "
+                 "reach each other",
+    shared_reason="kube-system/network-operator shows 0 of 1 replicas available with "
+                  "its pod OOMKilled 5 times at its 512Mi limit, its last log says "
+                  "the overlay reconcile halted, and cross-node pod traffic has been "
+                  "failing since",
+    distractor_cause="the workloads' own Services lost their endpoints in a rollout",
+    distractor_reason="every Service involved lists its ready endpoints and the "
+                      "endpoints answer from the same node; only cross-node calls "
+                      "fail",
+    rationale="cross-node pod traffic depends on the overlay the network operator "
+              "reconciles, and the operator has been OOM-killed out of running; "
+              "this workload's peers are on other nodes",
+    remedy="Raise the network operator's memory limit (or fix the leak) so it stays "
+           "Running and reconciles the overlay; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/network-operator (Deployment)",
+        ("Overlay reconcile from the operator's view: halted\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      network-operator-7b6d9c8f5-q2m8x   0/1  OOMKilled  5 restarts\n"
+         "Last log:  overlay reconcile halted: killed at 512Mi"),
+    ),
+    healthy_origin_content=(
+        "Overlay reconcile from the operator's view: idle\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      network-operator-7b6d9c8f5-q2m8x   1/1  Running  0 restarts\n"
+        "Last log:  overlay reconcile idle: 3 nodes in sync"
+    ),
+    origin_state=("halted", "idle"),
+    origin_variants=(
+        (("Overlay reconcile from the operator's view: halted\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      network-operator-7b6d9c8f5-q2m8x   0/1  OOMKilled  5 restarts\n"
+          "Last log:  overlay reconcile halted: killed at 512Mi"),
+         ("Overlay reconcile from the operator's view: idle\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      network-operator-7b6d9c8f5-q2m8x   1/1  Running  0 restarts\n"
+          "Last log:  overlay reconcile idle: 3 nodes in sync")),
+        (("the network operator reports its overlay reconcile halted\n"
+          "the operator pod was OOM-killed 5 times at its 512Mi limit\n"
+          "cross-node pod traffic has failed for 15m"),
+         ("the network operator reports its overlay reconcile idle\n"
+          "the operator pod has been Running for 6d within its limit\n"
+          "cross-node pod traffic flows normally")),
+        (("Warning  OOMKilling  kubelet  Memory cgroup out of memory: killed process "
+          "network-operator (overlay reconcile halted)"),
+         ("Normal  Started  kubelet  Started container network-operator (overlay "
+          "reconcile idle, 3 nodes in sync)")),
+        (("overlay reconcile loop: halted\n"
+          "nodes out of sync: 3 of 3\n"
+          "operator OOM kills in the last hour: 5"),
+         ("overlay reconcile loop: idle\n"
+          "nodes out of sync: 0 of 3\n"
+          "operator OOM kills in the last hour: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dependency check to a peer on another "
+                     "node timed out",
+            local_cause="this Deployment's own readiness check calls a peer address "
+                        "that was retired in the last release",
+            local_reason="the check dials a peer hostname that no Service publishes "
+                         "any more",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: dependency "
+                  "check timed out")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="cluster join failed: peer on another node unreachable after 30s",
+            local_cause="this StatefulSet's own peer list still names a member that "
+                        "was scaled away last week",
+            local_reason="the join step waits on a member ordinal that no longer "
+                         "exists",
+            read=("get_log_causes {ns}/{pod}",
+                  "classified cause: peer join timed out (3 of 3 sampled restarts)"),
+            log_cause="peer join timed out",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="wait-for-db: dial tcp: i/o timeout reaching a pod on another "
+                     "node",
+            local_cause="this Job's own init container dials the database by a pod "
+                        "IP it cached from a previous run",
+            local_reason="the init step reads a stale address file instead of the "
+                         "Service name",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init wait for the database timed out "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init wait for the database timed out",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CERT_MANAGER_DOWN = Propagation(
+    key="cert-manager-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="cert-manager is down, so certificates near expiry are not renewed and "
+           "the workloads serving them fail their TLS checks once they lapse",
+    shared_cause="cert-manager is down, so certificates near expiry are not renewed "
+                 "and the workloads serving them fail their TLS checks once they "
+                 "lapse",
+    shared_reason="cert-manager/cert-manager shows 0 of 1 replicas available with its "
+                  "pod in CrashLoopBackOff after 11 restarts, its last log says it "
+                  "lost its leader lease, and 9 Certificates have passed their "
+                  "renewal time without a new Secret",
+    distractor_cause="the workloads' own TLS Secrets were overwritten by a manual "
+                     "kubectl apply",
+    distractor_reason="the TLS Secrets carry the same serial they had a month ago and "
+                      "no manual write is in the audit log",
+    rationale="the certificate this workload serves is renewed by cert-manager, and "
+              "cert-manager has been down past the renewal window; the workload's "
+              "own config is unchanged",
+    remedy="Restore cert-manager (let it reacquire its leader lease) and let it renew "
+           "the lapsed Certificates; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe cert-manager/cert-manager (Deployment)",
+        ("Leader lease from the controller's view: lost\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      cert-manager-6f9b8d7c5-w7r3n   0/1  CrashLoopBackOff  "
+         "11 restarts\n"
+         "Last log:  lost leader lease, exiting"),
+    ),
+    healthy_origin_content=(
+        "Leader lease from the controller's view: holding\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      cert-manager-6f9b8d7c5-w7r3n   1/1  Running  0 restarts\n"
+        "Last log:  holding leader lease, 0 certificates pending"
+    ),
+    origin_state=("lost", "holding"),
+    origin_variants=(
+        (("Leader lease from the controller's view: lost\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      cert-manager-6f9b8d7c5-w7r3n   0/1  CrashLoopBackOff  "
+          "11 restarts\n"
+          "Last log:  lost leader lease, exiting"),
+         ("Leader lease from the controller's view: holding\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      cert-manager-6f9b8d7c5-w7r3n   1/1  Running  0 restarts\n"
+          "Last log:  holding leader lease, 0 certificates pending")),
+        (("cert-manager reports its leader lease lost\n"
+          "the controller pod has crashed 11 times in 40m\n"
+          "9 Certificates are past their renewal time"),
+         ("cert-manager reports it is holding its leader lease\n"
+          "the controller pod has been Running for 12d\n"
+          "0 Certificates are past their renewal time")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "cert-manager (leader lease lost)"),
+         ("Normal  Started  kubelet  Started container cert-manager (holding leader "
+          "lease)")),
+        (("controller lease: lost\n"
+          "Certificates past renewal: 9 of 31\n"
+          "last renewal issued: 3h ago"),
+         ("controller lease: holding\n"
+          "Certificates past renewal: 0 of 31\n"
+          "last renewal issued: 6m ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: tls: certificate has expired",
+            local_cause="this Deployment's own probe pins a CA bundle that was "
+                        "rotated out of the trust store last quarter",
+            local_reason="the probe's CA file is a copy from before the routine "
+                         "rotation and no longer validates anything",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: tls: "
+                  "certificate has expired")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="tls: failed to load server certificate: certificate has expired",
+            local_cause="this StatefulSet's own server certificate is self-signed "
+                        "with a one-year validity nobody tracked",
+            local_reason="the certificate was generated by hand a year ago and never "
+                         "enrolled for renewal",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: server certificate expired "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="server certificate expired",
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="metrics push failed: x509: certificate has expired or is not "
+                     "yet valid",
+            local_cause="this agent's own client certificate is issued by a private "
+                        "CA outside the cluster with a lapsed intermediate",
+            local_reason="the agent's certificate chains to an intermediate that "
+                         "expired last night",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: client certificate rejected as expired "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="client certificate rejected as expired",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_METRICS_SERVER_DOWN = Propagation(
+    key="metrics-server-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="metrics-server is down, so every autoscaler is frozen at its last size",
+    shared_cause="metrics-server is down, so every autoscaler is frozen at its last "
+                 "size and overloaded pods are not scaled out",
+    shared_reason="kube-system/metrics-server shows 0 of 1 replicas available with "
+                  "its pod in CrashLoopBackOff after 8 restarts, its last log says "
+                  "node metric scrapes time out, and every HorizontalPodAutoscaler "
+                  "reports FailedGetResourceMetric",
+    distractor_cause="the workloads' own autoscalers were deleted in the last chart "
+                     "release",
+    distractor_reason="every HorizontalPodAutoscaler is present and its target "
+                      "reference is unchanged; each one reports it cannot read "
+                      "metrics",
+    rationale="this workload is overloaded because its autoscaler cannot read "
+              "metrics, and it cannot read them because metrics-server is down; "
+              "the same is true of every autoscaled workload",
+    remedy="Restore kube-system/metrics-server (fix its kubelet scrape timeout) and "
+           "let the autoscalers resume; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "describe kube-system/metrics-server (Deployment)",
+        ("Node metrics from the server's view: unable to fetch\n"
+         "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+         "Pods:      metrics-server-8c7d6b9f4-h5n2k   0/1  CrashLoopBackOff  "
+         "8 restarts\n"
+         "Last log:  unable to fetch node metrics: scrape timeout"),
+    ),
+    healthy_origin_content=(
+        "Node metrics from the server's view: scraped\n"
+        "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+        "Pods:      metrics-server-8c7d6b9f4-h5n2k   1/1  Running  0 restarts\n"
+        "Last log:  scraped 3 nodes, 41 pods"
+    ),
+    origin_state=("unable", "scraped"),
+    origin_variants=(
+        (("Node metrics from the server's view: unable to fetch\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 0 available | 1 unavailable\n"
+          "Pods:      metrics-server-8c7d6b9f4-h5n2k   0/1  CrashLoopBackOff  "
+          "8 restarts\n"
+          "Last log:  unable to fetch node metrics: scrape timeout"),
+         ("Node metrics from the server's view: scraped\n"
+          "Replicas:  1 desired | 1 updated | 1 total | 1 available | 0 unavailable\n"
+          "Pods:      metrics-server-8c7d6b9f4-h5n2k   1/1  Running  0 restarts\n"
+          "Last log:  scraped 3 nodes, 41 pods")),
+        (("metrics-server reports it is unable to fetch node metrics\n"
+          "the server pod has crashed 8 times in 25m\n"
+          "every HorizontalPodAutoscaler reports FailedGetResourceMetric"),
+         ("metrics-server reports it scraped every node\n"
+          "the server pod has been Running for 20d\n"
+          "every HorizontalPodAutoscaler reads its metrics normally")),
+        (("Warning  FailedGetResourceMetric  horizontal-pod-autoscaler  unable to "
+          "fetch metrics from resource metrics API"),
+         ("Normal  SuccessfulRescale  horizontal-pod-autoscaler  metrics scraped, "
+          "New size: 4; reason: cpu resource utilization above target")),
+        (("metrics API: unable to serve\n"
+          "autoscalers frozen: 17 of 17\n"
+          "last successful scrape: 25m ago"),
+         ("metrics API: scraped and serving\n"
+          "autoscalers frozen: 0 of 17\n"
+          "last successful scrape: 15s ago")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503 "
+                     "(overloaded, queue depth 4000)",
+            local_cause="this Deployment's own request queue is unbounded and a "
+                        "single slow client can fill it",
+            local_reason="the queue has no cap and one client is holding 4000 "
+                         "requests open",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="OOMKilled",
+            issue="OOMKilled",
+            reason="container {container} was killed by the kernel out-of-memory "
+                   "handler",
+            evidence="container exceeded its memory limit under load that would have "
+                     "been spread across more replicas",
+            local_cause="this StatefulSet's own in-memory index doubles on every "
+                        "compaction and never releases the old copy",
+            local_reason="the index keeps both copies after compaction and grows "
+                         "until the kernel kills it",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: memory limit exceeded under load "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="memory limit exceeded under load",
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="RestartLoop",
+            issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="scrape target overloaded: collector restarted after 30s of "
+                     "backpressure",
+            local_cause="this agent's own scrape interval was set to one second in "
+                        "its last config push",
+            local_reason="the agent scrapes every target every second and restarts "
+                         "when its buffer fills",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: collector restarted under backpressure "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="collector restarted under backpressure",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+
+_T_SHARED_NFS_SERVER_DOWN = Propagation(
+    key="shared-nfs-server-down",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the shared NFS server is down, so every pod that mounts a volume from "
+           "it is stuck at mount",
+    shared_cause="the shared NFS server is down, so every pod that mounts a volume "
+                 "from it is stuck at mount",
+    shared_reason="9 pods across 4 namespaces report the same FailedMount error, "
+                  "mount.nfs timed out, and every one of them names the same NFS "
+                  "server; that server has answered no mount in 20m",
+    distractor_cause="the workloads' own volume specs were rewritten to the wrong "
+                     "export path in the last chart release",
+    distractor_reason="the export paths in the failing pods' specs match what the "
+                      "server published last week, and the error is a timeout, not "
+                      "a missing export",
+    rationale="this workload's volume is served by the shared NFS server, and that "
+              "server has stopped answering mounts for every pod that uses it; the "
+              "workload's own volume spec is unchanged",
+    remedy="Bring the shared NFS server back (or fail over to its replica) and let "
+           "the kubelets retry their mounts; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedMount)",
+        ("NFS mount failures across the cluster: timed out against one server\n"
+         "9 pods across 4 namespaces report the same error:\n"
+         "  MountVolume.SetUp failed: mount.nfs: Connection timed out\n"
+         "distinct NFS servers in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "NFS mount failures across the cluster: one per failing pod, no server in "
+        "common\n"
+        "pods reporting a mount error name no NFS server in common, and\n"
+        "no two of them fail the same way: wrong fs type, permission denied,\n"
+        "no such export\n"
+        "distinct NFS servers in the failing set: one per failing pod"
+    ),
+    origin_state=("timed out", "one per failing pod"),
+    origin_variants=(
+        (("NFS mount failures across the cluster: timed out against one server\n"
+          "9 pods across 4 namespaces report the same error:\n"
+          "  MountVolume.SetUp failed: mount.nfs: Connection timed out\n"
+          "distinct NFS servers in the failing set: 1"),
+         ("NFS mount failures across the cluster: one per failing pod, no server in "
+          "common\n"
+          "pods reporting a mount error name no NFS server in common, and\n"
+          "no two of them fail the same way: wrong fs type, permission denied,\n"
+          "no such export\n"
+          "distinct NFS servers in the failing set: one per failing pod")),
+        (("every FailedMount event in the last 20m names the same NFS server\n"
+          "each of the 9 mounts timed out after 30s\n"
+          "the server has answered no mount request since the failures began"),
+         ("the FailedMount events in the last 20m name a different server each: "
+          "one per failing pod\n"
+          "each mount fails for its own reason: a wrong fs type, a denied "
+          "permission, a missing export\n"
+          "every named server answers mount requests")),
+        (("Warning  FailedMount  kubelet  MountVolume.SetUp failed: mount.nfs: "
+          "Connection timed out (same server for 9 of 9 failing pods)"),
+         ("Warning  FailedMount  kubelet  MountVolume.SetUp failed: mount.nfs: no "
+          "such export (servers named: one per failing pod)")),
+        (("NFS server in common across failing mounts: 1\n"
+          "mount outcome for every pod that uses it: timed out\n"
+          "failing pods: 9 in 4 namespaces"),
+         ("NFS server in common across failing mounts: 0, one per failing pod\n"
+          "mount outcome: a different error for each pod\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.SetUp failed for volume \"{pvc}\": mount.nfs: "
+                     "mount failed",
+            local_cause="this Deployment's own volume names an NFS export path that "
+                        "was renamed on the server last week",
+            local_reason="the pod spec still mounts the old export path and the "
+                         "server now publishes it under a new name",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.SetUp failed for volume "
+                  "\"{pvc}\": mount.nfs: mount failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the NFS CSI "
+                     "node plugin reported the attach as failed",
+            local_cause="this StatefulSet's own volume attachment is pinned to a "
+                        "node that was rebuilt without the NFS client package",
+            local_reason="the attachment names a node whose image lost the NFS "
+                         "client in the last rebuild",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="DaemonSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: mount source for the agent's "
+                     "shared volume is not ready",
+            local_cause="this agent's own hostPath mount points at a directory the "
+                        "node image no longer ships",
+            local_reason="the DaemonSet mounts a host directory that the last node "
+                         "image dropped",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container \"{container}\": mount source not ready")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CLUSTER_MAINTENANCE_TAINT = Propagation(
+    key="cluster-maintenance-taint",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="every node carries a maintenance taint no workload tolerates, so no new "
+           "pod can be scheduled anywhere",
+    shared_cause="every node carries a maintenance taint no workload tolerates, so "
+                 "no new pod can be scheduled anywhere",
+    shared_reason="12 pods across 5 namespaces report the same FailedScheduling "
+                  "error, 0/3 nodes available because all 3 carry an untolerated "
+                  "maintenance taint, and no pending pod has tolerated it",
+    distractor_cause="the workloads' own tolerations were dropped in the last chart "
+                     "release",
+    distractor_reason="the pending pods never carried a toleration for this taint, "
+                      "because the taint did not exist before the maintenance "
+                      "window opened",
+    rationale="this workload cannot be scheduled because every node carries the "
+              "maintenance taint, and no pod in the cluster can be scheduled for "
+              "the same reason; the workload's own spec is unchanged",
+    remedy="Remove the maintenance taint from the nodes once the window closes (or "
+           "untaint one node now); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedScheduling)",
+        ("Untolerated taint across the cluster: maintenance, on every node\n"
+         "12 pods across 5 namespaces report the same error:\n"
+         "  0/3 nodes are available: 3 node(s) had untolerated taint "
+         "{{maintenance: true}}\n"
+         "distinct taints in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Untolerated taint across the cluster: none\n"
+        "pods reporting a scheduling failure name no taint in common, and\n"
+        "no two of them fail the same way: insufficient cpu, node affinity "
+        "mismatch,\n"
+        "unbound claim\n"
+        "distinct taints in the failing set: none"
+    ),
+    origin_state=("maintenance", "none"),
+    origin_variants=(
+        (("Untolerated taint across the cluster: maintenance, on every node\n"
+          "12 pods across 5 namespaces report the same error:\n"
+          "  0/3 nodes are available: 3 node(s) had untolerated taint "
+          "{{maintenance: true}}\n"
+          "distinct taints in the failing set: 1"),
+         ("Untolerated taint across the cluster: none\n"
+          "pods reporting a scheduling failure name no taint in common, and\n"
+          "no two of them fail the same way: insufficient cpu, node affinity "
+          "mismatch,\n"
+          "unbound claim\n"
+          "distinct taints in the failing set: none")),
+        (("every FailedScheduling event in the last 20m names the maintenance "
+          "taint\n"
+          "all 3 nodes carry it and no pending pod tolerates it\n"
+          "pods pending on it: 12 in 5 namespaces"),
+         ("the FailedScheduling events in the last 20m name a taint in common: "
+          "none\n"
+          "each pending pod waits for its own reason: cpu, affinity, a claim\n"
+          "pods pending: 3 in 3 namespaces")),
+        (("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "3 node(s) had an untolerated maintenance taint (12 of 12 pending pods)"),
+         ("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "1 Insufficient cpu, 2 node(s) didn't match affinity (shared taint: "
+          "none)")),
+        (("taint shared by every pending pod: maintenance\n"
+          "nodes carrying it: 3 of 3\n"
+          "pending pods that tolerate it: 0 of 12"),
+         ("taint shared by every pending pod: none\n"
+          "nodes carrying an untolerated taint: 0 of 3\n"
+          "pending pods: 3, each for its own reason")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this Deployment's own required node affinity names an "
+                        "instance type the pool no longer has",
+            local_reason="the affinity rule asks for a node label no node in the "
+                         "pool carries since the last resize",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: no node fits this pod")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this StatefulSet's own pod anti-affinity forbids two "
+                        "replicas per node and it now asks for more replicas than "
+                        "there are nodes",
+            local_reason="the anti-affinity rule leaves no node for the fourth "
+                         "replica of a three-node cluster",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nEvents: Warning  FailedScheduling  "
+                  "default-scheduler  0/3 nodes are available: no node fits this "
+                  "pod")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="0/3 nodes are available for this pod",
+            local_cause="this Job's own resource request asks for a GPU that no node "
+                        "in the cluster has",
+            local_reason="the pod requests one GPU and the cluster has no GPU node",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: no node fits this pod")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_SHARED_GATEWAY_REFUSING = Propagation(
+    key="shared-gateway-refusing",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the shared API gateway refuses connections, so every pod whose readiness "
+           "check calls through it fails its probe",
+    shared_cause="the shared API gateway refuses connections, so every pod whose "
+                 "readiness check calls through it fails its probe",
+    shared_reason="14 pods across 6 namespaces report the same Unhealthy error, "
+                  "readiness probe failed because the API gateway refused the "
+                  "connection, and every one of them names the same gateway",
+    distractor_cause="the workloads' own readiness probes were pointed at the wrong "
+                     "path in the last rollout",
+    distractor_reason="the probe paths are unchanged and answer when called "
+                      "directly; only the hop through the gateway fails",
+    rationale="this workload's readiness check calls through the shared API "
+              "gateway, and the gateway is refusing every connection; the "
+              "workload's own probe is unchanged",
+    remedy="Restore the shared API gateway (restart it or roll back its last "
+           "config) and let the probes pass; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=Unhealthy)",
+        ("Gateway named by failing readiness probes: one, and it refused every "
+         "call\n"
+         "14 pods across 6 namespaces report the same error:\n"
+         "  Readiness probe failed: API gateway: connection refused\n"
+         "distinct gateways in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Gateway named by failing readiness probes: one per failing pod\n"
+        "pods reporting a readiness failure name no gateway in common, and\n"
+        "no two of them fail the same way: HTTP 500, timeout, missing path\n"
+        "distinct gateways in the failing set: one per failing pod"
+    ),
+    origin_state=("refused", "one per failing pod"),
+    origin_variants=(
+        (("Gateway named by failing readiness probes: one, and it refused every "
+          "call\n"
+          "14 pods across 6 namespaces report the same error:\n"
+          "  Readiness probe failed: API gateway: connection refused\n"
+          "distinct gateways in the failing set: 1"),
+         ("Gateway named by failing readiness probes: one per failing pod\n"
+          "pods reporting a readiness failure name no gateway in common, and\n"
+          "no two of them fail the same way: HTTP 500, timeout, missing path\n"
+          "distinct gateways in the failing set: one per failing pod")),
+        (("every Unhealthy event in the last 20m names the same API gateway\n"
+          "the gateway refused all 14 probe calls\n"
+          "the gateway's own listener has accepted nothing since"),
+         ("the Unhealthy events in the last 20m name a different gateway each: "
+          "one per failing pod\n"
+          "each probe fails for its own reason: a 500, a timeout, a missing path\n"
+          "every named gateway accepts connections")),
+        (("Warning  Unhealthy  kubelet  Readiness probe failed: API gateway: "
+          "connection refused (same gateway for 14 of 14 failing pods)"),
+         ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe failed "
+          "with statuscode: 500 (gateways named: one per failing pod)")),
+        (("API gateway in common across failing probes: 1\n"
+          "outcome of every probe call through it: refused\n"
+          "failing pods: 14 in 6 namespaces"),
+         ("API gateway in common across failing probes: 0, one per failing pod\n"
+          "outcome: a different error for each pod\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: 503",
+            local_cause="this Deployment's own readiness path was renamed in its "
+                        "last image and the probe still calls the old one",
+            local_reason="the probe asks for a path the new image answers with 404 "
+                         "and the handler reports that as not ready",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Running",
+            issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: dependency check did not pass",
+            local_cause="this StatefulSet's own readiness check calls a sidecar that "
+                        "its last rollout removed from the pod",
+            local_reason="the check dials a sidecar port that nothing in the pod "
+                         "listens on any more",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nReady: False\nEvents: Warning  Unhealthy  kubelet  "
+                  "Readiness probe failed: dependency check did not pass")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="first outbound call failed on start, exiting",
+            local_cause="this Job's own container exits on its first failed outbound call "
+                        "because its retry budget is set to zero",
+            local_reason="the retry count is 0, so one failed call ends the process",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: first outbound call failed on start "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="first outbound call failed on start",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_RUNTIME_CLASS_REMOVED = Propagation(
+    key="runtime-class-removed",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the sandboxed RuntimeClass handler was removed from the nodes, so every "
+           "pod that asks for it fails to create its sandbox",
+    shared_cause="the sandboxed RuntimeClass handler was removed from the nodes, so "
+                 "every pod that asks for it fails to create its sandbox",
+    shared_reason="8 pods across 4 namespaces report the same FailedCreatePodSandBox "
+                  "error, no runtime for the sandboxed handler is configured, and "
+                  "every one of them asks for that one handler",
+    distractor_cause="the workloads' own pod specs gained a runtimeClassName in the "
+                     "last chart release",
+    distractor_reason="the failing pods have asked for the sandboxed class for "
+                      "months and ran fine until the node runtime config changed",
+    rationale="this workload asks for the sandboxed RuntimeClass, and the nodes no "
+              "longer have a handler for it; every pod that asks for the same "
+              "class fails the same way and the workload's own spec is unchanged",
+    remedy="Restore the sandboxed handler in the container runtime config on every "
+           "node (or roll back the runtime config change); the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_events (cluster-wide, reason=FailedCreatePodSandBox)",
+        ("Sandbox handler across the cluster: no runtime for the sandboxed class\n"
+         "8 pods across 4 namespaces report the same error:\n"
+         "  Failed to create pod sandbox: no runtime for \"sandboxed\" is "
+         "configured\n"
+         "distinct runtime handlers in the failing set: 1"),
+    ),
+    healthy_origin_content=(
+        "Sandbox handler across the cluster: one per failing pod\n"
+        "pods reporting a sandbox failure name no handler in common, and\n"
+        "no two of them fail the same way: cgroup limit, seccomp profile "
+        "missing,\n"
+        "hostPort in use\n"
+        "distinct runtime handlers in the failing set: one per failing pod"
+    ),
+    origin_state=("no runtime", "one per failing pod"),
+    origin_variants=(
+        (("Sandbox handler across the cluster: no runtime for the sandboxed class\n"
+          "8 pods across 4 namespaces report the same error:\n"
+          "  Failed to create pod sandbox: no runtime for \"sandboxed\" is "
+          "configured\n"
+          "distinct runtime handlers in the failing set: 1"),
+         ("Sandbox handler across the cluster: one per failing pod\n"
+          "pods reporting a sandbox failure name no handler in common, and\n"
+          "no two of them fail the same way: cgroup limit, seccomp profile "
+          "missing,\n"
+          "hostPort in use\n"
+          "distinct runtime handlers in the failing set: one per failing pod")),
+        (("every FailedCreatePodSandBox event in the last 20m names the sandboxed "
+          "handler\n"
+          "the nodes report no runtime configured for it since the last runtime "
+          "config push\n"
+          "pods failing on it: 8 in 4 namespaces"),
+         ("the FailedCreatePodSandBox events in the last 20m name a handler in "
+          "common: none, one per failing pod\n"
+          "each sandbox fails for its own reason: a cgroup limit, a missing "
+          "seccomp profile, a busy hostPort\n"
+          "every handler the nodes list is configured")),
+        (("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+          "no runtime for \"sandboxed\" is configured (8 of 8 failing pods)"),
+         ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+          "hostPort 8080 already in use (handlers named: one per failing pod)")),
+        (("runtime handler in common across failing sandboxes: 1, sandboxed\n"
+          "handler state on the nodes: no runtime configured\n"
+          "failing pods: 8 in 4 namespaces"),
+         ("runtime handler in common across failing sandboxes: 0, one per failing "
+          "pod\n"
+          "handler state on the nodes: every listed handler configured\n"
+          "failing pods: 3 in 3 namespaces")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this Deployment's own pod spec asks for a seccomp profile "
+                        "the node image never shipped",
+            local_reason="the securityContext names a localhost seccomp profile "
+                         "that no node has on disk",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod "
+                  "sandbox: sandbox creation failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this StatefulSet's own container requests a hostPort that "
+                        "another pod on every node already holds",
+            local_reason="the hostPort it asks for is taken on each node by a "
+                         "DaemonSet that arrived last week",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nRuntimeClassName: sandboxed\nEvents: Warning  "
+                  "FailedCreatePodSandBox  kubelet  Failed to create pod sandbox: "
+                  "sandbox creation failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="Failed to create pod sandbox for pod {pod}",
+            local_cause="this Job's own pod spec sets a cgroup parent that does not "
+                        "exist on the nodes",
+            local_reason="the pod asks for a cgroup parent path the nodes' cgroup "
+                         "tree does not contain",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedCreatePodSandBox  kubelet  Failed to create pod "
+                  "sandbox: sandbox creation failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CSI_CONTROLLER_OOMKILLED = Propagation(
+    key="csi-controller-oomkilled",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the block-ssd CSI controller is OOM-killed on every start, so no claim "
+           "on that class gets a volume",
+    shared_cause="the block-ssd CSI controller is OOM-killed on every start, so no "
+                 "claim on that class gets a volume",
+    shared_reason="storage-system/block-ssd-csi-controller shows 0 of 2 ready with "
+                  "both pods OOMKilled, its last restart 40s ago with exit 137, and "
+                  "0 PersistentVolumes have bound on block-ssd in the last 20m",
+    distractor_cause="the workloads' own claims were recreated with the wrong access "
+                     "mode in the last chart release",
+    distractor_reason="the claims ask for the same access mode they always did and "
+                      "the class supports it; the provisioner has simply not "
+                      "answered any of them",
+    rationale="this workload's claim is on the block-ssd class, and that class's "
+              "controller is OOM-killed before it can provision anything; the "
+              "workload's own claim is unchanged",
+    remedy="Raise the block-ssd CSI controller's memory limit (or fix its leak) so "
+           "it stays up and provisions; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass block-ssd",
+        ("block-ssd controller state: OOMKilled on every start\n"
+         "provisioner: example.com/block-ssd-csi\n"
+         "controller storage-system/block-ssd-csi-controller: 0/2 ready, OOMKilled\n"
+         "last restart: 40s ago, exit 137\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "block-ssd controller state: Running\n"
+        "provisioner: example.com/block-ssd-csi\n"
+        "controller storage-system/block-ssd-csi-controller: 2/2 ready, Running\n"
+        "last restart: none in 7d\n"
+        "PersistentVolumes bound in the last 20m: 5"
+    ),
+    origin_state=("OOMKilled", "Running"),
+    origin_variants=(
+        (("block-ssd controller state: OOMKilled on every start\n"
+          "provisioner: example.com/block-ssd-csi\n"
+          "controller storage-system/block-ssd-csi-controller: 0/2 ready, "
+          "OOMKilled\n"
+          "last restart: 40s ago, exit 137\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("block-ssd controller state: Running\n"
+          "provisioner: example.com/block-ssd-csi\n"
+          "controller storage-system/block-ssd-csi-controller: 2/2 ready, Running\n"
+          "last restart: none in 7d\n"
+          "PersistentVolumes bound in the last 20m: 5")),
+        (("the block-ssd CSI controller is OOMKilled at its 256Mi limit on every "
+          "start\n"
+          "both controller pods have exit 137 in their last termination\n"
+          "no block-ssd claim has bound in 20m"),
+         ("the block-ssd CSI controller has been Running within its limit for 7d\n"
+          "both controller pods report 0 restarts\n"
+          "5 block-ssd claims bound in the last 20m")),
+        (("Warning  BackOff  kubelet  Back-off restarting failed container "
+          "block-ssd-csi-controller (OOMKilled, exit 137)"),
+         ("Normal  Started  kubelet  Started container block-ssd-csi-controller "
+          "(Running, 2 of 2 ready)")),
+        (("class block-ssd provisioner health: OOMKilled\n"
+          "controller pods ready: 0 of 2\n"
+          "claims waiting on this class: 5, bound in 20m: 0"),
+         ("class block-ssd provisioner health: Running\n"
+          "controller pods ready: 2 of 2\n"
+          "claims waiting on this class: 0, bound in 20m: 5")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim asks for a storage class name "
+                        "with a typo, so no provisioner picks it up",
+            local_reason="the claim names a class one letter off from any class in "
+                         "the cluster",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this StatefulSet's own volumeClaimTemplate asks for 10 TiB, "
+                        "more than the class's per-volume cap",
+            local_reason="the template requests a size the class will never "
+                         "provision",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.MountDevice failed for volume \"{pvc}\": the "
+                     "controller has not published the volume",
+            local_cause="this Job's own pod mounts the same claim twice with "
+                        "conflicting mount options",
+            local_reason="two volumeMounts name the same claim, one read-only and "
+                         "one read-write, and the second mount fails",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.MountDevice failed for volume "
+                  "\"{pvc}\": mount failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CSI_CONTROLLER_UNSCHEDULABLE = Propagation(
+    key="csi-controller-unschedulable",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the archive-hdd CSI controller cannot be scheduled, so claims on that "
+           "class are never provisioned",
+    shared_cause="the archive-hdd CSI controller cannot be scheduled, so claims on "
+                 "that class are never provisioned",
+    shared_reason="storage-system/archive-hdd-csi-controller shows 0 of 1 ready and "
+                  "Pending because its node selector storage-tier=archive matches "
+                  "no node, and 0 PersistentVolumes have bound on archive-hdd in "
+                  "the last 20m",
+    distractor_cause="the workloads' own claim templates were switched to a class "
+                     "name with a typo in the last chart release",
+    distractor_reason="the claims name archive-hdd exactly and the class exists; "
+                      "its controller has no node to run on",
+    rationale="this workload's claim is on the archive-hdd class, and that class's "
+              "controller is Pending with no node matching its selector, so "
+              "nothing on the class is provisioned; the workload's own claim is "
+              "unchanged",
+    remedy="Label a node storage-tier=archive (or fix the controller's node "
+           "selector) so the archive-hdd controller can run; the flagged workloads "
+           "need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass archive-hdd",
+        ("archive-hdd controller placement: its node selector matches no node\n"
+         "provisioner: example.com/archive-hdd-csi\n"
+         "controller storage-system/archive-hdd-csi-controller: 0/1 ready, Pending "
+         "(node selector matches no node)\n"
+         "node selector: storage-tier=archive\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "archive-hdd controller placement: Running on its archive node\n"
+        "provisioner: example.com/archive-hdd-csi\n"
+        "controller storage-system/archive-hdd-csi-controller: 1/1 ready, Running\n"
+        "node selector: storage-tier=archive (1 node)\n"
+        "PersistentVolumes bound in the last 20m: 3"
+    ),
+    origin_state=("matches no node", "Running"),
+    origin_variants=(
+        (("archive-hdd controller placement: its node selector matches no node\n"
+          "provisioner: example.com/archive-hdd-csi\n"
+          "controller storage-system/archive-hdd-csi-controller: 0/1 ready, "
+          "Pending (node selector matches no node)\n"
+          "node selector: storage-tier=archive\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("archive-hdd controller placement: Running on its archive node\n"
+          "provisioner: example.com/archive-hdd-csi\n"
+          "controller storage-system/archive-hdd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "node selector: storage-tier=archive (1 node)\n"
+          "PersistentVolumes bound in the last 20m: 3")),
+        (("the archive-hdd CSI controller is Pending because its node selector "
+          "matches no node\n"
+          "the label storage-tier=archive is on 0 of 3 nodes since the last node "
+          "pool rollout\n"
+          "no archive-hdd claim has bound in 20m"),
+         ("the archive-hdd CSI controller is Running on the node labelled "
+          "storage-tier=archive\n"
+          "the label is on 1 of 3 nodes\n"
+          "3 archive-hdd claims bound in the last 20m")),
+        (("Warning  FailedScheduling  default-scheduler  0/3 nodes are available: "
+          "3 node(s) didn't match Pod's node affinity/selector "
+          "(archive-hdd-csi-controller: selector matches no node)"),
+         ("Normal  Scheduled  default-scheduler  Successfully assigned "
+          "storage-system/archive-hdd-csi-controller to the archive node "
+          "(Running)")),
+        (("class archive-hdd provisioner placement: matches no node\n"
+          "controller pods ready: 0 of 1\n"
+          "claims waiting on this class: 3, bound in 20m: 0"),
+         ("class archive-hdd provisioner placement: Running, 1 node matched\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 0, bound in 20m: 3")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim pins a volume by name that "
+                        "another claim already holds",
+            local_reason="the claim's volumeName points at a PersistentVolume bound "
+                         "to a different claim",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Job's own claim asks for ReadWriteMany on a class that "
+                        "only offers ReadWriteOnce",
+            local_reason="the claim's access mode is one the class cannot provide",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="init step waited 120s for its data volume and gave up",
+            local_cause="this StatefulSet's own init container polls a volume path "
+                        "that its last chart release renamed, so it never sees the "
+                        "disk that is mounted",
+            local_reason="the init step waits on a path the chart no longer mounts "
+                         "the disk at",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: init step gave up waiting for its data volume "
+                  "(3 of 3 sampled restarts)")),
+            log_cause="init step gave up waiting for its data volume",
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_PROVISIONER_CREDENTIALS_ROTATED = Propagation(
+    key="provisioner-credentials-rotated",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the encrypted-ssd provisioner's backend credentials were rotated, so the "
+           "backend refuses every new volume request",
+    shared_cause="the encrypted-ssd provisioner's backend credentials were rotated, "
+                 "so the backend refuses every new volume request",
+    shared_reason="storage-system/encrypted-ssd-csi-controller is 1 of 1 ready, but "
+                  "its last provision error says the backend refused credentials "
+                  "(401), and 0 PersistentVolumes have bound on encrypted-ssd in "
+                  "the last 20m",
+    distractor_cause="the workloads' own service accounts lost the storage role in "
+                     "the last RBAC change",
+    distractor_reason="claims need no service account role to bind, and the refusal "
+                      "comes from the storage backend, not the API server",
+    rationale="this workload's claim is on the encrypted-ssd class, and that "
+              "class's backend refuses the provisioner's credentials, so no claim "
+              "on it binds; the workload's own claim is unchanged",
+    remedy="Update the encrypted-ssd provisioner's backend secret with the rotated "
+           "credentials and restart it; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass encrypted-ssd",
+        ("encrypted-ssd backend provision errors: refused credentials on every "
+         "call\n"
+         "provisioner: example.com/encrypted-ssd-csi\n"
+         "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+         "Running\n"
+         "last provision error: backend refused credentials (401)\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "encrypted-ssd backend provision errors: none\n"
+        "provisioner: example.com/encrypted-ssd-csi\n"
+        "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+        "Running\n"
+        "last provision error: none\n"
+        "PersistentVolumes bound in the last 20m: 6"
+    ),
+    origin_state=("refused credentials", "none"),
+    origin_variants=(
+        (("encrypted-ssd backend provision errors: refused credentials on every "
+          "call\n"
+          "provisioner: example.com/encrypted-ssd-csi\n"
+          "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "last provision error: backend refused credentials (401)\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("encrypted-ssd backend provision errors: none\n"
+          "provisioner: example.com/encrypted-ssd-csi\n"
+          "controller storage-system/encrypted-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "last provision error: none\n"
+          "PersistentVolumes bound in the last 20m: 6")),
+        (("the encrypted-ssd controller is up but its backend has refused "
+          "credentials on all 6 provision calls in 20m\n"
+          "the backend rotated its access credentials overnight and the provisioner still "
+          "holds the old ones\n"
+          "no encrypted-ssd claim has bound since"),
+         ("the encrypted-ssd controller is up and its backend accepted all 6 "
+          "provision calls in 20m\n"
+          "provision errors in that window: none\n"
+          "6 encrypted-ssd claims bound in the last 20m")),
+        (("Warning  ProvisioningFailed  example.com/encrypted-ssd-csi  failed to "
+          "provision volume: backend refused credentials (401)"),
+         ("Normal  ProvisioningSucceeded  example.com/encrypted-ssd-csi  "
+          "Successfully provisioned volume (errors in 20m: none)")),
+        (("class encrypted-ssd backend auth: refused credentials\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 6, bound in 20m: 0"),
+         ("class encrypted-ssd backend auth: accepted, errors none\n"
+          "controller pods ready: 1 of 1\n"
+          "claims waiting on this class: 0, bound in 20m: 6")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim was created in the wrong "
+                        "namespace by its chart, so the pod never finds it",
+            local_reason="the chart rendered the claim into a different namespace "
+                         "than the Deployment",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this StatefulSet's own claim template sets a selector that "
+                        "no PersistentVolume label matches",
+            local_reason="the template's selector asks for a volume label nothing "
+                         "in the cluster carries",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the backend "
+                     "did not complete the attach",
+            local_cause="this Job's own claim is bound to a volume still attached to "
+                        "a node that was deleted without detaching",
+            local_reason="the volume's attachment record names a node that no "
+                         "longer exists",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_STORAGE_BACKEND_FULL = Propagation(
+    key="storage-backend-full",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the bulk-nvme storage backend is out of space, so the provisioner cannot "
+           "carve a new volume for any claim on that class",
+    shared_cause="the bulk-nvme storage backend is out of space, so the provisioner "
+                 "cannot carve a new volume for any claim on that class",
+    shared_reason="storage-system/bulk-nvme-csi-controller is 1 of 1 ready, but the "
+                  "backend reports out of space with 0 GiB free of 4 TiB, and 0 "
+                  "PersistentVolumes have bound on bulk-nvme in the last 20m",
+    distractor_cause="the workloads' own claims ask for more space than their "
+                     "namespace quota allows",
+    distractor_reason="every namespace involved has quota to spare, and the claims "
+                      "were admitted; the backend has no space to fill them",
+    rationale="this workload's claim is on the bulk-nvme class, and that class's "
+              "backend has no free space to provision from; the workload's own "
+              "claim is unchanged",
+    remedy="Free or add capacity on the bulk-nvme backend (delete released volumes "
+           "or extend the pool); the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass bulk-nvme",
+        ("bulk-nvme backend: out of space\n"
+         "provisioner: example.com/bulk-nvme-csi\n"
+         "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+         "backend capacity: out of space (0 GiB free of 4 TiB)\n"
+         "PersistentVolumes bound in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "bulk-nvme backend: space remaining\n"
+        "provisioner: example.com/bulk-nvme-csi\n"
+        "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+        "backend capacity: space remaining 1.9 TiB of 4 TiB\n"
+        "PersistentVolumes bound in the last 20m: 4"
+    ),
+    origin_state=("out of space", "space remaining"),
+    origin_variants=(
+        (("bulk-nvme backend: out of space\n"
+          "provisioner: example.com/bulk-nvme-csi\n"
+          "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+          "backend capacity: out of space (0 GiB free of 4 TiB)\n"
+          "PersistentVolumes bound in the last 20m: 0"),
+         ("bulk-nvme backend: space remaining\n"
+          "provisioner: example.com/bulk-nvme-csi\n"
+          "controller storage-system/bulk-nvme-csi-controller: 1/1 ready, Running\n"
+          "backend capacity: space remaining 1.9 TiB of 4 TiB\n"
+          "PersistentVolumes bound in the last 20m: 4")),
+        (("the bulk-nvme backend is out of space: 0 GiB free of 4 TiB\n"
+          "the controller is up and every provision call fails on capacity\n"
+          "no bulk-nvme claim has bound in 20m"),
+         ("the bulk-nvme backend has space remaining: 1.9 TiB free of 4 TiB\n"
+          "the controller is up and every provision call in 20m succeeded\n"
+          "4 bulk-nvme claims bound in the last 20m")),
+        (("Warning  ProvisioningFailed  example.com/bulk-nvme-csi  failed to "
+          "provision volume: backend out of space (0 GiB free)"),
+         ("Normal  ProvisioningSucceeded  example.com/bulk-nvme-csi  Successfully "
+          "provisioned volume (space remaining 1.9 TiB)")),
+        (("class bulk-nvme backend capacity: out of space\n"
+          "free: 0 GiB of 4 TiB\n"
+          "claims waiting on this class: 4, bound in 20m: 0"),
+         ("class bulk-nvme backend capacity: space remaining\n"
+          "free: 1.9 TiB of 4 TiB\n"
+          "claims waiting on this class: 0, bound in 20m: 4")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Deployment's own claim asks for a size below the "
+                        "class's minimum, which the provisioner rejects",
+            local_reason="the claim requests 100Mi and the class provisions nothing "
+                         "under 1Gi",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
+                  "available: pod has unbound immediate PersistentVolumeClaims")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="Pending",
+            issue="Unschedulable",
+            reason="no node has room for the pod",
+            evidence="pod has unbound immediate PersistentVolumeClaims",
+            local_cause="this Job's own claim names a snapshot as its data source "
+                        "that was pruned by the retention policy",
+            local_reason="the claim's dataSource points at a VolumeSnapshot that no "
+                         "longer exists",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Status: Pending\nVolumes: {pvc} (PersistentVolumeClaim, "
+                  "unbound)\nEvents: Warning  FailedScheduling  default-scheduler  "
+                  "0/3 nodes are available: pod has unbound immediate "
+                  "PersistentVolumeClaims")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the backend "
+                     "could not allocate the attach",
+            local_cause="this StatefulSet's own volume was resized past the "
+                        "backend's per-volume cap and the failed resize left it "
+                        "detached",
+            local_reason="the claim's last resize was refused by the backend and "
+                         "the volume has not reattached since",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_CSI_DRIVER_VERSION_MISMATCH = Propagation(
+    key="csi-driver-version-mismatch",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the replicated-ssd CSI controller was upgraded ahead of its node "
+           "plugins, so volumes it provisions cannot be staged on any node",
+    shared_cause="the replicated-ssd CSI controller was upgraded ahead of its node "
+                 "plugins, so volumes it provisions cannot be staged on any node",
+    shared_reason="storage-system/replicated-ssd-csi-controller is 1 of 1 ready at "
+                  "driver API v2 while every node plugin is still at v1, and of the "
+                  "5 PersistentVolumes bound on replicated-ssd in the last 20m, 0 "
+                  "have been staged on any node",
+    distractor_cause="the workloads' own pods were moved to nodes without the CSI "
+                     "node plugin in the last node pool rollout",
+    distractor_reason="every node runs the replicated-ssd node plugin and reports "
+                      "it healthy; the plugin is a version the controller no longer "
+                      "speaks to",
+    rationale="this workload's volume is on the replicated-ssd class, and that "
+              "class's controller provisions volumes its older node plugins cannot "
+              "stage; the workload's own volume spec is unchanged",
+    remedy="Roll the replicated-ssd node plugin DaemonSet to the controller's "
+           "version (or roll the controller back); the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related storageclass replicated-ssd",
+        ("replicated-ssd driver versions: mismatch between controller and node "
+         "plugins\n"
+         "provisioner: example.com/replicated-ssd-csi\n"
+         "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+         "Running\n"
+         "driver API: controller v2, node plugins v1 (mismatch)\n"
+         "PersistentVolumes bound in the last 20m: 5, staged on a node: 0"),
+    ),
+    healthy_origin_content=(
+        "replicated-ssd driver versions: in step\n"
+        "provisioner: example.com/replicated-ssd-csi\n"
+        "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+        "Running\n"
+        "driver API: controller v2, node plugins v2, in step\n"
+        "PersistentVolumes bound in the last 20m: 5, staged on a node: 5"
+    ),
+    origin_state=("mismatch", "in step"),
+    origin_variants=(
+        (("replicated-ssd driver versions: mismatch between controller and node "
+          "plugins\n"
+          "provisioner: example.com/replicated-ssd-csi\n"
+          "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "driver API: controller v2, node plugins v1 (mismatch)\n"
+          "PersistentVolumes bound in the last 20m: 5, staged on a node: 0"),
+         ("replicated-ssd driver versions: in step\n"
+          "provisioner: example.com/replicated-ssd-csi\n"
+          "controller storage-system/replicated-ssd-csi-controller: 1/1 ready, "
+          "Running\n"
+          "driver API: controller v2, node plugins v2, in step\n"
+          "PersistentVolumes bound in the last 20m: 5, staged on a node: 5")),
+        (("the replicated-ssd controller speaks driver API v2 and every node "
+          "plugin still speaks v1: a mismatch\n"
+          "the controller was upgraded 25m ago and the node plugin DaemonSet was "
+          "not\n"
+          "5 volumes bound since then, 0 staged on any node"),
+         ("the replicated-ssd controller and every node plugin speak driver API "
+          "v2, in step\n"
+          "both were upgraded together 3d ago\n"
+          "5 volumes bound in 20m, all 5 staged")),
+        (("Warning  FailedMount  kubelet  MountVolume.MountDevice failed: node "
+          "plugin v1 cannot stage a v2 volume (driver version mismatch)"),
+         ("Normal  SuccessfulMountVolume  kubelet  MapVolume.MapPodDevice "
+          "succeeded (driver versions in step, v2/v2)")),
+        (("class replicated-ssd driver API: mismatch\n"
+          "controller: v2, node plugins: v1 on 3 of 3 nodes\n"
+          "volumes bound in 20m: 5, staged: 0"),
+         ("class replicated-ssd driver API: in step\n"
+          "controller: v2, node plugins: v2 on 3 of 3 nodes\n"
+          "volumes bound in 20m: 5, staged: 5")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment",
+            status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted into the pod",
+            evidence="MountVolume.MountDevice failed for volume \"{pvc}\": the node "
+                     "plugin could not stage the volume",
+            local_cause="this Deployment's own volume mount asks for a mount option "
+                        "the driver does not support",
+            local_reason="the claim's mountOptions carry a flag the driver rejects "
+                         "at stage",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nStatus: ContainerCreating\nEvents: Warning  "
+                  "FailedMount  kubelet  MountVolume.MountDevice failed for volume "
+                  "\"{pvc}\": stage failed")),
+            pass_confidence="high",
+        ),
+        Victim(
+            workload_kind="StatefulSet",
+            status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to the pod's node",
+            evidence="AttachVolume.Attach failed for volume \"{pvc}\": the node "
+                     "plugin did not acknowledge the attach",
+            local_cause="this StatefulSet's own volume was left attached to a node "
+                        "that was removed from the cluster before its pod moved",
+            local_reason="the volume's attachment still names the removed node and "
+                         "the new node cannot take it",
+            read=("get_events {ns}/{name}",
+                  ("Warning  FailedAttachVolume  attachdetach-controller  "
+                  "AttachVolume.Attach failed for volume \"{pvc}\": attach failed")),
+            pass_confidence="medium",
+        ),
+        Victim(
+            workload_kind="Job",
+            status="ContainerStartError",
+            issue="ContainerStartError",
+            reason="container {container} could not be started",
+            evidence="failed to start container: the data volume was not staged "
+                     "before the container's start deadline",
+            local_cause="this Job's own container entrypoint runs a filesystem check "
+                        "that fails on the volume's unclean journal",
+            local_reason="the entrypoint's fsck refuses the volume and exits before "
+                         "the main process starts",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
+                  "start container \"{container}\": data volume not ready")),
+            pass_confidence="high",
+        ),
+    ),
+)
+
+_T_NETPOL_DNS_EGRESS_MISSING = Propagation(
+    key="networkpolicy-dns-egress-missing",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's egress policy has no DNS rule, so every pod's name "
+           "lookups are dropped",
+    shared_cause="the egress policy in {ns} allows no DNS traffic, so every pod "
+                 "there fails to resolve any name",
+    shared_reason="{ns}/egress-to-app selects every pod in the namespace with "
+                  "policyTypes Egress and one rule, to app=backend on tcp/8080; "
+                  "it has no rule to kube-system on udp/53, so DNS is not "
+                  "allowed for any of the 6 selected pods",
+    distractor_cause="the workloads' own DNS settings were changed to a "
+                     "nameserver outside the cluster in the last chart release",
+    distractor_reason="every pod still uses the cluster DNS service address from "
+                      "its dnsPolicy ClusterFirst; the queries leave the pod and "
+                      "are dropped at the policy",
+    rationale="the workload cannot resolve any name because the egress policy "
+              "that selects it has no DNS rule, and that is true of every pod "
+              "in {ns} right now",
+    remedy="Add an egress rule to {ns}/egress-to-app allowing udp/53 to "
+           "kube-system; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-app",
+        ("DNS egress allowed: no\n"
+         "podSelector: empty (selects every pod in the namespace)\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=backend tcp/8080\n"
+         "DNS udp/53 allowed: no\n"
+         "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "DNS egress allowed: yes\n"
+        "podSelector: empty (selects every pod in the namespace)\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=backend tcp/8080\n"
+        "egress: allow to kube-system udp/53\n"
+        "DNS udp/53 allowed: yes\n"
+        "pods selected: 6 of 6"
+    ),
+    origin_state=("allowed: no", "allowed: yes"),
+    origin_variants=(
+        (("DNS egress allowed: no\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=backend tcp/8080\n"
+          "DNS udp/53 allowed: no\n"
+          "pods selected: 6 of 6"),
+         ("DNS egress allowed: yes\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=backend tcp/8080\n"
+          "egress: allow to kube-system udp/53\n"
+          "DNS udp/53 allowed: yes\n"
+          "pods selected: 6 of 6")),
+        (("the namespace egress policy selects all 6 pods and lists one rule, to "
+          "the backend on tcp/8080\n"
+          "DNS to kube-system udp/53 allowed: no\n"
+          "name lookups from every selected pod time out"),
+         ("the namespace egress policy selects all 6 pods and lists two rules, "
+          "to the backend and to kube-system udp/53\n"
+          "DNS to kube-system udp/53 allowed: yes\n"
+          "name lookups from every selected pod answer in under 5ms")),
+        (("Warning  PolicyDrop  network-plugin  DNS query to kube-system udp/53 "
+          "dropped by egress-to-app (DNS allowed: no)"),
+         ("Normal  PolicyAllow  network-plugin  DNS query to kube-system udp/53 "
+          "passed egress-to-app (DNS allowed: yes)")),
+        (("egress-to-app DNS rule: missing, allowed: no\n"
+          "selected pods: 6 of 6\n"
+          "dropped udp/53 packets in the last 10m: 2410"),
+         ("egress-to-app DNS rule: present, allowed: yes\n"
+          "selected pods: 6 of 6\n"
+          "dropped udp/53 packets in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="name resolution failed on start",
+            local_cause="this Deployment's own pod spec sets dnsPolicy None with an "
+                        "empty nameserver list, so it has nowhere to send a query",
+            local_reason="the pod's own dnsConfig lists no nameserver at all",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: name resolution failed on start (3 of 3 "
+                  "sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-app",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: peer lookup failed",
+            local_cause="this StatefulSet's own readiness check resolves a hostname "
+                        "with a typo that no zone serves",
+            local_reason="the probe's own peer hostname is misspelled in the "
+                         "StatefulSet's config",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: peer lookup failed")),
+            pass_confidence="medium",
+            network_policies=("egress-to-app",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-backend could not resolve the backend name",
+            local_cause="this Job's own init container looks up a search domain "
+                        "that its chart dropped from the pod's dnsConfig",
+            local_reason="the init step queries a short name whose search domain "
+                         "the pod no longer carries",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-backend could not resolve "
+                  "the backend name")),
+            pass_confidence="high",
+            network_policies=("egress-to-app",),
+        ),
+    ),
+)
+
+_T_NETPOL_NAMESPACE_LABEL_DRIFTED = Propagation(
+    key="networkpolicy-namespace-label-drifted",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's broker egress policy names the messaging namespace by a "
+           "label that was renamed, so no pod can reach the broker",
+    shared_cause="the egress policy in {ns} names the messaging namespace by a "
+                 "label that was renamed, so no pod there can reach the message "
+                 "broker",
+    shared_reason="{ns}/egress-to-messaging selects app=orders pods, 3 of 6, with "
+                  "one Egress rule to namespaceSelector team=messaging on "
+                  "tcp/5672; that selector matches 0 namespaces since the "
+                  "messaging namespace was relabelled, so broker traffic from "
+                  "every selected pod is dropped",
+    distractor_cause="the message broker has stopped accepting connections from "
+                     "every namespace",
+    distractor_reason="the broker's own readiness passes and a pod in another "
+                      "namespace publishes to it without error",
+    rationale="the workload cannot reach the broker because the egress policy "
+              "that selects it matches no namespace any more, and that is true "
+              "of every selected pod in {ns} right now",
+    remedy="Update the namespaceSelector in {ns}/egress-to-messaging to the "
+           "messaging namespace's current label; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-messaging",
+        ("Broker namespace match: no namespace carries the rule's label\n"
+         "podSelector: app=orders\n"
+         "policyTypes: Egress\n"
+         "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+         "namespaces matched: 0 (matches no namespace; label renamed)\n"
+         "pods selected: 3 of 6"),
+    ),
+    healthy_origin_content=(
+        "Broker namespace match: the messaging namespace\n"
+        "podSelector: app=orders\n"
+        "policyTypes: Egress\n"
+        "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+        "namespaces matched: 1 (the messaging namespace)\n"
+        "pods selected: 3 of 6"
+    ),
+    origin_state=("no namespace", "messaging namespace"),
+    origin_variants=(
+        (("Broker namespace match: no namespace carries the rule's label\n"
+          "podSelector: app=orders\n"
+          "policyTypes: Egress\n"
+          "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+          "namespaces matched: 0 (matches no namespace; label renamed)\n"
+          "pods selected: 3 of 6"),
+         ("Broker namespace match: the messaging namespace\n"
+          "podSelector: app=orders\n"
+          "policyTypes: Egress\n"
+          "egress: allow to namespaceSelector team=messaging tcp/5672\n"
+          "namespaces matched: 1 (the messaging namespace)\n"
+          "pods selected: 3 of 6")),
+        (("the broker egress rule's namespaceSelector matches no namespace\n"
+          "the label team=messaging was renamed to owner=messaging 40m ago\n"
+          "broker connections from the 3 selected pods: all dropped"),
+         ("the broker egress rule's namespaceSelector matches the messaging "
+          "namespace\n"
+          "the label team=messaging is present on it\n"
+          "broker connections from the 3 selected pods: all open")),
+        (("Warning  PolicyDrop  network-plugin  egress to tcp/5672 dropped by "
+          "egress-to-messaging: namespaceSelector matches no namespace"),
+         ("Normal  PolicyAllow  network-plugin  egress to tcp/5672 passed "
+          "egress-to-messaging: namespaceSelector matches the messaging namespace")),
+        (("egress-to-messaging target: no namespace matched\n"
+          "selected pods: 3 of 6\n"
+          "dropped tcp/5672 connections in the last 10m: 96"),
+         ("egress-to-messaging target: the messaging namespace, 1 matched\n"
+          "selected pods: 3 of 6\n"
+          "dropped tcp/5672 connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="broker connection timed out during startup",
+            local_cause="this Deployment's own broker setting names a virtual host "
+                        "that was deleted from the broker last week",
+            local_reason="the connection setting's vhost no longer exists on the "
+                         "broker",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the broker timed out before the "
+                  "first publish (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-messaging",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-broker gave up after 120s",
+            local_cause="this Job's own init container waits on a broker queue that "
+                        "was renamed in the last release",
+            local_reason="the init step polls a queue name the broker no longer "
+                         "declares",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-broker gave up after 120s")),
+            pass_confidence="medium",
+            network_policies=("egress-to-messaging",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: broker check timed out",
+            local_cause="this StatefulSet's own readiness check publishes a test "
+                        "message with credentials the broker revoked",
+            local_reason="the probe's own broker login was revoked in the broker's "
+                         "last user cleanup",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: broker check timed out")),
+            pass_confidence="high",
+            network_policies=("egress-to-messaging",),
+        ),
+    ),
+)
+
+_T_NETPOL_PORT_MISMATCH = Propagation(
+    key="networkpolicy-port-mismatch",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's cache egress policy opens the cache's old port, so "
+           "every connection to its new port is dropped",
+    shared_cause="the egress policy in {ns} opens the cache's old port, so every "
+                 "connection to its new port is dropped",
+    shared_reason="{ns}/egress-to-cache selects role=worker pods, 5 of 6, with one "
+                  "Egress rule to app=cache on tcp/6379, while the cache now "
+                  "listens on tcp/6380; the port does not match, so every "
+                  "connection from the selected pods is dropped",
+    distractor_cause="the workloads' own cache client settings still name the "
+                     "cache's old port",
+    distractor_reason="the clients dial tcp/6380, the port the cache now listens "
+                      "on; it is the policy that still says tcp/6379",
+    rationale="the workload cannot reach the cache because the egress policy that "
+              "selects it opens a port the cache no longer listens on, and that "
+              "is true of every selected pod in {ns} right now",
+    remedy="Change the cache rule in {ns}/egress-to-cache from tcp/6379 to "
+           "tcp/6380; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/egress-to-cache",
+        ("Cache port match: no\n"
+         "podSelector: role=worker\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=cache tcp/6379\n"
+         "cache listening port: 6380\n"
+         "port match: no\n"
+         "pods selected: 5 of 6"),
+    ),
+    healthy_origin_content=(
+        "Cache port match: yes\n"
+        "podSelector: role=worker\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=cache tcp/6380\n"
+        "cache listening port: 6380\n"
+        "port match: yes\n"
+        "pods selected: 5 of 6"
+    ),
+    origin_state=("port match: no", "port match: yes"),
+    origin_variants=(
+        (("Cache port match: no\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=cache tcp/6379\n"
+          "cache listening port: 6380\n"
+          "port match: no\n"
+          "pods selected: 5 of 6"),
+         ("Cache port match: yes\n"
+          "podSelector: role=worker\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=cache tcp/6380\n"
+          "cache listening port: 6380\n"
+          "port match: yes\n"
+          "pods selected: 5 of 6")),
+        (("the cache egress rule opens tcp/6379 and the cache listens on "
+          "tcp/6380, port match: no\n"
+          "the cache moved ports in its last rollout and the policy was not "
+          "updated\n"
+          "cache connections from the 5 selected pods: all dropped"),
+         ("the cache egress rule opens tcp/6380 and the cache listens on "
+          "tcp/6380, port match: yes\n"
+          "the policy was updated with the cache's last rollout\n"
+          "cache connections from the 5 selected pods: all open")),
+        (("Warning  PolicyDrop  network-plugin  egress to app=cache tcp/6380 "
+          "dropped by egress-to-cache (rule opens tcp/6379, port match: no)"),
+         ("Normal  PolicyAllow  network-plugin  egress to app=cache tcp/6380 "
+          "passed egress-to-cache (rule opens tcp/6380, port match: yes)")),
+        (("egress-to-cache rule port: 6379, cache port: 6380, port match: no\n"
+          "selected pods: 5 of 6\n"
+          "dropped cache connections in the last 10m: 3120"),
+         ("egress-to-cache rule port: 6380, cache port: 6380, port match: yes\n"
+          "selected pods: 5 of 6\n"
+          "dropped cache connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="cache connection timed out during startup",
+            local_cause="this Deployment's own cache client pins a protocol version "
+                        "the cache stopped serving in its last upgrade",
+            local_reason="the client's own protocol setting is one the cache no "
+                         "longer answers",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the cache timed out before the "
+                  "first command (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-cache",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: cache check timed out",
+            local_cause="this StatefulSet's own readiness check pings the cache with "
+                        "an auth token that expired",
+            local_reason="the probe's own cache token passed its expiry last night",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: cache check timed out")),
+            pass_confidence="medium",
+            network_policies=("egress-to-cache",),
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="cache write-behind queue overflowed, exiting to flush",
+            log_cause="cache write-behind queue overflowed",
+            local_cause="this agent's own cache connection pool is sized larger than "
+                        "the cache's per-client connection cap",
+            local_reason="the agent's own pool opens more connections than the cache "
+                         "admits and the extras stall its queue",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: cache write-behind queue overflowed (3 of 3 "
+                  "sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("egress-to-cache",),
+        ),
+    ),
+)
+
+_T_NETPOL_ALLOW_SELECTOR_TYPO = Propagation(
+    key="networkpolicy-allow-selector-typo",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="the namespace's frontend allow policy has a typo in its pod selector, "
+           "so it selects nothing and the default-deny blocks every frontend pod",
+    shared_cause="the {ns} frontend allow policy has a typo in its pod selector, "
+                 "so it selects nothing and the namespace's default-deny blocks "
+                 "every frontend pod's egress",
+    shared_reason="{ns}/allow-frontend-egress carries podSelector role=fronted, "
+                  "which selects 0 of 6 pods, while the pods carry role=frontend; "
+                  "its one Egress rule to app=api on tcp/443 applies to nobody, "
+                  "and the namespace's default-deny egress applies to all 6",
+    distractor_cause="the workloads' own images lost their CA bundle in the last "
+                     "rebuild",
+    distractor_reason="the API's certificate verifies from a pod in another "
+                      "namespace running the same image; the connection from "
+                      "{ns} never leaves the pod",
+    rationale="the workload cannot reach the API because the policy meant to allow "
+              "it selects no pod, so the default-deny applies, and that is true "
+              "of every frontend pod in {ns} right now",
+    remedy="Fix the podSelector in {ns}/allow-frontend-egress from role=fronted "
+           "to role=frontend; the flagged workloads need no change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/allow-frontend-egress",
+        ("Frontend selector: selects no pod\n"
+         "podSelector: role=fronted (selects no pod)\n"
+         "policyTypes: Egress\n"
+         "egress: allow to app=api tcp/443\n"
+         "pods selected: 0 of 6\n"
+         "baseline: default-deny egress applies to the 6 unselected pods"),
+    ),
+    healthy_origin_content=(
+        "Frontend selector: every frontend pod\n"
+        "podSelector: role=frontend (selects every frontend pod)\n"
+        "policyTypes: Egress\n"
+        "egress: allow to app=api tcp/443\n"
+        "pods selected: 6 of 6\n"
+        "baseline: default-deny egress applies to 0 unselected pods"
+    ),
+    origin_state=("selects no pod", "every frontend pod"),
+    origin_variants=(
+        (("Frontend selector: selects no pod\n"
+          "podSelector: role=fronted (selects no pod)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=api tcp/443\n"
+          "pods selected: 0 of 6\n"
+          "baseline: default-deny egress applies to the 6 unselected pods"),
+         ("Frontend selector: every frontend pod\n"
+          "podSelector: role=frontend (selects every frontend pod)\n"
+          "policyTypes: Egress\n"
+          "egress: allow to app=api tcp/443\n"
+          "pods selected: 6 of 6\n"
+          "baseline: default-deny egress applies to 0 unselected pods")),
+        (("the frontend allow policy's selector says role=fronted and selects no "
+          "pod\n"
+          "the 6 frontend pods carry role=frontend\n"
+          "with nothing selected, the namespace default-deny drops their egress"),
+         ("the frontend allow policy's selector says role=frontend and selects "
+          "every frontend pod\n"
+          "all 6 frontend pods carry role=frontend\n"
+          "their egress to the API passes the allow rule")),
+        (("Warning  PolicyDrop  network-plugin  egress to app=api tcp/443 dropped "
+          "by default-deny: allow-frontend-egress selects no pod (role=fronted)"),
+         ("Normal  PolicyAllow  network-plugin  egress to app=api tcp/443 passed "
+          "allow-frontend-egress: selector matches every frontend pod")),
+        (("allow-frontend-egress selector: role=fronted, selects no pod\n"
+          "frontend pods under default-deny: 6 of 6\n"
+          "dropped tcp/443 connections in the last 10m: 870"),
+         ("allow-frontend-egress selector: role=frontend, every frontend pod\n"
+          "frontend pods under default-deny: 0 of 6\n"
+          "dropped tcp/443 connections in the last 10m: 0")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="API connection timed out during startup",
+            local_cause="this Deployment's own API client pins a TLS version the "
+                        "API stopped accepting last month",
+            local_reason="the client's own TLS floor is one the API no longer "
+                         "negotiates",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection to the API timed out before the "
+                  "first request (3 of 3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("allow-frontend-egress",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: API check timed out",
+            local_cause="this StatefulSet's own readiness check sends the API a "
+                        "token from a service account that was deleted",
+            local_reason="the probe's own service account no longer exists, so its "
+                         "token is rejected",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: API check timed out")),
+            pass_confidence="medium",
+            network_policies=("allow-frontend-egress",),
+        ),
+        Victim(
+            workload_kind="Job", status="Init:CrashLoopBackOff",
+            issue="Init:CrashLoopBackOff",
+            reason="init container {init_container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="wait-for-api gave up after 120s",
+            local_cause="this Job's own init container calls the API through a proxy "
+                        "setting that names a proxy nobody runs any more",
+            local_reason="the init step's own proxy variable points at a host that "
+                         "was decommissioned",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  back-off restarting failed init "
+                  "container {init_container}: wait-for-api gave up after 120s")),
+            pass_confidence="high",
+            network_policies=("allow-frontend-egress",),
+        ),
+    ),
+)
+
+_T_NETPOL_INGRESS_DENY_ALL = Propagation(
+    key="networkpolicy-ingress-deny-all",
+    blast_radius="namespace",
+    scope_field="ns",
+    origin="a deny-all ingress policy selects every pod in the namespace, so no "
+           "inbound connection reaches any of them",
+    shared_cause="a deny-all ingress policy in {ns} blocks every inbound "
+                 "connection, so pods there that need their peers or their "
+                 "callers cannot become ready",
+    shared_reason="{ns}/deny-all-ingress selects every pod in the namespace, 6 of "
+                  "6, with policyTypes Ingress and an empty ingress list, so all "
+                  "ingress is denied to every pod",
+    distractor_cause="the workloads' own readiness ports were changed in the last "
+                     "chart release",
+    distractor_reason="the probe ports match the containers' listening ports; the "
+                      "probes fail because nothing inbound reaches the pods",
+    rationale="the workload cannot take any inbound connection because a deny-all "
+              "ingress policy selects it, and that is true of every pod in {ns} "
+              "right now",
+    remedy="Narrow or delete {ns}/deny-all-ingress and add allow rules for the "
+           "peers and callers each pod needs; the flagged workloads need no "
+           "change.",
+    confidence="high",
+    origin_read=(
+        "get_related networkpolicy {ns}/deny-all-ingress",
+        ("Ingress into this namespace: all ingress denied\n"
+         "podSelector: empty (selects every pod in the namespace)\n"
+         "policyTypes: Ingress\n"
+         "ingress: [] (no rules — all ingress denied)\n"
+         "pods selected: 6 of 6"),
+    ),
+    healthy_origin_content=(
+        "Ingress into this namespace: allow from the scheduler, on one pod\n"
+        "podSelector: app=legacy-batch\n"
+        "policyTypes: Ingress\n"
+        "ingress: allow from podSelector app=scheduler\n"
+        "pods selected: 1 of 6"
+    ),
+    origin_state=("all ingress denied", "allow from"),
+    origin_variants=(
+        (("Ingress into this namespace: all ingress denied\n"
+          "podSelector: empty (selects every pod in the namespace)\n"
+          "policyTypes: Ingress\n"
+          "ingress: [] (no rules — all ingress denied)\n"
+          "pods selected: 6 of 6"),
+         ("Ingress into this namespace: allow from the scheduler, on one pod\n"
+          "podSelector: app=legacy-batch\n"
+          "policyTypes: Ingress\n"
+          "ingress: allow from podSelector app=scheduler\n"
+          "pods selected: 1 of 6")),
+        (("the ingress policy selects all 6 pods and lists no rule, so all "
+          "ingress denied\n"
+          "peer and caller connections into every pod are dropped\n"
+          "the policy was applied 30m ago by a cluster-wide hardening job"),
+         ("the ingress policy selects 1 of 6 pods and lists one rule, allow from "
+          "the scheduler\n"
+          "peer and caller connections into the other 5 pods are untouched\n"
+          "the policy has not changed in 30d")),
+        (("Warning  PolicyDrop  network-plugin  ingress to every pod dropped by "
+          "deny-all-ingress: no rules, all ingress denied"),
+         ("Normal  PolicyAllow  network-plugin  ingress to app=legacy-batch passed "
+          "deny-all-ingress: allow from app=scheduler")),
+        (("deny-all-ingress scope: 6 of 6 pods, all ingress denied\n"
+          "inbound connections dropped in the last 10m: 4280\n"
+          "pods with a passing readiness probe: 0 of 6"),
+         ("deny-all-ingress scope: 1 of 6 pods, allow from app=scheduler\n"
+          "inbound connections dropped in the last 10m: 0\n"
+          "pods with a passing readiness probe: 6 of 6")),
+    ),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="last state terminated with exit code 1",
+            log_cause="cluster join got no reply from any peer",
+            local_cause="this Deployment's own cluster-join step expects a reply on a "
+                        "port its container never opens",
+            local_reason="the join step's own reply port is not in the container's "
+                         "listen list",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: cluster join got no reply from any peer (3 of "
+                  "3 sampled restarts)")),
+            pass_confidence="high",
+            network_policies=("deny-all-ingress",),
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+            reason="readiness probe on container {container} is failing",
+            evidence="Readiness probe failed: HTTP probe failed with statuscode: "
+                     "503, body: peer handshake did not complete",
+            local_cause="this StatefulSet's own readiness check waits on a quorum "
+                        "vote its own config sets one member too high",
+            local_reason="the quorum size in the StatefulSet's config is one more "
+                         "than its replica count",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Unhealthy  kubelet  Readiness probe failed: HTTP probe "
+                  "failed with statuscode: 503, body: peer handshake did not "
+                  "complete")),
+            pass_confidence="medium",
+            network_policies=("deny-all-ingress",),
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="RestartLoop", issue="RestartLoop",
+            reason="container {container} has restarted {restarts} times and is "
+                   "Running again between attempts",
+            evidence="watchdog: no scrape received in 60s, restarting",
+            log_cause="watchdog saw no scrape in 60s",
+            local_cause="this agent's own watchdog restarts it whenever its metrics "
+                        "endpoint goes 60s without a scrape, and the scrape "
+                        "interval is 90s",
+            local_reason="the agent's own watchdog window is shorter than the "
+                         "scrape interval it is configured with",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: watchdog saw no scrape in 60s (3 of 3 sampled "
+                  "restarts)")),
+            pass_confidence="high",
+            network_policies=("deny-all-ingress",),
+        ),
+    ),
+)
+
 
 _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_IMAGE_PULL_SECRET, _T_SECRET_KEY_RENAMED,
@@ -3257,7 +6573,20 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
                        _T_NODE_CONNTRACK_FULL, _T_LIMITRANGE_LOWERED,
                        _T_EGRESS_PROXY_DOWN, _T_NS_PVC_FULL, _T_MIGRATION_LOCK,
                        _T_POD_IDENTITY_WEBHOOK, _T_STORAGECLASS_POOL_RETIRED,
-                       _T_NETPOL_EGRESS_ALLOWLIST, _T_NODE_MEMORY_PRESSURE)
+                       _T_NETPOL_EGRESS_ALLOWLIST, _T_NODE_MEMORY_PRESSURE,
+                       _T_NODE_NETWORK_UNAVAILABLE, _T_NODE_KERNEL_DEADLOCK,
+                       _T_NODE_READONLY_FILESYSTEM,
+                       _T_NODE_FREQUENT_KUBELET_RESTART, _T_NODE_CORDONED_DRAINING,
+                       _T_NODE_CORRUPT_OVERLAY, _T_EXTERNAL_SECRETS_DOWN,
+                       _T_NETWORK_OPERATOR_DOWN, _T_CERT_MANAGER_DOWN,
+                       _T_METRICS_SERVER_DOWN, _T_SHARED_NFS_SERVER_DOWN,
+                       _T_CLUSTER_MAINTENANCE_TAINT, _T_SHARED_GATEWAY_REFUSING,
+                       _T_RUNTIME_CLASS_REMOVED, _T_CSI_CONTROLLER_OOMKILLED,
+                       _T_CSI_CONTROLLER_UNSCHEDULABLE,
+                       _T_PROVISIONER_CREDENTIALS_ROTATED, _T_STORAGE_BACKEND_FULL,
+                       _T_CSI_DRIVER_VERSION_MISMATCH, _T_NETPOL_DNS_EGRESS_MISSING,
+                       _T_NETPOL_NAMESPACE_LABEL_DRIFTED, _T_NETPOL_PORT_MISMATCH,
+                       _T_NETPOL_ALLOW_SELECTOR_TYPO, _T_NETPOL_INGRESS_DENY_ALL)
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:

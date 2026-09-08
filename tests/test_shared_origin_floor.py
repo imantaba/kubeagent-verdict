@@ -11,6 +11,12 @@ This test pins a floor at the build recipe itself, after the split and after
 `drop_held_out`, because that is the pile the model reads. The floor is 12
 rows of each half per scenario. A share that looks generous as emitted is
 not the number that matters; the surviving count is.
+
+On 2026-09-08 the recipe moved to size 8000, both halves to 12 percent, and
+the pool to forty-eight scenarios. That is 960 rows per half, 20 pairs per
+scenario before the split. The smallest scenario keeps 13 pairs in train
+and the largest 20. The floor stays at 12: the extra room is the point,
+because the split still takes groups by hash, not by count.
 """
 from collections import Counter
 
@@ -19,7 +25,7 @@ import pytest
 from kubeagent_verdict.dataset import generate
 from kubeagent_verdict.dataset import propagation as prop
 
-SEED, SIZE = 17, 5500  # the runbook's build recipe
+SEED, SIZE = 17, 8000  # the runbook's build recipe
 FLOOR = 12
 
 SHARED = "shared_origin"
@@ -51,3 +57,27 @@ def test_every_trainable_scenario_keeps_the_floor_in_train(train):
 def test_the_two_halves_survive_the_split_together(train):
     """The pair shares a group key, so the split can never take one half."""
     assert _per_origin(train, SHARED) == _per_origin(train, DECOY)
+
+
+def test_three_verdict_decoys_are_common_and_span_the_node_scenarios(train):
+    """The 0907 model wrote broken JSON on decoy halves with three verdicts.
+    It had seen few: 80 of 397 kept decoy rows carried three or more, and
+    every node-scoped one came from a single scenario. Two floors now: at
+    least 40 of every 100 decoy rows carry three or more verdicts, and the
+    node-scoped ones with three or more come from at least 5 scenarios.
+
+    The generator cycles a pair's width over 2..len(victims), so a scenario
+    with two victims can never render three. These floors hold only when
+    nearly every scenario has a third victim."""
+    radius = {p.key: p.blast_radius for p in prop.trainable_scenarios()}
+    decoys = [e for e in train if e.case == DECOY]
+    wide = [e for e in decoys if len(e.meta["expected"]) >= 3]
+    share = len(wide) / len(decoys)
+    node_keys = {e.meta["origin"] for e in wide
+                 if radius[e.meta["origin"]] == "node"}
+    assert share >= 0.40, (
+        f"{len(wide)} of {len(decoys)} decoy rows carry three or more "
+        f"verdicts, share {share:.3f}")
+    assert len(node_keys) >= 5, (
+        f"node-scoped three-verdict decoys come from {len(node_keys)} "
+        f"scenario(s): {sorted(node_keys)}")
