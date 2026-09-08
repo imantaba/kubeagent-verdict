@@ -433,7 +433,7 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
     the claim it stood for did not. The claim is stated directly now: the
-    shared answer is 0.373 of the multi-workload rows at 8/8, and the cap of
+    shared answer is 0.368 of the multi-workload rows at 12/12, and the cap of
     0.40 leaves room for one more raise but fails as soon as `multi` falls
     below a fifth of `shared_origin`.
 
@@ -537,7 +537,7 @@ def test_the_generator_emits_the_two_classes_near_evenly(rows):
     Two sources feed the independent side now. The paired half is exact by
     construction -- every `shared_origin` row is emitted with a
     `shared_origin_decoy` twin from the same salt, so those two contribute
-    64/64 at this module's SIZE and cannot drift. On top of that sit the surviving
+    96/96 at this module's SIZE and cannot drift. On top of that sit the surviving
     every-third-`multi` negatives, which have no positive counterpart, and
     they are the whole of the lean.
 
@@ -578,7 +578,7 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     pairing ever emits one-sidedly.
 
     The floor moved from 0.55 to 0.52 on 2026-09-08 when the halves went to
-    12%: the kept pile then read 0.551 at this size and 0.546 at the build
+    12%: the kept pile then read 0.556 at this size and 0.546 at the build
     size, and 0.52 keeps three points of room below both.
     """
     share = _independent_share(kept)
