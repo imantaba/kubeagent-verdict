@@ -16,6 +16,17 @@ from pathlib import Path
 from kubeagent_verdict.dataset import generate
 
 
+def _write_probe_file(path: Path, rows: list[generate.Example]) -> None:
+    """Write a diagnostic probe file and print its summary line.
+
+    Makes the parent directory if needed, writes the rows as JSONL, then
+    prints how many rows and twin pairs went to which file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    generate.write_jsonl(path, rows)
+    print(f"wrote {len(rows)} rows ({len(rows) // 2} twin pairs) to {path}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="kv-dataset")
     p.add_argument("--seed", type=int)
@@ -33,18 +44,10 @@ def main() -> None:
              "FILE and exit; --seed/--size/--out are not used")
     args = p.parse_args()
     if args.probe_wide is not None:
-        rows = generate.shared_origin_wide_probes()
-        args.probe_wide.parent.mkdir(parents=True, exist_ok=True)
-        generate.write_jsonl(args.probe_wide, rows)
-        print(f"wrote {len(rows)} rows ({len(rows) // 2} twin pairs) "
-              f"to {args.probe_wide}")
+        _write_probe_file(args.probe_wide, generate.shared_origin_wide_probes())
         return
     if args.probe_cousins is not None:
-        rows = generate.shared_origin_cousin_probes()
-        args.probe_cousins.parent.mkdir(parents=True, exist_ok=True)
-        generate.write_jsonl(args.probe_cousins, rows)
-        print(f"wrote {len(rows)} rows ({len(rows) // 2} twin pairs) "
-              f"to {args.probe_cousins}")
+        _write_probe_file(args.probe_cousins, generate.shared_origin_cousin_probes())
         return
     if args.seed is None or args.size is None or args.out is None:
         p.error("--seed, --size and --out are required "

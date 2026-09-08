@@ -425,6 +425,39 @@ def shared_origin_decoy_probes() -> list[Example]:
     return out
 
 
+def _shared_origin_twin_pairs(origins, pairs_per_origin, salt, width_of,
+                               error_prefix) -> list[Example]:
+    """Build twin pairs (a probe row and its decoy) over a list of origins.
+
+    Both halves of a pair use the same salted rng, so they draw identical
+    names and differ only in what the origin read says. `width_of(p, i)`
+    picks the victim count for pair `i` of origin `p`; returning `None`
+    means the full victim set. A repeated expected-workload key would merge
+    two pairs in the paired scoring, so it raises instead.
+    """
+    from kubeagent_verdict.dataset import cases
+
+    out: list[Example] = []
+    seen: dict[str, str] = {}
+    for p in origins:
+        for i in range(pairs_per_origin):
+            width = width_of(p, i)
+            probe = cases.shared_origin_probe(
+                p, _entry_rng(salt, p.key, str(i)), victims=width)
+            decoy = cases.shared_origin_decoy_probe(
+                p, _entry_rng(salt, p.key, str(i)), victims=width)
+            key = "|".join(sorted(probe.meta["expected"]))
+            if key in seen:
+                raise ValueError(
+                    f"{error_prefix} pair key collision: {seen[key]} and "
+                    f"{p.key}#{i} both drew {key!r}; a collision would "
+                    "merge two pairs in the paired scoring")
+            seen[key] = f"{p.key}#{i}"
+            out.append(probe)
+            out.append(decoy)
+    return out
+
+
 def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     """EVAL-ONLY, DIAGNOSTIC-ONLY: five twin pairs per held-out origin.
 
@@ -444,29 +477,12 @@ def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     pair key would silently merge two pairs in the paired scoring, so a
     collision raises instead of shrinking the set.
     """
-    from kubeagent_verdict.dataset import cases, propagation
+    from kubeagent_verdict.dataset import propagation
 
-    out: list[Example] = []
-    seen: dict[str, str] = {}
-    for p in propagation.all_scenarios():
-        for i in range(pairs_per_origin):
-            width = 2 if i % 2 == 1 and len(p.victims) >= 3 else None
-            probe = cases.shared_origin_probe(
-                p, _entry_rng("shared-origin-wide", p.key, str(i)),
-                victims=width)
-            decoy = cases.shared_origin_decoy_probe(
-                p, _entry_rng("shared-origin-wide", p.key, str(i)),
-                victims=width)
-            key = "|".join(sorted(probe.meta["expected"]))
-            if key in seen:
-                raise ValueError(
-                    f"wide-probe pair key collision: {seen[key]} and "
-                    f"{p.key}#{i} both drew {key!r}; a collision would "
-                    "merge two pairs in the paired scoring")
-            seen[key] = f"{p.key}#{i}"
-            out.append(probe)
-            out.append(decoy)
-    return out
+    return _shared_origin_twin_pairs(
+        propagation.all_scenarios(), pairs_per_origin, "shared-origin-wide",
+        lambda p, i: 2 if i % 2 == 1 and len(p.victims) >= 3 else None,
+        "wide-probe")
 
 
 def shared_origin_cousin_probes(pairs_per_origin: int = 1) -> list[Example]:
@@ -486,28 +502,11 @@ def shared_origin_cousin_probes(pairs_per_origin: int = 1) -> list[Example]:
     minimal contrast. A repeated pair key would silently merge two pairs in
     the paired scoring, so a collision raises instead of shrinking the set.
     """
-    from kubeagent_verdict.dataset import cases, propagation
+    from kubeagent_verdict.dataset import propagation
 
-    out: list[Example] = []
-    seen: dict[str, str] = {}
-    for p in propagation.trainable_scenarios():
-        for i in range(pairs_per_origin):
-            probe = cases.shared_origin_probe(
-                p, _entry_rng("shared-origin-cousin", p.key, str(i)),
-                victims=None)
-            decoy = cases.shared_origin_decoy_probe(
-                p, _entry_rng("shared-origin-cousin", p.key, str(i)),
-                victims=None)
-            key = "|".join(sorted(probe.meta["expected"]))
-            if key in seen:
-                raise ValueError(
-                    f"cousin-probe pair key collision: {seen[key]} and "
-                    f"{p.key}#{i} both drew {key!r}; a collision would "
-                    "merge two pairs in the paired scoring")
-            seen[key] = f"{p.key}#{i}"
-            out.append(probe)
-            out.append(decoy)
-    return out
+    return _shared_origin_twin_pairs(
+        propagation.trainable_scenarios(), pairs_per_origin,
+        "shared-origin-cousin", lambda p, i: None, "cousin-probe")
 
 
 def test_set() -> list[Example]:
