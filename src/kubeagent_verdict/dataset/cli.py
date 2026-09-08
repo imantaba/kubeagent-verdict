@@ -43,6 +43,8 @@ def main() -> None:
              "scenario, full width; diagnostic only, gates no release) to "
              "FILE and exit; --seed/--size/--out are not used")
     args = p.parse_args()
+    if args.probe_wide is not None and args.probe_cousins is not None:
+        p.error("--probe-wide and --probe-cousins are separate modes; pass one of them")
     if args.probe_wide is not None:
         _write_probe_file(args.probe_wide, generate.shared_origin_wide_probes())
         return

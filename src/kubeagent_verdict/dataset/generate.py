@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import json
 import random
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kubeagent_verdict.dataset.propagation import Propagation
 
 
 @dataclass(frozen=True)
@@ -425,8 +430,9 @@ def shared_origin_decoy_probes() -> list[Example]:
     return out
 
 
-def _shared_origin_twin_pairs(origins, pairs_per_origin, salt, width_of,
-                               error_prefix) -> list[Example]:
+def _shared_origin_twin_pairs(origins: Sequence[Propagation], pairs_per_origin: int,
+                              salt: str, width_of: Callable[[Propagation, int], int | None],
+                              error_prefix: str) -> list[Example]:
     """Build twin pairs (a probe row and its decoy) over a list of origins.
 
     Both halves of a pair use the same salted rng, so they draw identical

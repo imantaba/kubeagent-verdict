@@ -121,3 +121,19 @@ def test_cli_probe_cousins_writes_only_the_standalone_file(tmp_path, monkeypatch
     assert first["meta"]["case"] == "shared_origin_probe"
     # Standalone means standalone: no train/val/test/manifest beside it.
     assert [p.name for p in tmp_path.iterdir()] == ["probe-cousins.jsonl"]
+
+
+def test_cli_rejects_both_probe_flags_together(tmp_path, monkeypatch):
+    import pytest
+
+    from kubeagent_verdict.dataset import cli
+
+    wide = tmp_path / "probe-wide.jsonl"
+    cousins = tmp_path / "probe-cousins.jsonl"
+    monkeypatch.setattr(
+        "sys.argv",
+        ["kv-dataset", "--probe-wide", str(wide), "--probe-cousins", str(cousins)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    assert list(tmp_path.iterdir()) == []
