@@ -8,15 +8,17 @@ pinned lock file:
 That buys the exact dependency versions the release was built and
 evaluated against, not whatever `pyproject.toml`'s loose lower bounds
 resolve to today. The full pipeline is CPU-only, and the training step
-alone runs **about 17½ hours** on a workstation — run it under
+alone runs **about 28 hours** at the size-8000 build below (the 0907 run
+took about 8 seconds per example pass, and 16 or 32 threads gave the same
+wall time, so time scales with rows and nothing else) — run it under
 `nohup` and watch `out/adapter-checkpoint/progress.json` (step 3;
 **not** `train_log.json`, which does not exist until the run is over).
 
 1. **Dataset** (seconds):
 
-       kv-dataset --seed 17 --size 5500 --out out/dataset
+       kv-dataset --seed 17 --size 8000 --out out/dataset
 
-   Check `out/dataset/manifest.json`: train+val ≤ 5500 (the shortfall is
+   Check `out/dataset/manifest.json`: train+val ≤ 8000 (the shortfall is
    examples dropped for colliding with a corpus-test fixture's group),
    test > 0, every case present in `case_counts`.
 
@@ -480,6 +482,18 @@ alone runs **about 17½ hours** on a workstation — run it under
      The wide probe is a diagnostic instrument, not a release decider: its
      numbers say where to aim the next fix. The frozen exam is still the
      only thing a release argument may cite.
+
+     The cousin probe asks the other question. The wide probe asks the six
+     held-out origins five times each; the cousin probe asks every trained
+     scenario once. `kv-dataset --probe-cousins out/probe-cousins.jsonl`
+     writes one twin pair per trainable scenario (48 pairs, 96 rows) to its
+     own file, every decoy half at full width, and
+     `kv-eval --test out/probe-cousins.jsonl --endpoint <url>` scores it.
+     It is in-distribution on purpose. A model that scores well here and
+     fails the exam has a coverage gap; a model that fails here did not
+     learn to read the origin at all, and the next look is at the recipe.
+     Like the wide probe, it is a diagnostic and not a decider. Report
+     both beside the six deciders; neither one changes the verdict.
 
      One date matters when you compare decoy numbers across runs. On
      2026-09-05 two of the ten decoy rows changed by one line each. Their

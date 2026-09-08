@@ -81,7 +81,7 @@ proportions, and each kind teaches one specific skill:
 
 | Question type | Share | The skill it teaches |
 |---|---|---|
-| `attributed` | 18% | The obvious candidate is right — pick it, word for word |
+| `attributed` | 10% | The obvious candidate is right — pick it, word for word |
 | `none_of_these` | 15% | Sometimes *every* offered candidate is wrong. Say so. |
 | `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
 | `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
@@ -89,8 +89,8 @@ proportions, and each kind teaches one specific skill:
 | `multi` | 11% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
 | `empty_candidates` | 5% | Nothing is actually wrong. Do not invent a problem. |
-| `shared_origin` | 8% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
-| `shared_origin_decoy` | 8% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
+| `shared_origin` | 12% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
+| `shared_origin_decoy` | 12% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
 
 Those last two rows are new, and they are one row really: every
 `shared_origin` question is generated together with its `shared_origin_decoy`
@@ -315,9 +315,10 @@ not change at all.**
 
 **Change 1 — a new lesson type, from its own private scenarios.**
 
-`shared_origin` entered the curriculum at 4% (it is 8% now; Change 4 below
-says why): several workloads, one upstream cause, the same answer on every
-row.
+`shared_origin` entered the curriculum at 4% (it is 12% now; Change 4 below
+says how it reached 8%, and the last section of Part 3 says why it went on
+to 12%. Change 4 says why): several workloads, one upstream cause, the
+same answer on every row.
 
 The obvious way to build it would have been to reuse the six scenarios the exam
 already uses, with different names drawn. That would have been a trap. The
@@ -407,17 +408,22 @@ Both halves are 8% now. The budget came out of `attributed` again (26% →
 pairs in train after the split; a test pins the floor at 12 for the build
 recipe (seed 17, size 5500). 7% was tried first and left one scenario at 11.
 
-| | 4% build | 8% build |
-|---|---|---|
-| `shared_origin` pairs, as generated | 220 | 440 |
-| fewest pairs one scenario keeps in train | 5 | 14 |
-| training questions | 4,282 | 4,314 |
-| validation | 436 | 473 |
-| **exam (test.jsonl)** | **263** | **263 — byte-identical** |
+Both halves are 12% since the final retrain's data landed, the build size
+is 8000, and the floor test now pins 12 pairs at that recipe (seed 17, size
+8000). The last section of Part 3 says why.
+
+| | 4% build | 8% build | 12% build |
+|---|---|---|---|
+| `shared_origin` pairs, as generated | 220 | 440 | 960 |
+| fewest pairs one scenario keeps in train | 5 | 14 | 13 |
+| training questions | 4,282 | 4,314 | 6,358 |
+| validation | 436 | 473 | 671 |
+| **exam (test.jsonl)** | **263** | **263 — byte-identical** | **263 — byte-identical** |
 
 Among the questions that carry a cluster-wide read, the pile the model reads
-now holds 440 shared against 573 separate, 43 / 57. The numbers in the rest
-of this part describe the pile as it was when the pairing landed.
+held 440 shared against 573 separate, 43 / 57, at the 8% build; at the 12%
+build it holds 960 shared against 1,155 separate, 45 / 55. The numbers in the
+rest of this part describe the pile as it was when the pairing landed.
 
 ### What the change did to the data
 
@@ -727,11 +733,11 @@ the answer actually turns on.
 
 The response is not a further training run. It is a change to the textbook a
 future run would use. This change took the shared-origin curriculum from four
-scenarios to twenty (the section after this one takes it to twenty-four), and
-inside each one the discriminating read itself varies from lesson to lesson
-instead of repeating one of a small handful of fixed strings. The right answer
-now depends on what the read actually says, not on which of a few familiar
-shapes the question is.
+scenarios to twenty (the sections after this one take it to twenty-four,
+then to forty-eight), and inside each one the discriminating read itself
+varies from lesson to lesson instead of repeating one of a small handful of
+fixed strings. The right answer now depends on what the read actually says,
+not on which of a few familiar shapes the question is.
 
 Here is what changed, measured on the built dataset at the time. The four
 percentages below were all taken at the same sample size, so they compare
@@ -794,7 +800,8 @@ shapes it has never seen.
 
 The response is four new trained scenarios, one cousin per gap. Each uses the
 same kind of read as its held-out origin, in the same shape, with a different
-key and a different answer. The pool is now twenty-four.
+key and a different answer. The pool was twenty-four after this change.
+The next section takes it to forty-eight.
 
 | Trained cousin | Held-out origin it covers | Read kind | State words |
 |---|---|---|---|
@@ -829,6 +836,96 @@ What the next retrain will tell us:
 
 This page does not authorise that retrain. It records what the textbook now
 holds and why.
+
+### What the 0907 run taught us
+
+The retrain on the twenty-four-scenario textbook ran on the seventh of
+September, so this page calls it 0907. It sat the exam and was refused.
+Two deciders failed.
+
+| Decider | Bar | 0907 result |
+|---|---|---|
+| 1. Every answer is valid JSON | 263 of 263 | **262 of 263** |
+| 5a. False "shared" on the multi-workload probe | at most 1 of 19 | **2 of 19** |
+| 5c. Pairs where both halves are right | at least 7 of 10 | **4 of 9** |
+
+The other deciders were met. Beside the exam, the wide probe scored 19 of
+30 pairs and the cousin probe scored 30 of 30. So the model read the origin
+on the scenarios it had studied, and missed on the ones it had not.
+
+The broken answer was on a node-disk-pressure decoy half with three
+victims. Every cause in it was right. The shape was wrong: the model wrote
+the second and third verdicts inside the first one and then wrote a second
+summary. Across the exam and the wide probe, 4 of the 6 three-verdict node
+decoy answers were broken the same way.
+
+We measured why instead of guessing. Four things stood out.
+
+- **Three-verdict decoys were rare in training.** 15 of the 24 trained
+  scenarios had only 2 victims, and so did 6 of the 7 node-scoped ones. A
+  node decoy with three verdicts could come from one scenario only, about 8
+  rows in all. The training pile held 317 decoy rows with 2 verdicts, 74
+  with 3, and 6 with 4.
+- **The exam's reads use real kubectl layouts the training never showed.**
+  The exam's node reads are a `Conditions:` table with `Taints:` under it.
+  Its Deployment reads have a `Replicas:` line, a `Pods:` table and a
+  `Last log:` line. Its registry read is a cluster-wide events summary. Its
+  StorageClass read names the controller's readiness and the volumes bound
+  in the last 20 minutes. The trained cousins used one-line labels instead,
+  such as "Process table: exhausted".
+- **The StorageClass read with a crashed controller scored 0 of 7 on all
+  three models.** The trained cousin said the controller was running and
+  the pool was retired. The exam says the controller is in CrashLoopBackOff
+  and nothing has bound in 20 minutes. The model had never seen a crashed
+  controller.
+- **Capacity is not the limit.** The training loss over the last 50 steps
+  averaged 0.0005. The model memorised the textbook. What it lacked was
+  shapes, not room.
+
+One more thing, about time rather than data: 16 threads and 32 threads took
+the same wall time. Time scales with rows, about 8 seconds per example
+pass.
+
+What this change does about it:
+
+- **Forty-eight scenarios, not twenty-four.** Twenty-four new ones, in five
+  groups that copy the exam's five read layouts: node `Conditions:` tables,
+  Deployment describes, cluster-wide events, StorageClass reads with a
+  crashed or missing controller, and NetworkPolicy reads. Every kind of
+  failure in the catalog still appears somewhere in the pool.
+- **Every scenario has at least three victims.** Fifteen scenarios got a
+  third one, so a decoy with three verdicts can now come from any scenario.
+  A test fails if fewer than 40 of every 100 decoy rows carry three or more
+  verdicts, or if the node-scoped ones come from fewer than 5 scenarios.
+- **Eleven existing scenarios got an exam-layout variant**, so the older
+  cousins also show the real layouts some of the time.
+- **The shares moved to 12% each**, paid out of `attributed` again, and the
+  textbook grew from 5,500 to 8,000 questions so that every scenario still
+  keeps at least 12 pairs in train.
+- **A cousin probe.** `kv-dataset --probe-cousins` writes one fresh pair per
+  trained scenario, 48 pairs and 96 rows, every decoy half at full width.
+  It asks whether the model reads the origin on what it studied. It decides
+  nothing.
+
+The exam did not move: 263 questions, the same checksum.
+
+What the final retrain will tell us:
+
+- **All six deciders pass:** the model ships. The wide and cousin probes are
+  reported beside it, and a poor probe score does not stop it.
+- **Decider 1 fails again on a three-verdict decoy:** the data now shows
+  that shape often, so the fault is in the recipe, not in coverage. The
+  next look is at the training, not the textbook.
+- **Decider 5c fails and the wide probe is low on one group:** that group's
+  layout still needs work, and the wide probe names the origin.
+- **Decider 5c fails and the cousin probe is low:** the model does not read
+  the origin even on scenarios it studied. That points at the recipe.
+- **Decider 5c fails and both probes are high:** the exam's six origins are
+  harder than their cousins. Read the pair-level rows before deciding
+  anything.
+
+This page does not authorise that retrain either. It records what the
+textbook now holds and why.
 
 ---
 
