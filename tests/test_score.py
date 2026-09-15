@@ -1,5 +1,6 @@
 import json
 
+from kubeagent_verdict.contract import TRUNCATION_MARKER
 from kubeagent_verdict.dataset import generate
 from kubeagent_verdict.evals import score
 
@@ -15,6 +16,40 @@ ROW = {
     "meta": {"case": "attributed", "expected_cause": "memory limit too low for the workload",
              "expected_confidence": "high"},
 }
+
+
+# --------------------------------------------------- job 1: the rationale cap
+
+
+def test_clean_rationale_passes_a_short_rationale_through_unchanged():
+    assert score._clean_rationale("the node was cordoned") == "the node was cordoned"
+
+
+def test_clean_rationale_caps_at_the_rune_limit_with_the_kubeagent_marker():
+    long_rationale = "x" * 600
+    cleaned = score._clean_rationale(long_rationale)
+    assert len(cleaned) == score.RATIONALE_MAX_RUNES
+    assert cleaned.endswith(TRUNCATION_MARKER)
+    marker = " " + TRUNCATION_MARKER
+    cut = score.RATIONALE_MAX_RUNES - len(marker)
+    assert cleaned == ("x" * cut) + marker
+
+
+def test_clean_rationale_strips_control_characters():
+    assert score._clean_rationale("line one\nline two\ttabbed\x00null") == \
+        "line oneline twotabbednull"
+
+
+def test_clean_rationale_trims_surrounding_space():
+    assert score._clean_rationale("  padded on both sides  ") == "padded on both sides"
+
+
+def test_clean_rationale_of_only_control_characters_is_blank():
+    assert score._clean_rationale("\x00\x01\x02") == ""
+
+
+def test_clean_rationale_of_an_empty_string_is_blank():
+    assert score._clean_rationale("") == ""
 
 
 def test_perfect_model_scores_ones():

@@ -10,13 +10,50 @@ from __future__ import annotations
 import json
 import re
 
-from kubeagent_verdict.contract import NONE_OF_THESE
+from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.evals.contract_check import contract_check
 
 KEYWORD_CASES = {"own_cause", "empty_candidates"}
 
 # The top of the three-grade vocabulary the catalog emits (high/medium/low).
 HIGHEST_CONFIDENCE = "high"
+
+# The rationale cap job 1 applies before checking a rule row's rationale for
+# a denial. This is the reply-side mirror of kubeagent's own `ruleRow` third
+# gate (`internal/investigate/local.go:448`): a rationale that survives the
+# same cap-then-clean kubeagent applies to a model-written rationale, and is
+# still non-blank afterward, is what kubeagent would actually render; one
+# that is not is what kubeagent renders as "no answer" instead.
+#
+# 512 runes -- Go's word for one Unicode character -- is `capRunes`'s own
+# limit (`local.go:463-474`), and `TRUNCATION_MARKER` is the same constant
+# `contract.py` already pins for the PROMPT side of this cap
+# (`" " + truncationMarker` in Go). Importing it rather than retyping the
+# 25-character string is what keeps the two byte-identical by construction.
+RATIONALE_MAX_RUNES = 512
+
+
+def _clean_rationale(text: str) -> str:
+    """Cap to RATIONALE_MAX_RUNES runes with kubeagent's own truncation
+    marker, then strip control characters and trim -- the reply-side mirror
+    of `ruleRow`'s third gate.
+
+    `capRunes` runs first in Go, then `safetext.Line`. `safetext.Line`'s own
+    byte-level algorithm is not available to this port; only its EFFECT is
+    documented -- a single-line result, no embedded newlines survive it. This
+    reproduces that effect (drop every character below the ASCII space and
+    the DEL character, which removes newlines along with the rest) rather
+    than porting an algorithm this repository cannot see.
+    """
+    runes = list(str(text))
+    if len(runes) > RATIONALE_MAX_RUNES:
+        marker = " " + TRUNCATION_MARKER
+        cut = max(0, RATIONALE_MAX_RUNES - len(marker))
+        capped = "".join(runes[:cut]) + marker
+    else:
+        capped = "".join(runes)
+    cleaned = "".join(ch for ch in capped if ord(ch) >= 0x20 and ch != "\x7f")
+    return cleaned.strip()
 
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
