@@ -1,11 +1,35 @@
 {
   "verdicts": [
-    {"workload": "shop/api", "cause": "container app exiting at startup",
+    {"workload": "web/frontend", "cause": "node worker-1 (NotReady)",
      "confidence": "high",
-     "rationale": "The previous-instance log names a missing config file /etc/app/app.yaml, which matches the crash loop."},
-    {"workload": "web/frontend", "cause": "image tag not found in the registry",
+     "rationale": "A fresh read of worker-1 still shows Ready False, and this workload's pod runs there."},
+    {"workload": "db/postgres", "cause": "PVC data-0 (FailedBinding)",
      "confidence": "high",
-     "rationale": "The pull error names registry.example.com/web/frontend:v2.4.1 as not found."}
+     "rationale": "A fresh read of PVC data-0 shows it is now Lost, confirming the claim will never bind."},
+    {"workload": "db/cache", "cause": "PVC cache-0 (ProvisionerNotResponding)",
+     "confidence": "high",
+     "rationale": "A fresh read of PVC cache-0 shows it is still Pending; the standard storage class has not provisioned it."},
+    {"workload": "db/search", "cause": "PVC search-0 (ProvisionerNotResponding)",
+     "confidence": "high",
+     "rationale": "A fresh read of PVC search-0 shows the same still-Pending claim as db/cache, on the same storage class."},
+    {"workload": "img/one", "cause": "registry registry.invalid (7 workloads failing to pull)",
+     "confidence": "medium",
+     "rationale": "A fresh pull event names a connection refused error, which points at the registry host itself."},
+    {"workload": "img/two", "cause": "registry registry.invalid (7 workloads failing to pull)",
+     "confidence": "medium",
+     "rationale": "A fresh pull event names an i/o timeout, another connection-shaped failure against the same host."},
+    {"workload": "img/three", "cause": "registry registry.invalid (7 workloads failing to pull)",
+     "confidence": "low",
+     "rationale": "A fresh pull event names an auth error, which could be this one image rather than the whole host."},
+    {"workload": "img/five", "cause": "registry registry.invalid (7 workloads failing to pull)",
+     "confidence": "low",
+     "rationale": "Events were read but none name the pull failure; they may have aged out of the window."},
+    {"workload": "img/six", "cause": "registry registry.invalid (7 workloads failing to pull)",
+     "confidence": "low",
+     "rationale": "The crashing pod's events were read, but the pulling pod's own events were not."},
+    {"workload": "img/lone", "cause": "registry mirror.invalid",
+     "confidence": "low",
+     "rationale": "Only this workload fails to pull from mirror.invalid, below kubeagent's threshold of two, and every node candidate is ruled out."}
   ],
-  "summary": "Two workloads are down for unrelated reasons.\nshop/api crashes on a missing config file.\nweb/frontend cannot pull its image tag.\nThe NotReady node is not implicated in either."
+  "summary": "9 of the 10 workloads are decided by kubeagent's own rules.\nA down node explains web/frontend; a bad PVC explains the three storage workloads.\nThe registry registry.invalid explains five more, though only img/one and img/two are confirmed.\nimg/lone is the one workload the rules could not decide."
 }

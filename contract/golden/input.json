@@ -1,58 +1,968 @@
 {
-  "cluster": {"degraded": true, "nodes_ready": 2, "nodes_total": 3,
-              "node_issues": ["worker-2 NotReady (KubeletNotReady)"], "system_issues": []},
-  "summary": {
-    "cpu": {"allocatable": "6", "requests": "4200m", "requests_pct": 70,
-            "limits": "5400m", "limits_pct": 90},
-    "memory": {"allocatable": "12Gi", "requests": "9Gi", "requests_pct": 75,
-               "limits": "11Gi", "limits_pct": 91},
-    "metrics_available": false
+  "cluster": {
+    "degraded": true,
+    "node_issues": [
+      "worker-2 NotReady (KubeletNotReady)"
+    ],
+    "nodes_ready": 2,
+    "nodes_total": 3,
+    "system_issues": []
   },
   "platform_line": "",
-  "service_issues": [
-    {"namespace": "shop", "name": "api", "type": "NoReadyEndpoints",
-     "detail": "service has 0 ready endpoints"}
-  ],
-  "workloads": [
+  "reads": [
     {
-      "namespace": "shop", "name": "api", "kind": "Deployment",
-      "ready": 0, "desired": 2, "status": "Progressing", "restarts": 14,
-      "confidence": "high",
-      "findings": [
-        {"issue": "CrashLoopBackOff", "reason": "back-off restarting failed container",
-         "evidence": "container app restarted 14 times",
-         "log_cause": "fatal: config file /etc/app/app.yaml not found",
-         "next_step": "starts then crashes — inspect the crash output", "command": "kubectl -n shop logs <pod> -c app --previous"}
-      ],
-      "candidates": [
-        {"cause": "container app exiting at startup", "verdict": "attributed",
-         "reason": "previous log names a missing config file"},
-        {"cause": "node worker-2 NotReady", "verdict": "outranked",
-         "reason": "pod is scheduled on worker-1, not the NotReady node"}
-      ]
+      "label": "describe node /worker-1",
+      "content": "node worker-1: unschedulable=false\n  condition Ready=False (KubeletNotReady): container runtime is down\n  taint node.kubernetes.io/not-ready=:NoSchedule\n"
     },
     {
-      "namespace": "web", "name": "frontend", "kind": "Deployment",
-      "ready": 1, "desired": 3, "status": "Progressing", "restarts": 0,
-      "confidence": "medium",
-      "findings": [
-        {"issue": "ImagePullBackOff", "reason": "Back-off pulling image",
-         "evidence": "registry.example.com/web/frontend:v2.4.1 not found",
-         "log_cause": "",
-         "next_step": "the image can't be pulled — verify the tag exists and the registry credentials", "command": "kubectl -n web describe pod <pod>"}
-      ],
-      "candidates": [
-        {"cause": "image tag not found in the registry", "verdict": "attributed",
-         "reason": "the pull error names the tag as missing"}
-      ]
+      "label": "describe node /worker-2",
+      "content": "node worker-2: unschedulable=false\n  condition Ready=True (KubeletReady): kubelet is posting ready status\n"
+    },
+    {
+      "label": "describe pvc db/aux-0",
+      "content": "pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442\n"
+    },
+    {
+      "label": "describe pvc db/data-0",
+      "content": "pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821\n"
+    },
+    {
+      "label": "describe pvc db/cache-0",
+      "content": "pvc db/cache-0: phase=Pending storageClass=standard volume=\n"
+    },
+    {
+      "label": "events img/one-7c9d4b5f6-abcde",
+      "content": "events for img/one-7c9d4b5f6-abcde:\n  Failed: Failed to pull image \"registry.invalid/img/one:1.0\": connection refused (x4)\n"
+    },
+    {
+      "label": "events img/five-7c9d4b5f6-defgh",
+      "content": "no events for img/five-7c9d4b5f6-defgh"
+    },
+    {
+      "label": "describe node /worker-7",
+      "content": "read failed: nodes \"worker-7\" is forbidden"
     }
   ],
-  "reads": [
-    {"label": "events shop/api-7f9c4d5b6-x2x9k",
-     "content": "12s Warning BackOff pod/api-7f9c4d5b6-x2x9k back-off restarting failed container app\n"},
-    {"label": "log causes shop/api-7f9c4d5b6-x2x9k container app",
-     "content": "fatal: config file /etc/app/app.yaml not found"},
-    {"label": "events web/frontend-5d8f7c9b4-q1w2e",
-     "content": "3m Warning Failed pod/frontend-5d8f7c9b4-q1w2e Failed to pull image \"registry.example.com/web/frontend:v2.4.1\": not found\n"}
+  "service_issues": [
+    {
+      "detail": "service has 0 ready endpoints",
+      "name": "api",
+      "namespace": "shop",
+      "type": "NoReadyEndpoints"
+    }
+  ],
+  "summary": {
+    "cpu": {
+      "allocatable": "6",
+      "limits": "5400m",
+      "limits_pct": 90,
+      "requests": "4200m",
+      "requests_pct": 70
+    },
+    "memory": {
+      "allocatable": "12Gi",
+      "limits": "11Gi",
+      "limits_pct": 91,
+      "requests": "9Gi",
+      "requests_pct": 75
+    },
+    "metrics_available": false
+  },
+  "workloads": [
+    {
+      "namespace": "web",
+      "name": "frontend",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 5,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n web describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/web/frontend:2.1\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "attributed",
+          "reason": "pod frontend-5b8d7f6c9-q2w3e is scheduled on it",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "Ready condition is False now"
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "not re-read: the read budget was spent first"
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "Ready condition is Unknown now"
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "the node has no Ready condition"
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: nodes \"worker-7\" is forbidden"
+        },
+        {
+          "cause": "registry registry.invalid",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "refuted",
+          "fresh_read_evidence": "a pull event shows an image error: manifest unknown; this pull fails for this image, not the host"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "node worker-1 (NotReady)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "db",
+      "name": "postgres",
+      "kind": "StatefulSet",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n db describe pod \u003cpod\u003e",
+          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+          "issue": "Pending",
+          "log_cause": "",
+          "next_step": "inspect the object for details",
+          "reason": "pod is not scheduled"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "attributed",
+          "reason": "pod postgres-0 mounts it",
+          "fresh_read_outcome": "refuted",
+          "fresh_read_evidence": "phase is Bound now"
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: persistentvolumeclaims \"aux-1\" is forbidden"
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "phase is not one kubeagent expects"
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is Lost"
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "decided": true,
+      "decided_cause": "PVC data-0 (FailedBinding)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "db",
+      "name": "cache",
+      "kind": "StatefulSet",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n db describe pod \u003cpod\u003e",
+          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+          "issue": "Pending",
+          "log_cause": "",
+          "next_step": "inspect the object for details",
+          "reason": "pod is not scheduled"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "attributed",
+          "reason": "pod cache-0 is scheduled on it",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "Ready condition is True, but the kubelet lease was not re-read"
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "outranked",
+          "reason": "node worker-2 (no kubelet lease) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is still Pending"
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "decided": true,
+      "decided_cause": "PVC cache-0 (ProvisionerNotResponding)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "db",
+      "name": "search",
+      "kind": "StatefulSet",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n db describe pod \u003cpod\u003e",
+          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+          "issue": "Pending",
+          "log_cause": "",
+          "next_step": "inspect the object for details",
+          "reason": "pod is not scheduled"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "attributed",
+          "reason": "pod search-0 mounts it",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is still Pending"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "PVC search-0 (ProvisionerNotResponding)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "img",
+      "name": "one",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/img/one:1.0\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "a pull event shows a connection error: connection refused"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "img",
+      "name": "two",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/img/two:1.0\"",
+          "issue": "ErrImagePull",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "a pull event shows a connection error: i/o timeout"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
+      "decided_outcome": "confirmed"
+    },
+    {
+      "namespace": "img",
+      "name": "three",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/img/three:1.0\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
+      "decided_outcome": "unverified"
+    },
+    {
+      "namespace": "img",
+      "name": "five",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/img/five:1.0\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "no pull event names the failure; events may have aged out"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
+      "decided_outcome": "unverified"
+    },
+    {
+      "namespace": "img",
+      "name": "six",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 2,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img logs \u003cpod\u003e --previous",
+          "evidence": "back-off 5m0s restarting failed container",
+          "issue": "CrashLoopBackOff",
+          "log_cause": "",
+          "next_step": "starts then crashes — inspect the crash output",
+          "reason": "container keeps exiting"
+        },
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"registry.invalid/img/six:1.0\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "events of the pulling pod were not read"
+        }
+      ],
+      "decided": true,
+      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
+      "decided_outcome": "unverified"
+    },
+    {
+      "namespace": "img",
+      "name": "lone",
+      "kind": "Deployment",
+      "ready": 0,
+      "desired": 1,
+      "status": "Progressing",
+      "restarts": 0,
+      "confidence": "",
+      "findings": [
+        {
+          "command": "kubectl -n img describe pod \u003cpod\u003e",
+          "evidence": "Failed to pull image \"mirror.invalid/img/lone:1.0\"",
+          "issue": "ImagePullBackOff",
+          "log_cause": "",
+          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry mirror.invalid",
+          "verdict": "ruled_out",
+          "reason": "only workload failing to pull from this host; threshold is 2",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "decided": false,
+      "decided_cause": "",
+      "decided_outcome": ""
+    }
   ]
 }

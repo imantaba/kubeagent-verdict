@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from kubeagent_verdict import contract as c
+from kubeagent_verdict.evals.contract_check import contract_check
 
 GOLDEN = Path(__file__).resolve().parent.parent / "contract" / "golden"
 
@@ -26,6 +27,9 @@ def load_golden_input():
             confidence=w.get("confidence", ""),
             findings=tuple(c.Finding(**f) for f in w["findings"]),
             candidates=tuple(c.Candidate(**cd) for cd in w.get("candidates", [])),
+            decided=w.get("decided", False),
+            decided_cause=w.get("decided_cause", ""),
+            decided_outcome=w.get("decided_outcome", ""),
         )
         for w in d["workloads"]
     )
@@ -44,12 +48,53 @@ def test_user_message_matches_kubeagent_bytes():
     assert got == expected
 
 
+def test_user_message_has_the_v1240_shapes():
+    text = (GOLDEN / "user_message.txt").read_text(encoding="utf-8")
+    assert "      fresh read: " in text
+    assert "    decided by rules: " in text
+    assert "    " + c.TRUNCATION_MARKER + "\n" in text
+
+
 def test_answer_is_contract_shaped():
     doc = json.loads((GOLDEN / "answer.json").read_text(encoding="utf-8"))
     assert set(doc) == {"verdicts", "summary"}
     rows = doc["verdicts"]
-    assert {r["workload"] for r in rows} == {"shop/api", "web/frontend"}
+    assert {r["workload"] for r in rows} == {
+        "web/frontend", "db/postgres", "db/cache", "db/search",
+        "img/one", "img/two", "img/three", "img/five", "img/six", "img/lone",
+    }
     for r in rows:
         assert set(r) == {"workload", "cause", "confidence", "rationale"}
         assert r["confidence"] in c.CONFIDENCE_VALUES
     assert len(doc["summary"].split("\n")) <= c.MAX_SUMMARY_LINES
+
+
+def test_answer_passes_contract_check():
+    d = json.loads((GOLDEN / "input.json").read_text(encoding="utf-8"))
+    flagged = {f"{w['namespace']}/{w['name']}" for w in d["workloads"]}
+    text = (GOLDEN / "answer.json").read_text(encoding="utf-8")
+    ok, reasons, _ = contract_check(text, flagged)
+    assert ok, reasons
+
+
+def test_answer_echoes_every_decided_cause_verbatim():
+    d = json.loads((GOLDEN / "input.json").read_text(encoding="utf-8"))
+    doc = json.loads((GOLDEN / "answer.json").read_text(encoding="utf-8"))
+    by_workload = {r["workload"]: r for r in doc["verdicts"]}
+    for w in d["workloads"]:
+        key = f"{w['namespace']}/{w['name']}"
+        if w.get("decided"):
+            assert by_workload[key]["cause"] == w["decided_cause"], key
+
+
+def test_input_candidates_have_exact_shape_and_ruled_out_fresh_read_is_empty():
+    d = json.loads((GOLDEN / "input.json").read_text(encoding="utf-8"))
+    decided = [w for w in d["workloads"] if w.get("decided")]
+    assert decided, "at least one workload is decided by rules"
+    for w in d["workloads"]:
+        assert set(w) >= {"decided", "decided_cause", "decided_outcome", "candidates"}
+        for cd in w["candidates"]:
+            assert set(cd) == {"cause", "verdict", "reason",
+                               "fresh_read_outcome", "fresh_read_evidence"}
+            if cd["verdict"] == "ruled_out":
+                assert cd["fresh_read_outcome"] == "" and cd["fresh_read_evidence"] == ""
