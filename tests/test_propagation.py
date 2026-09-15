@@ -468,3 +468,93 @@ def test_victim_decoy_objects_declare_their_contents():
     assert objects.unverify(probe, "lease").scan_reason == "no kubelet lease"
     assert objects.unverify(probe, "read_failed").scan_reason == (
         "kubelet not heartbeating")
+
+
+def test_shared_origin_meta_is_derived_from_the_object_not_declared():
+    """R21: job/decided_* meta for a shared-origin victim comes from running rules.decide
+    over the bound origin_object, not from a hand-set 'job: 1' literal."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
+
+    assert set(r.meta) == {"workloads", "label", "decoy_by_workload"}
+    assert len(r.meta["workloads"]) == 2
+    for meta in r.meta["workloads"].values():
+        assert set(meta) == {
+            "job", "decided", "decided_cause", "decided_outcome",
+            "decided_evidence", "expected_cause", "own_cause_keywords"}
+        assert meta["job"] == 1
+        assert meta["decided"] is True
+    assert r.meta["label"] in ("shared", "separate", "none")
+    assert set(r.meta["decoy_by_workload"]) == set(r.meta["workloads"])
+
+
+def test_shared_origin_decoy_meta_is_not_decided_when_healthy():
+    """The healthy half swaps in healthy_origin_fresh; 0 victims are confirmed on the
+    origin, so none of them are decided by it."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
+
+    assert all(meta["decided"] is False for meta in r.meta["workloads"].values())
+
+
+def test_registry_unreachable_shared_read_agrees_with_the_declared_object():
+    """The registry-events consistency rule, checked the one place _render_shared_origin
+    renders a registry object: rules.decide on the declared origin_object/healthy_origin_fresh
+    must land on the same outcome the origin_read/healthy_origin_content prose already tells."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    assert "dial tcp" in p.origin_read[1]
+    assert p.origin_object.fresh.literal == "dial tcp"
+    broken = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
+    for meta in broken.meta["workloads"].values():
+        assert meta["decided"] is True
+        assert meta["decided_outcome"] == "confirmed"
+
+    assert "manifest unknown" in p.healthy_origin_content
+    assert p.healthy_origin_fresh.literal == "manifest unknown"
+    healthy = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
+    for meta in healthy.meta["workloads"].values():
+        assert meta["decided"] is False
+
+
+def test_shared_origin_wrappers_merge_the_new_meta_without_losing_existing_keys():
+    """The four thin wrappers keep every key they write today and gain 'workloads',
+    'label', 'decoy_by_workload' from _render_shared_origin's r.meta."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+
+    ex = cases.shared_origin(p, random.Random(3))
+    for key in ("case", "origin", "expected", "expected_confidence", "origin_read_label"):
+        assert key in ex.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex.meta
+
+    ex_decoy = cases.shared_origin_decoy(p, random.Random(3))
+    assert "expected_confidence" not in ex_decoy.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_decoy.meta
+
+    ex_probe = cases.shared_origin_probe(p, random.Random(3))
+    for key in ("decoy_causes", "distractor_cause", "wrong_summary_phrase"):
+        assert key in ex_probe.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_probe.meta
+
+    ex_decoy_probe = cases.shared_origin_decoy_probe(p, random.Random(3))
+    assert "shared_claim_phrases" in ex_decoy_probe.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_decoy_probe.meta

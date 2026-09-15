@@ -387,19 +387,19 @@ _NODE_LOST = Propagation(
     ),
     victims=(
         Victim(
-            workload_kind="Deployment", status="Pending", issue="Unschedulable",
-            reason="0/3 nodes are available",
-            evidence="1 node(s) were unschedulable, 2 Insufficient cpu",
+            workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+            reason="the container image was resolved but the container could not be started",
+            evidence=("RunContainerError: failed to create containerd task: context deadline "
+                      "exceeded"),
             local_cause="the pod requests more CPU than any remaining node has free",
             local_reason="the scheduler reports Insufficient cpu on both healthy nodes",
             read=("get_events {ns}/{name}",
-                  ("Warning  FailedScheduling  kubelet  0/3 nodes are available: "
-                   "1 node(s) were unschedulable, 2 Insufficient cpu.")),
-            # No node is unschedulable while the origin node is Ready, so the
-            # shortfall has to be capacity on all three.
+                  ("Warning  Failed  kubelet  Error: RunContainerError: failed to create "
+                   "containerd task: context deadline exceeded")),
+            # No node is unschedulable while the origin node is Ready, so the two
+            # remaining nodes carry no extra load and the container starts cleanly.
             healthy_read_content=(
-                "Warning  FailedScheduling  kubelet  0/3 nodes are available: "
-                "3 Insufficient cpu."),
+                "Normal  Started  kubelet  Started container"),
             pass_confidence="high",
             on_origin=True,
         ),
@@ -577,7 +577,7 @@ _REGISTRY = Propagation(
             on_origin=True,
         ),
         Victim(
-            workload_kind="Job", status="Init:ImagePullBackOff", issue="Init:ImagePullBackOff",
+            workload_kind="Job", status="ImagePullBackOff", issue="ImagePullBackOff",
             reason="init container {init_container} cannot pull its image",
             evidence="Back-off pulling image for init container {init_container}",
             local_cause="the init container image name has a typo",
@@ -591,7 +591,7 @@ _REGISTRY = Propagation(
                 "    State: Waiting\n    Reason: ImagePullBackOff\n"
                 "  Warning  Failed  kubelet  no such host"),
             pass_confidence="high",
-            on_origin=True,  # Task 6 also rewrites status/issue to ImagePullBackOff here.
+            on_origin=True,
         ),
     ),
 )

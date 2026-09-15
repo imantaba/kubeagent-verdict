@@ -719,7 +719,7 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 # them. This pin has never moved and must not: it is what makes a number on
 # the 253 comparable across runs. The row count above cannot see a rewrite
 # that keeps the count; this can.
-FROZEN_253_SHA256 = "9f5fb341f620306d1d003d1617da613139f7bccf03cec768bd78539df75abb96"
+FROZEN_253_SHA256 = "b3572842c3131fa3fc5a7b8fe83a9f95996c44025a4cf688243306b395ca5a45"
 
 # The whole exam, 253 plus the ten `shared_origin_decoy_probe` rows. First
 # captured on `main` @ `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were
@@ -733,7 +733,13 @@ FROZEN_253_SHA256 = "9f5fb341f620306d1d003d1617da613139f7bccf03cec768bd78539df75
 # number measured before that date is not comparable to one measured after
 # it, and numbers on the 253 are. A change that moves this hash is wrong
 # unless it means to retire that comparison, and says so here.
-EVAL_SET_SHA256 = "9d59a8f881862bc9035605d206a2cc9269bf5b59300f8fb8af3a030aff04f1b9"
+#
+# Re-pinned again when Task 6 rewrote the node-not-ready and
+# registry-unreachable builders and moved the system prompt out of
+# `contract.py` into `contract/system_prompt.txt`: the rendered bytes of
+# every row changed, so every number banked against the old bytes is retired
+# by this change on purpose.
+EVAL_SET_SHA256 = "88e0c88bb4f96dd31ebae0c4841c02d4aecbdc0f58f00a3d9e26503d5158436d"
 
 
 def _digest(rows) -> str:

@@ -159,6 +159,9 @@ ENTRIES = [
             ("a bug in the application's health endpoint", "outranked",
              ("the probe passed continuously until the policy appeared, then failed on every "
               "replica at once")),
+            ("node {node} going NotReady", "ruled_out",
+             ("the probe failures start and stop with the NetworkPolicy, not with the node's "
+              "condition, which stays Ready throughout")),
         ),
         reads=(
             ("events {ns}/{pod}",
@@ -198,6 +201,8 @@ ENTRIES = [
         losers=(
             ("a failing node underneath the pods", "ruled_out",
              "the two crashing replicas run on two different nodes"),
+            ("node {node} going NotReady", "ruled_out",
+             "the two crashing replicas run on two different nodes, and both report Ready"),
         ),
         reads=(
             ("events kube-system/{pod}",
