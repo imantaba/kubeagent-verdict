@@ -174,17 +174,27 @@ class Victim:
     # confidence_carried.
     pass_confidence: str = "high"
     network_policies: tuple[str, ...] = ()
-    # Whether this victim's own read sits on the shared origin's identity —
-    # true only where the read names the origin's own node/PVC/registry
-    # directly (node-not-ready's PVC-attachment victim, all three of
-    # storage-provisioner-down and registry-unreachable's victims). Lets
-    # Task 6's builder bind the origin's own drawn Object instead of a
-    # separate decoy for that victim.
+    # Whether this victim hangs off a shared origin that has its own drawn
+    # Object. True on every victim of the three scenarios that declare an
+    # origin_object (node-not-ready, storage-provisioner-down,
+    # registry-unreachable), False on every victim of the three that do not
+    # (coredns-down, node-disk-pressure, networkpolicy-deny-all). It is
+    # therefore redundant with `origin_object is not None` today; it is a
+    # per-victim field because the binding it drives is per-victim — it lets
+    # Task 6's builder bind the origin's own Object for this victim instead
+    # of a separate decoy.
     on_origin: bool = False
     # This victim's own decoy objects — a node, PVC or registry its local,
-    # wrong candidate points at. Empty where the victim's local_cause names
-    # nothing from the closed node/PVC/registry vocabulary, or where
-    # on_origin is True and the origin's own object already covers it.
+    # wrong candidate points at. Exactly one node decoy on every victim of
+    # the three scenarios with no origin_object; empty on every victim where
+    # on_origin is True, because the origin's own object already covers it.
+    # The decoy is not chosen from the victim's local_cause wording: several
+    # victims name nothing from the node/PVC/registry vocabulary and still
+    # carry a node decoy.
+    # The declared `fresh` here is a placeholder, not a claim: the builder
+    # draws an ending for every decoy, and each ending replaces `fresh`
+    # outright (see objects.refute and objects.unverify). Only `kind`,
+    # `name`, `scan_reason` and `placement` survive to the prompt.
     objects: tuple[Object, ...] = ()
 
 

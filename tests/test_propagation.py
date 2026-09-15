@@ -18,7 +18,7 @@ import json
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import propagation
+from kubeagent_verdict.dataset import objects, propagation
 from kubeagent_verdict.dataset.objects import Fresh, Object
 
 
@@ -435,3 +435,22 @@ def test_every_scenario_object_passes_check_declaration():
         rules.check_declaration(p.key, origin_objects)
         for i, v in enumerate(p.victims):
             rules.check_declaration(f"{p.key}/victim{i}", v.objects)
+
+
+def test_victim_decoy_objects_declare_their_contents():
+    """Every victim decoy is a node decoy, declared the same way."""
+    for prop in propagation.all_scenarios():
+        for i, v in enumerate(prop.victims, 1):
+            for obj in v.objects:
+                where = f"{prop.key}/victim{i}/{obj.kind}:{obj.name}"
+                assert obj.intent == "decoy", where
+                assert obj.kind == "node", where
+                assert obj.scan_reason == "NotReady", where
+                assert obj.fresh.how == "read", where
+    # A victim decoy's declared `fresh` never reaches a prompt: every node
+    # ending replaces it. Pin that, so the comment above `objects` stays true.
+    for ending in ("lease", "read_failed"):
+        sample = propagation.by_key()["coredns-down"].victims[0].objects[0]
+        assert objects.unverify(sample, ending).fresh != sample.fresh, ending
+    sample = propagation.by_key()["coredns-down"].victims[0].objects[0]
+    assert objects.refute(sample).fresh.ready == "True"
