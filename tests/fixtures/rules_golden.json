@@ -1,0 +1,1108 @@
+{
+  "kubeagent": {
+    "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd",
+    "tag": "v1.24.0"
+  },
+  "workloads": [
+    {
+      "namespace": "web",
+      "name": "frontend",
+      "pod": "frontend-5b8d7f6c9-q2w3e",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/web/frontend:2.1",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "attributed",
+          "reason": "pod frontend-5b8d7f6c9-q2w3e is scheduled on it",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "Ready condition is False now"
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "not re-read: the read budget was spent first"
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "Ready condition is Unknown now"
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "the node has no Ready condition"
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: nodes \"worker-7\" is forbidden"
+        },
+        {
+          "cause": "registry registry.invalid",
+          "verdict": "outranked",
+          "reason": "node worker-1 (NotReady) is the stronger cause",
+          "fresh_read_outcome": "refuted",
+          "fresh_read_evidence": "a pull event shows an image error: manifest unknown; this pull fails for this image, not the host"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "node worker-1 (NotReady)",
+        "outcome": "confirmed",
+        "evidence": "Ready condition is False now",
+        "group_key": "node/worker-1",
+        "group_text": "node worker-1 (NotReady)",
+        "decisions": [
+          {
+            "candidate": "node worker-1 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "Ready condition is False now"
+          },
+          {
+            "candidate": "node worker-3 (kubelet not heartbeating)",
+            "outcome": "unverified",
+            "evidence": "not re-read: the read budget was spent first"
+          },
+          {
+            "candidate": "node worker-5 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "Ready condition is Unknown now"
+          },
+          {
+            "candidate": "node worker-6 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "the node has no Ready condition"
+          },
+          {
+            "candidate": "node worker-7 (NotReady)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: nodes \"worker-7\" is forbidden"
+          },
+          {
+            "candidate": "registry registry.invalid",
+            "outcome": "refuted",
+            "evidence": "a pull event shows an image error: manifest unknown; this pull fails for this image, not the host"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "db",
+      "name": "postgres",
+      "pod": "postgres-0",
+      "issue": "Pending",
+      "image": "",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "attributed",
+          "reason": "pod postgres-0 mounts it",
+          "fresh_read_outcome": "refuted",
+          "fresh_read_evidence": "phase is Bound now"
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: persistentvolumeclaims \"aux-1\" is forbidden"
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "phase is not one kubeagent expects"
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "outranked",
+          "reason": "PVC aux-0 (ProvisioningFailed) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is Lost"
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "PVC data-0 (FailedBinding)",
+        "outcome": "confirmed",
+        "evidence": "phase is Lost",
+        "group_key": "pvc/db/data-0",
+        "group_text": "PVC data-0 (FailedBinding)",
+        "decisions": [
+          {
+            "candidate": "PVC aux-0 (ProvisioningFailed)",
+            "outcome": "refuted",
+            "evidence": "phase is Bound now"
+          },
+          {
+            "candidate": "PVC aux-1 (ProvisioningFailed)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: persistentvolumeclaims \"aux-1\" is forbidden"
+          },
+          {
+            "candidate": "PVC aux-2 (ProvisioningFailed)",
+            "outcome": "unverified",
+            "evidence": "phase is not one kubeagent expects"
+          },
+          {
+            "candidate": "PVC data-0 (FailedBinding)",
+            "outcome": "confirmed",
+            "evidence": "phase is Lost"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "db",
+      "name": "cache",
+      "pod": "cache-0",
+      "issue": "Pending",
+      "image": "",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "attributed",
+          "reason": "pod cache-0 is scheduled on it",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "Ready condition is True, but the kubelet lease was not re-read"
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "outranked",
+          "reason": "node worker-2 (no kubelet lease) is the stronger cause",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is still Pending"
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "PVC cache-0 (ProvisionerNotResponding)",
+        "outcome": "confirmed",
+        "evidence": "phase is still Pending",
+        "group_key": "storageclass/standard/ProvisionerNotResponding",
+        "group_text": "storage class standard (ProvisionerNotResponding)",
+        "decisions": [
+          {
+            "candidate": "node worker-2 (no kubelet lease)",
+            "outcome": "unverified",
+            "evidence": "Ready condition is True, but the kubelet lease was not re-read"
+          },
+          {
+            "candidate": "PVC cache-0 (ProvisionerNotResponding)",
+            "outcome": "confirmed",
+            "evidence": "phase is still Pending"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "db",
+      "name": "search",
+      "pod": "search-0",
+      "issue": "Pending",
+      "image": "",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-0 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-1 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-2 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-3 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC aux-4 (ProvisioningFailed)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC cache-0 (ProvisionerNotResponding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC data-0 (FailedBinding)",
+          "verdict": "ruled_out",
+          "reason": "not mounted by this workload's pods",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "PVC search-0 (ProvisionerNotResponding)",
+          "verdict": "attributed",
+          "reason": "pod search-0 mounts it",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "phase is still Pending"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "PVC search-0 (ProvisionerNotResponding)",
+        "outcome": "confirmed",
+        "evidence": "phase is still Pending",
+        "group_key": "storageclass/standard/ProvisionerNotResponding",
+        "group_text": "storage class standard (ProvisionerNotResponding)",
+        "decisions": [
+          {
+            "candidate": "PVC search-0 (ProvisionerNotResponding)",
+            "outcome": "confirmed",
+            "evidence": "phase is still Pending"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "one",
+      "pod": "one-7c9d4b5f6-abcde",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/one:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "a pull event shows a connection error: connection refused"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "confirmed",
+        "evidence": "a pull event shows a connection error: connection refused",
+        "group_key": "registry/registry.invalid",
+        "group_text": "registry registry.invalid (7 workloads failing to pull)",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "confirmed",
+            "evidence": "a pull event shows a connection error: connection refused"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "two",
+      "pod": "two-7c9d4b5f6-bcdef",
+      "issue": "ErrImagePull",
+      "image": "registry.invalid/img/two:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "confirmed",
+          "fresh_read_evidence": "a pull event shows a connection error: i/o timeout"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "confirmed",
+        "evidence": "a pull event shows a connection error: i/o timeout",
+        "group_key": "registry/registry.invalid",
+        "group_text": "registry registry.invalid (7 workloads failing to pull)",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "confirmed",
+            "evidence": "a pull event shows a connection error: i/o timeout"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "three",
+      "pod": "three-7c9d4b5f6-cdefg",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/three:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "five",
+      "pod": "five-7c9d4b5f6-defgh",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/five:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "no pull event names the failure; events may have aged out"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "no pull event names the failure; events may have aged out",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "no pull event names the failure; events may have aged out"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "six",
+      "pod": "six-6f8e9d0a1-crash",
+      "issue": "CrashLoopBackOff",
+      "image": "",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "events of the pulling pod were not read"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "events of the pulling pod were not read",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "events of the pulling pod were not read"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "lone",
+      "pod": "lone-7c9d4b5f6-efghi",
+      "issue": "ImagePullBackOff",
+      "image": "mirror.invalid/img/lone:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry mirror.invalid",
+          "verdict": "ruled_out",
+          "reason": "only workload failing to pull from this host; threshold is 2",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        }
+      ],
+      "result": {
+        "decided": false,
+        "cause": "",
+        "outcome": "",
+        "evidence": "",
+        "group_key": "",
+        "group_text": "",
+        "decisions": []
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "seven",
+      "pod": "seven-7c9d4b5f6-fghij",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/seven:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: events is forbidden"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "fresh read failed: events is forbidden",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: events is forbidden"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "eight",
+      "pod": "eight-7c9d4b5f6-ghijk",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/eight:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "not re-read: the read budget was spent first"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "not re-read: the read budget was spent first",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "not re-read: the read budget was spent first"
+          }
+        ]
+      }
+    }
+  ],
+  "shared": [
+    "2 workloads share one upstream cause: registry registry.invalid (7 workloads failing to pull)",
+    "2 workloads share one upstream cause: storage class standard (ProvisionerNotResponding)"
+  ],
+  "reads": [
+    {
+      "label": "describe node /worker-1",
+      "content": "node worker-1: unschedulable=false\n  condition Ready=False (KubeletNotReady): container runtime is down\n  taint node.kubernetes.io/not-ready=:NoSchedule\n"
+    },
+    {
+      "label": "describe node /worker-2",
+      "content": "node worker-2: unschedulable=false\n  condition Ready=True (KubeletReady): kubelet is posting ready status\n"
+    },
+    {
+      "label": "describe pvc db/aux-0",
+      "content": "pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442\n"
+    },
+    {
+      "label": "describe pvc db/data-0",
+      "content": "pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821\n"
+    },
+    {
+      "label": "describe pvc db/cache-0",
+      "content": "pvc db/cache-0: phase=Pending storageClass=standard volume=\n"
+    },
+    {
+      "label": "events img/one-7c9d4b5f6-abcde",
+      "content": "events for img/one-7c9d4b5f6-abcde:\n  Failed: Failed to pull image \"registry.invalid/img/one:1.0\": connection refused (x4)\n"
+    },
+    {
+      "label": "events img/five-7c9d4b5f6-defgh",
+      "content": "no events for img/five-7c9d4b5f6-defgh"
+    },
+    {
+      "label": "describe node /worker-7",
+      "content": "read failed: nodes \"worker-7\" is forbidden"
+    }
+  ]
+}

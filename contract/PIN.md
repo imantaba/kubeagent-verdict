@@ -26,3 +26,10 @@ version there means re-pinning here. Re-run the capture procedure against
 the new kubeagent tag, re-extract `system_prompt.txt`, update
 `contract.py`'s renderers until the golden test passes again, bump the
 version named in this file, and retrain.
+
+## Capture record (v1.24.0 re-scope)
+
+- Captured from kubeagent tag `v1.24.0`, commit `15ec5649bbd2d07558eae945b71430afc8f231fd`.
+- Test: `contract/capture/kv_capture_test.go.txt`. The five steps are in its header.
+- Files: `tests/fixtures/rules_golden.json` (the rules pin). The prompt golden and the system prompt land in `contract/golden/` and `contract/system_prompt.txt` as the code that renders them lands.
+- The worktree was removed after the capture. kubeagent was not changed.
