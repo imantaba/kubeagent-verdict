@@ -1,11 +1,12 @@
 import dataclasses
+import inspect
 import json
 import random
 
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, catalog
+from kubeagent_verdict.dataset import cases, catalog, render
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset.render import object_reads
 
@@ -469,3 +470,53 @@ def test_prose_decoy_helpers_are_retired():
     for helper_name in ("_candidates", "_swapped_candidates", "_decoy_cause", "_reads"):
         assert not hasattr(cases, helper_name), (
             f"cases.{helper_name} should be deleted once every builder reads e.objects")
+
+
+def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatch):
+    """Item 1 of the Task 6 fix round: `render.check_prompt_size` has to run on
+    every prompt a builder assembles, not just on the strings its own unit
+    tests hand it directly. Lowering the real cap -- rather than fabricating
+    a giant catalog entry -- is what makes a REAL builder's REAL prompt
+    exceed it: the wiring under test is the funnel, not any one entry's byte
+    count. If the funnel is unwired this raises nothing and the `with`
+    block fails instead.
+    """
+    monkeypatch.setattr(render, "MAX_PROMPT_BYTES", 10)
+    e = _entry("memory-limit-oomkill")
+    n = names_mod.draw(random.Random(11))
+    with pytest.raises(ValueError) as excinfo:
+        cases.attributed(e, n, random.Random(11))
+    assert str(excinfo.value).startswith(f"entry {e.key}: prompt is ")
+    assert "over the 10-byte cap" in str(excinfo.value)
+
+
+def test_check_prompt_size_refuses_an_oversize_multi_workload_prompt(monkeypatch):
+    """Same net, the multi-workload key shape: the funnel's key is a join of
+    every paired entry's own key, never a placeholder, so the raised error
+    names both real entries.
+    """
+    monkeypatch.setattr(render, "MAX_PROMPT_BYTES", 10)
+    e1, e2 = _two_entries()
+    n1 = names_mod.draw(random.Random(1))
+    n2 = names_mod.draw(random.Random(2))
+    with pytest.raises(ValueError) as excinfo:
+        cases.multi([(e1, n1), (e2, n2)], random.Random(11))
+    msg = str(excinfo.value)
+    assert e1.key in msg, msg
+    assert e2.key in msg, msg
+
+
+def test_every_build_user_message_call_goes_through_the_checked_funnel():
+    """`check_prompt_size` only ever runs if every c.build_user_message(...)
+    call routes through the one funnel that pairs the two. This does not
+    care what the funnel is named -- it cares that no OTHER line in
+    cases.py calls c.build_user_message directly, so a thirteenth call site
+    added later (or the funnel removed) fails this test instead of quietly
+    reopening the gap Item 1 closed.
+    """
+    source = inspect.getsource(cases)
+    call_lines = [ln for ln in source.splitlines() if "c.build_user_message(" in ln]
+    assert len(call_lines) == 1, (
+        f"expected exactly one c.build_user_message(...) call site in cases.py "
+        f"(the shared funnel); found {len(call_lines)}: {call_lines}"
+    )

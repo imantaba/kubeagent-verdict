@@ -103,6 +103,29 @@ def _answer(rows: list[dict], summary: str) -> str:
     return json.dumps({"verdicts": rows, "summary": summary}, ensure_ascii=False)
 
 
+def _user_message(cluster: c.ClusterHealth | None, summary: c.ResourceSummary | None,
+                  platform_line: str, service_issues: tuple[c.ServiceIssue, ...],
+                  workloads: tuple[c.Workload, ...], reads: tuple[c.EvidenceRead, ...],
+                  *, key: str) -> str:
+    """Build the user prompt, then refuse it if it is over the byte cap.
+
+    Every one of the 11 callers that used to call `c.build_user_message`
+    directly now calls this instead, so a twelfth call site gets the check
+    for free rather than needing to remember to pair the two calls itself.
+    `c.build_user_message` never raises on an oversize prompt -- at
+    contract.py:327-336 it silently truncates and appends
+    `c.TRUNCATION_MARKER`, which is kubeagent's own runtime policy. This
+    function is what refuses that truncation before it reaches a training
+    example. `key` is the real catalog entry key, or a join of the entry
+    keys for a multi-workload row -- never a placeholder -- so the error
+    this raises names exactly which row blew the cap.
+    """
+    user = c.build_user_message(cluster, summary, platform_line, service_issues,
+                                workloads, reads)
+    render.check_prompt_size(user, entry_or_scenario_key=key)
+    return user
+
+
 def _confidence(e: CatalogEntry) -> str:
     return "high" if e.direct else "medium"
 
@@ -173,7 +196,7 @@ def _winner_example(e: CatalogEntry, n: Names, cands: tuple[c.Candidate, ...],
     """
     conf = _confidence(e)
     w = _workload(e, n, cands, confidence=conf)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.winner_cause, n)
     rationale = _fmt(e.rationale, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
@@ -229,7 +252,7 @@ def none_of_these_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example
     candidates = _to_contract_candidates(raw, result)
     w = _workload(e, n, candidates, confidence=_confidence(e))
     reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
              "confidence": "medium",
              "rationale": "The evidence contradicts every listed candidate rather than "
@@ -254,7 +277,7 @@ def own_cause_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     candidates = _to_contract_candidates(raw, result)
     w = _workload(e, n, candidates, confidence="")
     reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
              "rationale": _fmt(e.rationale, n)
@@ -286,7 +309,7 @@ def truncated(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     rng.shuffle(cands)
     w = _workload(e, n, tuple(cands), confidence=_confidence(e))
     reads = object_reads(budgeted, ns=n.ns, pod=n.pod)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.winner_cause, n)
     rationale = "The evidence was truncated, so the candidate is only weakly confirmed."
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "low",
@@ -339,7 +362,7 @@ def wrong_attribution(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     rng.shuffle(cands)
     w = _workload(e, n, tuple(cands), confidence=_confidence(e))
     reads = object_reads(refuted, ns=n.ns, pod=n.pod)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
              "rationale": _fmt(e.rationale, n)
@@ -410,7 +433,7 @@ def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
     candidates, result = _decoy_result(e, n, menu)
     w = _workload(e, n, candidates, confidence=_confidence(e))
     reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
              "rationale": _fmt(e.rationale, n)}]
@@ -498,7 +521,7 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     if not used_registry:
         reads.append(c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=own_line))
     reads = tuple(reads)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
              "confidence": "medium",
              "rationale": "The evidence contradicts every listed candidate rather than "
@@ -525,7 +548,7 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
         remaining = drop(remaining, obj)
     w = _workload(e, n, (), confidence="")
     reads = (c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=_fmt(e.reads[0][1], n)),)
-    user = c.build_user_message(None, None, "", _service_issues(e, n), (w,), reads)
+    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
              "rationale": _fmt(e.rationale, n)
@@ -598,11 +621,11 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                                             own_cause_keywords=list(e.own_cause_keywords))
         decoy_by_workload[key] = [cand.cause for cand in candidates]
         results.append(result)
-    user = c.build_user_message(None, None, "", (), tuple(workloads),
-                                tuple(all_reads[:c.MAX_TOOL_CALLS]))
+    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    user = _user_message(None, None, "", (), tuple(workloads),
+                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     label = rules.label(rules.shared(tuple(results)))
     extra_meta = prompt_meta(workloads_meta, label=label, decoy_by_workload=decoy_by_workload)
     meta = {"case": "multi_misattribution_probe",
@@ -814,7 +837,8 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
 
-    user = c.build_user_message(None, None, "", (), tuple(workloads), tuple(reads))
+    group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
+    user = _user_message(None, None, "", (), tuple(workloads), tuple(reads), key=group)
     if healthy:
         # Verbatim `multi`'s shape: this IS the ordinary independent answer,
         # and a different wording would separate the classes by phrasing.
@@ -824,7 +848,6 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         lines = [f"{count} workloads share one upstream cause: {_fmt(p.origin, anchor)}.",
                  f"Root cause: {shared_cause}.",
                  _fmt(p.remedy, anchor)]
-    group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
     return _SharedOrigin(drawn=drawn, scope_value=scope_value, anchor=anchor,
                          shared_cause=shared_cause, distractor_cause=distractor_cause,
                          decoys=decoys, user=user,
@@ -1106,11 +1129,11 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     label = rules.label(rules.shared(tuple(results)))
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
-    user = c.build_user_message(None, None, "", (), tuple(workloads),
-                                tuple(all_reads[:c.MAX_TOOL_CALLS]))
+    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    user = _user_message(None, None, "", (), tuple(workloads),
+                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,
                    assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
                    meta={"case": "multi",
