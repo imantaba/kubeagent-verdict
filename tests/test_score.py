@@ -206,6 +206,70 @@ def test_job1_registry_and_pvc_kinds_use_their_own_table():
     assert score.job1(wm, reply) == 0.0
 
 
+# --------------------------------------------------- job 2: the scorer itself
+
+
+def test_job2_bar_is_seven_tenths():
+    assert score.JOB2_BAR == 0.7
+
+
+def test_job2_passes_when_all_keywords_appear_in_the_reply_cause():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "the memory limit is too small for the workload",
+             "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 1.0
+
+
+def test_job2_fails_when_one_keyword_is_missing():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "the container was killed", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 0.0
+
+
+def test_job2_matching_is_case_folded():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "Memory LIMIT exceeded", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 1.0
+
+
+def test_job2_passes_none_of_these_only_when_expected():
+    wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
+    reply = {"cause": "none_of_these", "confidence": "medium", "rationale": "r"}
+    assert score.job2(wm, reply, []) == 1.0
+
+
+def test_job2_fails_none_of_these_on_an_own_cause_row():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "none_of_these", "confidence": "medium", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 0.0
+
+
+def test_job2_fails_a_named_cause_on_a_none_of_these_row():
+    wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
+    reply = {"cause": "a NetworkPolicy blocks the probe", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, []) == 0.0
+
+
+def test_job2_fails_a_wrong_named_cause():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "a NetworkPolicy blocks the probe", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 0.0
+
+
+def test_job2_missing_row_scores_zero():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    assert score.job2(wm, None, ["memory", "limit"]) == 0.0
+
+
+def test_job2_own_cause_row_with_no_keywords_scores_zero():
+    """A malformed own-cause workload (job 2, a named expected_cause, but an
+    empty own_cause_keywords list) cannot be credited -- there is nothing to
+    check the reply's cause against, so it reads 0.0 rather than a free 1.0."""
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "the memory limit is too small", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, []) == 0.0
+
+
 def test_perfect_model_scores_ones():
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     board = score.scoreboard(results)

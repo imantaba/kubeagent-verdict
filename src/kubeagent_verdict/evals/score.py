@@ -135,6 +135,27 @@ def job1(meta_workload: dict, reply_row: dict | None) -> float:
 
     return 1.0
 
+
+JOB2_BAR = 0.7
+
+
+def job2(meta_workload: dict, reply_row: dict | None,
+         own_cause_keywords: list[str]) -> float:
+    """Score one undecided ("job 2") workload. 1.0 when the reply names the
+    story's own cause -- all of `own_cause_keywords` appear in the reply's
+    cause, matched as substrings after lowercasing both sides -- or, on a
+    `none_of_these` workload, when the reply's cause is exactly that. 0.0
+    otherwise, including a missing row, reply, or keyword set.
+    """
+    if reply_row is None:
+        return 0.0
+    got_cause = str(reply_row.get("cause", "")).strip().lower()
+    if meta_workload.get("expected_cause") == NONE_OF_THESE:
+        return 1.0 if got_cause == NONE_OF_THESE else 0.0
+    if not own_cause_keywords:
+        return 0.0
+    return 1.0 if all(str(k).lower() in got_cause for k in own_cause_keywords) else 0.0
+
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
 # so it lives here rather than in row meta -- which also keeps score.py's
