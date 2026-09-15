@@ -440,6 +440,7 @@ def test_multi_probe_hands_attributed_to_the_decoy_in_every_workload():
     # Every `attributed` line in the prompt must point somewhere OTHER than the
     # answer, so a tag-copier scores zero on this row.
     tagged = [ln for ln in ex.user.splitlines() if ": attributed —" in ln]
+    assert len(tagged) == 2  # one per workload -- guards the loop below against a vacuous pass
     for line in tagged:
         cause = line.split("considered ", 1)[1].rsplit(": attributed", 1)[0]
         assert cause not in causes.values(), f"tag points at the answer: {cause}"
