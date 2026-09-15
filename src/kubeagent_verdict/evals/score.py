@@ -100,6 +100,41 @@ def _word_bounded_signal(text: str, phrases: tuple[str, ...]) -> bool:
             return True
     return False
 
+
+JOB1_BAR = 0.9
+
+
+def job1(meta_workload: dict, reply_row: dict | None) -> float:
+    """Score one rule-decided ("job 1") workload: 1.0 only if the reply
+    echoes decided_cause byte for byte, gives a non-blank rationale after
+    the same cap-and-clean kubeagent applies, and fires no denial phrase --
+    the node-only "is ready" special case and the unverified-only overclaim
+    words included. 0.0 otherwise, including a missing row or reply.
+    """
+    if reply_row is None:
+        return 0.0
+    if reply_row.get("cause") != meta_workload.get("decided_cause"):
+        return 0.0
+    rationale = _clean_rationale(str(reply_row.get("rationale", "")))
+    if not rationale:
+        return 0.0
+
+    kind = _cause_kind(meta_workload.get("decided_cause", ""))
+    if _word_bounded_signal(rationale, DENIAL_PHRASES.get(kind, ())):
+        return 0.0
+
+    if kind == "node":
+        evidence = str(meta_workload.get("decided_evidence", "")).lower()
+        is_ready_agrees = "ready condition is true" in evidence
+        if not is_ready_agrees and _word_bounded_signal(rationale, ("is ready",)):
+            return 0.0
+
+    if (meta_workload.get("decided_outcome") == "unverified"
+            and _word_bounded_signal(rationale, OVERCLAIM_WORDS)):
+        return 0.0
+
+    return 1.0
+
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
 # so it lives here rather than in row meta -- which also keeps score.py's

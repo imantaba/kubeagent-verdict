@@ -112,6 +112,100 @@ def test_word_bounded_signal_is_false_when_no_phrase_is_present():
     assert score._word_bounded_signal("the disk is under pressure", ("is bound",)) is False
 
 
+# --------------------------------------------------- job 1: the scorer itself
+
+
+def _node_workload(rationale="the node was cordoned for disk pressure",
+                   cause="node worker-1 (disk pressure)",
+                   evidence="disk pressure condition is True",
+                   outcome="confirmed"):
+    return {"job": 1, "decided": True, "decided_cause": cause,
+            "decided_outcome": outcome, "decided_evidence": evidence,
+            "expected_cause": cause}
+
+
+def _reply(cause, rationale):
+    return {"cause": cause, "confidence": "high", "rationale": rationale}
+
+
+def test_job1_bar_is_nine_tenths():
+    assert score.JOB1_BAR == 0.9
+
+
+def test_job1_passes_a_clean_echo():
+    wm = _node_workload()
+    assert score.job1(wm, _reply(wm["decided_cause"], "the node was cordoned for disk pressure")) == 1.0
+
+
+def test_job1_fails_a_wrong_cause():
+    wm = _node_workload()
+    assert score.job1(wm, _reply("a different cause entirely", "some rationale")) == 0.0
+
+
+def test_job1_fails_a_rationale_that_is_blank_after_the_cap():
+    wm = _node_workload()
+    assert score.job1(wm, _reply(wm["decided_cause"], "\x00\x01\x02")) == 0.0
+
+
+def test_job1_fails_an_unnegated_denial_phrase():
+    wm = _node_workload()
+    reply = _reply(wm["decided_cause"], "cordoned, but node is fine otherwise")
+    assert score.job1(wm, reply) == 0.0
+
+
+def test_job1_passes_a_negated_denial_phrase():
+    wm = _node_workload()
+    reply = _reply(wm["decided_cause"],
+                   "this is not a healthy node, it was cordoned for disk pressure")
+    assert score.job1(wm, reply) == 1.0
+
+
+def test_job1_is_ready_denies_by_default():
+    wm = _node_workload(cause="node worker-1 (kubelet lease not re-read)",
+                        evidence="fresh read failed: connection refused",
+                        outcome="unverified")
+    reply = _reply(wm["decided_cause"], "the node reports it is ready, so no issue here")
+    assert score.job1(wm, reply) == 0.0
+
+
+def test_job1_is_ready_agrees_when_the_evidence_says_ready_condition_is_true():
+    wm = _node_workload(
+        cause="node worker-1 (kubelet lease not re-read)",
+        evidence="Ready condition is True, but the kubelet lease was not re-read",
+        outcome="unverified")
+    reply = _reply(wm["decided_cause"],
+                   "the node is ready but the kubelet lease was not re-read recently")
+    assert score.job1(wm, reply) == 1.0
+
+
+def test_job1_overclaim_word_fails_only_on_unverified_rows():
+    wm = _node_workload(outcome="unverified")
+    reply = _reply(wm["decided_cause"], "the node's disk pressure is confirmed by the kubelet")
+    assert score.job1(wm, reply) == 0.0
+
+
+def test_job1_overclaim_word_is_silent_on_a_confirmed_row():
+    wm = _node_workload(outcome="confirmed")
+    reply = _reply(wm["decided_cause"], "the node's disk pressure is confirmed by the kubelet")
+    assert score.job1(wm, reply) == 1.0
+
+
+def test_job1_missing_row_scores_zero():
+    wm = _node_workload()
+    assert score.job1(wm, None) == 0.0
+
+
+def test_job1_registry_and_pvc_kinds_use_their_own_table():
+    wm = _node_workload(cause="registry registry.invalid (3 workloads failing to pull)",
+                        evidence="3 workloads failing to pull")
+    reply = _reply(wm["decided_cause"], "unrelated app bug, registry is reachable fine")
+    assert score.job1(wm, reply) == 0.0
+    wm = _node_workload(cause="PVC data-claim (provisioning failed)",
+                        evidence="provisioning failed: no storage class")
+    reply = _reply(wm["decided_cause"], "the claim is fine, some other cause")
+    assert score.job1(wm, reply) == 0.0
+
+
 def test_perfect_model_scores_ones():
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     board = score.scoreboard(results)
