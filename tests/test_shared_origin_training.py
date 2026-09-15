@@ -974,3 +974,29 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
         f"{top[0][0]!r} is {top[0][1] / total:.3f} of all shared-origin causes")
     assert sum(n for _c, n in top) / total < 0.30, (
         f"top three are {sum(n for _c, n in top) / total:.3f} of all causes")
+
+
+def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
+    """The `separate` label is pinned three ways (a rules unit test, a scorer
+    unit test, and this one): at least one real training prompt must reach
+    `label == "separate"`, both its workloads confirmed and on different
+    nodes, or the label exists only in isolated unit tests and never in a
+    prompt a model actually trains on. `separate` stays at 0 in the exam
+    (R42), so this prompt has to live in the training split.
+    """
+    train, _ = generate.split(generate.generate(seed=17, size=8000), seed=17)
+    separate_rows = [e for e in train
+                     if e.meta.get("case") == "multi" and e.meta.get("label") == "separate"]
+    assert separate_rows, "no training-only separate-label multi prompt at seed=17"
+    row = separate_rows[0]
+    workloads = row.meta["workloads"]
+    assert len(workloads) == 2
+    for meta in workloads.values():
+        assert meta["decided"] is True
+    # decided_evidence is a template sentence ("Ready condition is False
+    # now") shared by every worker-containerd-stop draw regardless of which
+    # node it lands on, so it carries no node identity. decided_cause does
+    # ("node worker-2 (NotReady)" vs. "node worker-1 (NotReady)") -- the
+    # per-workload field this assert actually needs.
+    nodes = {meta["decided_cause"] for meta in workloads.values()}
+    assert len(nodes) == 2, "both workloads must be on different nodes"

@@ -48,8 +48,8 @@ def test_every_example_is_contract_valid():
 
 
 def test_to_row_schema():
-    (ex,) = generate.generate(seed=17, size=1)
-    row = generate.to_row(ex)
+    exs = generate.generate(seed=17, size=1)
+    row = generate.to_row(exs[0])
     assert set(row) == {"messages", "meta"}
     assert [m["role"] for m in row["messages"]] == ["system", "user", "assistant"]
 
@@ -155,9 +155,12 @@ def test_every_probe_row_carries_a_decoy_that_is_not_the_answer():
     for ex in generate.test_set():
         if ex.case not in ("positional_probe", "misattribution_probe"):
             continue
-        assert ex.meta["decoy_cause"]
-        assert ex.meta["decoy_cause"] != ex.meta["expected_cause"]
-        assert ex.meta["decoy_cause"] in ex.user
+        # Single-workload probe rows carry exactly one workload's decoy list.
+        decoys = next(iter(ex.meta["decoy_by_workload"].values()))
+        assert decoys
+        assert ex.meta["expected_cause"] not in decoys
+        for decoy in decoys:
+            assert decoy in ex.user
 
 
 # The multi probe is APPENDED after the two single-workload probe slices, never
@@ -204,7 +207,9 @@ def test_contradiction_probe_is_appended_last_one_row_per_entry():
                                               "shared_origin_decoy_probe"}
     for ex in tail:
         assert ex.meta["expected_cause"] == c.NONE_OF_THESE
-        assert ex.meta["decoy_cause"] in ex.user
+        decoys = next(iter(ex.meta["decoy_by_workload"].values()))
+        for decoy in decoys:
+            assert decoy in ex.user
 
 
 def test_multi_probe_rows_carry_two_distinct_workloads():
@@ -314,11 +319,18 @@ def test_keyword_slice_exposure_is_pinned():
 
     Pinned per case as well as in total: a corpus edit that raised the exposure
     of one slice while lowering the other's would slide past a total-only
-    assertion. `20 of 38` is what the implementation measures today, and it
-    matches the count taken independently when option C was decided. It is a
+    assertion. `19 of 38` is what the implementation measures today. It is a
     measurement, not a target — a change here is a real change in how much the
     slices give away, and the number is updated deliberately with the reason,
-    never tuned back to 20.
+    never tuned back to a stale value.
+
+    Re-pinned for the v1.24.0 rescope (kv-2026-09-14-v1240-rescope, Task 6):
+    `own_cause` moved from 10 to 9 because `own_cause_case` no longer builds its
+    candidate menu from hand-authored prose (`_candidates(..., include_winner=
+    False)`); it now runs the entry's declared objects through `_refuted_menu`
+    and `rules.attribute`, which renders one fewer keyword-exposing candidate
+    for this seed's corpus. `empty_candidates` is untouched at 10 -- that case
+    never read `e.losers`.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -331,9 +343,9 @@ def test_keyword_slice_exposure_is_pinned():
         by_case[ex.case] += 1 if derivable else 0
 
     assert dict(graded) == {"own_cause": 19, "empty_candidates": 19}
-    assert dict(by_case) == {"own_cause": 10, "empty_candidates": 10}
+    assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10}
     assert sum(graded.values()) == 38
-    assert sum(by_case.values()) == 20
+    assert sum(by_case.values()) == 19
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():
@@ -348,3 +360,210 @@ def test_multi_probe_builder_rejects_colliding_workloads():
     n = names.draw(random.Random(0))
     with pytest.raises(ValueError, match="distinct workloads"):
         cases.multi_misattribution_probe([(entry, n), (entry, n)], random.Random(0))
+
+
+def test_generate_wraps_nothing_in_try_except():
+    """R45: generate() lets a ValueError from any case builder propagate uncaught —
+    no call site inside it may swallow the exception."""
+    import inspect
+
+    from kubeagent_verdict.dataset import generate
+
+    assert "except" not in inspect.getsource(generate.generate)
+
+
+def test_generate_stops_at_first_error_and_writes_nothing(tmp_path, monkeypatch):
+    """A ValueError raised while building any row propagates out of generate(), and
+    write_jsonl is never reached — R45: generate stops at the first error, writes
+    nothing, so a half-rendered exam can never land."""
+    from kubeagent_verdict.dataset import cases, generate
+
+    def boom(*args, **kwargs):
+        raise ValueError("worker-1: object node:'worker-1' outside the closed table")
+
+    monkeypatch.setattr(cases, "attributed", boom)
+    out = tmp_path / "would-be-written.jsonl"
+
+    with pytest.raises(ValueError, match="outside the closed table"):
+        train, val = generate.generate(seed=17, size=50)
+        generate.write_jsonl(out, train + val)
+
+    assert not out.exists()
+
+
+def test_generate_appends_one_training_only_separate_multi_row():
+    """The training-only separate prompt is one extra multi() call, appended once, not
+    part of the CASE_MIX-counted 11 multi rows -- pairs worker-containerd-stop with
+    itself at two different (ns, node) draws so the two workloads decide different
+    causes and rules.label comes out 'separate'."""
+    from kubeagent_verdict.dataset import generate
+
+    rows = generate.generate(seed=5, size=200)
+    doubled = [ex for ex in rows if ex.case == "multi"
+              and ex.group.count("worker-containerd-stop:") == 2]
+    assert len(doubled) == 1
+    ex = doubled[0]
+    assert ex.meta["label"] == "separate"
+    workloads = list(ex.meta["workloads"].values())
+    assert len(workloads) == 2
+    assert workloads[0]["decided_cause"] != workloads[1]["decided_cause"]
+
+
+def test_job_population_counts_match_the_pinned_exam_shape():
+    """Every workload answer is job 1 (decided) or job 2 (not decided); every
+    prompt with 2+ workloads is job 3, labelled shared/separate/none by
+    rules.label. These counts are a direct read of the pinned 13-case-count
+    exam (job 3's count and label split) plus one measurement over the
+    workload-level job field (job 1 and job 2), taken once and pinned here so
+    a case-count or job-derivation regression is caught by a moving number
+    rather than silently accepted.
+    """
+    rows = generate.test_set()
+    job1 = job2 = 0
+    job3_labels = {"shared": 0, "separate": 0, "none": 0}
+    job3_prompts = 0
+    for e in rows:
+        workloads = e.meta.get("workloads", {})
+        for wl in workloads.values():
+            assert wl["job"] in (1, 2)
+            if wl["job"] == 1:
+                job1 += 1
+            else:
+                job2 += 1
+        if len(workloads) >= 2:
+            job3_prompts += 1
+            job3_labels[e.meta["label"]] += 1
+
+    # job1 and job2 are measured, not derived -- R40 states them as "about 70"
+    # and "about 210"; Step 51's actual measurement over the v1.24.0 exam
+    # printed 157 and 153, so those are the pinned literals, not R40's
+    # rounded figures.
+    assert job1 == 157
+    assert job2 == 153
+    assert job3_prompts == 39
+    assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
+
+
+def test_every_declared_down_node_appears_ruled_out_on_every_other_workload():
+    """A multi-workload prompt declares a down node once per prompt, but
+    placement is per workload: a workload whose pod is not on a given down
+    node must still see that node named in its own candidate menu, ruled out
+    there. This is what stops a model from treating an absent candidate as
+    evidence the node was never considered. Scoped to case == "multi": a
+    shared_origin* row's shared node is deliberately "outranked" on every
+    victim's own menu, never "ruled out" -- a different, intentional shape
+    this fact does not describe.
+
+    Pulled from the training corpus (seed=17, size=8000, matching
+    test_evidence_overlap.py's frozen SEED/SIZE), not test_set(): "multi" is
+    a CASE_MIX-only case and never appears in the held-out exam
+    (test_set()'s multi-workload rows are all multi_misattribution_probe,
+    shared_origin_probe or shared_origin_decoy_probe -- none is a plain
+    "multi" row), and Example.case is a top-level field, not a meta key.
+    Reads the rendered prompt straight off ex.user, since to_row()'s dict
+    carries no "prompt" key (only "messages" and "meta").
+
+    The section boundaries are cut inside the candidates block alone, not
+    the whole prompt: a workload's "ns/name" key also opens its inventory
+    line, which comes first in every rendered prompt, so slicing on each
+    key's first whole-prompt occurrence lands the cut inside the inventory
+    block (one line long) rather than the candidates block this fact is
+    about. Restricting the search to the text between the candidates
+    section's own BEGIN/END markers makes each key's first occurrence there
+    the candidates heading itself, which is the cut this fact needs.
+
+    The declared-down-node owner is read off the rendered candidates, not
+    off meta["workloads"][...]["expected_cause"]: for a multi() row that
+    field is the workload's OWN catalog-entry cause (a PVC, a Secret, a
+    NetworkPolicy, ...), which is independent of the shared decoy nodes
+    _multi_objects layers onto every workload's menu -- a workload can win
+    on a decoy node (decided_cause) while its expected_cause names something
+    that never renders as a candidate at all. The fact this test pins is
+    about the rendered decoy nodes themselves, so each owner's node is found
+    by scanning that owner's own section for an "attributed" candidate whose
+    cause starts with "node ".
+    """
+    rows = generate.generate(seed=17, size=8000)
+    multi_workload_rows = [e for e in rows
+                           if e.case == "multi"
+                           and len(e.meta.get("workloads", {})) >= 2]
+    assert multi_workload_rows, "the training corpus must carry at least one multi-workload multi() row"
+    attributed_node = re.compile(r"^    considered (node .+): attributed — ", re.MULTILINE)
+    for e in multi_workload_rows:
+        prompt = e.user
+        cand_start = prompt.index("== BEGIN candidates ==")
+        cand_end = prompt.index("== END candidates ==")
+        candidates = prompt[cand_start:cand_end]
+        workloads = e.meta["workloads"]
+        keys = sorted(workloads, key=lambda k: candidates.index(k))
+        bounds = [candidates.index(k) for k in keys] + [len(candidates)]
+        sections = {k: candidates[bounds[i]:bounds[i + 1]] for i, k in enumerate(keys)}
+        down_nodes = {wl: m.group(1) for wl, text in sections.items()
+                     for m in [attributed_node.search(text)] if m}
+        for owner, node in down_nodes.items():
+            for other in workloads:
+                if other == owner:
+                    continue
+                # The node this OTHER workload does not own must still show up,
+                # ruled out, inside its OWN section of the prompt -- not just
+                # anywhere in the prompt, since the owner's own section also
+                # names the node (there, as the attributed cause). render_candidates
+                # renders a ruled-out candidate as
+                # "    considered <cause>: ruled out — <reason>", so the literal
+                # marker to check for is "<node>: ruled out".
+                assert f"{node}: ruled out" in sections[other], (
+                    f"{node} (declared for {owner}) missing a ruled-out line in "
+                    f"{other}'s own section")
+
+
+def test_registry_fresh_read_literal_is_a_substring_of_the_events_read():
+    """Every workload with a registry candidate renders two things about the
+    same object: a fresh-read line or a decided-by-rules line, in the
+    prompt's `candidates` section, and an `events for <ns>/<pod>` read, in
+    its `evidence` section (what `classifyPullEvents` actually scans).
+    `rules._check_registry` always writes the candidate line's literal
+    verbatim after the fixed phrase `a pull event shows a ... error:`, and
+    `render.registry_events_read` writes the same `obj.fresh.literal` into
+    the events read's `Failed:` line -- so whatever literal a candidate line
+    names has to appear in the evidence section too (case-insensitively), or
+    a model reading only the events text would reach a different answer than
+    the candidate menu claims. The two sections are found by the real
+    `== BEGIN <name> ==` / `== END <name> ==` markers `contract.section()`
+    writes; both sections render every workload's own text concatenated
+    together, so the check compares the two sections as a whole rather than
+    scoping to one workload -- no per-workload ns/pod lookup is needed.
+    """
+    rows = generate.test_set()
+    for e in rows:
+        prompt = e.user.lower()
+        cand_start = prompt.index("== begin candidates ==")
+        cand_end = prompt.index("== end candidates ==")
+        ev_start = prompt.index("== begin evidence ==")
+        ev_end = prompt.index("== end evidence ==")
+        candidates_text = prompt[cand_start:cand_end]
+        evidence_text = prompt[ev_start:ev_end]
+        for line in candidates_text.splitlines():
+            if "pull event shows" not in line or " error: " not in line:
+                continue
+            literal = line.split(" error: ", 1)[1].split(";", 1)[0].strip()
+            assert literal in evidence_text, (
+                f"{literal!r} named in the candidates section but missing "
+                "from the evidence section's events read")
+
+
+def test_no_pull_event_line_has_no_events_for_in_it():
+    """The `no_event` ending's rendered events read must say `no events for`,
+    never a literal a `Failed:` line would carry -- the DECISION's second
+    invariant, checked directly rather than as a byproduct of the substring
+    check above.
+    """
+    rows = generate.test_set()
+    saw_no_event = False
+    for e in rows:
+        prompt = e.user
+        if "no events for" in prompt:
+            saw_no_event = True
+            for line in prompt.splitlines():
+                if "no events for" in line:
+                    assert "Failed:" not in line
+    assert saw_no_event, "the exam must carry at least one no_event registry ending"
