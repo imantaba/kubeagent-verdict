@@ -1,6 +1,7 @@
+import ast
 import dataclasses
-import inspect
 import json
+import pathlib
 import random
 
 import pytest
@@ -491,8 +492,9 @@ def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatc
 
 
 def test_check_prompt_size_refuses_an_oversize_multi_workload_prompt(monkeypatch):
-    """Same net, the multi-workload key shape: the funnel's key is a join of
-    every paired entry's own key, never a placeholder, so the raised error
+    """Same net, the multi-workload key shape: the funnel's key is the row's
+    own `group` string -- each paired entry's key plus its namespace/name,
+    joined across workloads -- never a placeholder, so the raised error
     names both real entries.
     """
     monkeypatch.setattr(render, "MAX_PROMPT_BYTES", 10)
@@ -506,17 +508,66 @@ def test_check_prompt_size_refuses_an_oversize_multi_workload_prompt(monkeypatch
     assert e2.key in msg, msg
 
 
-def test_every_build_user_message_call_goes_through_the_checked_funnel():
-    """`check_prompt_size` only ever runs if every c.build_user_message(...)
-    call routes through the one funnel that pairs the two. This does not
-    care what the funnel is named -- it cares that no OTHER line in
-    cases.py calls c.build_user_message directly, so a twelfth call site
-    added later (or the funnel removed) fails this test instead of quietly
-    reopening the gap Item 1 closed.
+def _is_build_user_message_call(node: ast.AST) -> bool:
+    """True for a call to something named `build_user_message` -- as an
+    attribute (`c.build_user_message(...)`, `contract.build_user_message(...)`,
+    whatever the import is aliased to) or as a bare name (a call site that did
+    `from ... import build_user_message` directly). Matches by name only, not
+    by which module the name resolves to.
     """
-    source = inspect.getsource(cases)
-    call_lines = [ln for ln in source.splitlines() if "c.build_user_message(" in ln]
-    assert len(call_lines) == 1, (
-        f"expected exactly one c.build_user_message(...) call site in cases.py "
-        f"(the shared funnel); found {len(call_lines)}: {call_lines}"
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr == "build_user_message"
+    if isinstance(func, ast.Name):
+        return func.id == "build_user_message"
+    return False
+
+
+def _build_user_message_calls_outside_the_funnel() -> list[str]:
+    """Every call to `build_user_message` found by parsing every module under
+    `src/kubeagent_verdict/dataset/`, except the one call inside
+    `cases._user_message` itself -- the funnel. Returns "path:lineno" strings
+    for whatever is left; an empty list means every call site in the package
+    is routed through the funnel (and so through `render.check_prompt_size`).
+    """
+    dataset_dir = pathlib.Path(cases.__file__).parent
+    funnel_call_ids: set[int] = set()
+    findings: list[str] = []
+    for path in sorted(dataset_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        if path.name == "cases.py":
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == "_user_message":
+                    funnel_call_ids = {
+                        id(sub) for sub in ast.walk(node) if _is_build_user_message_call(sub)
+                    }
+        for node in ast.walk(tree):
+            if _is_build_user_message_call(node) and id(node) not in funnel_call_ids:
+                findings.append(f"{path.name}:{node.lineno}")
+    return findings
+
+
+def test_every_build_user_message_call_goes_through_the_checked_funnel():
+    """`check_prompt_size` only ever runs if every `build_user_message(...)`
+    call routes through `cases._user_message`, the one funnel that pairs the
+    two. This parses every module under `src/kubeagent_verdict/dataset/` with
+    `ast` and flags any `build_user_message` call it finds outside that one
+    funnel function -- by attribute, under any import alias
+    (`c.build_user_message`, `contract.build_user_message`, ...), or by bare
+    name (a direct `from ... import build_user_message`). That covers a call
+    added under any spelling in any module in the package, not just the
+    `c.build_user_message(` substring in cases.py a plain text search would
+    have caught. It does not follow a renamed bare import (`import
+    build_user_message as x`), and it does not reach outside
+    `src/kubeagent_verdict/dataset/` -- `contract.build_messages`'s own call to
+    `contract.build_user_message` is a different, unused entry point and is
+    intentionally out of scope.
+    """
+    findings = _build_user_message_calls_outside_the_funnel()
+    assert findings == [], (
+        f"expected every build_user_message(...) call under "
+        f"src/kubeagent_verdict/dataset/ to route through cases._user_message "
+        f"(the shared funnel); found call(s) outside it: {findings}"
     )
