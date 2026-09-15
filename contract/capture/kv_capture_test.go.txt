@@ -449,14 +449,21 @@ func serviceIssuesJSON(issues []svchealth.Issue) []map[string]any {
 // findingsJSON converts a workload's findings into the JSON shape today's
 // golden uses. next_step/command are remediation's own deterministic
 // suggestion for the finding's Issue, exactly as the prompt's "suggested
-// fix" line reports it (explain.go's suggestionFor calls the same
-// remediation.For; the pod-name masking it does first only matters for a
-// finding whose Pod differs from the owning workload's identity, which
-// none of these findings do for command purposes worth hiding — every pod
-// name here is already a synthetic fixture name).
-func findingsJSON(findings []diagnose.Finding) []map[string]any {
+// fix" line reports it: explain.go's suggestionFor masks f.Pod to <pod>
+// before calling remediation.For whenever the finding's pod differs from
+// the owning workload's own namespace/name, and this mirrors that rule so
+// input.json's command values match the prompt's masked run: lines byte
+// for byte.
+func findingsJSON(w inventory.Workload, findings []diagnose.Finding) []map[string]any {
 	out := make([]map[string]any, 0, len(findings))
 	for _, f := range findings {
+		if f.Pod != "" && f.Pod != w.Namespace+"/"+w.Name {
+			if i := strings.IndexByte(f.Pod, '/'); i >= 0 {
+				f.Pod = f.Pod[:i+1] + "<pod>"
+			} else {
+				f.Pod = "<pod>"
+			}
+		}
 		s := remediation.For(f)
 		out = append(out, map[string]any{
 			"issue":     f.Issue,
@@ -554,7 +561,7 @@ func TestCaptureVerdictGolden(t *testing.T) {
 			Namespace: w.Namespace, Name: w.Name, Kind: w.Kind,
 			Ready: int(w.Ready), Desired: int(w.Desired), Status: w.Status,
 			Restarts: int(w.Restarts), Confidence: w.RootCauseConfidence,
-			Findings: findingsJSON(w.Findings), Candidates: candidatesJSON(w, r),
+			Findings: findingsJSON(w, w.Findings), Candidates: candidatesJSON(w, r),
 			Decided: r.Decided, DecidedCause: r.Cause, DecidedOutcome: string(r.Outcome),
 		})
 	}
