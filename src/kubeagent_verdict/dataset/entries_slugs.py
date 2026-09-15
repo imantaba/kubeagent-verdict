@@ -1,6 +1,7 @@
 """Slug-keyed catalog entries — one per chaos fault slug (17 when complete)."""
 
 from kubeagent_verdict.dataset.catalog import CatalogEntry
+from kubeagent_verdict.dataset.objects import Fresh, Object
 
 ENTRIES = [
     CatalogEntry(
@@ -36,6 +37,10 @@ ENTRIES = [
         own_cause="container killed at its memory limit",
         own_cause_keywords=("memory", "limit"),
         grounding=("OOMKilled",),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="deployment-bad-image-tag",
@@ -70,6 +75,10 @@ ENTRIES = [
         own_cause="the image tag does not exist in the registry",
         own_cause_keywords=("tag", "registry"),
         grounding=("ImagePullBackOff",),
+        objects=(
+            Object(kind="registry", name="registry.example.com", scan_reason="2",
+                   placement="", fresh=Fresh(literal="dial tcp"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="control-plane-docker-stop",
@@ -127,6 +136,10 @@ ENTRIES = [
         own_cause="the pod's node is cordoned and reporting disk pressure",
         own_cause_keywords=("cordon", "disk"),
         grounding=("Unschedulable",),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="no kubelet lease",
+                   placement="on", fresh=Fresh(ready="True"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="networkpolicy-deny-all",
@@ -163,6 +176,10 @@ ENTRIES = [
         own_cause="a NetworkPolicy now blocks traffic to the pod's probe port",
         own_cause_keywords=("networkpolicy", "traffic"),
         network_policies=("default-deny",),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="coredns-corefile-broken",
@@ -199,6 +216,10 @@ ENTRIES = [
         own_cause_keywords=("corefile", "coredns"),
         grounding=("kube-system/coredns",),
         degraded=False,
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="loadbalancer-no-provider",
@@ -262,6 +283,14 @@ ENTRIES = [
         own_cause="the container runtime on the pod's node is not responding",
         own_cause_keywords=("runtime", "node"),
         grounding=("NotReady",),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="cause"),
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0947"),
+                   intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="certmanager-bad-issuer-ref",
@@ -313,6 +342,12 @@ ENTRIES = [
                       "unschedulable. (x5)\n",
         own_cause="the pod's memory request is larger than any node can allocate",
         own_cause_keywords=("memory", "request"),
+        objects=(
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="crashloop-pod",
@@ -348,6 +383,10 @@ ENTRIES = [
                       '  Pulled: Successfully pulled image "{image}" (x1)\n',
         own_cause="the container's command or entrypoint is wrong and it exits immediately",
         own_cause_keywords=("entrypoint", "exit"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="no-fault-healthy-readyz",

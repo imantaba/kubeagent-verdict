@@ -126,6 +126,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from kubeagent_verdict.dataset.objects import Fresh, Object
+
 # The blast radius answers "how much of the cluster does this origin reach" —
 # the field that makes a propagation graph useful rather than decorative.
 BLAST_RADII = ("cluster", "node", "namespace")
@@ -172,6 +174,18 @@ class Victim:
     # confidence_carried.
     pass_confidence: str = "high"
     network_policies: tuple[str, ...] = ()
+    # Whether this victim's own read sits on the shared origin's identity —
+    # true only where the read names the origin's own node/PVC/registry
+    # directly (node-not-ready's PVC-attachment victim, all three of
+    # storage-provisioner-down and registry-unreachable's victims). Lets
+    # Task 6's builder bind the origin's own drawn Object instead of a
+    # separate decoy for that victim.
+    on_origin: bool = False
+    # This victim's own decoy objects — a node, PVC or registry its local,
+    # wrong candidate points at. Empty where the victim's local_cause names
+    # nothing from the closed node/PVC/registry vocabulary, or where
+    # on_origin is True and the origin's own object already covers it.
+    objects: tuple[Object, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -221,6 +235,16 @@ class Propagation:
     shared_verdict: str = "outranked"
     distractor_verdict: str = "ruled_out"
     notes: str = field(default="")
+    # The origin's own declared identity, for the three scenarios whose
+    # job-3 label is "shared/none": node-not-ready, storage-provisioner-down,
+    # registry-unreachable. None for the three "none/none" scenarios, whose
+    # victims still carry their own local decoys but whose shared origin is
+    # never itself offered as a candidate object.
+    origin_object: Object | None = None
+    # The origin's Fresh state once decided healthy — what
+    # shared_origin_decoy_probe reads instead of the broken state. None
+    # wherever origin_object is None.
+    healthy_origin_fresh: Fresh | None = None
 
 
 _COREDNS = Propagation(
@@ -261,6 +285,10 @@ _COREDNS = Propagation(
                   ("classified cause: name resolution failed for "
                    "postgres.data.svc.cluster.local (3 of 3 sampled restarts)")),
             pass_confidence="high",
+            objects=(
+                Object(kind="node", name="worker-1", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
         Victim(
             workload_kind="Deployment", status="Running", issue="ProbeFailure",
@@ -279,6 +307,10 @@ _COREDNS = Propagation(
                 "checking dependency sessions.auth.svc.cluster.local: "
                 "context deadline exceeded after 1s"),
             pass_confidence="medium",
+            objects=(
+                Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
         Victim(
             workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
@@ -296,6 +328,10 @@ _COREDNS = Propagation(
                 "type: <none>\nselector: n/a\n"
                 "ready endpoints: n/a  (no Service named {name} in {ns})"),
             pass_confidence="high",
+            objects=(
+                Object(kind="node", name="worker-3", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
     ),
 )
@@ -315,6 +351,9 @@ _NODE_LOST = Propagation(
               "in the workload itself",
     remedy="Recover or drain {node}; the flagged workloads need no change.",
     confidence="high",
+    origin_object=Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                          fresh=Fresh(ready="False"), intent="cause"),
+    healthy_origin_fresh=Fresh(ready="True"),
     origin_read=(
         "describe node {node}",
         ("Conditions:\n"
@@ -347,6 +386,7 @@ _NODE_LOST = Propagation(
                 "Warning  FailedScheduling  kubelet  0/3 nodes are available: "
                 "3 Insufficient cpu."),
             pass_confidence="high",
+            on_origin=True,
         ),
         Victim(
             workload_kind="StatefulSet", status="ContainerCreating", issue="VolumeAttachError",
@@ -361,6 +401,7 @@ _NODE_LOST = Propagation(
                 "Status: Bound\nAccess Modes: RWO\n"
                 "Attached to node: {node}  (node is Ready)"),
             pass_confidence="medium",
+            on_origin=True,
         ),
     ),
 )
@@ -379,6 +420,11 @@ _STORAGE = Propagation(
     rationale="the workload is waiting on a volume that nothing is left to create",
     remedy="Restore the provisioner; the pending claims bind on their own afterwards.",
     confidence="high",
+    origin_object=Object(kind="pvc", name="{pvc}", scan_reason="ProvisionerNotResponding",
+                          placement="mounted",
+                          fresh=Fresh(phase="Pending", storage_class="standard"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(phase="Bound", storage_class="standard"),
     origin_read=(
         "get_related storageclass standard",
         ("provisioner: example.com/local-path\n"
@@ -410,6 +456,7 @@ _STORAGE = Propagation(
                 "Events: Warning  ProvisioningFailed  persistentvolume-controller  "
                 "storageclass.storage.k8s.io \"fast-ssd\" not found"),
             pass_confidence="high",
+            on_origin=True,
         ),
         Victim(
             workload_kind="Job", status="Pending", issue="Unschedulable",
@@ -430,6 +477,7 @@ _STORAGE = Propagation(
                 "Warning  ProvisioningFailed    example.com/local-path  failed to "
                 "provision volume: requested 4Ti exceeds the 512Gi free on every node"),
             pass_confidence="medium",
+            on_origin=True,
         ),
         Victim(
             workload_kind="Deployment", status="ContainerCreating", issue="VolumeMountError",
@@ -442,6 +490,7 @@ _STORAGE = Propagation(
                    "volumes: unmounted volumes=[{pvc}], timed out waiting for the "
                    "condition")),
             pass_confidence="high",
+            on_origin=True,
         ),
     ),
 )
@@ -460,6 +509,9 @@ _REGISTRY = Propagation(
               "answering, which is true of every image in the cluster right now",
     remedy="Restore registry reachability; no workload manifest needs editing.",
     confidence="high",
+    origin_object=Object(kind="registry", name="registry.example.com", scan_reason="3",
+                          placement="", fresh=Fresh(literal="dial tcp"), intent="cause"),
+    healthy_origin_fresh=Fresh(literal="manifest unknown"),
     origin_read=(
         "get_events (cluster-wide, reason=Failed)",
         ("12 pods across 5 namespaces report the same error:\n"
@@ -490,6 +542,7 @@ _REGISTRY = Propagation(
                 "Events: Warning  Failed  kubelet  Failed to pull image {image}: "
                 "manifest unknown"),
             pass_confidence="high",
+            on_origin=True,
         ),
         Victim(
             workload_kind="DaemonSet", status="ErrImagePull", issue="ErrImagePull",
@@ -506,6 +559,7 @@ _REGISTRY = Propagation(
                 "Warning  Failed  kubelet  failed to resolve reference: "
                 "unauthorized: authentication required"),
             pass_confidence="medium",
+            on_origin=True,
         ),
         Victim(
             workload_kind="Job", status="Init:ImagePullBackOff", issue="Init:ImagePullBackOff",
@@ -522,6 +576,7 @@ _REGISTRY = Propagation(
                 "    State: Waiting\n    Reason: ImagePullBackOff\n"
                 "  Warning  Failed  kubelet  no such host"),
             pass_confidence="high",
+            on_origin=True,  # Task 6 also rewrites status/issue to ImagePullBackOff here.
         ),
     ),
 )
@@ -576,6 +631,10 @@ _DISK_PRESSURE = Propagation(
                 "available: 1 node(s) had untolerated taint dedicated=gpu, "
                 "2 Insufficient cpu."),
             pass_confidence="high",
+            objects=(
+                Object(kind="node", name="{node}", scan_reason="NotReady", placement="off",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
         Victim(
             workload_kind="Deployment", status="ContainerStartError",
@@ -595,6 +654,10 @@ _DISK_PRESSURE = Propagation(
                 "Events: Warning  Failed  kubelet  Error: failed to create "
                 "containerd task: no space left on device"),
             pass_confidence="medium",
+            objects=(
+                Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
         Victim(
             workload_kind="DaemonSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
@@ -608,6 +671,10 @@ _DISK_PRESSURE = Propagation(
                   ("classified cause: write failed, device full (3 of 3 sampled "
                    "restarts)")),
             pass_confidence="high",
+            objects=(
+                Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
     ),
 )
@@ -651,6 +718,10 @@ _NETPOL = Propagation(
                    "restarts)")),
             pass_confidence="high",
             network_policies=("default-deny",),
+            objects=(
+                Object(kind="node", name="worker-1", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
         Victim(
             workload_kind="Deployment", status="Running", issue="ProbeFailure",
@@ -663,6 +734,10 @@ _NETPOL = Propagation(
                    "upstream check timed out")),
             pass_confidence="medium",
             network_policies=("default-deny",),
+            objects=(
+                Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                       fresh=Fresh(ready="False"), intent="decoy"),
+            ),
         ),
     ),
 )

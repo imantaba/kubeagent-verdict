@@ -19,6 +19,25 @@ import json
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import vocab
 from kubeagent_verdict.dataset import propagation
+from kubeagent_verdict.dataset.objects import Fresh, Object
+
+
+def test_victim_and_propagation_gain_the_declaration_fields():
+    v = propagation.Victim(
+        workload_kind="Deployment", status="Running", issue="ProbeFailure",
+        reason="r", evidence="e", local_cause="c", local_reason="cr",
+        read=("label", "content"),
+    )
+    assert v.on_origin is False
+    assert v.objects == ()
+    p = propagation.Propagation(
+        key="t", blast_radius="node", scope_field="node", origin="o",
+        shared_cause="sc", shared_reason="sr", distractor_cause="dc",
+        distractor_reason="dr", rationale="ra", remedy="re", confidence="high",
+        origin_read=("label", "content"), victims=(v,),
+    )
+    assert p.origin_object is None
+    assert p.healthy_origin_fresh is None
 
 
 def test_every_scenario_has_a_closed_blast_radius():
@@ -330,3 +349,89 @@ def test_the_eval_six_declare_no_variants_and_no_state():
     for p in propagation.all_scenarios():
         assert p.origin_variants == (), p.key
         assert p.origin_state == ("", ""), p.key
+
+
+def test_the_shared_scenarios_declare_an_origin_object():
+    by_key = {p.key: p for p in propagation.all_scenarios()}
+
+    node_lost = by_key["node-not-ready"]
+    assert node_lost.origin_object == Object(
+        kind="node", name="{node}", scan_reason="NotReady", placement="on",
+        fresh=Fresh(ready="False"), intent="cause")
+    assert node_lost.healthy_origin_fresh == Fresh(ready="True")
+
+    storage = by_key["storage-provisioner-down"]
+    assert storage.origin_object == Object(
+        kind="pvc", name="{pvc}", scan_reason="ProvisionerNotResponding",
+        placement="mounted",
+        fresh=Fresh(phase="Pending", storage_class="standard"), intent="cause")
+    assert storage.healthy_origin_fresh == Fresh(phase="Bound", storage_class="standard")
+
+    registry = by_key["registry-unreachable"]
+    assert registry.origin_object == Object(
+        kind="registry", name="registry.example.com", scan_reason="3", placement="",
+        fresh=Fresh(literal="dial tcp"), intent="cause")
+    assert registry.healthy_origin_fresh == Fresh(literal="manifest unknown")
+
+    for key in ("coredns-down", "node-disk-pressure", "networkpolicy-deny-all"):
+        p = by_key[key]
+        assert p.origin_object is None, key
+        assert p.healthy_origin_fresh is None, key
+
+
+def test_the_six_scenarios_declare_what_the_graft_table_says():
+    by_key = {p.key: p for p in propagation.all_scenarios()}
+
+    coredns = by_key["coredns-down"]
+    names = [v.objects[0].name for v in coredns.victims]
+    assert names == ["worker-1", "worker-2", "worker-3"]
+    for v in coredns.victims:
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].placement == "on"
+        assert v.on_origin is False
+
+    node_lost = by_key["node-not-ready"]
+    v1, v2 = node_lost.victims
+    assert v1.on_origin is True and v1.objects == ()
+    assert v2.on_origin is True and v2.objects == ()
+
+    storage = by_key["storage-provisioner-down"]
+    sv1, sv2, sv3 = storage.victims
+    assert sv1.on_origin is True and sv1.objects == ()
+    assert sv2.on_origin is True and sv2.objects == ()
+    assert sv3.on_origin is True and sv3.objects == ()
+
+    registry = by_key["registry-unreachable"]
+    for v in registry.victims:
+        assert v.on_origin is True
+        assert v.objects == ()
+
+    disk = by_key["node-disk-pressure"]
+    d1, d2, d3 = disk.victims
+    assert [v.objects[0].placement for v in (d1, d2, d3)] == ["off", "on", "on"]
+    for v in disk.victims:
+        assert v.on_origin is False
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].name == "{node}"
+
+    netpol = by_key["networkpolicy-deny-all"]
+    n1, n2 = netpol.victims
+    assert n1.objects[0].name == "worker-1"
+    assert n2.objects[0].name == "worker-2"
+    for v in netpol.victims:
+        assert v.on_origin is False
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].placement == "on"
+
+
+def test_every_scenario_object_passes_check_declaration():
+    from kubeagent_verdict.dataset import rules
+
+    for p in propagation.all_scenarios():
+        origin_objects = (p.origin_object,) if p.origin_object is not None else ()
+        rules.check_declaration(p.key, origin_objects)
+        for i, v in enumerate(p.victims):
+            rules.check_declaration(f"{p.key}/victim{i}", v.objects)

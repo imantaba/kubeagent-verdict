@@ -1,6 +1,7 @@
 """Kind-keyed catalog entries — one per issue kind no slug entry covers (11 when complete)."""
 
 from kubeagent_verdict.dataset.catalog import CatalogEntry
+from kubeagent_verdict.dataset.objects import Fresh, Object
 
 ENTRIES = [
     CatalogEntry(
@@ -37,6 +38,10 @@ ENTRIES = [
         own_cause="the application answers its readiness endpoint with errors",
         own_cause_keywords=("application", "readiness"),
         service_issue=("NoReadyEndpoints", "service has 0 ready endpoints"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="container-start-error",
@@ -71,6 +76,10 @@ ENTRIES = [
                       "terminate successfully (x3)\n",
         own_cause="the container's entrypoint names a path that does not exist in the image",
         own_cause_keywords=("names", "path"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="create-container-config-error",
@@ -105,6 +114,12 @@ ENTRIES = [
                       "found (x2)\n",
         own_cause="the pod spec references a ConfigMap key that was never added or was renamed",
         own_cause_keywords=("configmap", "key"),
+        objects=(
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0442"),
+                   intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="init-crashloop",
@@ -140,6 +155,10 @@ ENTRIES = [
         own_cause="the init container cannot reach a dependency it waits for before the pod "
                   "can start",
         own_cause_keywords=("init", "dependency"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="init-config-error",
@@ -174,6 +193,10 @@ ENTRIES = [
                       "DB_PASSWORD in Secret {ns}/migration-creds (x2)\n",
         own_cause="a Secret the init container references was never created in this namespace",
         own_cause_keywords=("secret", "init"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="init-errimagepull",
@@ -209,6 +232,10 @@ ENTRIES = [
                       "dial tcp: i/o timeout (x1)\n",
         own_cause="the init container's image tag does not exist in the registry",
         own_cause_keywords=("tag", "registry"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="init-imagepullbackoff",
@@ -244,6 +271,10 @@ ENTRIES = [
                       '"registry.example.com/shop/migrate:v0.9.0" (x1)\n',
         own_cause="the init container's image tag does not exist in the registry",
         own_cause_keywords=("registry", "tag"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="init-oomkilled",
@@ -281,6 +312,10 @@ ENTRIES = [
         own_cause="the init container's memory limit is too small for the work it does at "
                   "startup",
         own_cause_keywords=("memory", "init"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="restart-loop",
@@ -317,6 +352,10 @@ ENTRIES = [
                       "503 (x{restarts})\n",
         own_cause="the container panics intermittently, most often under load",
         own_cause_keywords=("intermittently", "panics"),
+        objects=(
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="volume-attach-error",
@@ -355,6 +394,12 @@ ENTRIES = [
                       "responding (x8)\n",
         own_cause="the PVC is still attached to the node the previous pod ran on",
         own_cause_keywords=("attached", "previous"),
+        objects=(
+            Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
     ),
     CatalogEntry(
         key="volume-mount-error",
@@ -391,5 +436,11 @@ ENTRIES = [
                       '"app-config" not found (x5)\n',
         own_cause="the PVC's underlying volume is unhealthy or unreachable on the pod's node",
         own_cause_keywords=("unreachable", "underlying"),
+        objects=(
+            Object(kind="pvc", name="aux-1", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
     ),
 ]
