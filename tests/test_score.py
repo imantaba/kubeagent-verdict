@@ -52,6 +52,66 @@ def test_clean_rationale_of_an_empty_string_is_blank():
     assert score._clean_rationale("") == ""
 
 
+# --------------------------------------------------- job 1: phrase matching
+
+
+def test_cause_kind_reads_the_first_word_of_decided_cause():
+    assert score._cause_kind("node worker-1 (disk pressure)") == "node"
+    assert score._cause_kind("PVC data-claim (provisioning failed)") == "pvc"
+    assert score._cause_kind(
+        "registry registry.invalid (3 workloads failing to pull)") == "registry"
+
+
+def test_denial_phrases_cover_the_three_kinds():
+    assert set(score.DENIAL_PHRASES) == {"node", "registry", "pvc"}
+    assert score.DENIAL_PHRASES["node"] == (
+        "rather than the node", "not the node", "node is fine",
+        "node is healthy", "healthy node")
+    assert score.DENIAL_PHRASES["registry"] == (
+        "rather than the registry", "not the registry", "registry is reachable")
+    assert score.DENIAL_PHRASES["pvc"] == (
+        "rather than the claim", "not the claim", "claim is fine", "is bound")
+
+
+def test_overclaim_words_are_the_four_confirmation_words():
+    assert score.OVERCLAIM_WORDS == ("verified", "confirm", "confirms", "confirmed")
+
+
+def test_word_bounded_signal_fires_on_a_plain_phrase():
+    assert score._word_bounded_signal(
+        "the node is cordoned, not the node causing this", ("not the node",)) is True
+
+
+def test_word_bounded_signal_is_case_insensitive():
+    assert score._word_bounded_signal("NODE IS FINE, cordon only", ("node is fine",)) is True
+
+
+def test_word_bounded_signal_respects_word_boundaries():
+    """OVERCLAIM_WORDS mixes single words into the phrase set -- "verified"
+    must not fire inside "unverified", which is exactly the failure a plain
+    substring scan (`_shared_claim_signal`'s `.find`) would produce."""
+    assert score._word_bounded_signal(
+        "the outage remains unverified pending a fresh read", ("verified",)) is False
+
+
+def test_word_bounded_signal_is_negation_aware():
+    assert score._word_bounded_signal(
+        "this is not a healthy node, it was cordoned for disk pressure",
+        ("healthy node",)) is False
+
+
+def test_word_bounded_signal_still_fires_when_the_phrase_itself_starts_with_a_negator():
+    """"not the node" is itself a listed denial phrase -- it must fire on its
+    own occurrence, not be read as negating itself."""
+    assert score._word_bounded_signal(
+        "the workload failed for reasons that are not the node's fault",
+        ("not the node",)) is True
+
+
+def test_word_bounded_signal_is_false_when_no_phrase_is_present():
+    assert score._word_bounded_signal("the disk is under pressure", ("is bound",)) is False
+
+
 def test_perfect_model_scores_ones():
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     board = score.scoreboard(results)

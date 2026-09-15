@@ -55,6 +55,51 @@ def _clean_rationale(text: str) -> str:
     cleaned = "".join(ch for ch in capped if ord(ch) >= 0x20 and ch != "\x7f")
     return cleaned.strip()
 
+
+def _cause_kind(cause: str) -> str:
+    """The first word of a decided_cause, lowercased -- "node", "pvc" or
+    "registry". Every decided_cause kubeagent's rule engine writes starts
+    with its kind name ("node <name> (...)", "PVC <name> (...)", "registry
+    <name> (...)"), so a plain split needs no per-kind special-casing.
+    """
+    return str(cause).split(" ", 1)[0].lower()
+
+
+# The denial table job 1 checks a rule row's rationale against. Closed and
+# small, one tuple per kind kubeagent's rule engine can decide.
+DENIAL_PHRASES = {
+    "node": ("rather than the node", "not the node", "node is fine",
+             "node is healthy", "healthy node"),
+    "registry": ("rather than the registry", "not the registry",
+                 "registry is reachable"),
+    "pvc": ("rather than the claim", "not the claim", "claim is fine", "is bound"),
+}
+
+# Fire only on a decided row whose decided_outcome is "unverified" -- word-
+# bounded so "verified" does not self-collide inside "unverified".
+OVERCLAIM_WORDS = ("verified", "confirm", "confirms", "confirmed")
+
+
+def _word_bounded_signal(text: str, phrases: tuple[str, ...]) -> bool:
+    """Whether any of `phrases` fires in `text`: case-insensitive, matched on
+    word boundaries, and negation-aware the same way `_shared_claim_signal`
+    is -- a hit preceded within NEGATION_WINDOW characters by a NEGATORS word
+    or an "n't" is not a fire.
+
+    Word-bounded rather than `_shared_claim_signal`'s plain substring scan,
+    because OVERCLAIM_WORDS mixes in single words: "verified" would
+    otherwise self-collide inside "unverified".
+    """
+    low = str(text).lower()
+    for phrase in phrases:
+        pattern = re.compile(r"\b" + re.escape(str(phrase).lower()) + r"\b")
+        for m in pattern.finditer(low):
+            window = low[max(0, m.start() - NEGATION_WINDOW):m.start()]
+            if NEGATORS.search(window) or "n't" in window:
+                continue
+            return True
+    return False
+
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
 # so it lives here rather than in row meta -- which also keeps score.py's
