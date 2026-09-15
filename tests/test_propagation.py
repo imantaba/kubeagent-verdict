@@ -15,6 +15,7 @@ any attempt is made to correct it.
 """
 
 import json
+from dataclasses import replace
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import vocab
@@ -454,3 +455,16 @@ def test_victim_decoy_objects_declare_their_contents():
         assert objects.unverify(sample, ending).fresh != sample.fresh, ending
     sample = propagation.by_key()["coredns-down"].victims[0].objects[0]
     assert objects.refute(sample).fresh.ready == "True"
+    # `kind`, `name` and `placement` are the only declared values every ending
+    # keeps. Pin all three endings, so the comment above `objects` stays true.
+    for drawn in (objects.refute(sample), objects.unverify(sample, "lease"),
+                  objects.unverify(sample, "read_failed")):
+        assert (drawn.kind, drawn.name, drawn.placement) == (
+            sample.kind, sample.name, sample.placement)
+    # `scan_reason` is a placeholder under two of the three endings. Declare a
+    # different one, so the check cannot pass by coincidence.
+    probe = replace(sample, scan_reason="kubelet not heartbeating")
+    assert objects.refute(probe).scan_reason == "NotReady"
+    assert objects.unverify(probe, "lease").scan_reason == "no kubelet lease"
+    assert objects.unverify(probe, "read_failed").scan_reason == (
+        "kubelet not heartbeating")

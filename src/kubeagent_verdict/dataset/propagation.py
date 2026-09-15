@@ -193,8 +193,13 @@ class Victim:
     # carry a node decoy.
     # The declared `fresh` here is a placeholder, not a claim: the builder
     # draws an ending for every decoy, and each ending replaces `fresh`
-    # outright (see objects.refute and objects.unverify). Only `kind`,
-    # `name`, `scan_reason` and `placement` survive to the prompt.
+    # outright (see objects.refute and objects.unverify). Only `kind`, `name`
+    # and `placement` survive every ending. `scan_reason` is a placeholder
+    # too, under two of the three: `refute` writes "NotReady" over it, and the
+    # lease ending writes "no kubelet lease". Only the read_failed ending
+    # keeps the declared value. It reads as preserved here for one reason —
+    # every victim decoy already declares "NotReady", which is what `refute`
+    # writes.
     objects: tuple[Object, ...] = ()
 
 
