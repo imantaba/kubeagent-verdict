@@ -51,6 +51,7 @@ def test_user_message_matches_kubeagent_bytes():
 def test_user_message_has_the_v1240_shapes():
     text = (GOLDEN / "user_message.txt").read_text(encoding="utf-8")
     assert "      fresh read: " in text
+    assert "      fresh read: confirmed — " in text
     assert "    decided by rules: " in text
     assert "    " + c.TRUNCATION_MARKER + "\n" in text
 
@@ -98,3 +99,11 @@ def test_input_candidates_have_exact_shape_and_ruled_out_fresh_read_is_empty():
                                "fresh_read_outcome", "fresh_read_evidence"}
             if cd["verdict"] == "ruled_out":
                 assert cd["fresh_read_outcome"] == "" and cd["fresh_read_evidence"] == ""
+
+
+def test_no_real_identifier_in_golden_files():
+    banned = ("kubeconfig", "/home/", "@", "kubeagent-live", "http://", "https://")
+    for name in ("user_message.txt", "input.json", "answer.json"):
+        text = (GOLDEN / name).read_text(encoding="utf-8")
+        for b in banned:
+            assert b not in text, f"{name} contains {b!r}"

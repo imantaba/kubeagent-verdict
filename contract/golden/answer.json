@@ -26,7 +26,7 @@
      "rationale": "Events were read but none name the pull failure; they may have aged out of the window."},
     {"workload": "img/six", "cause": "registry registry.invalid (7 workloads failing to pull)",
      "confidence": "low",
-     "rationale": "The crashing pod's events were read, but the pulling pod's own events were not."},
+     "rationale": "The pulling pod's own events were not read, so the registry cause stays unverified."},
     {"workload": "img/lone", "cause": "registry mirror.invalid",
      "confidence": "low",
      "rationale": "Only this workload fails to pull from mirror.invalid, below kubeagent's threshold of two, and every node candidate is ruled out."}
