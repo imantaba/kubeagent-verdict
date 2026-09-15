@@ -474,13 +474,12 @@ def test_prose_decoy_helpers_are_retired():
 
 
 def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatch):
-    """Item 1 of the Task 6 fix round: `render.check_prompt_size` has to run on
-    every prompt a builder assembles, not just on the strings its own unit
-    tests hand it directly. Lowering the real cap -- rather than fabricating
-    a giant catalog entry -- is what makes a REAL builder's REAL prompt
-    exceed it: the wiring under test is the funnel, not any one entry's byte
-    count. If the funnel is unwired this raises nothing and the `with`
-    block fails instead.
+    """`render.check_prompt_size` has to run on every prompt a builder
+    assembles, not just on the strings its own unit tests hand it directly.
+    Lowering the real cap -- rather than fabricating a giant catalog entry --
+    is what makes a REAL builder's REAL prompt exceed it: the wiring under
+    test is the funnel, not any one entry's byte count. If the funnel is
+    unwired this raises nothing and the `with` block fails instead.
     """
     monkeypatch.setattr(render, "MAX_PROMPT_BYTES", 10)
     e = _entry("memory-limit-oomkill")
@@ -511,7 +510,7 @@ def test_every_build_user_message_call_goes_through_the_checked_funnel():
     """`check_prompt_size` only ever runs if every c.build_user_message(...)
     call routes through the one funnel that pairs the two. This does not
     care what the funnel is named -- it cares that no OTHER line in
-    cases.py calls c.build_user_message directly, so a thirteenth call site
+    cases.py calls c.build_user_message directly, so a twelfth call site
     added later (or the funnel removed) fails this test instead of quietly
     reopening the gap Item 1 closed.
     """

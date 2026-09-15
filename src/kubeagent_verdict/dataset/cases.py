@@ -116,9 +116,11 @@ def _user_message(cluster: c.ClusterHealth | None, summary: c.ResourceSummary | 
     contract.py:327-336 it silently truncates and appends
     `c.TRUNCATION_MARKER`, which is kubeagent's own runtime policy. This
     function is what refuses that truncation before it reaches a training
-    example. `key` is the real catalog entry key, or a join of the entry
-    keys for a multi-workload row -- never a placeholder -- so the error
-    this raises names exactly which row blew the cap.
+    example. `key` is the real catalog entry key for a single-workload row,
+    or the row's own `group` string for a multi-workload row -- each
+    paired entry's key plus its namespace/name, joined across workloads --
+    never a placeholder, so the error this raises names exactly which row
+    blew the cap.
     """
     user = c.build_user_message(cluster, summary, platform_line, service_issues,
                                 workloads, reads)

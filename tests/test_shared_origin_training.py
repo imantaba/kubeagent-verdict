@@ -738,6 +738,7 @@ FROZEN_253_SHA256 = "b3572842c3131fa3fc5a7b8fe83a9f95996c44025a4cf688243306b395c
 # it. On 2026-09-05 the 253 stayed put -- only the ten decoy rows changed --
 # so a number on the 253 measured before that date was still comparable to
 # one measured after it. A change that moves this hash is wrong
+# unless it means to retire that comparison, and says so here.
 #
 # Re-pinned again on 2026-09-16, when the node-not-ready and
 # registry-unreachable builders were rewritten and the system prompt moved
