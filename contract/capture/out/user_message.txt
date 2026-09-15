@@ -41,7 +41,7 @@ Workload problems (P2):
     issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "mirror.invalid/img/lone:1.0")
       suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
 Service issues:
-  - shop/api (): service has 0 ready endpoints
+  - shop/api (NoReadyEndpoints): service has 0 ready endpoints
 == END inventory ==
 
 == BEGIN candidates ==

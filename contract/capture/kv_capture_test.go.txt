@@ -73,9 +73,10 @@ var pods = map[string]string{
 // kubeagent repo, Task 3 Step 2): a degraded 2/3-node cluster, a CPU/memory
 // summary with no live metrics, and one ClusterIP service with zero ready
 // endpoints. Those sections of the prompt keep today's bytes; only the
-// candidates/evidence sections below are new. svchealth.Issue's field is
-// Problem at v1.24.0 (the old capture's plan text called it Type) — the
-// value copied over is unchanged.
+// candidates/evidence sections below are new. svchealth.Issue has both a
+// Type and a Problem field at v1.24.0; BuildInventoryPrompt prints Type, so
+// the fixture's NoReadyEndpoints value goes in Type, exactly where the
+// pre-rescope capture had it.
 func goldenCluster() clusterhealth.ClusterHealth {
 	return clusterhealth.ClusterHealth{
 		Verdict:    "Degraded",
@@ -100,7 +101,7 @@ func goldenSummary() *resources.Summary {
 
 func goldenServiceIssues() []svchealth.Issue {
 	return []svchealth.Issue{
-		{Namespace: "shop", Name: "api", Problem: "NoReadyEndpoints", Detail: "service has 0 ready endpoints"},
+		{Namespace: "shop", Name: "api", Type: "NoReadyEndpoints", Detail: "service has 0 ready endpoints"},
 	}
 }
 
@@ -439,7 +440,7 @@ func serviceIssuesJSON(issues []svchealth.Issue) []map[string]any {
 		out = append(out, map[string]any{
 			"namespace": iss.Namespace,
 			"name":      iss.Name,
-			"type":      iss.Problem,
+			"type":      iss.Type,
 			"detail":    iss.Detail,
 		})
 	}
