@@ -65,6 +65,8 @@ class Candidate:
     cause: str
     verdict: str  # "attributed" | "ruled_out" | "outranked"
     reason: str
+    fresh_read_outcome: str = ""
+    fresh_read_evidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,9 @@ class Workload:
     confidence: str = ""
     network_policies: tuple[str, ...] = ()
     rollout: Rollout | None = None
+    decided: bool = False
+    decided_cause: str = ""
+    decided_outcome: str = ""
 
 
 @dataclass(frozen=True)
@@ -204,6 +209,14 @@ def render_candidates(workloads: tuple[Workload, ...]) -> str:
                 break
             out.append(
                 f"    considered {cand.cause}: {cand.verdict.replace('_', ' ')} — {cand.reason}\n"
+            )
+            if cand.fresh_read_outcome:
+                out.append(
+                    f"      fresh read: {cand.fresh_read_outcome} — {cand.fresh_read_evidence}\n"
+                )
+        if w.decided:
+            out.append(
+                f"    decided by rules: {w.decided_cause} — {w.decided_outcome}\n"
             )
     return "".join(out)
 

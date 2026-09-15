@@ -50,6 +50,48 @@ def test_render_candidates_format_and_cap():
     assert c.render_candidates((bare,)) == ""
 
 
+def test_render_candidates_fresh_read_line_after_non_ruled_out():
+    cand = c.Candidate(cause="node worker-1", verdict="attributed", reason="pod runs there",
+                       fresh_read_outcome="confirmed", fresh_read_evidence="Ready condition is False now")
+    w = c.Workload(namespace="shop", name="api", kind="Deployment", ready=0, desired=1,
+                   status="Progressing", restarts=0, findings=(), candidates=(cand,))
+    out = c.render_candidates((w,))
+    assert "    considered node worker-1: attributed — pod runs there\n" in out
+    assert "      fresh read: confirmed — Ready condition is False now\n" in out
+
+
+def test_render_candidates_fresh_read_line_absent_without_outcome():
+    cand = c.Candidate(cause="node worker-2", verdict="attributed", reason="pod runs there")
+    w = c.Workload(namespace="shop", name="api", kind="Deployment", ready=0, desired=1,
+                   status="Progressing", restarts=0, findings=(), candidates=(cand,))
+    out = c.render_candidates((w,))
+    assert "    considered node worker-2: attributed — pod runs there\n" in out
+    assert "fresh read:" not in out
+
+
+def test_render_candidates_decided_line_after_the_loop():
+    cand = c.Candidate(cause="node worker-1", verdict="attributed", reason="pod runs there",
+                       fresh_read_outcome="confirmed", fresh_read_evidence="Ready condition is False now")
+    w = c.Workload(namespace="shop", name="api", kind="Deployment", ready=0, desired=1,
+                   status="Progressing", restarts=0, findings=(), candidates=(cand,),
+                   decided=True, decided_cause="node worker-1", decided_outcome="confirmed")
+    out = c.render_candidates((w,))
+    assert out.endswith("    decided by rules: node worker-1 — confirmed\n")
+
+
+def test_render_candidates_decided_line_can_name_a_candidate_past_the_cap():
+    cands = tuple(
+        c.Candidate(cause=f"cause-{i}", verdict="ruled_out", reason=f"r{i}") for i in range(9)
+    )
+    w = c.Workload(namespace="shop", name="api", kind="Deployment", ready=0, desired=1,
+                   status="Progressing", restarts=0, findings=(), candidates=cands,
+                   decided=True, decided_cause="cause-8", decided_outcome="unverified")
+    out = c.render_candidates((w,))
+    assert out.endswith(
+        "    " + c.TRUNCATION_MARKER + "\n" + "    decided by rules: cause-8 — unverified\n"
+    )
+
+
 def _finding(**over):
     base = {
         "issue": "CrashLoopBackOff", "reason": "back-off restarting failed container",
