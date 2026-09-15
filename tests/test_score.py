@@ -1,7 +1,7 @@
 import json
 
 from kubeagent_verdict.contract import TRUNCATION_MARKER
-from kubeagent_verdict.dataset import generate
+from kubeagent_verdict.dataset import cases, generate
 from kubeagent_verdict.evals import score
 
 ROW = {
@@ -386,6 +386,15 @@ def test_job3_every_declared_negator_denies_its_own_sentence():
     for word, (sentence, _phrase) in NEGATOR_SENTENCES.items():
         assert score.job3("separate", sentence) == 1.0, (
             f"negator {word!r} did not deny its own sentence: {sentence!r}")
+
+
+def test_shared_claim_phrases_matches_the_generators_copy():
+    """score.py keeps its own copy of SHARED_CLAIM_PHRASES rather than
+    importing dataset.cases (score.py's import boundary is contract and
+    contract_check only), so this pin is what keeps the two from drifting.
+    Relocated from the now-deleted tests/test_paired_contrast.py, where it
+    guarded the same two tuples for the paired decider this task removes."""
+    assert score.SHARED_CLAIM_PHRASES == cases.SHARED_CLAIM_PHRASES
 
 
 def test_perfect_model_scores_ones():
