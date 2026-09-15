@@ -156,6 +156,34 @@ def job2(meta_workload: dict, reply_row: dict | None,
         return 0.0
     return 1.0 if all(str(k).lower() in got_cause for k in own_cause_keywords) else 0.0
 
+
+JOB3_BAR = 0.9
+
+
+def job3(label: str, summary: str | None) -> float:
+    """Score one prompt's summary against its shared/separate/none label,
+    reusing `_shared_claim_signal`, `SHARED_CLAIM_PHRASES` and
+    `INDEPENDENCE_PHRASES` unchanged.
+
+    `shared` needs a claim and no denial; `separate` needs a denial and no
+    claim; both signals or neither scores 0 for either label. `none` is
+    looser -- it only needs a non-blank summary that does not claim a
+    shared cause, so an explicit denial still passes it. Blank or missing
+    summary scores 0 on every label.
+    """
+    if not summary or not str(summary).strip():
+        return 0.0
+    low = str(summary).lower()
+    claims, negated = _shared_claim_signal(low, SHARED_CLAIM_PHRASES)
+    denies = negated or any(p in low for p in INDEPENDENCE_PHRASES)
+    if label == "shared":
+        return 1.0 if claims and not denies else 0.0
+    if label == "separate":
+        return 1.0 if denies and not claims else 0.0
+    if label == "none":
+        return 1.0 if not claims else 0.0
+    return 0.0
+
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
 # so it lives here rather than in row meta -- which also keeps score.py's

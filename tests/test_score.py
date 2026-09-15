@@ -270,6 +270,124 @@ def test_job2_own_cause_row_with_no_keywords_scores_zero():
     assert score.job2(wm, reply, []) == 0.0
 
 
+# --------------------------------------------------- job 3: the summary scorer
+
+
+def test_job3_bar_is_nine_tenths():
+    assert score.JOB3_BAR == 0.9
+
+
+def test_job3_shared_label_passes_a_claim():
+    assert score.job3("shared", "these two failures share a common cause upstream") == 1.0
+
+
+def test_job3_shared_label_fails_a_denial():
+    assert score.job3("shared", "2 workloads are failing for separate reasons") == 0.0
+
+
+def test_job3_shared_label_fails_both_claim_and_denial():
+    assert score.job3(
+        "shared", "the database outage is the shared origin, but the web "
+        "failures are independent") == 0.0
+
+
+def test_job3_shared_label_fails_neither_signal():
+    assert score.job3("shared", "two workloads are broken") == 0.0
+
+
+def test_job3_separate_label_passes_a_denial():
+    assert score.job3("separate", "these are independent, unrelated failures") == 1.0
+
+
+def test_job3_separate_label_fails_a_claim():
+    assert score.job3("separate", "these share a common root cause") == 0.0
+
+
+def test_job3_separate_label_fails_both_signals():
+    assert score.job3(
+        "separate", "the database outage is the shared origin, but the web "
+        "failures are independent") == 0.0
+
+
+def test_job3_separate_label_fails_neither_signal():
+    assert score.job3("separate", "two workloads are broken") == 0.0
+
+
+def test_job3_none_label_passes_a_plain_non_claiming_summary():
+    assert score.job3("none", "two workloads are broken for reasons that are not yet clear") == 1.0
+
+
+def test_job3_none_label_fails_a_claim():
+    assert score.job3("none", "these share a common cause") == 0.0
+
+
+def test_job3_none_label_passes_even_when_it_also_denies():
+    """The spec's looser reading: `none` only needs to NOT claim -- it does
+    not also require the independence phrases to be absent, unlike `shared`
+    and `separate`, which both fail on a both-signals summary."""
+    assert score.job3("none", "these are separate, unrelated failures") == 1.0
+
+
+def test_job3_blank_summary_scores_zero_on_every_label():
+    for label in ("shared", "separate", "none"):
+        assert score.job3(label, "") == 0.0
+        assert score.job3(label, "   ") == 0.0
+
+
+def test_job3_missing_summary_scores_zero():
+    assert score.job3("shared", None) == 0.0
+
+
+def test_job3_is_case_insensitive():
+    assert score.job3("shared", "COMMON ROOT CAUSE across both") == 1.0
+
+
+def test_job3_reuses_shared_claim_phrases_and_independence_phrases():
+    """Not a new phrase set -- job 3 reads the same two tables and the same
+    negation machinery `_shared_claim_signal` already defines."""
+    assert score.job3("shared", "no shared cause was found") == 0.0
+    assert score.job3("separate", "no shared cause was found") == 1.0
+
+
+# The documented negation-class defeats, ported from the old
+# false_shared/_shared_verdict tests to call job3 directly. Each still
+# asserts the RULE'S ACTUAL behaviour, not the value it ought to have --
+# see `_shared_claim_signal`'s own docstring in score.py for why the two
+# classes below (wrong-scope negator, double negation) are documented,
+# accepted costs of the bounded heuristic rather than bugs to fix here.
+def test_job3_negated_same_underlying_denies():
+    assert score.job3("separate", "not the same underlying problem") == 1.0
+
+
+def test_job3_negated_upstream_denies():
+    assert score.job3(
+        "separate", "these are not caused by a shared upstream failure; each "
+        "workload has its own separate configuration problem") == 1.0
+
+
+def test_job3_the_no_doubt_defeat_case_is_the_documented_known_limit():
+    """"there is no doubt these share a common cause" is an AFFIRMATION, but
+    the window has no grammar: "no" reads as negating "common cause" anyway,
+    so `shared` reads this as a denial and scores 0.0 -- the rule's actual,
+    documented behaviour, not the value it ought to have."""
+    assert score.job3("shared", "there is no doubt these share a common cause") == 0.0
+    assert score.job3("separate", "there is no doubt these share a common cause") == 1.0
+
+
+def test_job3_the_double_negation_defeat_case_is_the_documented_known_limit():
+    """"not without a shared upstream trigger" is semantically a CLAIM (two
+    negatives), but the function does not compose negations -- each negator
+    independently marks the occurrence denied."""
+    assert score.job3("shared", "this is not without a shared upstream trigger") == 0.0
+    assert score.job3("separate", "this is not without a shared upstream trigger") == 1.0
+
+
+def test_job3_every_declared_negator_denies_its_own_sentence():
+    for word, (sentence, _phrase) in NEGATOR_SENTENCES.items():
+        assert score.job3("separate", sentence) == 1.0, (
+            f"negator {word!r} did not deny its own sentence: {sentence!r}")
+
+
 def test_perfect_model_scores_ones():
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     board = score.scoreboard(results)
