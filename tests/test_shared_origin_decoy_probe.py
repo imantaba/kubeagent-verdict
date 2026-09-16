@@ -272,8 +272,8 @@ def test_every_origin_read_label_in_the_exam_carries_both_answers(exam):
 
     Before it, the distinctive cluster-wide read labels appeared ONLY on rows
     whose answer was one shared cause, so a model could answer the whole slice
-    by matching the label and never reading the content -- and would pass both
-    halves of decider 5 doing it. Now every label that appears under one
+    by matching the label and never reading the content -- and nothing then
+    scored would have caught it. Now every label that appears under one
     answer appears under the other too.
     """
     shared, separate = set(), set()

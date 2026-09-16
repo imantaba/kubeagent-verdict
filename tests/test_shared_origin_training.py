@@ -473,7 +473,8 @@ def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
 
 
 def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
-    """Decider 5 has two halves and this change can only break the other one.
+    """job 3 grades two mirror failures, and this change can only push
+    the model toward one of them.
 
     job3 grades a shared claim and a separate claim as mirror failures: if
     the shared answer becomes the usual answer to a multi-workload question,
