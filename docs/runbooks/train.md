@@ -427,9 +427,10 @@ so time scales with rows and nothing else) — run it under
      instead of a pair.
 
    - **Is the answer the prompt's own `suggested fix` line handed back?**
-     `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253
-     for a run scored against the exam as it stood before the
-     `shared_origin_decoy_probe` append. Every
+     `suggestion echo` must be **0**, over every row the model answered — 263
+     today when it answered them all, 253 for a run scored against the exam as
+     it stood before the `shared_origin_decoy_probe` append. What that
+     denominator does and does not prove is below. Every
      finding in a scan prompt carries a `suggested fix (deterministic,
      pre-reviewed — do not substitute): <text> | run: <cmd>` line, and that
      text is a *symptom* restated generically by `internal/remediation.For`,
@@ -452,12 +453,35 @@ so time scales with rows and nothing else) — run it under
      strings `internal/remediation.For` can produce. Re-scoring v0.1.0's
      recorded outputs against its own prompts returns `0.0 (253)`, which
      looks like a clean pass and is not a measurement at all. So a 0 here is
-     a pass only when **`n` is the full row count of the exam that was scored
-     (263 today, 253 before the append) and
-     `tests/test_dataset_suggestions.py` is green** — that test renders
-     `generate.test_set()` in full, so it covers the appended rows without
-     amendment, and it is what makes the prompt vocabulary kubeagent's.
-     Without it the number is decoration.
+     a pass only when **`tests/test_dataset_suggestions.py` is green** — that
+     test renders `generate.test_set()` in full, so it covers the appended
+     rows without amendment, and it is what makes the prompt vocabulary
+     kubeagent's. Without it the number is decoration.
+
+     That test is the whole guard, not half of one. This rule used to ask for
+     a full row count as well, and a full row count would not have caught the
+     bug it was written for: when the two vocabularies were disjoint, `n` read
+     253 of 253 — the entire exam of the day — and the reading was still
+     empty. A count of rows cannot see whether the strings in them mean
+     anything. Only the test can.
+
+     Read `n` anyway, but read it as a different question: how much of the
+     exam the scorer could judge. A row leaves this rate when the prompt
+     offered no suggestion line to echo, or when the scorer got no verdict
+     out of the reply. Today every one of the 263 prompts carries a
+     suggestion line, so in practice a missing row is one the scorer could
+     not read — and `contract` already charges the model for it, over all
+     263 rows. 0908 is the worked example: echo reads `0.0 (262)` because one
+     reply was not valid JSON, so no cause came off it. Note what that row is
+     not. It is not a truncated reply and not a refusal: it is a complete
+     answer that names a cause for both flagged workloads, with one extra `}`
+     two thirds of the way in. A single stray character costs the whole row,
+     here and on every other rate that reads a cause. `contract` reads 0.9696
+     over 263 with 8 failures, that row among them. So one or two missing
+     rows is still a pass; the model has already paid for them on the decider
+     that counts them. A large gap is not a pass — it says most of the exam
+     never produced a readable answer, and a 0 over the remainder is a
+     statement about a handful of rows.
 
      Note where the failure was actually seen: **live, not on the eval.**
      v0.1.0 scores 0.0 on the synthetic set and still handed back

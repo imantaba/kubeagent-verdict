@@ -1876,3 +1876,47 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     assert board["jobs"]["job2"]["n"] > 0
     assert board["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
+
+
+def _paste_the_prompt_bot(rows: list[dict]):
+    """Answers every flagged workload with the prompt handed back verbatim.
+
+    It reads nothing and diagnoses nothing. It wins a job-2 workload only
+    when every keyword that workload's answer key requires is already
+    printed somewhere in the prompt, because job 2 marks a cause right when
+    all of its keywords appear as substrings. That makes this bot the
+    measured ceiling of job 2's keyword exposure.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        prompt = messages[1]["content"]
+        row = by_prompt[prompt]
+        verdicts = [{"workload": name, "cause": prompt,
+                     "confidence": "medium",
+                     "rationale": "restating the prompt back without reading it"}
+                    for name in row["meta"]["workloads"]]
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
+    """A bot that reads nothing still clears the job-2 workloads whose
+    answer keywords the prompt already prints.
+
+    The scoreboard's footnote counts that exposure from the corpus alone:
+    56 of the 114 keyword-graded job-2 workloads have every required
+    keyword in their own prompt. This bot converts that footnote into a
+    score, so the exposure is a measurement rather than an estimate.
+    """
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _paste_the_prompt_bot(rows))
+    board = score.scoreboard(results)
+
+    assert board["overall"]["keyword_derivable_n"] == 56
+    assert board["overall"]["keyword_graded_n"] == 114
+    assert board["jobs"]["job2"]["n"] == 153
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.366, abs=0.005)
+    assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
