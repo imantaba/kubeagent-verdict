@@ -4,7 +4,7 @@ Redacted, tracked under `contract/smoke/`, and scored by the same job 1 the
 exam uses on a rule row -- but never gating a pass bar. These tests check
 the six files on disk carry none of the banned shapes, that they hold
 exactly the twelve rule rows the live run produced, and that scoring them
-gives the echoed count measured against the real `job1`.
+gives the job 1 count measured by the real `job1`, not the echoed count.
 """
 from __future__ import annotations
 
