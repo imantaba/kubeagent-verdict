@@ -1097,7 +1097,7 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
               # phrasing only to deny it is not counted as a shared claim --
               # but job3 never reads this field: it takes a label and a
               # summary, and checks the summary against score.py's own
-              # SHARED_CLAIM_PHRASES tuple. This key is written for the
+              # SHARED_CLAIM_PHRASES tuple. This key is kept for the
               # pinned hash blob and read by no scorer.
               "shared_claim_phrases": list(SHARED_CLAIM_PHRASES),
               **r.meta,

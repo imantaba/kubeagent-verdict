@@ -209,4 +209,5 @@ def main() -> None:
             (smoke_dir / f"{pair}-response.json").read_text(encoding="utf-8"))
         pair_scores = smoke.score_smoke_pair(smoke_request, smoke_response)
         job1_scored = sum(1 for value in pair_scores if value == 1.0)
-        print(f"  {pair}: job 1 scored {job1_scored} of {len(pair_scores)} rule rows")
+        print(f"  {pair}: job 1 scored {job1_scored} of {len(pair_scores)} "
+              f"decided workloads")

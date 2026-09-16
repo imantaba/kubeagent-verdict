@@ -545,11 +545,12 @@ because its zeros are the worked example for "a `0.0` is not a pass":
 
 `docs/runbooks/train.md` step 6 named four deciders when this release was
 scored. Three are met; the fourth cannot be measured on this run, and that is
-reported as unmeasured rather than as a pass. Step 6 now names **six** — the
-paired shared-origin join and the suggestion-echo check were added afterwards,
-from failures the four could not see. This table is the four, and is left as
-the four: the two later deciders were never run against this model, and filling
-them in from adjacent numbers would be inventing readings.
+reported as unmeasured rather than as a pass. Step 6 names **five** today. Two
+were added after this release was scored, from failures the four could not
+see: the suggestion-echo check, which stands, and the paired shared-origin
+join, which was added then retired in the v1.24.0 rescope. This table is the
+four, and is left as the four: neither later decider was ever run against this
+model, and filling them in from adjacent numbers would be inventing readings.
 
 | decider | reading | verdict |
 |---|---|---|

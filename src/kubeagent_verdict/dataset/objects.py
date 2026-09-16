@@ -38,7 +38,13 @@ PULL_LITERALS = CONNECTION_LITERALS + AUTH_LITERALS + IMAGE_LITERALS
 
 @dataclass(frozen=True)
 class Fresh:
-    """What the fresh read finds. Only the fields for the object's kind are read."""
+    """What the fresh read finds.
+
+    The fields are grouped by kind, and the reader for a kind reads only its
+    own group. Nothing enforces the grouping except `wrong_pod`, which
+    `validate` refuses on a non-registry. A node carrying `phase` is a valid
+    `Object`; the node readers just never look at it.
+    """
 
     how: str = "read"          # read | read_failed | not_read
     message: str = ""          # the failed-read message, when how == read_failed

@@ -227,6 +227,12 @@ because each one caught a real cheat that had already fooled us:
    "suggested fix" line. Handing that back is the cheapest wrong answer
    available — fluent, on-topic, and already in the context. Zero tolerance.
 
+There were six until the v1.24.0 rescope. The sixth was the paired
+shared-origin join, and it was retired there because the exam it read no
+longer has two halves to join. Parts 2 and 3 below record runs that were
+judged against six, so a "six" in a record of one of those runs is what was
+in force then, not a claim about today. Five decide a release now.
+
 ---
 
 ## Part 2 — What we changed after the first training, and why
@@ -908,7 +914,7 @@ The exam did not move: 263 questions, the same checksum.
 
 What the final retrain will tell us:
 
-- **All six deciders pass:** the model ships. The wide and cousin probes are
+- **All five deciders pass:** the model ships. The wide and cousin probes are
   reported beside it, and a poor probe score does not stop it.
 - **Decider 1 fails again on a three-verdict decoy:** the data now shows
   that shape often, so the fault is in the recipe, not in coverage. The
@@ -920,6 +926,10 @@ What the final retrain will tell us:
 - **Decider 5c fails and both probes are high:** the exam's six origins are
   harder than their cousins. Read the pair-level rows before deciding
   anything.
+
+Decider 5 — the paired shared-origin join, and the 5a/5c readings under it —
+was retired in the v1.24.0 rescope. The three branches above are kept as the
+reasoning of the time, not as a test anyone can still run.
 
 This page does not authorise that retrain either. It records what the
 textbook now holds and why.
@@ -942,4 +952,4 @@ textbook now holds and why.
 | **decoy** | A wrong candidate placed in the question on purpose, to see if the model bites. |
 | **negative control** | Checking that a new exam actually *fails* the old model — proof the exam got harder, not that the model got better. |
 | **slice** | One named group of exam questions, scored separately. |
-| **decider** | One of the six numbers that must hold before a model may be released. |
+| **decider** | One of the five numbers that must hold before a model may be released. |

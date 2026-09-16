@@ -3,7 +3,7 @@ import re
 
 import pytest
 
-from kubeagent_verdict.contract import TRUNCATION_MARKER
+from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.dataset import cases, generate
 from kubeagent_verdict.evals import score
 
@@ -917,7 +917,7 @@ def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
 # --------------------------------------------------- evaluate(): job1/job2/job3
 
 
-def test_evaluate_computes_job1_as_the_row_mean_of_its_job1_workloads():
+def test_evaluate_keeps_one_job1_score_per_decided_workload():
     row = json.loads(json.dumps(ROW))
     row["meta"]["workloads"] = {"shop/api": {
         "job": 1, "decided": True, "decided_cause": "node worker-1 (disk pressure)",
@@ -929,8 +929,8 @@ def test_evaluate_computes_job1_as_the_row_mean_of_its_job1_workloads():
                                        "rationale": "the node has disk pressure"}],
                          "summary": "s"})
     results = score.evaluate([row], lambda messages: answer)
-    assert results[0]["job1"] == 1.0
-    assert results[0]["job2"] is None
+    assert results[0]["job1_scores"] == [1.0]
+    assert results[0]["job2_scores"] == []
 
 
 def test_evaluate_computes_job2_from_the_workloads_own_cause_keywords():
@@ -941,11 +941,17 @@ def test_evaluate_computes_job2_from_the_workloads_own_cause_keywords():
                                        "confidence": "high", "rationale": "r"}],
                          "summary": "s"})
     results = score.evaluate([row], lambda messages: answer)
-    assert results[0]["job2"] == 1.0
-    assert results[0]["job1"] is None
+    assert results[0]["job2_scores"] == [1.0]
+    assert results[0]["job1_scores"] == []
 
 
-def test_evaluate_averages_job1_over_several_job1_workloads_in_one_row():
+def test_evaluate_keeps_both_scores_when_one_row_carries_two_job1_workloads():
+    """Spec: "One score per decided workload." A row with two decided
+    workloads contributes two scores, not one row mean. Averaging inside the
+    row first weights a one-workload row the same as a twelve-workload one,
+    and prints a denominator that counts rows under a word that says
+    workloads.
+    """
     row = {"messages": [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "user shop/api and shop/web"},
@@ -973,7 +979,7 @@ def test_evaluate_averages_job1_over_several_job1_workloads_in_one_row():
         {"workload": "shop/web", "cause": "something else", "confidence": "high",
          "rationale": "r"}], "summary": "these share a common cause upstream"})
     results = score.evaluate([row], lambda messages: answer)
-    assert results[0]["job1"] == 0.5
+    assert results[0]["job1_scores"] == [1.0, 0.0]
     assert results[0]["job3"] == 1.0
 
 
@@ -1049,11 +1055,18 @@ def test_a_prompt_with_no_suggestion_line_is_not_measured():
 
 # ------------------------------------------------- keyword exposure (D6, option C)
 #
-# The `own_cause` and `empty_candidates` slices are graded by keyword
-# containment, the loosest rule on the board. `keyword_derivable` measures how
-# much of that looseness the CORPUS already hands over: a row whose every
-# expected keyword is printed in the prompt cannot separate a model that read
-# the evidence from one that restated it.
+# job 2 grades most of its workloads by keyword containment -- all of the
+# workload's `own_cause_keywords` must appear in the reply's cause -- which is
+# the loosest rule on the board. This footnote measures how much of that
+# looseness the CORPUS already hands over: a workload whose every expected
+# keyword is printed in the prompt cannot separate a model that read the
+# evidence from one that restated it.
+#
+# The population is job 2's own, one entry per workload. Design spec line 547:
+# `keyword_derivable_n` "keeps printing, now over all job-2 rows". Before the
+# rescope fix it counted the retired `cause_acc` slice instead -- the two case
+# names in `KEYWORD_CASES`, at the row level -- and printed 19 of 38 where the
+# spec's population is 56 of 114.
 #
 # It measures the corpus, not the model. Every test below therefore holds the
 # row fixed and varies nothing about the answer, except the one that varies
@@ -1079,31 +1092,32 @@ def _answer(cause="the memory limit is too small"):
                        "summary": "s"})
 
 
-def test_keyword_row_whose_terms_are_absent_from_the_prompt_is_not_derivable():
+def test_keyword_workload_whose_terms_are_absent_from_the_prompt_is_not_derivable():
     row = _keyword_row("the container exited", ["memory", "limit"])
     results = score.evaluate([row], lambda m: _answer())
-    assert results[0]["keyword_derivable"] is False
+    assert results[0]["keyword_derivable_n"] == 0
+    assert results[0]["keyword_graded_n"] == 1
     board = score.scoreboard(results)
     assert board["overall"]["keyword_derivable_n"] == 0
     assert board["overall"]["keyword_graded_n"] == 1
 
 
-def test_keyword_row_whose_terms_are_all_in_the_prompt_is_derivable():
+def test_keyword_workload_whose_terms_are_all_in_the_prompt_is_derivable():
     row = _keyword_row("the memory limit was exceeded", ["memory", "limit"])
     results = score.evaluate([row], lambda m: _answer())
-    assert results[0]["keyword_derivable"] is True
+    assert results[0]["keyword_derivable_n"] == 1
     board = score.scoreboard(results)
     assert board["overall"]["keyword_derivable_n"] == 1
     assert board["overall"]["keyword_graded_n"] == 1
 
 
 def test_partial_keyword_presence_is_not_derivable():
-    """`all`, not `any` -- the same conjunction the grader uses. A row where
-    one of two keywords is on screen still requires the model to supply the
-    other, so it is not derivable."""
+    """`all`, not `any` -- the same conjunction the grader uses. A workload
+    where one of two keywords is on screen still requires the model to supply
+    the other, so it is not derivable."""
     row = _keyword_row("the memory was exhausted", ["memory", "limit"])
     results = score.evaluate([row], lambda m: _answer())
-    assert results[0]["keyword_derivable"] is False
+    assert results[0]["keyword_derivable_n"] == 0
     assert score.scoreboard(results)["overall"]["keyword_derivable_n"] == 0
 
 
@@ -1113,44 +1127,55 @@ def test_keyword_matching_is_case_folded_like_the_grader():
     that the grader would accept off the prompt."""
     row = _keyword_row("Memory LIMIT exceeded", ["memory", "limit"])
     results = score.evaluate([row], lambda m: _answer())
-    assert results[0]["keyword_derivable"] is True
+    assert results[0]["keyword_derivable_n"] == 1
 
 
-def test_non_keyword_graded_row_is_none_and_out_of_the_denominator():
-    """`attributed` is graded by exact match, so the exposure is meaningless
-    for it. None, never False -- a row that cannot be measured must not sit in
-    the denominator, the same contract `_rate` states."""
+def test_a_workload_with_no_keyword_set_is_out_of_the_denominator():
+    """`job2` scores a workload with no keywords 0.0 whatever the reply says,
+    so no keyword was ever looked for and there is no exposure to report.
+    Counting it would pad the denominator with a question never asked."""
     results = score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])
-    assert results[0]["keyword_derivable"] is None
+    assert results[0]["keyword_graded_n"] == 0
     board = score.scoreboard(results)
     assert board["overall"]["keyword_derivable_n"] == 0
     assert board["overall"]["keyword_graded_n"] == 0
 
 
-def test_keyword_case_without_a_keyword_set_is_not_measured():
-    """`_is_keyword_graded` is the grader's own condition -- `case in
-    KEYWORD_CASES` AND `expected_own_keywords`. A row missing the set is
-    graded by exact match despite its case name, so it is not keyword-graded
-    and not measured."""
-    row = json.loads(json.dumps(ROW))
-    row["meta"] = {"case": "own_cause", "expected_cause": "x", "expected_confidence": "high",
-                   "label": "none", "workloads": {"shop/api": {
-                       "job": 2, "decided": False, "decided_cause": "",
-                       "decided_outcome": "", "decided_evidence": "",
-                       "expected_cause": "x", "own_cause_keywords": []}}}
+def test_a_none_of_these_workload_is_out_of_the_denominator():
+    """`job2` grades a `none_of_these` workload by exact match against that
+    one string, not by keywords, so the exposure question does not apply."""
+    row = _keyword_row("the memory limit was exceeded", ["memory", "limit"])
+    wm = row["meta"]["workloads"]["shop/api"]
+    wm["expected_cause"] = NONE_OF_THESE
     results = score.evaluate([row], lambda m: _answer())
-    assert results[0]["keyword_derivable"] is None
-    assert score.scoreboard(results)["overall"]["keyword_graded_n"] == 0
+    assert results[0]["keyword_graded_n"] == 0
 
 
-def test_both_keyword_cases_are_measured():
-    """Both members of KEYWORD_CASES, so narrowing the set to one silently
-    halves the denominator instead of failing."""
-    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"], case=c)
-            for c in sorted(score.KEYWORD_CASES)]
-    board = score.scoreboard(score.evaluate(rows, lambda m: _answer()))
-    assert board["overall"]["keyword_graded_n"] == len(score.KEYWORD_CASES) == 2
-    assert board["overall"]["keyword_derivable_n"] == 2
+def test_a_decided_workload_is_out_of_the_denominator():
+    """Job 1's cause comes from the rule engine, never from a keyword match.
+    A decided workload carrying keywords is still not keyword-graded."""
+    row = _keyword_row("the memory limit was exceeded", ["memory", "limit"])
+    wm = row["meta"]["workloads"]["shop/api"]
+    wm.update({"job": 1, "decided": True,
+               "decided_cause": "node worker-1 (disk pressure)",
+               "decided_outcome": "confirmed",
+               "decided_evidence": "disk pressure condition is True"})
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["keyword_graded_n"] == 0
+
+
+def test_the_population_does_not_depend_on_the_case_name():
+    """The retired `cause_acc` slice gated on `KEYWORD_CASES`, two case names.
+    job 2 does not: it grades by keyword wherever a workload carries keywords
+    and does not expect `none_of_these`. A case outside `KEYWORD_CASES` --
+    `wrong_attribution` and `multi_misattribution_probe` are two real ones --
+    is measured here, which is where the extra 76 workloads come from."""
+    row = _keyword_row("the memory limit was exceeded", ["memory", "limit"],
+                       case="wrong_attribution")
+    assert "wrong_attribution" not in score.KEYWORD_CASES
+    board = score.scoreboard(score.evaluate([row], lambda m: _answer()))
+    assert board["overall"]["keyword_graded_n"] == 1
+    assert board["overall"]["keyword_derivable_n"] == 1
 
 
 def test_exposure_does_not_move_with_the_model_answer():
@@ -1161,7 +1186,7 @@ def test_exposure_does_not_move_with_the_model_answer():
     for answer in (_answer(), _answer("something else entirely"),
                    json.dumps({"verdicts": [], "summary": "s"}), "not json at all"):
         results = score.evaluate([row], lambda m, a=answer: a)
-        assert results[0]["keyword_derivable"] is True, answer
+        assert results[0]["keyword_derivable_n"] == 1, answer
         assert score.scoreboard(results)["overall"]["keyword_derivable_n"] == 1, answer
 
 
@@ -1175,7 +1200,8 @@ def test_exposure_is_a_footnote_not_a_column():
     table, _blank, *footnotes = [ln for ln in md.splitlines()]
     assert "keyword" not in table.lower()
     note = "\n".join(footnotes)
-    assert "Keyword-graded rows whose keywords all appear in the prompt already: 1 of 2" in note
+    assert ("Job-2 workloads whose keywords all appear in the prompt already: "
+            "1 of 2") in note
 
 
 def test_exposure_footnote_prints_even_when_nothing_is_keyword_graded():
@@ -1183,7 +1209,8 @@ def test_exposure_footnote_prints_even_when_nothing_is_keyword_graded():
     disappears reads as "not measured" to whoever is checking the release bar."""
     md = score.render_markdown(score.scoreboard(
         score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])))
-    assert "Keyword-graded rows whose keywords all appear in the prompt already: 0 of 0" in md
+    assert ("Job-2 workloads whose keywords all appear in the prompt already: "
+            "0 of 0") in md
 
 
 def test_exposure_is_broken_out_per_case_not_just_overall():
@@ -1191,13 +1218,13 @@ def test_exposure_is_broken_out_per_case_not_just_overall():
     and every other assertion here reads `overall` -- where `block`'s `rs` and
     the enclosing `scoreboard`'s `results` are the same list, so a slip
     between the two names is invisible from `overall` alone. This is the only
-    assertion that can see the difference: a case with no keyword-graded row
-    must read 0 of 0, not the whole run's numbers."""
+    assertion that can see the difference: a case with no keyword-graded
+    workload must read 0 of 0, not the whole run's numbers."""
     rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"],
                          case="own_cause"),
             _keyword_row("the container exited", ["memory", "limit"],
                          case="empty_candidates"),
-            ROW]  # `attributed`, graded by exact match -- measured on neither axis
+            ROW]  # `attributed`, no keywords at all -- measured on neither axis
     by_case = score.scoreboard(score.evaluate(rows, lambda m: _answer()))["by_case"]
     assert by_case["own_cause"]["keyword_derivable_n"] == 1
     assert by_case["own_cause"]["keyword_graded_n"] == 1
@@ -1207,50 +1234,55 @@ def test_exposure_is_broken_out_per_case_not_just_overall():
     assert by_case["attributed"]["keyword_graded_n"] == 0
 
 
-def test_the_keyword_graded_population_is_the_measured_population():
+def test_the_keyword_graded_population_is_the_population_job2_grades():
     """The grader's population and the footnote's denominator are one
     predicate, and this is what keeps them one.
 
-    `_is_keyword_graded` is what makes the claim structurally true; a test is
-    what keeps it true when someone edits a call site rather than the
-    predicate. The probe answers every row with a cause that contains both
-    expected keywords and is never the expected cause, so `cause_acc == 1.0`
-    exactly when the row was graded by keyword containment -- compared, row by
-    row, against whether the row was measured at all.
-
-    The case names come from the corpus, plus one the corpus does not carry:
-    widening the grader to an existing case and widening it to a new one are
-    different edits, and both have to fail here. A block appended below pins
-    the same population as a fact about the real corpus.
+    `_is_job2_keyword_graded` is what makes the claim structurally true; a
+    test is what keeps it true when someone edits a call site rather than the
+    predicate. The probe answers with a cause that contains both keywords and
+    is never `none_of_these`, so `job2 == 1.0` exactly when the workload was
+    graded by keyword containment -- compared, workload by workload, against
+    whether it was counted at all.
     """
-    corpus_cases = {generate.to_row(ex)["meta"].get("case")
-                    for ex in generate.test_set()}
-    cases = sorted(corpus_cases) + ["a_case_the_corpus_does_not_contain"]
-    assert score.KEYWORD_CASES <= corpus_cases
-    rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"], case=c)
-            for c in cases]
-    for case, r in zip(cases, score.evaluate(rows, lambda m: _answer())):
-        graded_by_keyword = r["cause_acc"] == 1.0
-        assert graded_by_keyword == (r["keyword_derivable"] is not None), case
-        assert graded_by_keyword == (case in score.KEYWORD_CASES), case
+    cases = [("keywords, own cause", ["memory", "limit"],
+              "container killed at its memory limit", 1.0, 1),
+             ("no keywords", [], "container killed at its memory limit", 0.0, 0),
+             ("none_of_these", ["memory", "limit"], NONE_OF_THESE, 0.0, 0)]
+    for name, keywords, expected_cause, want_job2, want_graded in cases:
+        row = _keyword_row("the memory limit was exceeded", keywords)
+        row["meta"]["workloads"]["shop/api"]["expected_cause"] = expected_cause
+        r = score.evaluate([row], lambda m: _answer())[0]
+        assert r["job2_scores"] == [want_job2], name
+        assert r["keyword_graded_n"] == want_graded, name
 
-    # A decided workload's cause comes from the rule engine, never from a
-    # keyword match, so Task 6's generator never sets expected_own_keywords
-    # on a row unless every one of its workloads is undecided (job 2). This
-    # checks that directly, over every row the generator actually produces --
-    # the corpus fact that makes "keyword_derivable_n counts over all job-2
-    # rows" true without any workload-level code in this file.
-    for ex in generate.test_set():
-        real_meta = generate.to_row(ex)["meta"]
-        if score._is_keyword_graded(real_meta):
-            assert all(wm["job"] == 2 for wm in real_meta["workloads"].values()), \
-                real_meta.get("case")
+
+def test_the_footnote_counts_the_corpus_job2_keyword_population():
+    """The real corpus, measured: 56 of 114 job-2 workloads have every
+    expected keyword already printed in the prompt.
+
+    Pinned because it is the number `kv-eval` prints and the model card
+    quotes. It is a measurement, not a target -- a change here is a real
+    change in how much job 2 gives away, updated deliberately with the
+    reason, never tuned back to a stale value.
+    """
+    rows = [generate.to_row(ex) for ex in generate.test_set()]
+    board = score.scoreboard(score.evaluate(rows, lambda m: ""))
+    assert board["overall"]["keyword_graded_n"] == 114
+    assert board["overall"]["keyword_derivable_n"] == 56
+    # Every counted workload is a job-2 workload, which is what design spec
+    # line 547's "over all job-2 rows" asks for.
+    counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
+                  if wm.get("job") == 2
+                  and wm.get("expected_cause") != NONE_OF_THESE
+                  and wm.get("own_cause_keywords"))
+    assert counted == 114
 
 
 # --- the length-gap decider -------------------------------------------------
 #
 # `docs/runbooks/train.md` step 6 names "`length helps` and `length misleads`
-# close together" as one of six release deciders, but nothing computed the
+# close together" as one of the release deciders, but nothing computed the
 # difference and no constant said how close is close enough, so the bullet was
 # a human eyeball check wearing a gate's clothes. These tests pin the gate.
 #
@@ -1353,6 +1385,28 @@ def test_markdown_prints_the_gap_and_names_the_bar():
     assert str(score.LENGTH_GAP_TOLERANCE) in md
 
 
+def test_markdown_names_the_empty_slice_when_only_one_is_empty():
+    """The reason has to say what actually fired. Naming "one of the two
+    slices" when both are empty, or leaving the reader to guess which one,
+    is the same defect as a number under the wrong word.
+    """
+    a_row, a_ans = _length_row("positional_probe", "memory limit too low for the workload",
+                               "node pressure", "memory limit too low for the workload")
+    md = score.render_markdown(score.scoreboard(
+        score.evaluate([a_row], lambda messages: a_ans)))
+    assert "the `length misleads` slice has no rows" in md
+    assert "not measured" in md
+    assert "not a zero" in md.lower()
+
+
+def test_markdown_says_neither_slice_has_rows_when_both_are_empty():
+    md = score.render_markdown(score.scoreboard(
+        score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])))
+    assert "neither slice has any rows" in md
+    assert "one of the two slices" not in md
+    assert "not a zero" in md.lower()
+
+
 def test_markdown_says_not_measured_rather_than_met_when_below_the_floor():
     board = score.scoreboard(score.evaluate(
         [ROW], lambda messages: ROW["messages"][2]["content"]))
@@ -1435,7 +1489,7 @@ def test_scoreboard_of_no_rows_still_has_a_well_formed_jobs_block():
     }
 
 
-def test_scoreboard_job1_rate_averages_only_rows_that_carry_a_job1_score():
+def test_scoreboard_job1_rate_averages_only_workloads_that_carry_a_job1_score():
     row = json.loads(json.dumps(ROW))
     row["meta"]["workloads"] = {"shop/api": {
         "job": 1, "decided": True, "decided_cause": "node worker-1 (disk pressure)",
@@ -1452,6 +1506,37 @@ def test_scoreboard_job1_rate_averages_only_rows_that_carry_a_job1_score():
     board = score.scoreboard(results)
     assert board["jobs"]["job1"] == {"rate": 1.0, "n": 1}
     assert board["jobs"]["job2"]["n"] == 1
+
+
+def test_scoreboard_job1_n_is_the_workload_count_across_rows():
+    """Two decided workloads in ONE row read as n = 2, not n = 1."""
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api and shop/web"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": "shop/api", "cause": "node worker-1 (disk pressure)",
+             "confidence": "high", "rationale": "r"},
+            {"workload": "shop/web", "cause": "node worker-2 (disk pressure)",
+             "confidence": "high", "rationale": "r"}], "summary": "s"})}],
+        "meta": {"case": "multi", "label": "none",
+                 "workloads": {
+                     "shop/api": {"job": 1, "decided": True,
+                                  "decided_cause": "node worker-1 (disk pressure)",
+                                  "decided_outcome": "confirmed",
+                                  "decided_evidence": "disk pressure condition is True",
+                                  "expected_cause": "node worker-1 (disk pressure)"},
+                     "shop/web": {"job": 1, "decided": True,
+                                  "decided_cause": "node worker-2 (disk pressure)",
+                                  "decided_outcome": "confirmed",
+                                  "decided_evidence": "disk pressure condition is True",
+                                  "expected_cause": "node worker-2 (disk pressure)"}}}}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "node worker-1 (disk pressure)",
+         "confidence": "high", "rationale": "disk pressure on the node"},
+        {"workload": "shop/web", "cause": "wrong", "confidence": "high",
+         "rationale": "r"}], "summary": "s"})
+    board = score.scoreboard(score.evaluate([row], lambda m: answer))
+    assert board["jobs"]["job1"] == {"rate": 0.5, "n": 2}
 
 
 def test_scoreboard_job3_by_label_only_counts_rows_of_that_label():
@@ -1520,9 +1605,9 @@ def test_render_markdown_prints_job1_job2_job3_lines():
                          "summary": "s"})
     board = score.scoreboard(score.evaluate([row], lambda m: answer))
     md = score.render_markdown(board)
-    assert f"Job 1 (rule rows, bar >= {score.JOB1_BAR}):" in md
-    assert f"Job 2 (undecided rows, bar >= {score.JOB2_BAR}):" in md
-    assert f"Job 3 (summary, bar >= {score.JOB3_BAR}, gating):" in md
+    assert f"Job 1 (decided workloads, bar >= {score.JOB1_BAR}):" in md
+    assert f"Job 2 (undecided workloads, bar >= {score.JOB2_BAR}):" in md
+    assert f"Job 3 (prompt summaries, bar >= {score.JOB3_BAR}, gating):" in md
     # exact cell format checked below; here just confirm the one job-2 row
     # (the only one with a score in this fixture) prints its count.
     assert score._cell({"rate": 1.0, "n": 1}) in md
@@ -1532,9 +1617,25 @@ def test_render_markdown_job_lines_use_the_shared_cell_format():
     board = score.scoreboard([])
     md = score.render_markdown(board)
     empty_cell = score._cell({"rate": None, "n": 0})
-    assert f"Job 1 (rule rows, bar >= {score.JOB1_BAR}): {empty_cell}" in md
-    assert f"Job 2 (undecided rows, bar >= {score.JOB2_BAR}): {empty_cell}" in md
-    assert f"Job 3 (summary, bar >= {score.JOB3_BAR}, gating): {empty_cell}" in md
+    assert f"Job 1 (decided workloads, bar >= {score.JOB1_BAR}): {empty_cell}" in md
+    assert f"Job 2 (undecided workloads, bar >= {score.JOB2_BAR}): {empty_cell}" in md
+    assert (f"Job 3 (prompt summaries, bar >= {score.JOB3_BAR}, gating): "
+            f"{empty_cell}") in md
+
+
+def test_every_job_line_names_the_thing_its_denominator_counts():
+    """The branch's recurring defect, pinned: a correct number under a word
+    that names a different quantity. job1 and job2 count workloads, job3
+    counts prompts, so no job line may say "rows".
+    """
+    md = score.render_markdown(score.scoreboard([]))
+    job_lines = [ln for ln in md.splitlines() if ln.startswith("Job ")]
+    assert len(job_lines) == 3
+    for line in job_lines:
+        assert " rows" not in line, line
+    assert "workloads" in job_lines[0]
+    assert "workloads" in job_lines[1]
+    assert "summaries" in job_lines[2]
 
 
 def test_render_markdown_job3_prints_a_per_label_line_for_each_of_the_three_labels():
@@ -1566,11 +1667,11 @@ def _corpus_rows() -> list[dict]:
 def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     rows = _corpus_rows()
     expected_job1_n = sum(1 for r in rows
-                          if any(wm.get("job") == 1
-                                 for wm in r["meta"]["workloads"].values()))
+                          for wm in r["meta"]["workloads"].values()
+                          if wm.get("job") == 1)
     expected_job2_n = sum(1 for r in rows
-                          if any(wm.get("job") == 2
-                                 for wm in r["meta"]["workloads"].values()))
+                          for wm in r["meta"]["workloads"].values()
+                          if wm.get("job") == 2)
     expected_job3_n = sum(1 for r in rows if len(r["meta"]["workloads"]) >= 2)
 
     results = score.evaluate(rows, lambda messages: "")
@@ -1580,8 +1681,10 @@ def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     assert board["jobs"]["job2"] == {"rate": 0.0, "n": expected_job2_n}
     assert board["jobs"]["job3"]["rate"] == 0.0
     assert board["jobs"]["job3"]["n"] == expected_job3_n
-    assert expected_job1_n > 0
-    assert expected_job2_n > 0
+    # The two numbers the spec and the model card name. A corpus change that
+    # moves them fails here instead of quietly restating a bar.
+    assert expected_job1_n == 157
+    assert expected_job2_n == 153
 
 
 def _echo_the_decided_cause_bot(rows: list[dict]):
@@ -1721,8 +1824,8 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     results = score.evaluate(rows, _regex_copier_bot(rows))
     board = score.scoreboard(results)
 
-    assert board["jobs"]["job1"]["rate"] == 1.0
-    assert board["jobs"]["job2"]["rate"] == 0.0
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 157}
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 153}
 
 
 def _always_none_of_these_bot(rows: list[dict]):
@@ -1748,28 +1851,28 @@ def _always_none_of_these_bot(rows: list[dict]):
 
 
 def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
-    """job2's rate is a row-weighted mean of means: the score per row
-    first, then the mean of those row scores -- not one flat mean over
-    every job-2 workload in the corpus. The flat, workload-level share of
-    `none_of_these` job-2 workloads is 19/153 = 0.1242, close to design
-    spec section 6's 0.1 estimate. But every one of those 19 workloads is
-    the ONLY job-2 workload in its row, so each one's row mean is 1.0 (not
-    diluted by any sibling workload), which pulls the row-weighted mean up
-    to 19/125 = 0.152. Both numbers describe the same corpus; job2 reports
-    the second one.
+    """job2 is one flat mean over every undecided workload in the corpus,
+    the spec's "one score per undecided workload". 19 of the 153 undecided
+    workloads expect `none_of_these`, so a bot that always says it scores
+    19/153 = 0.1242 -- close to design spec section 6's 0.1 estimate.
 
-    0.152 is pinned with a tight tolerance on purpose: a change to this
+    Before the rescope fix this read 0.152, because the score was a mean of
+    row means and each of those 19 workloads was the only job-2 workload in
+    its row, so none of them was diluted by a sibling. Same corpus, two
+    different arithmetics; the spec picks this one.
+
+    0.1242 is pinned with a tight tolerance on purpose: a change to this
     number means the corpus moved (a different `none_of_these` count, or a
-    different split of job-2 workloads across rows), and that is worth
-    noticing, not smoothing over. The property this test actually exists
-    to defend -- a bot that always says "none of these" scores far below
-    the job2 bar -- is asserted on its own so it never depends on getting
-    the exact figure right.
+    different job-2 workload count), and that is worth noticing, not
+    smoothing over. The property this test actually exists to defend -- a
+    bot that always says "none of these" scores far below the job2 bar --
+    is asserted on its own so it never depends on getting the exact figure
+    right.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _always_none_of_these_bot(rows))
     board = score.scoreboard(results)
 
     assert board["jobs"]["job2"]["n"] > 0
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.152, abs=0.005)
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR

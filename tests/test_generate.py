@@ -308,44 +308,48 @@ def test_test_set_slice_counts_are_pinned():
     assert sum(counts.values()) == 263
 
 
-def test_keyword_slice_exposure_is_pinned():
-    """How much of the keyword slices' answer the prompt already gives away.
+def test_the_job2_keyword_exposure_is_pinned_per_case():
+    """How much of job 2 the corpus gives away for free, measured.
 
-    `own_cause` and `empty_candidates` are graded by keyword containment, so a
-    row whose every expected keyword is already printed in the prompt grades a
-    restatement as a diagnosis. This is the corpus-side number the scoreboard's
-    footnote prints; it measures the CORPUS, not the model, and it moves only
-    when a prompt's evidence wording or a keyword set moves.
+    job 2 grades a workload by keyword containment: all of its
+    `own_cause_keywords` must appear in the reply's cause. Where every one of
+    those keywords is already printed in the prompt, a cause assembled from
+    words on screen grades as correct, so the slice cannot separate "read the
+    evidence and concluded" from "restated the evidence".
 
-    Pinned per case as well as in total: a corpus edit that raised the exposure
-    of one slice while lowering the other's would slide past a total-only
-    assertion. `19 of 38` is what the implementation measures today. It is a
-    measurement, not a target — a change here is a real change in how much the
-    slices give away, and the number is updated deliberately with the reason,
-    never tuned back to a stale value.
+    Pinned per case as well as in total: a corpus edit that raised the
+    exposure of one slice while lowering another's would slide past a
+    total-only assertion. `56 of 114` is what the implementation measures
+    today. It is a measurement, not a target -- a change here is a real
+    change in how much the slice gives away, and the number is updated
+    deliberately with the reason, never tuned back to a stale value.
 
-    Re-pinned for the v1.24.0 rescope (kv-2026-09-14-v1240-rescope, Task 6):
-    `own_cause` moved from 10 to 9 because `own_cause_case` no longer builds its
-    candidate menu from hand-authored prose (`_candidates(..., include_winner=
-    False)`); it now runs the entry's declared objects through `_refuted_menu`
-    and `rules.attribute`, which renders one fewer keyword-exposing candidate
-    for this seed's corpus. `empty_candidates` is untouched at 10 -- that case
-    never read `e.losers`.
+    The population moved for the v1.24.0 rescope. It used to be the retired
+    `cause_acc` slice -- the two case names in `score.KEYWORD_CASES`, counted
+    once per row -- which read 19 of 38. Design spec line 547 asks for all of
+    job 2 instead, which is one entry per undecided workload that carries
+    keywords, and adds three more cases: `wrong_attribution`,
+    `misattribution_probe` and `multi_misattribution_probe`.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
     for ex in generate.test_set():
         row = generate.to_row(ex)
-        derivable = score._keyword_derivable(row["meta"], row["messages"][1]["content"])
-        if derivable is None:
+        prompt = row["messages"][1]["content"]
+        derivable, measured = score._keyword_exposure(row["meta"], prompt)
+        if not measured:
             continue
-        graded[ex.case] += 1
-        by_case[ex.case] += 1 if derivable else 0
+        graded[ex.case] += measured
+        by_case[ex.case] += derivable
 
-    assert dict(graded) == {"own_cause": 19, "empty_candidates": 19}
-    assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10}
-    assert sum(graded.values()) == 38
-    assert sum(by_case.values()) == 19
+    assert dict(graded) == {"own_cause": 19, "empty_candidates": 19,
+                            "wrong_attribution": 19, "misattribution_probe": 19,
+                            "multi_misattribution_probe": 38}
+    assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10,
+                             "wrong_attribution": 9, "misattribution_probe": 9,
+                             "multi_misattribution_probe": 19}
+    assert sum(graded.values()) == 114
+    assert sum(by_case.values()) == 56
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():

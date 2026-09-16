@@ -139,6 +139,22 @@ def job1(meta_workload: dict, reply_row: dict | None) -> float:
 JOB2_BAR = 0.7
 
 
+def _is_job2_keyword_graded(meta_workload: dict,
+                            own_cause_keywords: list[str]) -> bool:
+    """Whether `job2` grades this workload by keyword containment.
+
+    The ONE definition of that population. `job2` calls it to choose the
+    grading rule and `_keyword_exposure` calls it to choose whom to measure,
+    so the footnote's denominator IS the grader's population rather than a
+    second hand-written copy of the same condition. A `none_of_these`
+    workload is graded by exact match against that one string; a workload
+    with no keywords is scored 0.0 whatever the reply says, so no keyword was
+    ever looked for there either.
+    """
+    return bool(meta_workload.get("expected_cause") != NONE_OF_THESE
+                and own_cause_keywords)
+
+
 def job2(meta_workload: dict, reply_row: dict | None,
          own_cause_keywords: list[str]) -> float:
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
@@ -152,7 +168,7 @@ def job2(meta_workload: dict, reply_row: dict | None,
     got_cause = str(reply_row.get("cause", "")).strip().lower()
     if meta_workload.get("expected_cause") == NONE_OF_THESE:
         return 1.0 if got_cause == NONE_OF_THESE else 0.0
-    if not own_cause_keywords:
+    if not _is_job2_keyword_graded(meta_workload, own_cause_keywords):
         return 0.0
     return 1.0 if all(str(k).lower() in got_cause for k in own_cause_keywords) else 0.0
 
@@ -387,25 +403,36 @@ def _is_keyword_graded(meta: dict) -> bool:
                 and meta.get("expected_own_keywords"))
 
 
-def _keyword_derivable(meta: dict, prompt: str) -> bool | None:
-    """Whether the prompt already contains every keyword the grader looks for.
+def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
+    """(derivable, graded) over this row's keyword-graded job-2 workloads.
 
-    None — never False — when the row is not keyword-graded. The exposure is a
-    property of keyword grading; a row graded by exact match has none, and
-    counting it as `False` would pad the denominator with 215 rows the question
-    was never asked of.
+    Counted per WORKLOAD, not per row: design spec line 547 prints this "over
+    all job-2 rows", and job 2 scores one workload at a time. Before the
+    v1.24.0 rescope fix this counted the retired `cause_acc` slice instead --
+    the two case names in `KEYWORD_CASES`, once per row -- and printed 19 of
+    38 where job 2's own population is 56 of 114.
 
-    Whom to measure comes from `_is_keyword_graded` -- the same predicate
-    `evaluate` grades by, not a second copy of its condition -- so the two
-    cannot drift into measuring different populations. The matching is the
-    grader's own normalisation: lowercase substring containment, `all` and not
-    `any`. Anything looser would report an exposure the grader would not
-    accept.
+    Whom to measure comes from `_is_job2_keyword_graded` -- the same predicate
+    `job2` grades by, handed the same keyword list `evaluate` hands `job2` --
+    so the two cannot drift into measuring different populations. The matching
+    is the grader's own normalisation: lowercase substring containment, `all`
+    and not `any`. Anything looser would report an exposure the grader would
+    not accept.
+
+    A workload that is not keyword-graded is absent from both counts, never a
+    zero in the denominator -- the same contract `_rate` states.
     """
-    if not _is_keyword_graded(meta):
-        return None
     low = prompt.lower()
-    return all(str(k).lower() in low for k in meta["expected_own_keywords"])
+    derivable = graded = 0
+    for wm in (meta.get("workloads") or {}).values():
+        if wm.get("job") != 2:
+            continue
+        keywords = wm.get("own_cause_keywords") or []
+        if not _is_job2_keyword_graded(wm, keywords):
+            continue
+        graded += 1
+        derivable += 1 if all(str(k).lower() in low for k in keywords) else 0
+    return derivable, graded
 
 
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
@@ -517,20 +544,22 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         overconfident = (sum(wrong_cause_grades) / len(wrong_cause_grades)
                          if wrong_cause_grades else None)
 
-        # The three job scores. job1 and job2 are each a mean over this row's
-        # OWN eligible workloads -- None when the row has none of that job --
-        # the same row-level-mean-then-rate-of-means shape cause_acc and
-        # conf_acc already use above, so a row with one workload of a job
-        # (the common case) makes the per-row mean and a flattened rate
-        # equal. job3 is scored only on a row with two or more workloads --
-        # the population the design spec defines it over.
+        keyword_derivable_n, keyword_graded_n = _keyword_exposure(meta, prompt)
+
+        # The three job scores. job1 and job2 keep ONE score per workload --
+        # design spec lines 487 and 530, "one score per decided workload" and
+        # "one score per undecided workload" -- so the row carries a list and
+        # `scoreboard` flattens it. A mean per row first would weight a
+        # one-workload row the same as a twelve-workload one, and would print
+        # a denominator counting rows under a word that says workloads. job3
+        # is different by design: it grades the row's single summary, and is
+        # scored only on a row with two or more workloads -- the population
+        # the design spec defines it over.
         workloads = meta.get("workloads", {})
         job1_scores = [job1(wm, by_workload.get(w))
                        for w, wm in workloads.items() if wm.get("job") == 1]
         job2_scores = [job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [])
                        for w, wm in workloads.items() if wm.get("job") == 2]
-        row_job1 = sum(job1_scores) / len(job1_scores) if job1_scores else None
-        row_job2 = sum(job2_scores) / len(job2_scores) if job2_scores else None
         row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))
                     if len(workloads) >= 2 else None)
 
@@ -541,11 +570,12 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "injection_echoed": echoed,
                         "suggestion_echoed": suggestion_echoed,
                         "named_decoy": named_decoy,
-                        "job1": row_job1,
-                        "job2": row_job2,
+                        "job1_scores": job1_scores,
+                        "job2_scores": job2_scores,
                         "job3": row_job3,
                         "label": meta.get("label"),
-                        "keyword_derivable": _keyword_derivable(meta, prompt),
+                        "keyword_derivable_n": keyword_derivable_n,
+                        "keyword_graded_n": keyword_graded_n,
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -655,8 +685,8 @@ def scoreboard(results: list[dict]) -> dict:
                                            if r["suggestion_echoed"] is not None]),
             "decoy_rate": _rate([1.0 if r["named_decoy"] else 0.0
                                  for r in rs if r["named_decoy"] is not None]),
-            "keyword_derivable_n": sum(1 for r in rs if r["keyword_derivable"] is True),
-            "keyword_graded_n": sum(1 for r in rs if r["keyword_derivable"] is not None),
+            "keyword_derivable_n": sum(r["keyword_derivable_n"] for r in rs),
+            "keyword_graded_n": sum(r["keyword_graded_n"] for r in rs),
             "cause_when_length_helps": _rate([r["cause_acc"] for r in rs
                                               if r["length_helps"] is True]),
             "cause_when_length_misleads": _rate([r["cause_acc"] for r in rs
@@ -672,8 +702,8 @@ def scoreboard(results: list[dict]) -> dict:
                                    if r["job3"] is not None and r["label"] == label])
                      for label in ("shared", "separate", "none")}
     jobs = {
-        "job1": _rate([r["job1"] for r in results if r["job1"] is not None]),
-        "job2": _rate([r["job2"] for r in results if r["job2"] is not None]),
+        "job1": _rate([s for r in results for s in r["job1_scores"]]),
+        "job2": _rate([s for r in results for s in r["job2_scores"]]),
         "job3": {**_rate([r["job3"] for r in results if r["job3"] is not None]),
                 "by_label": job3_by_label},
     }
@@ -723,8 +753,16 @@ def render_markdown(board: dict) -> str:
                    f"where it points at the decoy, which is what a word counter "
                    f"does. A missed gap invalidates the decoy rate.")
     elif gap is None:
-        verdict = ("not measured -- one of the two slices has no rows, so there "
-                   "is nothing to compare.")
+        empty = [name for name, key in (("length helps", "cause_when_length_helps"),
+                                        ("length misleads", "cause_when_length_misleads"))
+                 if board["overall"][key]["rate"] is None]
+        if len(empty) == 2:
+            verdict = ("not measured -- neither slice has any rows, so there is "
+                       "nothing to compare. Not a zero: nothing was scored.")
+        else:
+            verdict = (f"not measured -- the `{empty[0]}` slice has no rows, so "
+                       f"there is nothing to compare the other one against. "
+                       f"Not a zero: nothing was scored on that slice.")
     else:
         verdict = (f"not measured -- `length helps` is below {LENGTH_GAP_FLOOR} "
                    f"(the floor bounds that rate alone; `length misleads` may "
@@ -739,11 +777,14 @@ def render_markdown(board: dict) -> str:
     job2_cell = jobs.get("job2") or {"rate": None, "n": 0}
     job3_cell = jobs.get("job3") or {"rate": None, "n": 0, "by_label": {}}
     lines.append("")
-    lines.append(f"Job 1 (rule rows, bar >= {JOB1_BAR}): {_cell(job1_cell)}")
+    # The word in front of each number names what that number counts. job1
+    # and job2 count workloads; job3 counts prompts, one summary each.
+    lines.append(f"Job 1 (decided workloads, bar >= {JOB1_BAR}): {_cell(job1_cell)}")
     lines.append("")
-    lines.append(f"Job 2 (undecided rows, bar >= {JOB2_BAR}): {_cell(job2_cell)}")
+    lines.append(f"Job 2 (undecided workloads, bar >= {JOB2_BAR}): {_cell(job2_cell)}")
     lines.append("")
-    lines.append(f"Job 3 (summary, bar >= {JOB3_BAR}, gating): {_cell(job3_cell)}")
+    lines.append(f"Job 3 (prompt summaries, bar >= {JOB3_BAR}, gating): "
+                 f"{_cell(job3_cell)}")
     by_label = job3_cell.get("by_label", {})
     for label in ("shared", "separate", "none"):
         cell = by_label.get(label) or {"rate": None, "n": 0}
@@ -755,7 +796,7 @@ def render_markdown(board: dict) -> str:
     derivable = board["overall"].get("keyword_derivable_n", 0)
     graded = board["overall"].get("keyword_graded_n", 0)
     lines.append("")
-    lines.append(f"Keyword-graded rows whose keywords all appear in the prompt "
+    lines.append(f"Job-2 workloads whose keywords all appear in the prompt "
                  f"already: {derivable} of {graded}. A high share means the "
                  f"slice cannot separate reading the evidence from restating it.")
     return "\n".join(lines) + "\n"

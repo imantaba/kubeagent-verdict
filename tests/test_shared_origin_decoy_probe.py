@@ -213,7 +213,7 @@ def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
 def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
     """The one meta field this slice needs, and the one it must not carry.
 
-    `shared_claim_phrases` is written for the pinned hash blob and read by
+    `shared_claim_phrases` is kept for the pinned hash blob and read by
     no scorer -- job3's honesty check runs on its own copy of the phrases in
     score.py, not on this key. `wrong_summary_phrase` on this slice would
     score the CORRECT summary as a failure -- independence is the right

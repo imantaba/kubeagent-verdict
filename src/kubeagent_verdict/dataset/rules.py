@@ -381,11 +381,21 @@ def label(lines: tuple[str, ...]) -> str:
 def read_text(obj: Object, *, ns: str, pod: str) -> tuple[str, str]:
     """Port of reader.go's describeNode/describePVC and gather.go's read label.
 
-    Returns (trail label, content) exactly as gather.go's appendRead would
-    record them for a node or PVC candidate's fresh read. Only "node" and
-    "pvc" kinds have a read here — a registry candidate's fresh read is the
-    pulling pod's events, out of scope for this function (see the module
-    docstring). Calling this with a registry object raises ValueError.
+    Returns (trail label, content) in the shape gather.go's appendRead
+    records for a node or PVC candidate's fresh read. Only "node" and "pvc"
+    kinds have a read here — a registry candidate's fresh read is the pulling
+    pod's events, out of scope for this function (see the module docstring).
+    Calling this with a registry object raises ValueError.
+
+    Every line this function writes itself is byte-for-byte the Go format: the
+    label, the `read failed: ` prefix, the node's `unschedulable=` line and the
+    whole PVC line. The node's condition and taint lines are not written here.
+    describeNode builds one line per condition and one per taint, in the
+    node's own order, with the reason and message sanitized; this port takes
+    them ready-made from `fresh.extra` and joins them. So their fidelity is
+    the fixture author's, not this function's, and `fresh.ready` is not read
+    at all — a node's Ready condition reaches the content only because
+    `extra` carries it.
 
     `pod` is accepted for signature symmetry with the events read this
     function does not cover; neither the node nor the PVC read format uses
