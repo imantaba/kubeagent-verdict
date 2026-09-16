@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from kubeagent_verdict.contract import TRUNCATION_MARKER
 from kubeagent_verdict.dataset import cases, generate
 from kubeagent_verdict.evals import score
@@ -14,7 +16,12 @@ ROW = {
             "summary": "s"})},
     ],
     "meta": {"case": "attributed", "expected_cause": "memory limit too low for the workload",
-             "expected_confidence": "high"},
+             "expected_confidence": "high", "label": "none",
+             "workloads": {"shop/api": {
+                 "job": 2, "decided": False, "decided_cause": "",
+                 "decided_outcome": "", "decided_evidence": "",
+                 "expected_cause": "memory limit too low for the workload",
+                 "own_cause_keywords": []}}},
 }
 
 
@@ -414,7 +421,12 @@ def test_garbage_model_scores_zero_contract():
 def test_own_cause_matches_by_keywords():
     row = json.loads(json.dumps(ROW))
     row["meta"] = {"case": "own_cause", "expected_cause": "container killed at its memory limit",
-                   "expected_confidence": "high", "expected_own_keywords": ["memory", "limit"]}
+                   "expected_confidence": "high", "expected_own_keywords": ["memory", "limit"],
+                   "label": "none", "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": "container killed at its memory limit",
+                       "own_cause_keywords": []}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api",
                                        "cause": "the memory limit is too small",
                                        "confidence": "high", "rationale": "r"}],
@@ -457,8 +469,13 @@ def _decoy_row(model_cause):
     row = json.loads(json.dumps(ROW))
     row["meta"] = {"case": "positional_probe",
                    "expected_cause": "memory limit too low for the workload",
-                   "expected_confidence": "high",
-                   "decoy_cause": "node worker-2 under memory pressure"}
+                   "expected_confidence": "high", "label": "none",
+                   "decoy_cause": "node worker-2 under memory pressure",
+                   "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": "memory limit too low for the workload",
+                       "own_cause_keywords": []}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": model_cause,
                                        "confidence": "high", "rationale": "r"}],
                          "summary": "s"})
@@ -551,8 +568,13 @@ def _refusing_decoy_board(answer):
     row = json.loads(json.dumps(ROW))
     row["meta"] = {"case": "misattribution_probe",
                    "expected_cause": "memory limit too low for the workload",
-                   "expected_confidence": "high",
-                   "decoy_cause": "node worker-2 under memory pressure"}
+                   "expected_confidence": "high", "label": "none",
+                   "decoy_cause": "node worker-2 under memory pressure",
+                   "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": "memory limit too low for the workload",
+                       "own_cause_keywords": []}}}
     return score.scoreboard(score.evaluate([row], lambda messages: answer))
 
 
@@ -578,7 +600,11 @@ def _length_row(case, expected_cause, decoy_cause, model_cause):
         "verdicts": [{"workload": "shop/api", "cause": expected_cause,
                       "confidence": "high", "rationale": "r"}], "summary": "s"})
     row["meta"] = {"case": case, "expected_cause": expected_cause,
-                   "expected_confidence": "high", "decoy_cause": decoy_cause}
+                   "expected_confidence": "high", "decoy_cause": decoy_cause,
+                   "label": "none", "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": expected_cause, "own_cause_keywords": []}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": model_cause,
                                        "confidence": "high", "rationale": "r"}],
                          "summary": "s"})
@@ -635,8 +661,15 @@ def _multi_decoy_board(model_causes):
              "rationale": "r"},
             {"workload": "shop/web", "cause": "real two", "confidence": "high",
              "rationale": "r"}], "summary": "s"})}],
-        "meta": {"case": "multi_misattribution_probe",
-                 "decoy_causes": ["decoy one", "decoy two"]}}
+        "meta": {"case": "multi_misattribution_probe", "label": "separate",
+                 "decoy_causes": ["decoy one", "decoy two"],
+                 "workloads": {
+                     "shop/api": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "real one", "own_cause_keywords": []},
+                     "shop/web": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "real two", "own_cause_keywords": []}}}}
     answer = json.dumps({"verdicts": [
         {"workload": w, "cause": cse, "confidence": "high", "rationale": "r"}
         for w, cse in zip(["shop/api", "shop/web"], model_causes)], "summary": "s"})
@@ -700,6 +733,267 @@ def test_negator_sentence_table_matches_negators_bidirectionally():
         "NEGATOR_SENTENCES (this test module) and NEGATORS (score.py) have "
         "drifted apart -- add or remove a table entry to match the regex, "
         "in whichever direction moved")
+
+
+# --------------------------------------------------- evaluate(): validation
+
+
+def test_evaluate_raises_keyerror_for_a_row_missing_label():
+    row = json.loads(json.dumps(ROW))
+    del row["meta"]["label"]
+    calls = []
+    with pytest.raises(KeyError):
+        score.evaluate([row], lambda messages: calls.append(messages) or "{}")
+    assert calls == [], "the pre-pass must run before any chat_fn call"
+
+
+def test_evaluate_raises_keyerror_for_a_row_missing_workloads():
+    row = json.loads(json.dumps(ROW))
+    del row["meta"]["workloads"]
+    with pytest.raises(KeyError):
+        score.evaluate([row], lambda messages: "{}")
+
+
+def test_evaluate_raises_keyerror_for_a_workload_missing_job():
+    row = json.loads(json.dumps(ROW))
+    del row["meta"]["workloads"]["shop/api"]["job"]
+    with pytest.raises(KeyError):
+        score.evaluate([row], lambda messages: "{}")
+
+
+def test_evaluate_raises_keyerror_for_a_workload_missing_decided_cause():
+    row = json.loads(json.dumps(ROW))
+    del row["meta"]["workloads"]["shop/api"]["decided_cause"]
+    with pytest.raises(KeyError):
+        score.evaluate([row], lambda messages: "{}")
+
+
+def test_evaluate_checks_every_row_before_calling_chat_fn_on_any():
+    """The second row is malformed; the first must never be sent to chat_fn
+    even though it would be evaluated first in file order."""
+    good = json.loads(json.dumps(ROW))
+    bad = json.loads(json.dumps(ROW))
+    del bad["meta"]["label"]
+    calls = []
+    with pytest.raises(KeyError):
+        score.evaluate([good, bad], lambda messages: calls.append(messages) or "{}")
+    assert calls == []
+
+
+# --------------------------------------------------- evaluate(): the decoy gate
+
+
+def test_decoy_by_workload_catches_the_workload_that_carries_it():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["decoy_by_workload"] = {"shop/api": ["node worker-2 under memory pressure"]}
+    answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                       "cause": "node worker-2 under memory pressure",
+                                       "confidence": "high", "rationale": "r"}],
+                         "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["named_decoy"] is True
+
+
+def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
+    """The loophole this key exists to close: a multi-workload row whose
+    decoy sits on ONE workload must not read as "resisted" just because a
+    DIFFERENT workload in the same row was answered. Before decoy_by_workload,
+    the row-level `answered` gate saw the other workload's verdict and let
+    the decoy-bearing one go untested for free."""
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api and shop/web"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": "shop/api", "cause": "node worker-1 (disk pressure)",
+             "confidence": "high", "rationale": "r"},
+            {"workload": "shop/web", "cause": "memory limit too low for the workload",
+             "confidence": "high", "rationale": "r"}], "summary": "s"})}],
+        "meta": {"case": "multi_misattribution_probe", "label": "separate",
+                 "decoy_by_workload": {"shop/api": ["decoy for shop/api"]},
+                 "workloads": {
+                     "shop/api": {"job": 1, "decided": True,
+                                  "decided_cause": "node worker-1 (disk pressure)",
+                                  "decided_outcome": "confirmed",
+                                  "decided_evidence": "disk pressure condition is True",
+                                  "expected_cause": "node worker-1 (disk pressure)"},
+                     "shop/web": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "memory limit too low for the workload",
+                                  "own_cause_keywords": ["memory", "limit"]}}}}
+    # The reply's verdicts list omits shop/api entirely and answers only
+    # shop/web (correctly) -- decoy_by_workload must report None for the
+    # unanswered, decoy-bearing shop/api workload, not fall through to
+    # shop/web's unrelated answer.
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/web", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["named_decoy"] is None
+
+
+def test_decoy_by_workload_empty_still_scores_from_the_row_level_pair():
+    """A row with no decoy_by_workload entry at all still has its row-level
+    decoy_causes/decoy_cause checked -- the union's other half is simply
+    empty, not a different code path."""
+    board = score.scoreboard(_decoy_row("node worker-2 under memory pressure"))
+    assert board["overall"]["decoy_rate"] == {"rate": 1.0, "n": 1}
+
+
+def test_decoy_gate_unions_the_workload_list_with_the_row_level_pair():
+    """A row can carry BOTH decoy_by_workload and decoy_causes at once, and
+    they are not alternatives: decoy_by_workload names a workload's own
+    local false candidates (the rule engine's other attributions);
+    decoy_causes names a decoy that applies to every flagged workload -- the
+    shared-cause trap some rows set. This is the real shape of the corpus's
+    shared_origin_decoy_probe rows: an unrelated per-workload entry sits
+    beside the row's real trap. A model that names the row-level decoy must
+    still be caught, even though it never touches the per-workload list."""
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": "shop/api", "cause": "memory limit too low for the workload",
+             "confidence": "high", "rationale": "r"}], "summary": "s"})}],
+        "meta": {"case": "shared_origin_decoy_probe", "label": "none",
+                 "decoy_by_workload": {"shop/api": ["node worker-2 (NotReady)"]},
+                 "decoy_causes": ["CoreDNS is down cluster-wide"],
+                 "workloads": {"shop/api": {
+                     "job": 2, "decided": False, "decided_cause": "",
+                     "decided_outcome": "", "decided_evidence": "",
+                     "expected_cause": "memory limit too low for the workload",
+                     "own_cause_keywords": []}}}}
+    answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                       "cause": "CoreDNS is down cluster-wide",
+                                       "confidence": "high", "rationale": "r"}],
+                         "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["named_decoy"] is True
+
+
+def test_decoy_gate_skips_a_workload_whose_combined_decoy_list_is_empty():
+    """A workload can carry an explicit, empty decoy_by_workload entry -- it
+    has nothing to test and must contribute neither a hit nor a miss. The
+    other workload in the same row carries a real decoy and is still
+    checked on its own; naming the OTHER workload's decoy on the
+    empty-listed workload must not leak across the boundary."""
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api and shop/web"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": "shop/api", "cause": "memory limit too low for the workload",
+             "confidence": "high", "rationale": "r"},
+            {"workload": "shop/web", "cause": "bad image tag",
+             "confidence": "high", "rationale": "r"}], "summary": "s"})}],
+        "meta": {"case": "multi_misattribution_probe", "label": "none",
+                 "decoy_by_workload": {"shop/api": [],
+                                       "shop/web": ["the registry is unreachable"]},
+                 "workloads": {
+                     "shop/api": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "memory limit too low for the workload",
+                                  "own_cause_keywords": []},
+                     "shop/web": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "bad image tag",
+                                  "own_cause_keywords": []}}}}
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "the registry is unreachable",
+         "confidence": "high", "rationale": "r"},
+        {"workload": "shop/web", "cause": "bad image tag",
+         "confidence": "high", "rationale": "r"}], "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["named_decoy"] is False
+
+
+def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
+    """No decoy_by_workload entry and no row-level decoy_causes/decoy_cause:
+    the row has nothing to test, so named_decoy stays None rather than
+    False, and never enters decoy_rate as a free 'resisted' row."""
+    results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
+    assert results[0]["named_decoy"] is None
+
+
+# --------------------------------------------------- evaluate(): job1/job2/job3
+
+
+def test_evaluate_computes_job1_as_the_row_mean_of_its_job1_workloads():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["workloads"] = {"shop/api": {
+        "job": 1, "decided": True, "decided_cause": "node worker-1 (disk pressure)",
+        "decided_outcome": "confirmed", "decided_evidence": "disk pressure condition is True",
+        "expected_cause": "node worker-1 (disk pressure)"}}
+    answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                       "cause": "node worker-1 (disk pressure)",
+                                       "confidence": "high",
+                                       "rationale": "the node has disk pressure"}],
+                         "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["job1"] == 1.0
+    assert results[0]["job2"] is None
+
+
+def test_evaluate_computes_job2_from_the_workloads_own_cause_keywords():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["workloads"]["shop/api"]["own_cause_keywords"] = ["memory", "limit"]
+    answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                       "cause": "the memory limit is too small",
+                                       "confidence": "high", "rationale": "r"}],
+                         "summary": "s"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["job2"] == 1.0
+    assert results[0]["job1"] is None
+
+
+def test_evaluate_averages_job1_over_several_job1_workloads_in_one_row():
+    row = {"messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "user shop/api and shop/web"},
+        {"role": "assistant", "content": json.dumps({"verdicts": [
+            {"workload": "shop/api", "cause": "node worker-1 (disk pressure)",
+             "confidence": "high", "rationale": "r"},
+            {"workload": "shop/web", "cause": "node worker-2 (disk pressure)",
+             "confidence": "high", "rationale": "r"}], "summary": "s"})}],
+        "meta": {"case": "multi", "label": "shared",
+                 "workloads": {
+                     "shop/api": {"job": 1, "decided": True,
+                                  "decided_cause": "node worker-1 (disk pressure)",
+                                  "decided_outcome": "confirmed",
+                                  "decided_evidence": "disk pressure condition is True",
+                                  "expected_cause": "node worker-1 (disk pressure)"},
+                     "shop/web": {"job": 1, "decided": True,
+                                  "decided_cause": "node worker-2 (disk pressure)",
+                                  "decided_outcome": "confirmed",
+                                  "decided_evidence": "disk pressure condition is True",
+                                  "expected_cause": "node worker-2 (disk pressure)"}}}}
+    # shop/api echoes correctly with a clean rationale; shop/web is wrong.
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "node worker-1 (disk pressure)",
+         "confidence": "high", "rationale": "disk pressure on the node"},
+        {"workload": "shop/web", "cause": "something else", "confidence": "high",
+         "rationale": "r"}], "summary": "these share a common cause upstream"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["job1"] == 0.5
+    assert results[0]["job3"] == 1.0
+
+
+def test_evaluate_job3_is_none_on_a_single_workload_row():
+    results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
+    assert results[0]["job3"] is None
+
+
+def test_evaluate_job3_reads_the_summary_against_the_rows_label():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["label"] = "shared"
+    row["meta"]["workloads"]["shop/web"] = dict(row["meta"]["workloads"]["shop/api"])
+    row["messages"][1]["content"] = "user shop/api and shop/web"
+    answer = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"},
+        {"workload": "shop/web", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}],
+        "summary": "both share one common root cause"})
+    results = score.evaluate([row], lambda messages: answer)
+    assert results[0]["job3"] == 1.0
 
 
 # ------------------------------------------------- suggestion echo
@@ -769,7 +1063,12 @@ def _keyword_row(prompt, keywords, case="own_cause"):
     row = json.loads(json.dumps(ROW))
     row["messages"][1]["content"] = prompt
     row["meta"] = {"case": case, "expected_cause": "container killed at its memory limit",
-                   "expected_confidence": "high", "expected_own_keywords": list(keywords)}
+                   "expected_confidence": "high", "expected_own_keywords": list(keywords),
+                   "label": "none", "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": "container killed at its memory limit",
+                       "own_cause_keywords": list(keywords)}}}
     return row
 
 
@@ -833,7 +1132,11 @@ def test_keyword_case_without_a_keyword_set_is_not_measured():
     graded by exact match despite its case name, so it is not keyword-graded
     and not measured."""
     row = json.loads(json.dumps(ROW))
-    row["meta"] = {"case": "own_cause", "expected_cause": "x", "expected_confidence": "high"}
+    row["meta"] = {"case": "own_cause", "expected_cause": "x", "expected_confidence": "high",
+                   "label": "none", "workloads": {"shop/api": {
+                       "job": 2, "decided": False, "decided_cause": "",
+                       "decided_outcome": "", "decided_evidence": "",
+                       "expected_cause": "x", "own_cause_keywords": []}}}
     results = score.evaluate([row], lambda m: _answer())
     assert results[0]["keyword_derivable"] is None
     assert score.scoreboard(results)["overall"]["keyword_graded_n"] == 0
@@ -916,7 +1219,8 @@ def test_the_keyword_graded_population_is_the_measured_population():
 
     The case names come from the corpus, plus one the corpus does not carry:
     widening the grader to an existing case and widening it to a new one are
-    different edits, and both have to fail here.
+    different edits, and both have to fail here. A block appended below pins
+    the same population as a fact about the real corpus.
     """
     corpus_cases = {generate.to_row(ex)["meta"].get("case")
                     for ex in generate.test_set()}
@@ -928,6 +1232,18 @@ def test_the_keyword_graded_population_is_the_measured_population():
         graded_by_keyword = r["cause_acc"] == 1.0
         assert graded_by_keyword == (r["keyword_derivable"] is not None), case
         assert graded_by_keyword == (case in score.KEYWORD_CASES), case
+
+    # A decided workload's cause comes from the rule engine, never from a
+    # keyword match, so Task 6's generator never sets expected_own_keywords
+    # on a row unless every one of its workloads is undecided (job 2). This
+    # checks that directly, over every row the generator actually produces --
+    # the corpus fact that makes "keyword_derivable_n counts over all job-2
+    # rows" true without any workload-level code in this file.
+    for ex in generate.test_set():
+        real_meta = generate.to_row(ex)["meta"]
+        if score._is_keyword_graded(real_meta):
+            assert all(wm["job"] == 2 for wm in real_meta["workloads"].values()), \
+                real_meta.get("case")
 
 
 # --- the length-gap decider -------------------------------------------------
@@ -1101,3 +1417,128 @@ def test_a_partial_length_bias_at_the_floor_passes_and_that_is_the_residual():
     """
     assert score.length_gap({"rate": 0.5, "n": 45},
                             {"rate": 1.0, "n": 12}) == (-0.5, True)
+
+
+# --------------------------------------------------- scoreboard(): jobs
+
+
+def test_scoreboard_of_no_rows_still_has_a_well_formed_jobs_block():
+    board = score.scoreboard([])
+    assert board["jobs"] == {
+        "job1": {"rate": None, "n": 0},
+        "job2": {"rate": None, "n": 0},
+        "job3": {"rate": None, "n": 0,
+                 "by_label": {"shared": {"rate": None, "n": 0},
+                              "separate": {"rate": None, "n": 0},
+                              "none": {"rate": None, "n": 0}}},
+    }
+
+
+def test_scoreboard_job1_rate_averages_only_rows_that_carry_a_job1_score():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["workloads"] = {"shop/api": {
+        "job": 1, "decided": True, "decided_cause": "node worker-1 (disk pressure)",
+        "decided_outcome": "confirmed", "decided_evidence": "disk pressure condition is True",
+        "expected_cause": "node worker-1 (disk pressure)"}}
+    good_answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                            "cause": "node worker-1 (disk pressure)",
+                                            "confidence": "high",
+                                            "rationale": "the node has disk pressure"}],
+                              "summary": "s"})
+    other = json.loads(json.dumps(ROW))  # job 2, no job1 score at all
+    results = score.evaluate([row], lambda m: good_answer) + score.evaluate(
+        [other], lambda m: other["messages"][2]["content"])
+    board = score.scoreboard(results)
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 1}
+    assert board["jobs"]["job2"]["n"] == 1
+
+
+def test_scoreboard_job3_by_label_only_counts_rows_of_that_label():
+    def two_workload_row(label, summary):
+        return {"messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": f"user shop/api and shop/web ({label})"},
+            {"role": "assistant", "content": json.dumps({"verdicts": [
+                {"workload": "shop/api", "cause": "c1", "confidence": "high", "rationale": "r"},
+                {"workload": "shop/web", "cause": "c2", "confidence": "high",
+                 "rationale": "r"}], "summary": summary})}],
+            "meta": {"case": "multi", "label": label,
+                     "workloads": {
+                         "shop/api": {"job": 2, "decided": False, "decided_cause": "",
+                                      "decided_outcome": "", "decided_evidence": "",
+                                      "expected_cause": "c1", "own_cause_keywords": []},
+                         "shop/web": {"job": 2, "decided": False, "decided_cause": "",
+                                      "decided_outcome": "", "decided_evidence": "",
+                                      "expected_cause": "c2", "own_cause_keywords": []}}}}
+
+    shared_row = two_workload_row("shared", "both share one common root cause")
+    separate_row = two_workload_row("separate", "these are unrelated, independent causes")
+    rows = [shared_row, separate_row]
+
+    def _reply_for(messages):
+        # Look the row up by its user message text rather than parsing it as
+        # JSON -- the user message is plain English ("user shop/api and
+        # shop/web (shared)"), not a JSON document.
+        content = messages[1]["content"]
+        return next(r["messages"][2]["content"] for r in rows
+                    if r["messages"][1]["content"] == content)
+
+    results = score.evaluate(rows, _reply_for)
+    board = score.scoreboard(results)
+    assert board["jobs"]["job3"]["by_label"]["shared"] == {"rate": 1.0, "n": 1}
+    assert board["jobs"]["job3"]["by_label"]["separate"] == {"rate": 1.0, "n": 1}
+    assert board["jobs"]["job3"]["by_label"]["none"] == {"rate": None, "n": 0}
+    assert board["jobs"]["job3"]["n"] == 2
+
+
+def test_scoreboard_no_longer_carries_the_removed_paired_keys():
+    board = score.scoreboard([])
+    assert "paired_shared_origin" not in board
+    assert "separate_reasons_rate" not in board["overall"]
+    assert "false_shared_rate" not in board["overall"]
+    assert "shared_ambiguous_n" not in board["overall"]
+
+
+# --------------------------------------------------- render_markdown(): jobs
+
+
+def test_render_markdown_no_longer_has_the_paired_columns():
+    md = score.render_markdown(score.scoreboard([]))
+    assert "separate reasons" not in md
+    assert "false shared" not in md
+    assert "Paired shared-origin" not in md
+    assert "Shared-origin summaries" not in md
+
+
+def test_render_markdown_prints_job1_job2_job3_lines():
+    row = json.loads(json.dumps(ROW))
+    row["meta"]["workloads"]["shop/api"]["own_cause_keywords"] = ["memory", "limit"]
+    answer = json.dumps({"verdicts": [{"workload": "shop/api",
+                                       "cause": "the memory limit is too small",
+                                       "confidence": "high", "rationale": "r"}],
+                         "summary": "s"})
+    board = score.scoreboard(score.evaluate([row], lambda m: answer))
+    md = score.render_markdown(board)
+    assert f"Job 1 (rule rows, bar >= {score.JOB1_BAR}):" in md
+    assert f"Job 2 (undecided rows, bar >= {score.JOB2_BAR}):" in md
+    assert f"Job 3 (summary, bar >= {score.JOB3_BAR}, gating):" in md
+    # exact cell format checked below; here just confirm the one job-2 row
+    # (the only one with a score in this fixture) prints its count.
+    assert score._cell({"rate": 1.0, "n": 1}) in md
+
+
+def test_render_markdown_job_lines_use_the_shared_cell_format():
+    board = score.scoreboard([])
+    md = score.render_markdown(board)
+    empty_cell = score._cell({"rate": None, "n": 0})
+    assert f"Job 1 (rule rows, bar >= {score.JOB1_BAR}): {empty_cell}" in md
+    assert f"Job 2 (undecided rows, bar >= {score.JOB2_BAR}): {empty_cell}" in md
+    assert f"Job 3 (summary, bar >= {score.JOB3_BAR}, gating): {empty_cell}" in md
+
+
+def test_render_markdown_job3_prints_a_per_label_line_for_each_of_the_three_labels():
+    md = score.render_markdown(score.scoreboard([]))
+    empty_cell = score._cell({"rate": None, "n": 0})
+    assert f"  - shared: {empty_cell}" in md
+    assert f"  - separate: {empty_cell}" in md
+    assert f"  - none: {empty_cell}" in md

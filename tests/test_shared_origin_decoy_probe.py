@@ -286,9 +286,10 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
 
     `separate_reasons_rate` alone is gamed by that answer. This is the
     measurement that makes it cost something: cause accuracy collapses to 0,
-    every row names the decoy, and `false_shared` reads 1.0 -- on a slice
-    where the 0830 model, which answered independence everywhere, would have
-    scored perfectly.
+    every row names the decoy, and job3 -- which grades this `label: none`
+    slice on whether the summary claims a shared cause -- reads 0.0, on a
+    slice where the 0830 model, which answered independence everywhere,
+    would have scored perfectly.
     """
     twin = {d.user: t.assistant for d, t in zip(decoys, probes)}
     results = score.evaluate([generate.to_row(e) for e in decoys],
@@ -296,8 +297,7 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     assert all(r["contract_ok"] for r in results)
     assert all(r["cause_acc"] == 0.0 for r in results)
     assert all(r["named_decoy"] is True for r in results)
-    assert all(r["false_shared"] == 1.0 for r in results)
-    assert not any(r["shared_ambiguous"] for r in results)
+    assert all(r["job3"] == 0.0 for r in results)
 
 
 def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
@@ -308,7 +308,7 @@ def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
     assert all(r["cause_acc"] == 1.0 for r in results)
     assert all(r["conf_acc"] == 1.0 for r in results)
     assert all(r["named_decoy"] is False for r in results)
-    assert all(r["false_shared"] == 0.0 for r in results)
+    assert all(r["job3"] == 1.0 for r in results)
 
 
 # ------------------------------------------- the training set must not move
