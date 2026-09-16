@@ -48,9 +48,10 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 
 
 # `multi` gave up four points to `shared_origin` when the case was added,
-# rather than the mix growing: `false_shared_rate` is the other half of the
+# rather than the mix growing: job3's honesty check is the other half of the
 # same release decider, and a model that learns to claim a shared origin
-# everywhere has traded one failure for its mirror. The shared answer stays
+# everywhere fails it on the decoy twin, trading one failure for its mirror.
+# The shared answer stays
 # the minority among multi-workload rows, asserted by test: every
 # `shared_origin` row has a `shared_origin_decoy` twin that answers "separate
 # reasons", and `multi` answers the same.

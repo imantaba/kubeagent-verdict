@@ -35,9 +35,10 @@ from kubeagent_verdict.dataset.render import (
 )
 
 # Language that asserts a shared upstream origin. It travels with the row as
-# meta -- the error side, exactly as `wrong_summary_phrase` does -- so
-# `score.py` keys off the field's presence instead of special-casing a slice
-# name, and keeps importing nothing from `dataset`.
+# meta -- the error side, exactly as `wrong_summary_phrase` does -- but no
+# scorer reads either field directly: job3 keys off `meta["label"]`
+# (`shared`, `separate` or `none`) instead. `score.py` keeps its own copy of
+# this tuple, pinned to this one, and keeps importing nothing from `dataset`.
 #
 # Deliberately over-inclusive for now. A row matching both these and an
 # independence phrase scores None and is counted, so the cost of
@@ -964,11 +965,12 @@ def shared_origin_probe(p: prop.Propagation, rng: random.Random,
               "expected": {row["workload"]: row["cause"] for row in r.rows},
               "expected_confidence": p.confidence,
               "decoy_causes": r.decoys, "distractor_cause": r.distractor_cause,
-              # The memorised sentence this slice exists to measure. `score`
-              # reports it as `separate_reasons_rate` -- a model that names the
-              # shared cause on every row and then summarises the workloads as
-              # independent has half-learned the correction, and averaging that
-              # into `cause_accuracy` would hide it.
+              # The memorised sentence this slice exists to measure: a model
+              # that names the shared cause on every row and then summarises
+              # the workloads as independent has half-learned the correction.
+              # No scorer reads this field anymore -- job3 grades the summary
+              # against this row's own `label` ("shared" here), so that
+              # half-learned answer scores 0 the same way any denial would.
               "wrong_summary_phrase": prop.SEPARATE_REASONS,
               **r.meta})
 
@@ -1003,12 +1005,11 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
       tag" sweeps this slice and scores zero on the twin; "take the outranked
       candidate" does exactly the reverse. Neither wins both, and the menu
       offers no third tag;
-    * the summary -- `false_shared_rate` fires here where
-      `separate_reasons_rate` fires on the twin, so answering "shared origin"
-      everywhere and answering "separate reasons" everywhere each fail on the
-      slice the other passes. `wrong_summary_phrase` is deliberately ABSENT
-      from this row's meta: independence is the CORRECT summary here, and
-      carrying it would score the right answer as a failure.
+    * the summary -- job3 grades each row against its own label, so
+      answering "shared origin" everywhere and answering "separate reasons"
+      everywhere each fail on the slice the other passes. `wrong_summary_phrase`
+      is deliberately ABSENT from this row's meta: independence is the CORRECT
+      summary here, and carrying it would score the right answer as a failure.
 
     Two things this slice does NOT do, stated rather than implied.
 
@@ -1039,9 +1040,9 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
               # decoys are the correct answers here, so they are not listed.
               "decoy_causes": [r.shared_cause],
               "distractor_cause": r.distractor_cause,
-              # Fires `false_shared_rate`, which unlike `separate_reasons_rate`
-              # is gated on an honesty check -- a summary that names shared
-              # phrasing only to deny it is not counted against the model.
+              # job3 grades this row against `shared_claim_phrases` through
+              # its honesty check: a summary that names shared phrasing only
+              # to deny it is not counted as a shared claim.
               "shared_claim_phrases": list(SHARED_CLAIM_PHRASES),
               **r.meta})
 
