@@ -71,7 +71,6 @@ def test_every_cousin_decoy_carries_three_or_more_verdicts():
             assert len(ex.meta["expected"]) >= 3, ex.meta["origin"]
 
 
-
 def test_cousin_probe_is_deterministic():
     a = [generate.to_row(ex) for ex in generate.shared_origin_cousin_probes()]
     b = [generate.to_row(ex) for ex in generate.shared_origin_cousin_probes()]

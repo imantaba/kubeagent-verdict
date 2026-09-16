@@ -59,7 +59,6 @@ def test_wide_rows_are_adjacent_twins_with_unique_pair_keys():
         assert shared.isdisjoint(set(decoy.meta["expected"].values()))
 
 
-
 def test_wide_probe_is_deterministic():
     a = [generate.to_row(ex) for ex in generate.shared_origin_wide_probes()]
     b = [generate.to_row(ex) for ex in generate.shared_origin_wide_probes()]
