@@ -201,9 +201,11 @@ def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
 def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
     """The two meta fields this slice needs, and the one it must not carry.
 
-    `shared_claim_phrases` lets job3 catch a summary that claims a shared
-    cause here. `wrong_summary_phrase` on this slice would score the CORRECT
-    summary as a failure -- independence is the right answer here.
+    `shared_claim_phrases` is written for the pinned hash blob and read by
+    no scorer -- job3's honesty check runs on its own copy of the phrases in
+    score.py, not on this key. `wrong_summary_phrase` on this slice would
+    score the CORRECT summary as a failure -- independence is the right
+    answer here.
     """
     for e in decoys:
         assert e.meta["shared_claim_phrases"] == list(cases.SHARED_CLAIM_PHRASES)

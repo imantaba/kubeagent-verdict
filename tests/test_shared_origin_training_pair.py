@@ -200,9 +200,9 @@ def test_no_trainable_local_cause_speaks_the_language_of_a_shared_claim():
     The decoy half teaches "these have SEPARATE causes" by naming each
     workload's own. If one of those causes is worded with a shared-claim
     phrase, the row teaches the grader's positive signal as part of a
-    negative answer -- and `evals.score._shared_verdict` reads the summary,
-    which carries the per-workload lines, so it would score a correct answer
-    as a shared claim.
+    negative answer -- and job3 reads the summary, which carries the
+    per-workload lines, so it would score a correct answer as a shared
+    claim.
 
     This is not the grader being crude. `kube-proxy-degraded`'s shared cause
     IS that pods on the node reach no Service, so a victim whose "separate"

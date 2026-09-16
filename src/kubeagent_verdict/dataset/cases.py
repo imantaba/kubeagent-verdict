@@ -1040,9 +1040,12 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
               # decoys are the correct answers here, so they are not listed.
               "decoy_causes": [r.shared_cause],
               "distractor_cause": r.distractor_cause,
-              # job3 grades this row against `shared_claim_phrases` through
-              # its honesty check: a summary that names shared phrasing only
-              # to deny it is not counted as a shared claim.
+              # job3's honesty check is real -- a summary that names shared
+              # phrasing only to deny it is not counted as a shared claim --
+              # but job3 never reads this field: it takes a label and a
+              # summary, and checks the summary against score.py's own
+              # SHARED_CLAIM_PHRASES tuple. This key is written for the
+              # pinned hash blob and read by no scorer.
               "shared_claim_phrases": list(SHARED_CLAIM_PHRASES),
               **r.meta})
 
