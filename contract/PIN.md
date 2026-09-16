@@ -61,3 +61,24 @@ contract version.
 - Test: `contract/capture/kv_capture_test.go.txt`. The five steps are in its header.
 - Files: `tests/fixtures/rules_golden.json` (the rules pin). The prompt golden and the system prompt land in `contract/golden/` and `contract/system_prompt.txt` as the code that renders them lands.
 - The worktree was removed after the capture. kubeagent was not changed.
+
+## Dataset pin moves
+
+The exam's two hashes live in `tests/test_shared_origin_training.py`:
+`FROZEN_253_SHA256` over the first 253 rows and `EVAL_SET_SHA256` over all
+263. They are pinned so a change to the generators cannot move the exam
+without someone saying why. This is where the why is recorded.
+
+- **2026-09-16 — the missing `decided by rules:` line.** Both hashes moved.
+  Not one of the 263 prompts carried that line, though job 1 grades the
+  model on echoing it. The renderer in `contract.py` was right; the
+  generators in `dataset/cases.py` built every workload without setting
+  `decided`, so the renderer had nothing to print. The line now renders on
+  all 157 rule-decided workloads and on no undecided one. The same commit
+  restored the `decoy_cause` key in every decoy row's meta — the decoy-rate
+  and length-gap readings both read it, and both were reading an empty
+  slice — and re-labelled the ten `shared_origin_decoy_probe` rows from
+  `none` to `separate`. Every job-1 and decoy number measured before this
+  is retired. The captured goldens under `contract/golden/` did not move:
+  they were always right, and `test_user_message_matches_kubeagent_bytes`
+  passed untouched across the fix.

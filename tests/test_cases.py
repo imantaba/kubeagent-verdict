@@ -193,12 +193,17 @@ def test_own_cause_menu_is_refuted_not_hand_written():
     assert len(object_reads(menu, ns=n.ns, pod=n.pod)) == len(e.objects)
 
 
-def test_wrong_attribution_drops_decoy_cause_meta_and_expects_the_own_cause():
+def test_wrong_attribution_names_its_decoy_cause_and_expects_the_own_cause():
+    """`decoy_cause` is the row's first decoy, taken from the same
+    `decoy_by_workload` list the decoy-rate gate reads, so the two cannot
+    name different strings. The length-gap decider is measured over this
+    key and has no population without it."""
     e = _entry("worker-containerd-stop")
     n = names_mod.draw(random.Random(21))
     ex = cases.wrong_attribution(e, n, random.Random(5))
     answer = json.loads(ex.assistant)
-    assert "decoy_cause" not in ex.meta
+    key = f"{n.ns}/{n.name}"
+    assert ex.meta["decoy_cause"] == ex.meta["decoy_by_workload"][key][0]
     assert answer["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
 
 

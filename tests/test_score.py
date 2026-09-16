@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -1632,10 +1633,10 @@ def _never_say_shared_bot(rows: list[dict]):
     reading below) but writes the same flat, uncommitted summary on every
     multi-workload row -- one that names neither a shared cause nor an
     independence phrase. Against job 3's table (Step 25) that summary scores
-    1.0 on a `none` row (neither claims nor denies -- correct) and 0.0 on a
-    `shared` row (must claim and does not). There are no `separate` rows in
-    the real corpus today (Task 6's pinned count: 5 shared / 0 separate / 34
-    none of 39), so this bot's job3 rate is exactly the `none` share: 34/39.
+    1.0 on a `none` row (neither claims nor denies -- correct), 0.0 on a
+    `shared` row (must claim and does not) and 0.0 on a `separate` row (must
+    deny and does not). The exam is 5 shared / 10 separate / 24 none of 39,
+    so this bot's job3 rate is exactly the `none` share: 24/39.
     """
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
@@ -1649,18 +1650,79 @@ def _never_say_shared_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_never_say_shared_bot_scores_34_of_39_on_job3():
+def test_never_say_shared_bot_scores_24_of_39_on_job3():
     rows = _corpus_rows()
     results = score.evaluate(rows, _never_say_shared_bot(rows))
     board = score.scoreboard(results)
 
     assert board["jobs"]["job3"]["n"] == 39
-    assert board["jobs"]["job3"]["rate"] == round(34 / 39, 4)
+    assert board["jobs"]["job3"]["rate"] == round(24 / 39, 4)
     assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 5
-    assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 0
-    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 34
+    assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 10
+    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 24
     assert board["jobs"]["job3"]["by_label"]["shared"]["rate"] == 0.0
+    assert board["jobs"]["job3"]["by_label"]["separate"]["rate"] == 0.0
     assert board["jobs"]["job3"]["by_label"]["none"]["rate"] == 1.0
+
+
+_PROMPT_HEADING_RE = re.compile(r"^- (\S+) \(")
+_PROMPT_DECIDED_RE = re.compile(r"^    decided by rules: (.+) — (\S+)$")
+
+
+def _regex_copier_bot(rows: list[dict]):
+    """The ceiling the design spec names: a bot that reads nothing.
+
+    It never looks at the evidence, the candidate menu or the meta. It runs
+    one regular expression over the prompt, copies out whatever the
+    `decided by rules:` line says, and pairs it with a fixed filler
+    rationale that carries no denial phrase and no overclaim word. Job 1
+    asks for exactly that, so this bot is job 1's upper bound -- and the
+    model card has to state it, because a high job 1 on its own is not
+    evidence of skill.
+
+    It answers only the workloads the prompt shows a decided line for, so
+    every undecided workload is simply missing from the reply and job 2
+    reads 0.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        prompt = messages[1]["content"]
+        assert prompt in by_prompt
+        start = prompt.index("== BEGIN candidates ==")
+        end = prompt.index("== END candidates ==")
+        verdicts = []
+        workload = None
+        for line in prompt[start:end].split("\n"):
+            heading = _PROMPT_HEADING_RE.match(line)
+            if heading:
+                workload = heading.group(1)
+                continue
+            decided = _PROMPT_DECIDED_RE.match(line)
+            if decided is None or workload is None:
+                continue
+            verdicts.append({"workload": workload, "cause": decided.group(1),
+                             "confidence": "high",
+                             "rationale": "the evidence shown above points to this cause"})
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
+    """Pins design spec section 4's "Known ceiling": the decided cause is
+    printed in the prompt, so a regex plus a filler rationale scores near
+    1.0 on job 1. Nothing proved this before -- the older echo bot read the
+    cause out of the row's meta, which a real model never sees, so it could
+    pass while no prompt carried the line at all.
+    """
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _regex_copier_bot(rows))
+    board = score.scoreboard(results)
+
+    assert board["jobs"]["job1"]["rate"] == 1.0
+    assert board["jobs"]["job2"]["rate"] == 0.0
 
 
 def _always_none_of_these_bot(rows: list[dict]):

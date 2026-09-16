@@ -121,16 +121,25 @@ def test_the_pair_shows_the_same_workloads_with_the_same_menus(decoys, probes):
 
     If the inventory or the candidate menu moved between the two on anything
     but the evidence, a model could separate them on that something and every
-    conclusion drawn from the pair would be about it. The one move allowed is
-    a finding line whose victim declares a `healthy_evidence`: without it the
+    conclusion drawn from the pair would be about it. Two moves are allowed.
+    A finding line whose victim declares a `healthy_evidence`: without it the
     healthy half's inventory would assert the origin is broken and argue
-    against its own label.
+    against its own label. And the `decided by rules:` line, which v1.24.0
+    prints from a fresh re-check of the origin read -- on the scenarios that
+    decide off that read the broken half decides and the healthy half does
+    not. That line is the rule engine's reading of the evidence, so it is
+    not a way of separating the halves without reading; the full accounting
+    is in `tests/test_healthy_evidence.py`.
     """
     from kubeagent_verdict.dataset import propagation as prop
 
+    def without_decided(lines):
+        return [x for x in lines if not x.startswith("    decided by rules: ")]
+
     for d, p in zip(decoys, probes):
         ds, ps = _sections(d.user), _sections(p.user)
-        assert ds["candidates"] == ps["candidates"], d.meta["origin"]
+        assert without_decided(ds["candidates"]) == without_decided(ps["candidates"]), \
+            d.meta["origin"]
         assert len(ds["inventory"]) == len(ps["inventory"]), d.meta["origin"]
         moved = [(a, b) for a, b in zip(ps["inventory"], ds["inventory"]) if a != b]
         scenario = next(x for x in prop.all_scenarios() if x.key == d.meta["origin"])

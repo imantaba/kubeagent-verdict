@@ -41,6 +41,28 @@ def _reads(user: str) -> str:
     return user.split(EVIDENCE_MARK)[1]
 
 
+DECIDED_PREFIX = "    decided by rules: "
+
+
+def _decided(user: str) -> list[str]:
+    return [line for line in user.splitlines() if line.startswith(DECIDED_PREFIX)]
+
+
+def _without_decided(text: str) -> str:
+    """The same text with the `decided by rules:` lines taken out.
+
+    v1.24.0 re-checks every candidate against the gather's fresh reads, so
+    the two halves of a pair do not decide the same way: where the origin
+    read is what decides a workload, the healthy half decides nothing. That
+    difference is the evidence itself, restated by the rule engine, and it
+    is checked on its own in
+    `test_the_decided_line_is_the_rule_engine_re_reading_the_origin`.
+    Everything else the pair holds fixed.
+    """
+    return "\n".join(line for line in text.splitlines()
+                      if not line.startswith(DECIDED_PREFIX))
+
+
 def _pair(p: prop.Propagation) -> tuple[cases.Example, cases.Example]:
     return (cases.shared_origin_probe(p, random.Random(7)),
             cases.shared_origin_decoy_probe(p, random.Random(7)))
@@ -66,21 +88,52 @@ def test_the_healthy_finding_and_the_healthy_read_name_the_same_taint():
     assert "dedicated=gpu" in _reads(decoy.user)
 
 
-def test_the_halves_differ_only_in_the_reads_and_the_switched_evidence():
+def test_the_halves_differ_only_in_the_reads_the_evidence_and_the_decided_line():
     """The pair-mechanics promise, machine-checked for every held-out origin.
 
-    Outside the reads, the two halves may differ in exactly the finding lines
-    whose victim declares a `healthy_evidence`, and in nothing else.
+    Outside the reads and the rule engine's own decided line, the two halves
+    may differ in exactly the finding lines whose victim declares a
+    `healthy_evidence`, and in nothing else.
     """
     for p in prop.all_scenarios():
         probe, decoy = _pair(p)
         switched = [v for v in p.victims if v.healthy_evidence]
-        diff = [(a, b) for a, b in zip(_before_reads(probe.user).splitlines(),
-                                       _before_reads(decoy.user).splitlines()) if a != b]
+        diff = [(a, b) for a, b in
+                zip(_without_decided(_before_reads(probe.user)).splitlines(),
+                    _without_decided(_before_reads(decoy.user)).splitlines()) if a != b]
         assert len(diff) == len(switched), (p.key, diff)
         for (a, b), v in zip(diff, switched):
             assert v.evidence.split("{")[0] in a, (p.key, a)
             assert v.healthy_evidence.split("{")[0] in b, (p.key, b)
+
+
+def test_the_decided_line_is_the_rule_engine_re_reading_the_origin():
+    """The one thing the pair cannot hold fixed, stated rather than hidden.
+
+    v1.24.0 re-checks each candidate against the gather's fresh reads and
+    prints what it decided. On the three scenarios whose origin read is the
+    thing that decides a workload, the broken half decides and the healthy
+    half does not, so the halves differ by that line. The claim "only the
+    contents of the reads differ" is narrowed here rather than dropped: the
+    line is the rule engine's reading of those contents, so a model
+    separating the halves on it is separating them on the evidence, not on
+    an artefact of how the pair was built. The other three scenarios decide
+    off a victim's own object, which the healthy swap does not touch, so
+    their lines are identical.
+    """
+    from_origin, from_victim = [], []
+    for p in prop.all_scenarios():
+        probe, decoy = _pair(p)
+        assert _decided(probe.user), p.key
+        if _decided(probe.user) == _decided(decoy.user):
+            from_victim.append(p.key)
+            assert p.origin_object is None, p.key
+        else:
+            from_origin.append(p.key)
+            assert p.origin_object is not None, p.key
+            assert _decided(decoy.user) == [], p.key
+    assert len(from_origin) == 3, from_origin
+    assert len(from_victim) == 3, from_victim
 
 
 def test_the_broken_half_never_renders_the_healthy_evidence():

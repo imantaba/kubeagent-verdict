@@ -723,7 +723,13 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 # the rendered bytes of every row. A number on the 253 measured before that
 # rewrite is not comparable to one measured after it. The row count above
 # cannot see a rewrite that keeps the count; this can.
-FROZEN_253_SHA256 = "b3572842c3131fa3fc5a7b8fe83a9f95996c44025a4cf688243306b395ca5a45"
+#
+# It moved a second time, on 2026-09-16, and for a plain reason: no prompt
+# carried a `decided by rules:` line. Job 1 grades the model on echoing that
+# line, so every row it should appear in was missing the thing being graded.
+# Adding it changed the rendered bytes of every decided row. A job-1 number
+# from before this fix measures something else and is retired on purpose.
+FROZEN_253_SHA256 = "4d772776179aa6406c73d8fbe7714b6f14e26af09ecf25322a5a0088529ffc4f"
 
 # The whole exam, 253 plus the ten `shared_origin_decoy_probe` rows. First
 # captured on `main` @ `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were
@@ -747,7 +753,15 @@ FROZEN_253_SHA256 = "b3572842c3131fa3fc5a7b8fe83a9f95996c44025a4cf688243306b395c
 # retired by this change on purpose. Unlike 2026-09-05, this time the 253 moved
 # too -- a number on the 253 from before this rewrite is not comparable to
 # one after it either.
-EVAL_SET_SHA256 = "88e0c88bb4f96dd31ebae0c4841c02d4aecbdc0f58f00a3d9e26503d5158436d"
+#
+# Re-pinned once more on 2026-09-16, in the same commit that fixed the
+# missing `decided by rules:` line. Two things moved the bytes. The line
+# itself now renders on all 157 rule-decided workloads, where before it
+# rendered on none. And every decoy row names its `decoy_cause` in the meta
+# again, which the decoy-rate and length-gap readings both read. The ten
+# `shared_origin_decoy_probe` rows also changed label from `none` to
+# `separate`. Every decoy and job-1 number banked before this is retired.
+EVAL_SET_SHA256 = "9d15c045d5d2bdf702aaf185f1340aca2b0e6965ee2681e3093da8355132a552"
 
 
 def _digest(rows) -> str:

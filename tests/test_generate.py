@@ -441,7 +441,10 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     assert job1 == 157
     assert job2 == 153
     assert job3_prompts == 39
-    assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
+    # The 10 `shared_origin_decoy_probe` rows are labelled `separate`: their
+    # correct summary denies a shared cause, and `none` only asks a summary
+    # not to claim one. See cases.shared_origin_decoy_probe.
+    assert job3_labels == {"shared": 5, "separate": 10, "none": 24}
 
 
 def test_every_declared_down_node_appears_ruled_out_on_every_other_workload():
@@ -567,3 +570,94 @@ def test_no_pull_event_line_has_no_events_for_in_it():
                 if "no events for" in line:
                     assert "Failed:" not in line
     assert saw_no_event, "the exam must carry at least one no_event registry ending"
+
+
+# ------------------------------------------- the decided line in the prompt
+
+_CANDIDATE_HEADING = re.compile(r"^- (\S+) \(")
+_DECIDED_LINE = re.compile(r"^    decided by rules: (.+) — (\S+)$")
+
+
+def _decided_lines(prompt: str) -> dict[str, tuple[str, str]]:
+    """Read every `decided by rules:` line back off a rendered prompt, keyed
+    by the `ns/name` its candidates heading names.
+
+    The candidates block is sliced out first. A workload's `ns/name` also
+    opens its inventory line, which comes earlier in the prompt, so a scan
+    over the whole prompt would key the wrong section.
+    """
+    start = prompt.index("== BEGIN candidates ==")
+    end = prompt.index("== END candidates ==")
+    out: dict[str, tuple[str, str]] = {}
+    key = None
+    for line in prompt[start:end].split("\n"):
+        heading = _CANDIDATE_HEADING.match(line)
+        if heading:
+            key = heading.group(1)
+            continue
+        decided = _DECIDED_LINE.match(line)
+        if decided is not None and key is not None:
+            out[key] = (decided.group(1), decided.group(2))
+    return out
+
+
+def test_every_job1_workload_prints_its_decided_line_and_no_job2_one_does():
+    """Job 1 grades a byte-for-byte echo of the rule engine's cause, so the
+    cause has to be in the prompt.
+
+    kubeagent v1.24.0 prints it under the workload's candidate menu as
+    `    decided by rules: <cause> — <outcome>`. The exam renders the same
+    line from the same `rules.Result` its meta records, so the two cannot
+    drift. Without it job 1 would measure recall of a string the model was
+    never shown.
+    """
+    rows = generate.test_set()
+    decided_total = 0
+    for e in rows:
+        lines = _decided_lines(e.user)
+        for key, wm in e.meta["workloads"].items():
+            if wm["job"] == 1:
+                assert key in lines, (e.meta["case"], key)
+                assert lines[key] == (wm["decided_cause"], wm["decided_outcome"])
+                decided_total += 1
+            else:
+                assert key not in lines, (e.meta["case"], key)
+    assert decided_total == 157
+
+
+def test_every_decoy_probe_row_names_its_decoy_cause():
+    """The length-gap decider reads `decoy_cause` off the row meta.
+
+    Without the key the decider has no population at all: both of its
+    slices come out empty and it can only print `not measured`. The four
+    probe builders that carry one row-level decoy name it again, and the
+    multi-workload probe names one decoy per workload, the way the base
+    revision did.
+    """
+    rows = generate.test_set()
+    named = collections.Counter(e.meta["case"] for e in rows if e.meta.get("decoy_cause"))
+    assert dict(named) == {"wrong_attribution": 19, "positional_probe": 19,
+                           "misattribution_probe": 19, "contradiction_probe": 19}
+    for e in rows:
+        if not e.meta.get("decoy_cause"):
+            continue
+        key = next(iter(e.meta["workloads"]))
+        assert e.meta["decoy_cause"] == e.meta["decoy_by_workload"][key][0]
+    multi = [e for e in rows if e.meta["case"] == "multi_misattribution_probe"]
+    assert len(multi) == 19
+    for e in multi:
+        assert e.meta["decoy_causes"] == [v[0] for v in e.meta["decoy_by_workload"].values()]
+
+
+def test_the_length_gap_decider_has_rows_in_both_slices():
+    """57 of the 263 exam rows carry both a decoy cause and an expected cause
+    that is not `none_of_these`, which is what the length gap is measured
+    over. Both slices have to be non-empty: a decider with one empty slice
+    reads `not measured` and tells a release reviewer nothing.
+    """
+    rows = [generate.to_row(e) for e in generate.test_set()]
+    results = score.evaluate(rows, lambda messages: "")
+    measured = [r["length_helps"] for r in results if r["length_helps"] is not None]
+    assert len(measured) == 57
+    assert sum(1 for m in measured if m) > 0
+    assert sum(1 for m in measured if not m) > 0
