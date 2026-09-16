@@ -85,6 +85,10 @@ unchanged at 4155/432.
 | injection echo | **0.0** (19) | 0.0 (19) |
 | overconfidence on wrong causes | **not measured** (n=0 on clean slices) | 0.6069 (145) |
 
+kubeagent v1.24.0 changed the job: this table predates it. `docs/model-card.md`
+now carries job 1 (echo the decided cause), job 2 (name the cause) and job 3
+(one cause or several) in its place.
+
 Do not read any of it without `docs/model-card.md`'s "How to read the
 scoreboard" and "Known limitations". In short, and each argued there:
 
@@ -139,8 +143,9 @@ The slice has since gained a twin, `shared_origin_decoy_probe`: the same ten
 scenarios rendered from the same seeds with the cluster-wide component
 **healthy**, where the correct answer really is separate causes. Same
 workloads, same candidate menus in the same order, same evidence labels — only
-the reads differ. The pair is what makes `separate_reasons_rate` and
-`false_shared_rate` readable together, because no habit can win both halves.
+the reads differ. Job 3 grades each row against its own label, so a habit
+that always claims a shared cause, or never claims one, cannot sweep both
+halves.
 The twin is not evidence about the models below: a model that answers
 "separate causes" to everything scores 1.0 on it, which is exactly what these
 two did.
@@ -171,6 +176,10 @@ scored on the exam and both failed the shared-origin decider; the raise to
 trained scenarios went from 24 to 48, and the build size went from 5500 to
 8000, all for the final retrain. Every number on this page still comes from
 a model that never saw the shape.
+
+kubeagent v1.24.0 retired this decider. Its two rates are gone; the exam
+now grades summary agreement as job 3 instead, and `docs/model-card.md`
+carries how the model does on it.
 
 ## License
 

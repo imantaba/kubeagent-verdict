@@ -64,7 +64,7 @@ Every decision below was approved explicitly during design.
 
 ## The interface being trained against
 
-At inference the model receives exactly what kubeagent v1.23.0's
+At inference the model receives exactly what kubeagent v1.24.0's
 `internal/investigate/local.go` sends:
 
 - **System message:** `verdictSystemPrompt`, a fixed constant. It declares
@@ -95,6 +95,12 @@ At inference the model receives exactly what kubeagent v1.23.0's
   No markdown, no fences, no text outside the object. kubeagent treats the
   answer as untrusted: it sanitizes every line, caps it at 512 runes, matches
   verdict rows against the flagged-workload set, and drops anything else.
+- **Rule-decided rows — since kubeagent v1.24.0:** the deterministic
+  pass re-checks each candidate against a fresh read first. A settled
+  candidate carries a `fresh read: <outcome> — <evidence>` line, and a
+  workload it settles closes with `decided by rules: <cause> —
+  <outcome>`. The model only echoes that cause; it cannot choose one.
+  An undecided workload still asks the model to name its own.
 
 Training examples must be in exactly this shape, or the fine-tune teaches the
 wrong interface.
@@ -132,11 +138,14 @@ kubeagent owns the interface; this repository pins it:
 
 - `contract/system_prompt.txt` holds `verdictSystemPrompt` verbatim.
 - `contract/PIN.md` names the pin: verdict contract v1, prompt shape as of
-  **kubeagent v1.23.0**, the section-renderer semantics (`(none)` for empty
-  bodies, trailing-newline trim before wrapping), the closing judge line, and
-  the truncation marker.
+  **kubeagent v1.24.0**, the section-renderer semantics (`(none)` for empty
+  bodies, trailing-newline trim before wrapping), the closing judge line,
+  the truncation marker, and the fresh-read and decided-by-rules lines.
 - `contract/golden/` holds one full fixture prompt and one valid answer. A
   test asserts `contract.py` reproduces the fixture **byte-for-byte**.
+- `contract/smoke/` holds three real prompt/reply pairs from a live
+  v1.24.0 run, redacted. See `contract/smoke/README.md` — nothing there
+  moves a pass bar.
 
 A kubeagent prompt change therefore requires a deliberate re-pin here — new
 fixture, new PIN.md entry — never a silent drift. The prose-versioned
@@ -273,9 +282,9 @@ wrong from the commit that introduced the case until a pre-publication
 audit recomputed it.
 
 `shared_origin` took its four points from `multi` rather than from the mix
-growing, and that is a deliberate cost. The two are the same release decider's
-two halves: `separate_reasons_rate` fails when the model can never see a shared
-origin, and `false_shared_rate` fails when it claims one everywhere. The
+growing, and that is a deliberate cost. Job 3 now grades both failure modes
+as one number: never claiming a shared cause fails as soon as one is real,
+and claiming one everywhere fails on the healthy twin. The
 share has since doubled to 8% and then risen to 12%, paid out of
 `attributed` both times, so that every trainable scenario keeps at least 12
 pairs in train after the validation split; a test pins that floor at the
