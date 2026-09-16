@@ -445,10 +445,7 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     assert job1 == 157
     assert job2 == 153
     assert job3_prompts == 39
-    # The 10 `shared_origin_decoy_probe` rows are labelled `separate`: their
-    # correct summary denies a shared cause, and `none` only asks a summary
-    # not to claim one. See cases.shared_origin_decoy_probe.
-    assert job3_labels == {"shared": 5, "separate": 10, "none": 24}
+    assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
 
 
 def test_every_declared_down_node_appears_ruled_out_on_every_other_workload():

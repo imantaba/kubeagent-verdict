@@ -761,7 +761,18 @@ FROZEN_253_SHA256 = "4d772776179aa6406c73d8fbe7714b6f14e26af09ecf25322a5a0088529
 # again, which the decoy-rate and length-gap readings both read. The ten
 # `shared_origin_decoy_probe` rows also changed label from `none` to
 # `separate`. Every decoy and job-1 number banked before this is retired.
-EVAL_SET_SHA256 = "9d15c045d5d2bdf702aaf185f1340aca2b0e6965ee2681e3093da8355132a552"
+#
+# Re-pinned a final time on 2026-09-16: the `separate` override above was
+# reverted (see `cases.shared_origin_decoy_probe`). The label the rules
+# derive for those ten rows is `none` -- they carry neither the "shared
+# cause" nor the "no shared cause" line -- and `**r.meta` already carried
+# that derived value before anything overrode it. The `decided by rules:`
+# line and the `decoy_cause` key from the previous re-pin stay; only the
+# label moved, from `separate` back to `none`. This changes the rendered
+# bytes of the ten decoy rows again, so every job-3 number banked against
+# the `separate` re-pin above is retired. `FROZEN_253_SHA256` does not
+# move: the ten relabelled rows are 254-263, outside the frozen slice.
+EVAL_SET_SHA256 = "0b943307d46a052a7f24c097d353cee27be1de2d81d9d873360179bbf9233468"
 
 
 def _digest(rows) -> str:

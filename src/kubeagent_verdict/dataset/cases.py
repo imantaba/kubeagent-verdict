@@ -1100,16 +1100,7 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
               # SHARED_CLAIM_PHRASES tuple. This key is kept for the
               # pinned hash blob and read by no scorer.
               "shared_claim_phrases": list(SHARED_CLAIM_PHRASES),
-              **r.meta,
-              # The label the rules derive for this row is `none`, and `none`
-              # only asks a summary not to CLAIM a shared cause. The right
-              # answer here is an active denial -- the origin reads healthy
-              # and each workload fails for its own reason -- so the row is
-              # graded `separate`, which asks for that denial. Graded `none`,
-              # a flat "see the verdicts above" summary passed all ten rows
-              # while saying nothing. The override comes after `**r.meta`
-              # because that is where the derived label arrives.
-              "label": "separate"})
+              **r.meta})
 
 
 def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],

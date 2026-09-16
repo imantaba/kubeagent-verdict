@@ -82,3 +82,18 @@ without someone saying why. This is where the why is recorded.
   is retired. The captured goldens under `contract/golden/` did not move:
   they were always right, and `test_user_message_matches_kubeagent_bytes`
   passed untouched across the fix.
+
+- **2026-09-16 — revert the `separate` relabel.** `EVAL_SET_SHA256` moved
+  again; `FROZEN_253_SHA256` did not, because the ten affected rows
+  (254-263) sit outside the frozen slice. The job-3 label is derived, not
+  declared: the design spec (`:247-250`) says a row is `shared` only when
+  its rendered lines carry the "share one upstream cause" line, `separate`
+  only when they carry the "no shared cause" line, and `none` when they
+  carry neither. The ten `shared_origin_decoy_probe` rows carry neither
+  keying line, so the value the rules produce is `none`. The previous
+  entry's relabel to `separate` overrode that derived value by hand and
+  was never derived from anything the rules said; it also contradicted the
+  spec's own flat pin that `separate` stays at 0 in the exam (`:473`,
+  `:845`). The override is removed; `**r.meta`'s derived label stands
+  again. Every job-3 number measured against the `separate` re-pin above
+  is retired.

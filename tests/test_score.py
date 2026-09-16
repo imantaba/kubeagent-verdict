@@ -1738,8 +1738,8 @@ def _never_say_shared_bot(rows: list[dict]):
     independence phrase. Against job 3's table (Step 25) that summary scores
     1.0 on a `none` row (neither claims nor denies -- correct), 0.0 on a
     `shared` row (must claim and does not) and 0.0 on a `separate` row (must
-    deny and does not). The exam is 5 shared / 10 separate / 24 none of 39,
-    so this bot's job3 rate is exactly the `none` share: 24/39.
+    deny and does not). The exam is 5 shared / 0 separate / 34 none of 39,
+    so this bot's job3 rate is exactly the `none` share: 34/39.
     """
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
@@ -1753,18 +1753,18 @@ def _never_say_shared_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_never_say_shared_bot_scores_24_of_39_on_job3():
+def test_never_say_shared_bot_scores_34_of_39_on_job3():
     rows = _corpus_rows()
     results = score.evaluate(rows, _never_say_shared_bot(rows))
     board = score.scoreboard(results)
 
     assert board["jobs"]["job3"]["n"] == 39
-    assert board["jobs"]["job3"]["rate"] == round(24 / 39, 4)
+    assert board["jobs"]["job3"]["rate"] == round(34 / 39, 4)
     assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 5
-    assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 10
-    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 24
+    assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 0
+    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 34
     assert board["jobs"]["job3"]["by_label"]["shared"]["rate"] == 0.0
-    assert board["jobs"]["job3"]["by_label"]["separate"]["rate"] == 0.0
+    assert board["jobs"]["job3"]["by_label"]["separate"]["rate"] is None
     assert board["jobs"]["job3"]["by_label"]["none"]["rate"] == 1.0
 
 
