@@ -312,39 +312,6 @@ def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, 
     return claims, denies
 
 
-# The minimal-contrast pair, and which answer is correct on each half.
-# `shared_origin_probe` and `shared_origin_decoy_probe` render the SAME
-# scenarios from the same salts -- identical inventory, identical candidate
-# menus, identical evidence labels in identical order, and a menu whose tags
-# are byte-identical across the pair. Only what the reads SAY differs, and the
-# correct answer flips with it.
-PAIRED_CASES = {"shared_origin_probe": "shared",
-                "shared_origin_decoy_probe": "separate"}
-
-
-def _shared_verdict(summary: str) -> str:
-    """Does this summary claim a shared origin, deny one, or neither?
-
-    The same three-way honesty gate `false_shared` applies to the decoy half,
-    applied to BOTH halves. That symmetry is the point. `wrong_summary` reads
-    the probe half with a one-sided substring test -- the memorised phrase is
-    present or it is not -- which cannot tell "these share one upstream cause"
-    from "I cannot tell what is wrong", and scores both as the correct answer.
-    Half of a paired decider must not be that much weaker than the other half,
-    or a model that says nothing on the probe and denies sharing on the decoy
-    scores a perfect pair for reading neither.
-
-    "ambiguous" covers both kinds present and neither present, following
-    `shared_ambiguous`: a summary the gate cannot read is n/a, never a pass.
-    """
-    low = str(summary).lower()
-    claims, negated = _shared_claim_signal(low, SHARED_CLAIM_PHRASES)
-    denies = negated or any(p in low for p in INDEPENDENCE_PHRASES)
-    if claims == denies:
-        return "ambiguous"
-    return "shared" if claims else "separate"
-
-
 # kubeagent fills every finding's `suggested fix` line from a fixed table
 # (internal/remediation.For) keyed on the issue kind, so the line restates the
 # SYMPTOM generically -- "the probe keeps failing", "starts then crashes". It is
@@ -606,66 +573,6 @@ def _rate(values: list[float]) -> dict:
     if not values:
         return {"rate": None, "n": 0}
     return {"rate": round(sum(values) / len(values), 4), "n": len(values)}
-
-
-def paired_contrast(results: list[dict]) -> dict:
-    """Did the answer change when only the evidence changed?
-
-    `separate_reasons_rate` and `false_shared_rate` are the two halves of
-    release decider 5, and each half alone is gamed by an answering habit: a
-    model that says "separate reasons" everywhere aces the decoy slice and
-    fails the probe, and one that says "shared origin" everywhere does the
-    reverse. Decider 5 already catches both -- but only by reading two numbers
-    together and knowing a good score on either alone is worthless.
-
-    This is that judgement as one number. A pair scores 1.0 only when the
-    probe half claims a shared origin AND its twin denies one, so any habit
-    that answers a pair the same way twice scores 0.0 on it whichever answer
-    it picks. There is no third answer available: the menu offers the same
-    three tags in the same order on both halves.
-
-    Why it is worth a third number rather than a restatement of two. The 0901
-    model scored 0.5 and 0.4 on the two rates -- middling numbers that read as
-    partial skill and cleared decider 5's pre-registered bar in its letter.
-    Paired, the same answers score 0.1: nine of its ten pairs got the same
-    verdict in both worlds, so the answer was a function of which scenario it
-    was looking at and not of what the reads said. The marginals cannot see
-    that, because a per-scenario constant landing right half the time is
-    indistinguishable from half-skill until the halves are joined.
-
-    `disagreement` is the diagnostic beside the score, never credit on its
-    own: a model that flips its answer with the evidence and gets the
-    direction wrong every time reads 1.0 here and 0.0 on `both_correct`.
-
-    A pair either half of which the gate could not read is n/a, following
-    `shared_ambiguous` -- excluded from the denominator rather than counted
-    right. So is a row whose twin is absent, which is the ordinary case when
-    only the frozen exam is scored: it carries the probe half and no decoy
-    half, and must report "not measured" rather than a number built from ten
-    half-pairs.
-    """
-    halves: dict[str, dict[str, str | None]] = {}
-    for r in results:
-        key, case = r.get("pair_key"), r.get("case")
-        if key and case in PAIRED_CASES:
-            halves.setdefault(key, {})[case] = r.get("shared_verdict")
-
-    both: list[float] = []
-    disagree: list[float] = []
-    ambiguous = unpaired = 0
-    for seen in halves.values():
-        if len(seen) != len(PAIRED_CASES):
-            unpaired += 1
-            continue
-        verdicts = {case: seen[case] for case in PAIRED_CASES}
-        if any(v in (None, "ambiguous") for v in verdicts.values()):
-            ambiguous += 1
-            continue
-        correct = all(verdicts[case] == want for case, want in PAIRED_CASES.items())
-        both.append(1.0 if correct else 0.0)
-        disagree.append(1.0 if len(set(verdicts.values())) > 1 else 0.0)
-    return {"both_correct": _rate(both), "disagreement": _rate(disagree),
-            "ambiguous": ambiguous, "unpaired": unpaired}
 
 
 # The two constants behind the `length helps` / `length misleads` release

@@ -1542,3 +1542,14 @@ def test_render_markdown_job3_prints_a_per_label_line_for_each_of_the_three_labe
     assert f"  - shared: {empty_cell}" in md
     assert f"  - separate: {empty_cell}" in md
     assert f"  - none: {empty_cell}" in md
+
+
+# --------------------------------------------------- retire the paired decider
+
+
+def test_paired_decider_symbols_are_deleted():
+    """After Task 7, the paired-decider code Steps 33/34 stopped calling is
+    gone, not just unreachable."""
+    for name in ("PAIRED_CASES", "_shared_verdict", "paired_contrast"):
+        assert not hasattr(score, name), (
+            f"score.{name} should be deleted once evaluate()/scoreboard() no longer call it")
