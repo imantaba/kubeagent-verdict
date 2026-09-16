@@ -596,18 +596,21 @@ scenario rather than from the one line that distinguishes the two halves.
 
 ### 0908 against the v1.24.0 exam
 
-**Fail.** 0908 does not clear the v1.24.0 exam. It misses all three job bars
-and four of the five deciders. That is the designed outcome, not a surprise:
-0908 was trained on the v1.23.0 prompt shape and has never seen a fresh-read
-line or a decided line. Nothing ships from this run — no version bump, no tag,
-no release. Run: `out/eval/0908`, 0916.
+**Fail.** 0908 does not clear the v1.24.0 exam. It misses all three job bars.
+Of the five deciders, three are missed, one is not measured, and one is met.
+That is the designed outcome, not a surprise: 0908 was trained on the v1.23.0
+prompt shape and has never seen a fresh-read line or a decided line. Nothing
+ships from this run — no version bump, no tag, no release. Run: `out/eval/0908`,
+0916.
 
-The exam was re-pinned before this run, so no number below can be compared with
-a number from an earlier one. The generator was printing no `decided by rules:`
-line at all, which meant job 1 was grading an echo of something no prompt
-carried; fixing that changed the prompt bytes, and ten probe rows moved from
-label `none` to `separate`. Both dataset hashes moved with it
-(`contract/PIN.md`).
+The exam has been re-pinned twice since this section was first written, so no
+number below can be compared with a number from an earlier run. First, the
+generator was printing no `decided by rules:` line at all, which meant job 1
+was grading an echo of something no prompt carried; fixing that changed the
+prompt bytes. Second, ten `shared_origin_decoy_probe` rows had been
+hand-labelled `separate` by mistake; that override is now reverted, so the
+label the rules derive for those ten rows — `none` — stands again. Both
+dataset hashes moved with each re-pin (`contract/PIN.md`).
 
 Before this run, the smoke set (not gated) scored 0908 against three real
 `--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3 of
@@ -618,7 +621,7 @@ Before this run, the smoke set (not gated) scored 0908 against three real
 |---|---|---|---|
 | job 1 — echo the decided cause | 0.1783 (157) | ≥ 0.9 | MISSED |
 | job 2 — name the cause on an undecided row | 0.2418 (153) | ≥ 0.7 | MISSED |
-| job 3 — agree with the shared-cause line | 0.6923 (39) | ≥ 0.9, gating | MISSED |
+| job 3 — grade the summary: shared, separate, or neither | 0.7179 (39) | ≥ 0.9, gating | MISSED |
 
 Jobs 1 and 2 count workloads, not prompts. One prompt can flag several
 workloads, and each one is its own score. So job 1 is 28 of 157 decided
@@ -629,10 +632,11 @@ prompt now, and a bot that copies it scores 1.0 (limit 1 below). 0908 reads
 0.1783 — the lowest of the three jobs, not the highest. It is not reading the
 line that hands it the answer.
 
-Job 3's 39 prompts split 5 `shared`, 10 `separate`, 24 `none`. 0908 scored 1.0
-on the 5 `shared` rows, 0.6 on the 10 `separate` rows and 0.6667 on the 24
-`none` rows. It can say "same cause" when that is true; it cannot say "separate
-causes" when that is true.
+Job 3's 39 prompts split 5 `shared`, 0 `separate`, 34 `none`. The `separate`
+label carries no exam row, so there is nothing to score there — its rate reads
+`n/a`, not `0.0`. 0908 scored 1.0 on the 5 `shared` rows and 0.6765 on the 34
+`none` rows. It can say "same cause" when that is true; whether it can say
+"separate causes" when that is true is not something this exam tests.
 
 | decider | reading | verdict |
 |---|---|---|
@@ -659,7 +663,7 @@ The overconfidence reading is the overall one, over 167 wrong causes. It is not
 a slice, and it is not blind — a zero denominator would be written `not
 measured`, and this one is far from zero.
 
-Five limits on this reading, carried from the design that scored it:
+Six limits on this reading, carried from the design that scored it:
 
 1. Job 1 has a measured ceiling: a bot that regex-copies the decided line out
    of the prompt and pads a filler rationale scores exactly 1.0, on all 157
@@ -667,14 +671,17 @@ Five limits on this reading, carried from the design that scored it:
    rather than an estimate.
 2. On option-A rows the rules fix a node the story says is not the cause, and
    the exam grades the echo, not the story.
-3. The `separate` label now reads 10 of the 39 job-3 prompts, all of them the
-   `shared_origin_decoy_probe` slice. It was 0 before this run, and the design
-   spec froze it there. The relabel departs from the spec on purpose: graded
-   `none`, those ten rows only asked a summary not to claim a shared cause, so
-   a flat "see the verdicts above" passed all ten while saying nothing.
-4. Job 3's bar has a thin margin. A bot that denies a shared cause on every
-   prompt, reading nothing, scores 34 of 39 — 0.8718 against a 0.9 bar, five
-   rows short. The relabel did not change that number; it changed what a bot
-   that says nothing scores, which fell from 34 of 39 to 24 of 39.
+3. The `separate` label stays at 0 in the exam. Only a scorer unit test and
+   one training-only prompt carry that label; an exam row would need a moved
+   identity, and the design refuses to move one.
+4. A bot that denies a shared cause on every prompt, reading nothing, scores
+   34 of 39 — 0.8718 against a 0.9 bar, five rows short, and still fails. The
+   design spec states this same figure and calls it a failure by design: the
+   bar is built to catch exactly this bot, not a margin to worry about.
 5. 0908 was trained on the v1.23.0 prompt shape. It never saw a fresh-read or
    decided line in training.
+6. The misleads slice is 1 row of 57. Whenever a run's `length helps` clears
+   the 0.5 floor, the length-gap decider comes down to that single row. This
+   run does not clear the floor, so nothing on the board above turns on it
+   today — but the next run that does will still have only one row deciding
+   the gap.
