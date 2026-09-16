@@ -385,11 +385,13 @@ so time scales with rows and nothing else) — run it under
      model sitting near 0.5 there has not earned the pass this bar just gave
      it.
 
-     The gate is computed on the **overall** block only. The two rates appear
-     on every case, but 0.15 is calibrated against the overall 12-row
-     `misleads` denominator where one row is 0.083; in the three cases that
-     carry length-keyed rows at all that denominator is 4, where one flipped
-     row is 0.25 and clears the bar on its own. Judge
+     The gate is computed on the **overall** block only. Re-measured for the
+     v1.24.0 rescope, the overall `misleads` denominator is now 1 row (56
+     helps against 1 misleads: `wrong_attribution` 19/0, `positional_probe`
+     18/1, `misattribution_probe` 19/0). At a denominator of 1 there is no
+     fraction of a row to tune 0.15 against — the misleads rate can only
+     read 0.0 or 1.0 — so 0.15 is kept as the meaning "the two slices must
+     agree" rather than as a number calibrated to this population. Judge
      a case by its two rates, never by arithmetic on them against this bar;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.

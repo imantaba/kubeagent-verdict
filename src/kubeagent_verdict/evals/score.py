@@ -605,15 +605,21 @@ def _rate(values: list[float]) -> dict:
 # release, but nothing computed the difference and nothing said how close is
 # close enough, so the bullet read as a gate and was a human eyeball check.
 #
-# TOLERANCE is read against the OVERALL 12-row `misleads` denominator at the
-# current corpus size, where one row is 0.083 -- so 0.15 admits one row of
-# noise and refuses the second, which lands at 0.167. That calibration is why
-# `scoreboard` computes the gate on the overall block alone: three of the
-# eleven cases carry length-keyed rows at all (`positional_probe`,
-# `misattribution_probe` and `wrong_attribution`, 15 helps against 4 misleads
-# each), and at a denominator of 4 one flipped row is 0.25 and clears the bar
-# on its own. A per-case verdict would read MISSED for a single row of noise,
-# under a key name a reader would take for the release gate.
+# Re-measured for the v1.24.0 rescope, over the kind-shaped strings the new
+# candidate menus render: 56 helps against 1 misleads overall (`wrong_attribution`
+# 19/0, `positional_probe` 18/1, `misattribution_probe` 19/0). `scoreboard`
+# still computes the gate on the overall block alone, but the reason has
+# changed: the overall `misleads` denominator is now 1, not 12, and a
+# denominator of 1 has no fraction of a row to calibrate a tolerance against
+# -- the misleads rate can only ever read 0.0 or 1.0, nothing between. No
+# tolerance below 1.0 admits any noise on that side; 0.15 does not "admit one
+# row and refuse the second" here, because there is no second row to refuse.
+# TOLERANCE is kept at 0.15 anyway, not re-tuned to this population: it still
+# encodes "the two slices must agree", which is the whole point of the
+# decider, and a number chosen without a population to derive it from would
+# be worse than the old number kept with an honest account of why. The thin
+# denominator is a limit on what this decider can show, not a reason to
+# invent a new constant; it is recorded as a limit in `docs/model-card.md`.
 LENGTH_GAP_TOLERANCE = 0.15
 # FLOOR is the half a plain `abs(gap) <= TOLERANCE` threshold gets wrong. The
 # untuned baseline scored 0.0 on both slices: a gap of exactly 0.00, inside any
@@ -644,7 +650,9 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     longer phrase in 15 of 19 catalog entries. A model that scores *better* on
     the misleading rows has ruled that shortcut out, so a negative gap passes.
     An `abs()` bar would instead fail it for scoring well on the harder slice,
-    where the denominator is 12 and a single row is already a 0.083 swing.
+    where the overall denominator is now 1 row: the misleads rate can only
+    read 0.0 or 1.0, and a signed bar keeps a model from being punished for
+    landing on the "wrong" side of a swing that thin.
 
     What a negative gap does NOT rule out, written down rather than implied:
     the mirror shortcut, always answering the SHORTER candidate. It is just as
