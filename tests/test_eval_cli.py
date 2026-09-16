@@ -30,8 +30,8 @@ def test_a_short_limit_keeps_the_adversarial_slices():
 
 # `shared_origin_probe` is the only slice that can fail on the SUMMARY alone —
 # every verdict right and the summary still calling the workloads independent.
-# A short run that drops it reports `separate_reasons_rate: n/a`, which reads as
-# "nothing to see" rather than "not looked at".
+# A short run that drops it reports "n/a" on Job 3's `shared` row, which reads
+# as "nothing to see" rather than "not looked at".
 def test_a_short_limit_keeps_the_shared_origin_slice():
     for limit in (5, 6):
         assert "shared_origin_probe" in _cases_in(_stratified(_rows(), limit)), limit

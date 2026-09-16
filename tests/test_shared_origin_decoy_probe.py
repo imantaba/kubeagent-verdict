@@ -31,10 +31,9 @@ that matters most:
   the attributed tag" scores 1.0 here and 0.0 on `shared_origin_probe`, and
   "always take the outranked candidate" scores exactly the reverse. Neither
   heuristic can win both, and the menu offers no third tag to try;
-* the summary -- `false_shared` fires on this slice where
-  `separate_reasons_rate` fires on its twin, so a model that answers "shared
-  origin" everywhere and one that answers "separate reasons" everywhere both
-  fail, each on the slice the other passes.
+* the summary -- job3 grades each row against its own label, so a model
+  that answers "shared origin" everywhere and one that answers "separate
+  reasons" everywhere both fail, each on the slice the other passes.
 
 Two things it does NOT do, stated rather than implied.
 
@@ -199,11 +198,12 @@ def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
         assert d.meta["decoy_causes"] == list(want), d.meta["origin"]
 
 
-def test_the_slice_feeds_false_shared_rather_than_separate_reasons(decoys):
-    """The mirror metric, and never the one its twin feeds.
+def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
+    """The two meta fields this slice needs, and the one it must not carry.
 
-    `wrong_summary_phrase` on this slice would score the CORRECT summary as a
-    failure -- independence is the right answer here.
+    `shared_claim_phrases` lets job3 catch a summary that claims a shared
+    cause here. `wrong_summary_phrase` on this slice would score the CORRECT
+    summary as a failure -- independence is the right answer here.
     """
     for e in decoys:
         assert e.meta["shared_claim_phrases"] == list(cases.SHARED_CLAIM_PHRASES)
@@ -284,12 +284,12 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     one shared cause" would emit here -- the real failure, not a caricature of
     it.
 
-    `separate_reasons_rate` alone is gamed by that answer. This is the
-    measurement that makes it cost something: cause accuracy collapses to 0,
-    every row names the decoy, and job3 -- which grades this `label: none`
-    slice on whether the summary claims a shared cause -- reads 0.0, on a
-    slice where the 0830 model, which answered independence everywhere,
-    would have scored perfectly.
+    Averaged across the whole corpus this would barely move `cause_accuracy`.
+    This is the measurement that makes it cost something: cause accuracy
+    collapses to 0, every row names the decoy, and job3 -- which grades this
+    `label: none` slice on whether the summary claims a shared cause -- reads
+    0.0, on a slice where the 0830 model, which answered independence
+    everywhere, would have scored perfectly.
     """
     twin = {d.user: t.assistant for d, t in zip(decoys, probes)}
     results = score.evaluate([generate.to_row(e) for e in decoys],

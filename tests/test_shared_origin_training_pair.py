@@ -256,12 +256,11 @@ def test_no_trainable_answer_both_denies_sharing_and_speaks_its_language(kept):
     """The invariant the `local_cause` test above only approximates.
 
     That one guards a field. This one guards the thing the field feeds: the
-    rendered answer. `evals.score` decides `false_shared` and `shared_verdict`
-    by reading the summary for both vocabularies at once -- a summary carrying
-    words from each is `shared_ambiguous`, scored neither right nor wrong. A
-    training row in that shape teaches the model to produce answers the grader
-    cannot read, and no field-level check catches it, because a summary is
-    built from several fields and any of them can be the one that collides.
+    rendered answer. job3 scores 0 when a summary carries both a shared claim
+    and a denial, on either the `shared` or the `separate` label. A training
+    row in that shape teaches the model to produce answers the grader cannot
+    read, and no field-level check catches it, because a summary is built
+    from several fields and any of them can be the one that collides.
 
     Guarding the field and guarding the answer are not the same guarantee, and
     the gap between them is not hypothetical: `log_cause` carries "upstream"
