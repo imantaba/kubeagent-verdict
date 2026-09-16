@@ -652,7 +652,7 @@ label carries no exam row, so there is nothing to score there — its rate reads
 | decoy rate low on every decoy-bearing workload | 0.0988 (243) overall; nonzero on 9 of the 11 slices counted | MISSED |
 | `length_gap` ≤ 0.15, and not at the floor | -0.9643, and `length helps` reads 0.0357 (56) — under the 0.5 floor | not measured |
 | overconfidence on wrong causes | 0.1717 (167) | MISSED |
-| suggestion echo `0` of `263` | 0.0 (262) — 1 row had nothing to check | met |
+| suggestion echo `0`, over every row answered | 0.0 (262) — 1 reply was not valid JSON, so no cause reached this rate; `contract` counts that row | met |
 
 The decoy rate, slice by slice: `0.0` (19) misattribution_probe and `0.0` (10)
 shared_origin_probe are clean; the other nine are not — `0.0377` (53)
