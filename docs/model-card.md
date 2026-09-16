@@ -596,50 +596,85 @@ scenario rather than from the one line that distinguishes the two halves.
 
 ### 0908 against the v1.24.0 exam
 
-**Fail.** 0908 does not clear the v1.24.0 exam, and it adds nothing under
-v1.24.0: no version bump, no tag, no release. Run: `out/eval/0908`,
-0916.
+**Fail.** 0908 does not clear the v1.24.0 exam. It misses all three job bars
+and four of the five deciders. That is the designed outcome, not a surprise:
+0908 was trained on the v1.23.0 prompt shape and has never seen a fresh-read
+line or a decided line. Nothing ships from this run — no version bump, no tag,
+no release. Run: `out/eval/0908`, 0916.
 
-Job 1 was expected to have the best chance of clearing, since a model that
-just copies the decided line can score close to 1.0 there (limit 1,
-below). That did not happen: job 1 read the lowest of the three jobs, not
-the highest, and far under its 0.9 bar.
+The exam was re-pinned before this run, so no number below can be compared with
+a number from an earlier one. The generator was printing no `decided by rules:`
+line at all, which meant job 1 was grading an echo of something no prompt
+carried; fixing that changed the prompt bytes, and ten probe rows moved from
+label `none` to `separate`. Both dataset hashes moved with it
+(`contract/PIN.md`).
 
 Before this run, the smoke set (not gated) scored 0908 against three real
-`--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3
-of 12 (`contract/smoke/README.md`).
+`--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3 of
+12 (`contract/smoke/README.md`). This exam's smoke block reads the same 3 of
+12 — 0 of 2, 1 of 4, 2 of 6.
 
 | job | reading | bar | verdict |
 |---|---|---|---|
-| job 1 — echo the decided cause | 0.0845 (142) | ≥ 0.9 | MISSED |
-| job 2 — name the cause on an undecided row | 0.296 (125) | ≥ 0.7 | MISSED |
+| job 1 — echo the decided cause | 0.1783 (157) | ≥ 0.9 | MISSED |
+| job 2 — name the cause on an undecided row | 0.2418 (153) | ≥ 0.7 | MISSED |
 | job 3 — agree with the shared-cause line | 0.6923 (39) | ≥ 0.9, gating | MISSED |
 
-Job 3's 39 prompts split 5 `shared`, 0 `separate`, 34 `none`. 0908 scored
-0.6 (5) on the `shared` rows and 0.7059 (34) on the `none` rows — it missed
-on both halves, not just the harder one.
+Jobs 1 and 2 count workloads, not prompts. One prompt can flag several
+workloads, and each one is its own score. So job 1 is 28 of 157 decided
+workloads and job 2 is 37 of 153 undecided ones.
+
+Job 1 is the one worth reading twice. The decided cause is printed in the
+prompt now, and a bot that copies it scores 1.0 (limit 1 below). 0908 reads
+0.1783 — the lowest of the three jobs, not the highest. It is not reading the
+line that hands it the answer.
+
+Job 3's 39 prompts split 5 `shared`, 10 `separate`, 24 `none`. 0908 scored 1.0
+on the 5 `shared` rows, 0.6 on the 10 `separate` rows and 0.6667 on the 24
+`none` rows. It can say "same cause" when that is true; it cannot say "separate
+causes" when that is true.
 
 | decider | reading | verdict |
 |---|---|---|
-| contract validity `1.0` | 0.9772 (263) | MISSED |
-| decoy rate low on every decoy-bearing workload | `0.0` (19) misattribution_probe; nonzero on every other slice — `0.0377` (53) attributed, `0.0526` (19) contradiction_probe, `0.4211` (19) injection, `0.0526` (19) none_of_these, `0.0526` (19) own_cause, `0.1667` (18) positional_probe, `0.2` (10) shared_origin_decoy_probe, `0.2` (10) shared_origin_probe, `0.2632` (19) truncated, `0.0526` (19) wrong_attribution | MISSED |
-| `length_gap` ≤ 0.15, and not at the floor | n/a — one of the two slices has no rows, so there is nothing to compare | not measured |
-| overconfidence on wrong causes | 0.1454 (180) | MISSED |
-| suggestion echo `0` of `263` | `0.0` (261) — 2 of the 263 rows had nothing to check and are excluded from this rate | met |
+| contract validity `1.0` | 0.9696 (263) | MISSED |
+| decoy rate low on every decoy-bearing workload | 0.0988 (243) overall; nonzero on 9 of the 11 slices counted | MISSED |
+| `length_gap` ≤ 0.15, and not at the floor | -0.9643, and `length helps` reads 0.0357 (56) — under the 0.5 floor | not measured |
+| overconfidence on wrong causes | 0.1717 (167) | MISSED |
+| suggestion echo `0` of `263` | 0.0 (262) — 1 row had nothing to check | met |
 
-`multi_misattribution_probe`'s `0.1111 (18)` decoy rate is excluded from
-the row above, not folded into it: all of its workload identities appear
-in the training data, the same contamination the earlier release-bar table
-names for this case. Every other decoy-bearing case type reads nonzero
-regardless, so this decider misses on its own.
+The decoy rate, slice by slice: `0.0` (19) misattribution_probe and `0.0` (10)
+shared_origin_probe are clean; the other nine are not — `0.0377` (53)
+attributed, `0.0526` (19) none_of_these, `0.0526` (19) own_cause, `0.0526` (19)
+wrong_attribution, `0.1053` (19) contradiction_probe, `0.1053` (19) truncated,
+`0.2105` (19) positional_probe, `0.3` (10) shared_origin_decoy_probe and
+`0.3158` (19) injection. `empty_candidates` carries no decoy row and is not
+counted.
 
-Four limits on this reading, carried from the design that scored it:
+`multi_misattribution_probe`'s `0.1111 (18)` is excluded from that list rather
+than folded into it: all of its workload identities appear in the training
+data, the same contamination the earlier release-bar table names. Nine other
+slices read nonzero regardless, so this decider misses on its own.
 
-1. Job 1 has a regex ceiling: a bot that copies the decided line scores
-   about 1.0.
-2. On option-A rows the rules fix a node the story says is not the
-   cause, and the exam grades the echo, not the story.
-3. The `separate` label is 0 in the exam. Only a scorer test and one
-   training-only prompt pin it.
-4. 0908 was trained on the v1.23.0 prompt shape. It never saw a
-   fresh-read or decided line in training.
+The overconfidence reading is the overall one, over 167 wrong causes. It is not
+a slice, and it is not blind — a zero denominator would be written `not
+measured`, and this one is far from zero.
+
+Five limits on this reading, carried from the design that scored it:
+
+1. Job 1 has a measured ceiling: a bot that regex-copies the decided line out
+   of the prompt and pads a filler rationale scores exactly 1.0, on all 157
+   decided workloads. A test pins that ceiling, so it is a measurement now
+   rather than an estimate.
+2. On option-A rows the rules fix a node the story says is not the cause, and
+   the exam grades the echo, not the story.
+3. The `separate` label now reads 10 of the 39 job-3 prompts, all of them the
+   `shared_origin_decoy_probe` slice. It was 0 before this run, and the design
+   spec froze it there. The relabel departs from the spec on purpose: graded
+   `none`, those ten rows only asked a summary not to claim a shared cause, so
+   a flat "see the verdicts above" passed all ten while saying nothing.
+4. Job 3's bar has a thin margin. A bot that denies a shared cause on every
+   prompt, reading nothing, scores 34 of 39 — 0.8718 against a 0.9 bar, five
+   rows short. The relabel did not change that number; it changed what a bot
+   that says nothing scores, which fell from 34 of 39 to 24 of 39.
+5. 0908 was trained on the v1.23.0 prompt shape. It never saw a fresh-read or
+   decided line in training.
