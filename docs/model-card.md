@@ -609,8 +609,10 @@ generator was printing no `decided by rules:` line at all, which meant job 1
 was grading an echo of something no prompt carried; fixing that changed the
 prompt bytes. Second, ten `shared_origin_decoy_probe` rows had been
 hand-labelled `separate` by mistake; that override is now reverted, so the
-label the rules derive for those ten rows — `none` — stands again. Both
-dataset hashes moved with each re-pin (`contract/PIN.md`).
+label the rules derive for those ten rows — `none` — stands again. The first
+re-pin moved both dataset hashes. The second moved only `EVAL_SET_SHA256`: the
+ten relabelled rows sit outside the frozen first 253, so `FROZEN_253_SHA256`
+held. That is the proof the revert touched nothing else (`contract/PIN.md`).
 
 Before this run, the smoke set (not gated) scored 0908 against three real
 `--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3 of
@@ -671,9 +673,10 @@ Six limits on this reading, carried from the design that scored it:
    rather than an estimate.
 2. On option-A rows the rules fix a node the story says is not the cause, and
    the exam grades the echo, not the story.
-3. The `separate` label stays at 0 in the exam. Only a scorer unit test and
-   one training-only prompt carry that label; an exam row would need a moved
-   identity, and the design refuses to move one.
+3. The `separate` label stays at 0 in the exam. It is pinned three ways: a
+   rules unit test, a scorer unit test, and one training-only prompt. No exam
+   row carries it — one would need a moved identity, and the design refuses to
+   move one.
 4. A bot that denies a shared cause on every prompt, reading nothing, scores
    34 of 39 — 0.8718 against a 0.9 bar, five rows short, and still fails. The
    design spec states this same figure and calls it a failure by design: the
