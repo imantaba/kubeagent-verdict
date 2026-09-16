@@ -197,14 +197,9 @@ INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
 # `dataset.cases.SHARED_CLAIM_PHRASES` rather than imported, because score.py's
 # import boundary is contract and contract_check only, never dataset.
 #
-# The per-row `false_shared` metric keeps reading its phrases from row meta and
-# is untouched. This copy exists for the PAIRED decider, which cannot use meta:
-# only the DECOY half of a pair carries `shared_claim_phrases`, the probe half
-# carries a single `wrong_summary_phrase`, and reading the two halves of a
-# minimal contrast with different-strength signals is exactly the weakness the
-# paired decider exists to remove. `tests/test_paired_contrast.py` pins this
-# copy to the generator's tuple, so drift fails the suite instead of quietly
-# weakening one half of the gate.
+# job3 is the only reader, through `_shared_claim_signal`. A test in
+# tests/test_score.py pins this copy to the generator's tuple, so drift fails
+# the suite instead of quietly weakening the shared-claim signal.
 SHARED_CLAIM_PHRASES = ("shared origin", "shared root cause", "common cause",
                         "common root cause", "same underlying", "same root cause",
                         "upstream", "cascading", "knock-on", "caused by the same")
