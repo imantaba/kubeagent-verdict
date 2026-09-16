@@ -6,7 +6,7 @@ import json
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit, urlunsplit
 
-from kubeagent_verdict.evals import client, score
+from kubeagent_verdict.evals import client, score, smoke
 
 # The slices a short run exists to look at. Everything else can only pass.
 # `shared_origin_probe` sits beside the other multi-workload slice: both put
@@ -199,3 +199,14 @@ def main() -> None:
     md = score.render_markdown(board)
     (args.out / "scoreboard.md").write_text(md, encoding="utf-8")
     print(md)
+
+    smoke_dir = Path(__file__).resolve().parents[3] / "contract" / "smoke"
+    print("\nsmoke (not gated)")
+    for pair in ("02", "03", "04"):
+        smoke_request = json.loads(
+            (smoke_dir / f"{pair}-request.json").read_text(encoding="utf-8"))
+        smoke_response = json.loads(
+            (smoke_dir / f"{pair}-response.json").read_text(encoding="utf-8"))
+        pair_scores = smoke.score_smoke_pair(smoke_request, smoke_response)
+        echoed = sum(1 for value in pair_scores if value == 1.0)
+        print(f"  {pair}: {echoed} of {len(pair_scores)} rule rows echoed")
