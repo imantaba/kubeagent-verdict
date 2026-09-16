@@ -8,7 +8,7 @@ close and says the fix belongs elsewhere:
 
     the exam cannot detect this shortcut even now -- seven of the ten
     `shared_origin_probe` rows carry a read label that appears in none of the
-    other 243, so label-matching alone passes both halves of decider 5.
+    other 243, so label-matching alone clears job 3 and the decoy rate.
 
 This is elsewhere. `shared_origin_decoy_probe` renders the SAME six scenarios
 with the origin read showing the component healthy, and the correct answer
@@ -31,10 +31,12 @@ that matters most:
   the attributed tag" scores 1.0 here and 0.0 on `shared_origin_probe`, and
   "always take the outranked candidate" scores exactly the reverse. Neither
   heuristic can win both, and the menu offers no third tag to try;
-* the summary -- `false_shared` fires on this slice where
-  `separate_reasons_rate` fires on its twin, so a model that answers "shared
-  origin" everywhere and one that answers "separate reasons" everywhere both
-  fail, each on the slice the other passes.
+* the summary -- job3 grades each row against its own label, and neither
+  constant answer wins both slices: a constant "shared origin" scores 0 of
+  10 here and 5 of 10 on the probe twin. The twin does not mirror this
+  slice -- a constant "separate reasons" sweeps this slice 10 of 10 and
+  still only reaches 5 of 10 there, because half the probe rows carry
+  label `none`, which a denial passes.
 
 Two things it does NOT do, stated rather than implied.
 
@@ -119,16 +121,25 @@ def test_the_pair_shows_the_same_workloads_with_the_same_menus(decoys, probes):
 
     If the inventory or the candidate menu moved between the two on anything
     but the evidence, a model could separate them on that something and every
-    conclusion drawn from the pair would be about it. The one move allowed is
-    a finding line whose victim declares a `healthy_evidence`: without it the
+    conclusion drawn from the pair would be about it. Two moves are allowed.
+    A finding line whose victim declares a `healthy_evidence`: without it the
     healthy half's inventory would assert the origin is broken and argue
-    against its own label.
+    against its own label. And the `decided by rules:` line, which v1.24.0
+    prints from a fresh re-check of the origin read -- on the scenarios that
+    decide off that read the broken half decides and the healthy half does
+    not. That line is the rule engine's reading of the evidence, so it is
+    not a way of separating the halves without reading; the full accounting
+    is in `tests/test_healthy_evidence.py`.
     """
     from kubeagent_verdict.dataset import propagation as prop
 
+    def without_decided(lines):
+        return [x for x in lines if not x.startswith("    decided by rules: ")]
+
     for d, p in zip(decoys, probes):
         ds, ps = _sections(d.user), _sections(p.user)
-        assert ds["candidates"] == ps["candidates"], d.meta["origin"]
+        assert without_decided(ds["candidates"]) == without_decided(ps["candidates"]), \
+            d.meta["origin"]
         assert len(ds["inventory"]) == len(ps["inventory"]), d.meta["origin"]
         moved = [(a, b) for a, b in zip(ps["inventory"], ds["inventory"]) if a != b]
         scenario = next(x for x in prop.all_scenarios() if x.key == d.meta["origin"])
@@ -199,11 +210,14 @@ def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
         assert d.meta["decoy_causes"] == list(want), d.meta["origin"]
 
 
-def test_the_slice_feeds_false_shared_rather_than_separate_reasons(decoys):
-    """The mirror metric, and never the one its twin feeds.
+def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
+    """The one meta field this slice needs, and the one it must not carry.
 
-    `wrong_summary_phrase` on this slice would score the CORRECT summary as a
-    failure -- independence is the right answer here.
+    `shared_claim_phrases` is kept for the pinned hash blob and read by
+    no scorer -- job3's honesty check runs on its own copy of the phrases in
+    score.py, not on this key. `wrong_summary_phrase` on this slice would
+    score the CORRECT summary as a failure -- independence is the right
+    answer here.
     """
     for e in decoys:
         assert e.meta["shared_claim_phrases"] == list(cases.SHARED_CLAIM_PHRASES)
@@ -258,8 +272,8 @@ def test_every_origin_read_label_in_the_exam_carries_both_answers(exam):
 
     Before it, the distinctive cluster-wide read labels appeared ONLY on rows
     whose answer was one shared cause, so a model could answer the whole slice
-    by matching the label and never reading the content -- and would pass both
-    halves of decider 5 doing it. Now every label that appears under one
+    by matching the label and never reading the content -- and nothing then
+    scored would have caught it. Now every label that appears under one
     answer appears under the other too.
     """
     shared, separate = set(), set()
@@ -284,11 +298,12 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     one shared cause" would emit here -- the real failure, not a caricature of
     it.
 
-    `separate_reasons_rate` alone is gamed by that answer. This is the
-    measurement that makes it cost something: cause accuracy collapses to 0,
-    every row names the decoy, and `false_shared` reads 1.0 -- on a slice
-    where the 0830 model, which answered independence everywhere, would have
-    scored perfectly.
+    Averaged across the whole corpus this would barely move `cause_accuracy`.
+    This is the measurement that makes it cost something: cause accuracy
+    collapses to 0, every row names the decoy, and job3 -- which grades this
+    `label: none` slice on whether the summary claims a shared cause -- reads
+    0.0, on a slice where the 0830 model, which answered independence
+    everywhere, would have scored perfectly.
     """
     twin = {d.user: t.assistant for d, t in zip(decoys, probes)}
     results = score.evaluate([generate.to_row(e) for e in decoys],
@@ -296,8 +311,7 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     assert all(r["contract_ok"] for r in results)
     assert all(r["cause_acc"] == 0.0 for r in results)
     assert all(r["named_decoy"] is True for r in results)
-    assert all(r["false_shared"] == 1.0 for r in results)
-    assert not any(r["shared_ambiguous"] for r in results)
+    assert all(r["job3"] == 0.0 for r in results)
 
 
 def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
@@ -308,7 +322,7 @@ def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
     assert all(r["cause_acc"] == 1.0 for r in results)
     assert all(r["conf_acc"] == 1.0 for r in results)
     assert all(r["named_decoy"] is False for r in results)
-    assert all(r["false_shared"] == 0.0 for r in results)
+    assert all(r["job3"] == 1.0 for r in results)
 
 
 # ------------------------------------------- the training set must not move

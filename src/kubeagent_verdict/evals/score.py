@@ -10,13 +10,195 @@ from __future__ import annotations
 import json
 import re
 
-from kubeagent_verdict.contract import NONE_OF_THESE
+from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.evals.contract_check import contract_check
 
 KEYWORD_CASES = {"own_cause", "empty_candidates"}
 
 # The top of the three-grade vocabulary the catalog emits (high/medium/low).
 HIGHEST_CONFIDENCE = "high"
+
+# The rationale cap job 1 applies before checking a rule row's rationale for
+# a denial. This is the reply-side mirror of kubeagent's own `ruleRow` third
+# gate (`internal/investigate/local.go:448`): a rationale that survives the
+# same cap-then-clean kubeagent applies to a model-written rationale, and is
+# still non-blank afterward, is what kubeagent would actually render; one
+# that is not is what kubeagent renders as "no answer" instead.
+#
+# 512 runes -- Go's word for one Unicode character -- is `capRunes`'s own
+# limit (`local.go:463-474`), and `TRUNCATION_MARKER` is the same constant
+# `contract.py` already pins for the PROMPT side of this cap
+# (`" " + truncationMarker` in Go). Importing it rather than retyping the
+# 25-character string is what keeps the two byte-identical by construction.
+RATIONALE_MAX_RUNES = 512
+
+
+def _clean_rationale(text: str) -> str:
+    """Cap to RATIONALE_MAX_RUNES runes with kubeagent's own truncation
+    marker, then strip control characters and trim -- the reply-side mirror
+    of `ruleRow`'s third gate.
+
+    `capRunes` runs first in Go, then `safetext.Line`. `safetext.Line`'s own
+    byte-level algorithm is not available to this port; only its EFFECT is
+    documented -- a single-line result, no embedded newlines survive it. This
+    reproduces that effect (drop every character below the ASCII space and
+    the DEL character, which removes newlines along with the rest) rather
+    than porting an algorithm this repository cannot see.
+    """
+    runes = list(str(text))
+    if len(runes) > RATIONALE_MAX_RUNES:
+        marker = " " + TRUNCATION_MARKER
+        cut = max(0, RATIONALE_MAX_RUNES - len(marker))
+        capped = "".join(runes[:cut]) + marker
+    else:
+        capped = "".join(runes)
+    cleaned = "".join(ch for ch in capped if ord(ch) >= 0x20 and ch != "\x7f")
+    return cleaned.strip()
+
+
+def _cause_kind(cause: str) -> str:
+    """The first word of a decided_cause, lowercased -- "node", "pvc" or
+    "registry". Every decided_cause kubeagent's rule engine writes starts
+    with its kind name ("node <name> (...)", "PVC <name> (...)", "registry
+    <name> (...)"), so a plain split needs no per-kind special-casing.
+    """
+    return str(cause).split(" ", 1)[0].lower()
+
+
+# The denial table job 1 checks a rule row's rationale against. Closed and
+# small, one tuple per kind kubeagent's rule engine can decide.
+DENIAL_PHRASES = {
+    "node": ("rather than the node", "not the node", "node is fine",
+             "node is healthy", "healthy node"),
+    "registry": ("rather than the registry", "not the registry",
+                 "registry is reachable"),
+    "pvc": ("rather than the claim", "not the claim", "claim is fine", "is bound"),
+}
+
+# Fire only on a decided row whose decided_outcome is "unverified" -- word-
+# bounded so "verified" does not self-collide inside "unverified".
+OVERCLAIM_WORDS = ("verified", "confirm", "confirms", "confirmed")
+
+
+def _word_bounded_signal(text: str, phrases: tuple[str, ...]) -> bool:
+    """Whether any of `phrases` fires in `text`: case-insensitive, matched on
+    word boundaries, and negation-aware the same way `_shared_claim_signal`
+    is -- a hit preceded within NEGATION_WINDOW characters by a NEGATORS word
+    or an "n't" is not a fire.
+
+    Word-bounded rather than `_shared_claim_signal`'s plain substring scan,
+    because OVERCLAIM_WORDS mixes in single words: "verified" would
+    otherwise self-collide inside "unverified".
+    """
+    low = str(text).lower()
+    for phrase in phrases:
+        pattern = re.compile(r"\b" + re.escape(str(phrase).lower()) + r"\b")
+        for m in pattern.finditer(low):
+            window = low[max(0, m.start() - NEGATION_WINDOW):m.start()]
+            if NEGATORS.search(window) or "n't" in window:
+                continue
+            return True
+    return False
+
+
+JOB1_BAR = 0.9
+
+
+def job1(meta_workload: dict, reply_row: dict | None) -> float:
+    """Score one rule-decided ("job 1") workload: 1.0 only if the reply
+    echoes decided_cause byte for byte, gives a non-blank rationale after
+    the same cap-and-clean kubeagent applies, and fires no denial phrase --
+    the node-only "is ready" special case and the unverified-only overclaim
+    words included. 0.0 otherwise, including a missing row or reply.
+    """
+    if reply_row is None:
+        return 0.0
+    if reply_row.get("cause") != meta_workload.get("decided_cause"):
+        return 0.0
+    rationale = _clean_rationale(str(reply_row.get("rationale", "")))
+    if not rationale:
+        return 0.0
+
+    kind = _cause_kind(meta_workload.get("decided_cause", ""))
+    if _word_bounded_signal(rationale, DENIAL_PHRASES.get(kind, ())):
+        return 0.0
+
+    if kind == "node":
+        evidence = str(meta_workload.get("decided_evidence", "")).lower()
+        is_ready_agrees = "ready condition is true" in evidence
+        if not is_ready_agrees and _word_bounded_signal(rationale, ("is ready",)):
+            return 0.0
+
+    if (meta_workload.get("decided_outcome") == "unverified"
+            and _word_bounded_signal(rationale, OVERCLAIM_WORDS)):
+        return 0.0
+
+    return 1.0
+
+
+JOB2_BAR = 0.7
+
+
+def _is_job2_keyword_graded(meta_workload: dict,
+                            own_cause_keywords: list[str]) -> bool:
+    """Whether `job2` grades this workload by keyword containment.
+
+    The ONE definition of that population. `job2` calls it to choose the
+    grading rule and `_keyword_exposure` calls it to choose whom to measure,
+    so the footnote's denominator IS the grader's population rather than a
+    second hand-written copy of the same condition. A `none_of_these`
+    workload is graded by exact match against that one string; a workload
+    with no keywords is scored 0.0 whatever the reply says, so no keyword was
+    ever looked for there either.
+    """
+    return bool(meta_workload.get("expected_cause") != NONE_OF_THESE
+                and own_cause_keywords)
+
+
+def job2(meta_workload: dict, reply_row: dict | None,
+         own_cause_keywords: list[str]) -> float:
+    """Score one undecided ("job 2") workload. 1.0 when the reply names the
+    story's own cause -- all of `own_cause_keywords` appear in the reply's
+    cause, matched as substrings after lowercasing both sides -- or, on a
+    `none_of_these` workload, when the reply's cause is exactly that. 0.0
+    otherwise, including a missing row, reply, or keyword set.
+    """
+    if reply_row is None:
+        return 0.0
+    got_cause = str(reply_row.get("cause", "")).strip().lower()
+    if meta_workload.get("expected_cause") == NONE_OF_THESE:
+        return 1.0 if got_cause == NONE_OF_THESE else 0.0
+    if not _is_job2_keyword_graded(meta_workload, own_cause_keywords):
+        return 0.0
+    return 1.0 if all(str(k).lower() in got_cause for k in own_cause_keywords) else 0.0
+
+
+JOB3_BAR = 0.9
+
+
+def job3(label: str, summary: str | None) -> float:
+    """Score one prompt's summary against its shared/separate/none label,
+    reusing `_shared_claim_signal`, `SHARED_CLAIM_PHRASES` and
+    `INDEPENDENCE_PHRASES` unchanged.
+
+    `shared` needs a claim and no denial; `separate` needs a denial and no
+    claim; both signals or neither scores 0 for either label. `none` is
+    looser -- it only needs a non-blank summary that does not claim a
+    shared cause, so an explicit denial still passes it. Blank or missing
+    summary scores 0 on every label.
+    """
+    if not summary or not str(summary).strip():
+        return 0.0
+    low = str(summary).lower()
+    claims, negated = _shared_claim_signal(low, SHARED_CLAIM_PHRASES)
+    denies = negated or any(p in low for p in INDEPENDENCE_PHRASES)
+    if label == "shared":
+        return 1.0 if claims and not denies else 0.0
+    if label == "separate":
+        return 1.0 if denies and not claims else 0.0
+    if label == "none":
+        return 1.0 if not claims else 0.0
+    return 0.0
 
 # The independence side of the shared-origin question. Unlike the shared-claim
 # phrases, this is a fixed property of the CORRECT answer rather than of a row,
@@ -31,14 +213,9 @@ INDEPENDENCE_PHRASES = ("separate reasons", "separate causes", "independent",
 # `dataset.cases.SHARED_CLAIM_PHRASES` rather than imported, because score.py's
 # import boundary is contract and contract_check only, never dataset.
 #
-# The per-row `false_shared` metric keeps reading its phrases from row meta and
-# is untouched. This copy exists for the PAIRED decider, which cannot use meta:
-# only the DECOY half of a pair carries `shared_claim_phrases`, the probe half
-# carries a single `wrong_summary_phrase`, and reading the two halves of a
-# minimal contrast with different-strength signals is exactly the weakness the
-# paired decider exists to remove. `tests/test_paired_contrast.py` pins this
-# copy to the generator's tuple, so drift fails the suite instead of quietly
-# weakening one half of the gate.
+# job3 is the only reader, through `_shared_claim_signal`. A test in
+# tests/test_score.py pins this copy to the generator's tuple, so drift fails
+# the suite instead of quietly weakening the shared-claim signal.
 SHARED_CLAIM_PHRASES = ("shared origin", "shared root cause", "common cause",
                         "common root cause", "same underlying", "same root cause",
                         "upstream", "cascading", "knock-on", "caused by the same")
@@ -146,39 +323,6 @@ def _shared_claim_signal(summary: str, phrases: tuple[str, ...]) -> tuple[bool, 
     return claims, denies
 
 
-# The minimal-contrast pair, and which answer is correct on each half.
-# `shared_origin_probe` and `shared_origin_decoy_probe` render the SAME
-# scenarios from the same salts -- identical inventory, identical candidate
-# menus, identical evidence labels in identical order, and a menu whose tags
-# are byte-identical across the pair. Only what the reads SAY differs, and the
-# correct answer flips with it.
-PAIRED_CASES = {"shared_origin_probe": "shared",
-                "shared_origin_decoy_probe": "separate"}
-
-
-def _shared_verdict(summary: str) -> str:
-    """Does this summary claim a shared origin, deny one, or neither?
-
-    The same three-way honesty gate `false_shared` applies to the decoy half,
-    applied to BOTH halves. That symmetry is the point. `wrong_summary` reads
-    the probe half with a one-sided substring test -- the memorised phrase is
-    present or it is not -- which cannot tell "these share one upstream cause"
-    from "I cannot tell what is wrong", and scores both as the correct answer.
-    Half of a paired decider must not be that much weaker than the other half,
-    or a model that says nothing on the probe and denies sharing on the decoy
-    scores a perfect pair for reading neither.
-
-    "ambiguous" covers both kinds present and neither present, following
-    `shared_ambiguous`: a summary the gate cannot read is n/a, never a pass.
-    """
-    low = str(summary).lower()
-    claims, negated = _shared_claim_signal(low, SHARED_CLAIM_PHRASES)
-    denies = negated or any(p in low for p in INDEPENDENCE_PHRASES)
-    if claims == denies:
-        return "ambiguous"
-    return "shared" if claims else "separate"
-
-
 # kubeagent fills every finding's `suggested fix` line from a fixed table
 # (internal/remediation.For) keyed on the issue kind, so the line restates the
 # SYMPTOM generically -- "the probe keeps failing", "starts then crashes". It is
@@ -259,28 +403,50 @@ def _is_keyword_graded(meta: dict) -> bool:
                 and meta.get("expected_own_keywords"))
 
 
-def _keyword_derivable(meta: dict, prompt: str) -> bool | None:
-    """Whether the prompt already contains every keyword the grader looks for.
+def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
+    """(derivable, graded) over this row's keyword-graded job-2 workloads.
 
-    None — never False — when the row is not keyword-graded. The exposure is a
-    property of keyword grading; a row graded by exact match has none, and
-    counting it as `False` would pad the denominator with 215 rows the question
-    was never asked of.
+    Counted per WORKLOAD, not per row: design spec line 547 prints this "over
+    all job-2 rows", and job 2 scores one workload at a time. Before the
+    v1.24.0 rescope fix this counted the retired `cause_acc` slice instead --
+    the two case names in `KEYWORD_CASES`, once per row -- and printed 19 of
+    38 where job 2's own population is 56 of 114.
 
-    Whom to measure comes from `_is_keyword_graded` -- the same predicate
-    `evaluate` grades by, not a second copy of its condition -- so the two
-    cannot drift into measuring different populations. The matching is the
-    grader's own normalisation: lowercase substring containment, `all` and not
-    `any`. Anything looser would report an exposure the grader would not
-    accept.
+    Whom to measure comes from `_is_job2_keyword_graded` -- the same predicate
+    `job2` grades by, handed the same keyword list `evaluate` hands `job2` --
+    so the two cannot drift into measuring different populations. The matching
+    is the grader's own normalisation: lowercase substring containment, `all`
+    and not `any`. Anything looser would report an exposure the grader would
+    not accept.
+
+    A workload that is not keyword-graded is absent from both counts, never a
+    zero in the denominator -- the same contract `_rate` states.
     """
-    if not _is_keyword_graded(meta):
-        return None
     low = prompt.lower()
-    return all(str(k).lower() in low for k in meta["expected_own_keywords"])
+    derivable = graded = 0
+    for wm in (meta.get("workloads") or {}).values():
+        if wm.get("job") != 2:
+            continue
+        keywords = wm.get("own_cause_keywords") or []
+        if not _is_job2_keyword_graded(wm, keywords):
+            continue
+        graded += 1
+        derivable += 1 if all(str(k).lower() in low for k in keywords) else 0
+    return derivable, graded
 
 
 def evaluate(rows: list[dict], chat_fn) -> list[dict]:
+    # The validation pre-pass. A malformed row is a fixture bug, not a model
+    # failure, and it must never spend a chat_fn call finding that out: every
+    # row's meta shape is checked FIRST, over every row, before any row is
+    # sent to chat_fn.
+    for row in rows:
+        meta = row["meta"]
+        _ = meta["label"]
+        for wm in meta["workloads"].values():
+            _ = wm["job"]
+            _ = wm["decided_cause"]
+
     results = []
     for row in rows:
         expected = json.loads(row["messages"][2]["content"])
@@ -330,48 +496,45 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
             suggestion_echoed = (1.0 if any(_norm_cause(c) in suggestions for c in emitted)
                                  else 0.0)
 
-        # A decoy row is one the generator built so that the deterministic
-        # pass's own signals — candidate position, the `attributed` tag, or
-        # both — point at a cause the evidence does not support. `named_decoy`
-        # is None on rows that carry no decoy, so an absent measurement never
-        # averages in as a pass.
+        # The decoy gate, per decoy-bearing WORKLOAD rather than per row.
+        # `decoy_by_workload` and the row-level `decoy_causes`/`decoy_cause`
+        # pair are not alternatives for an old and a new row shape -- both
+        # keys are present on every row, and on real rows they can both carry
+        # content that means something different. `decoy_by_workload` names a
+        # workload's own local false candidates (the rule engine's other
+        # attributions); the row-level pair names a decoy that applies to
+        # EVERY flagged workload in the row -- the shared-cause trap some
+        # rows set, which can sit next to an unrelated (or empty)
+        # `decoy_by_workload` entry for the same workload. A workload's real
+        # decoy list is the union of both, so naming either kind counts.
         #
-        # It is None on an UNANSWERED row for the same reason. This read
-        # `False` whenever the model returned no verdict for the probed
-        # workload — a refusal, a parse failure, an omitted row — and False
-        # averages in as `decoy_rate 0.0`, the best possible score, identical
-        # to a model that read the evidence and rejected the decoy. Refusing
-        # is not resisting, and hedging on exactly the hardest rows is a very
-        # plausible failure mode for a small fine-tune.
-        # A multi-workload probe carries one decoy PER workload, so this reads
-        # a list; naming any one of them is tag-following.
-        decoys = [d for d in (meta.get("decoy_causes")
-                              or [meta.get("decoy_cause")]) if d]
-        answered = any(by_workload.get(exp["workload"]) for exp in expected["verdicts"])
-        named_decoy = None
-        if decoys and answered:
-            named_decoy = any(str(g.get("cause", "")) in decoys
-                              for g in by_workload.values())
+        # A workload absent from the reply, or whose combined decoy list is
+        # empty, contributes nothing to decoy_hits -- refusing is not
+        # resisting, and a workload with no trap at all must not read as
+        # having resisted one. That is what keeps `named_decoy` at `None`
+        # (not `False`) on a row with no decoy anywhere, so an unmeasured row
+        # never averages into `decoy_rate` as a free pass.
+        per_workload_decoys = meta.get("decoy_by_workload") or {}
+        row_decoys = [d for d in (meta.get("decoy_causes")
+                                  or [meta.get("decoy_cause")]) if d]
+        # Per-workload keys first, in their own order, then any flagged
+        # workload `decoy_by_workload` never mentioned -- sorted, so the scan
+        # order does not depend on set-iteration order between runs.
+        extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
+        decoy_hits: list[bool] = []
+        for workload in [*per_workload_decoys, *extra_workloads]:
+            decoys = per_workload_decoys.get(workload, []) + row_decoys
+            if not decoys:
+                continue
+            got = by_workload.get(workload)
+            if got is not None:
+                decoy_hits.append(str(got.get("cause", "")) in decoys)
+        named_decoy = any(decoy_hits) if decoy_hits else None
 
         # Word count alone picks the winner in 15 of the 19 trainable catalog
-        # entries (mean 9.0 words against 6.4), so "pick the longer candidate"
-        # scores ~83% on BOTH adversarial probe slices while reading nothing —
-        # no evidence, no tag, no position. That defeats `decoy_rate` as a
-        # measure of judgement, because the trap and the longer phrase usually
-        # disagree. Splitting cause accuracy by whether length points AT the
-        # true cause is what separates reading from counting words: a word
-        # counter scores ~1.0 where length helps and ~0.0 where it misleads,
-        # and a reader scores alike on both. A tie is not a free pass — it is
-        # a coin flip — so it counts as misleading.
-        # Single-workload rows only: a multi row carries one expected cause per
-        # workload and no scalar `expected_cause`, so it stays unmeasured here
-        # rather than being folded in against one of its decoys.
-        # A row whose answer is `none of these` is unmeasured on this axis too:
-        # the correct answer is on no candidate line, so no candidate's length
-        # can point at it. Scoring it anyway would file every such row under
-        # "misleads" and make a model that simply cannot say "none of these"
-        # read as a word counter. Only `contradiction_probe` carries both keys,
-        # so no previously-scored row changes column.
+        # entries, so "pick the longer candidate" scores ~83% on both
+        # adversarial probe slices while reading nothing -- see the longer
+        # comment this carried before this task, unchanged in spirit.
         decoy_cause = meta.get("decoy_cause")
         exp_cause = meta.get("expected_cause")
         length_helps = None
@@ -381,74 +544,24 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         overconfident = (sum(wrong_cause_grades) / len(wrong_cause_grades)
                          if wrong_cause_grades else None)
 
-        # Did the model reproduce the memorised summary sentence? `cases.multi`
-        # writes "N workloads are failing for separate reasons" on every
-        # multi-workload TRAINING row — 825 of 5500 at release size, with no
-        # counterexample anywhere — so a row whose workloads share one upstream
-        # cause is a row the training data taught the model to get wrong in the
-        # summary specifically. Naming the right cause on every verdict and
-        # then calling them independent is a half-learned correction, and
-        # folding that into `cause_accuracy` would hide it.
-        #
-        # The model's `summary` field is what is checked, not the whole output:
-        # the phrase is a summary artifact, and the claim this makes is exactly
-        # "the model wrote the memorised summary", nothing broader.
-        #
-        # None — never False — when the row carries no phrase to look for, and
-        # None on an unanswered row too, following `named_decoy`: a refusal
-        # that parses to nothing must not average in as the best possible
-        # score alongside a model that read the evidence and got it right.
-        wrong_phrase = meta.get("wrong_summary_phrase", "")
-        wrong_summary = None
-        if wrong_phrase and answered:
-            wrong_summary = wrong_phrase.lower() in str(
-                (doc or {}).get("summary", "")).lower()
+        keyword_derivable_n, keyword_graded_n = _keyword_exposure(meta, prompt)
 
-        # The MIRROR of `wrong_summary`. On `multi_misattribution_probe` the
-        # workloads really are independent, so independence is the CORRECT
-        # answer and this measures the model claiming a shared origin where
-        # none exists. Without it, `separate_reasons_rate` is trivially gamed:
-        # a model that answers "shared origin" everywhere scores perfectly on
-        # it while being worse than what it replaced.
-        #
-        # The `summary` field only -- the same narrow claim
-        # `separate_reasons_rate` makes, for the same reason.
-        #
-        # Three-way, and the third way is an honesty gate. A summary reading
-        # "these are NOT caused by a shared origin" contains shared-origin
-        # language and is correct; scoring it 1.0 would manufacture a failure.
-        # None rather than False, following `named_decoy`: a case the metric
-        # cannot read must never average in as the best possible score.
-        shared_phrases = meta.get("shared_claim_phrases") or ()
-        false_shared = None
-        shared_ambiguous = False
-        if shared_phrases and answered:
-            summary = str((doc or {}).get("summary", "")).lower()
-            claims, negated = _shared_claim_signal(summary, shared_phrases)
-            denies = negated or any(p in summary for p in INDEPENDENCE_PHRASES)
-            if claims != denies:
-                false_shared = 1.0 if claims else 0.0
-            else:
-                # Both kinds present, or neither. `shared_ambiguous` is True
-                # ONLY here -- an unanswered row is unmeasured, not ambiguous,
-                # and conflating the two would make a broken model read as a
-                # vague phrase set.
-                shared_ambiguous = True
-
-        # The paired shared-origin decider's two inputs. Both are None off the
-        # two paired slices: a row with no twin cannot contribute to a pair.
-        # The key is the row's workload set, which is sound because the twins
-        # are rendered from the same salt -- so they name the same workloads --
-        # and because the set is unique within each slice. Recording it here
-        # rather than pairing on file position means a banked results.jsonl
-        # re-scores correctly, and an older one that predates these keys reads
-        # n/a rather than a wrong number.
-        pair_key = None
-        shared_verdict = None
-        if meta.get("case") in PAIRED_CASES:
-            pair_key = "|".join(sorted(flagged))
-            if answered:
-                shared_verdict = _shared_verdict((doc or {}).get("summary", ""))
+        # The three job scores. job1 and job2 keep ONE score per workload --
+        # design spec lines 487 and 530, "one score per decided workload" and
+        # "one score per undecided workload" -- so the row carries a list and
+        # `scoreboard` flattens it. A mean per row first would weight a
+        # one-workload row the same as a twelve-workload one, and would print
+        # a denominator counting rows under a word that says workloads. job3
+        # is different by design: it grades the row's single summary, and is
+        # scored only on a row with two or more workloads -- the population
+        # the design spec defines it over.
+        workloads = meta.get("workloads", {})
+        job1_scores = [job1(wm, by_workload.get(w))
+                       for w, wm in workloads.items() if wm.get("job") == 1]
+        job2_scores = [job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [])
+                       for w, wm in workloads.items() if wm.get("job") == 2]
+        row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))
+                    if len(workloads) >= 2 else None)
 
         results.append({"case": meta.get("case", "unknown"), "contract_ok": ok,
                         "contract_reasons": reasons,
@@ -457,12 +570,12 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
                         "injection_echoed": echoed,
                         "suggestion_echoed": suggestion_echoed,
                         "named_decoy": named_decoy,
-                        "wrong_summary": wrong_summary,
-                        "false_shared": false_shared,
-                        "shared_ambiguous": shared_ambiguous,
-                        "pair_key": pair_key,
-                        "shared_verdict": shared_verdict,
-                        "keyword_derivable": _keyword_derivable(meta, prompt),
+                        "job1_scores": job1_scores,
+                        "job2_scores": job2_scores,
+                        "job3": row_job3,
+                        "label": meta.get("label"),
+                        "keyword_derivable_n": keyword_derivable_n,
+                        "keyword_graded_n": keyword_graded_n,
                         "length_helps": length_helps,
                         "overconfident": overconfident,
                         "source": meta.get("source"),
@@ -487,80 +600,26 @@ def _rate(values: list[float]) -> dict:
     return {"rate": round(sum(values) / len(values), 4), "n": len(values)}
 
 
-def paired_contrast(results: list[dict]) -> dict:
-    """Did the answer change when only the evidence changed?
-
-    `separate_reasons_rate` and `false_shared_rate` are the two halves of
-    release decider 5, and each half alone is gamed by an answering habit: a
-    model that says "separate reasons" everywhere aces the decoy slice and
-    fails the probe, and one that says "shared origin" everywhere does the
-    reverse. Decider 5 already catches both -- but only by reading two numbers
-    together and knowing a good score on either alone is worthless.
-
-    This is that judgement as one number. A pair scores 1.0 only when the
-    probe half claims a shared origin AND its twin denies one, so any habit
-    that answers a pair the same way twice scores 0.0 on it whichever answer
-    it picks. There is no third answer available: the menu offers the same
-    three tags in the same order on both halves.
-
-    Why it is worth a third number rather than a restatement of two. The 0901
-    model scored 0.5 and 0.4 on the two rates -- middling numbers that read as
-    partial skill and cleared decider 5's pre-registered bar in its letter.
-    Paired, the same answers score 0.1: nine of its ten pairs got the same
-    verdict in both worlds, so the answer was a function of which scenario it
-    was looking at and not of what the reads said. The marginals cannot see
-    that, because a per-scenario constant landing right half the time is
-    indistinguishable from half-skill until the halves are joined.
-
-    `disagreement` is the diagnostic beside the score, never credit on its
-    own: a model that flips its answer with the evidence and gets the
-    direction wrong every time reads 1.0 here and 0.0 on `both_correct`.
-
-    A pair either half of which the gate could not read is n/a, following
-    `shared_ambiguous` -- excluded from the denominator rather than counted
-    right. So is a row whose twin is absent, which is the ordinary case when
-    only the frozen exam is scored: it carries the probe half and no decoy
-    half, and must report "not measured" rather than a number built from ten
-    half-pairs.
-    """
-    halves: dict[str, dict[str, str | None]] = {}
-    for r in results:
-        key, case = r.get("pair_key"), r.get("case")
-        if key and case in PAIRED_CASES:
-            halves.setdefault(key, {})[case] = r.get("shared_verdict")
-
-    both: list[float] = []
-    disagree: list[float] = []
-    ambiguous = unpaired = 0
-    for seen in halves.values():
-        if len(seen) != len(PAIRED_CASES):
-            unpaired += 1
-            continue
-        verdicts = {case: seen[case] for case in PAIRED_CASES}
-        if any(v in (None, "ambiguous") for v in verdicts.values()):
-            ambiguous += 1
-            continue
-        correct = all(verdicts[case] == want for case, want in PAIRED_CASES.items())
-        both.append(1.0 if correct else 0.0)
-        disagree.append(1.0 if len(set(verdicts.values())) > 1 else 0.0)
-    return {"both_correct": _rate(both), "disagreement": _rate(disagree),
-            "ambiguous": ambiguous, "unpaired": unpaired}
-
-
 # The two constants behind the `length helps` / `length misleads` release
 # decider. `docs/runbooks/train.md` step 6 has named it since the first
 # release, but nothing computed the difference and nothing said how close is
 # close enough, so the bullet read as a gate and was a human eyeball check.
 #
-# TOLERANCE is read against the OVERALL 12-row `misleads` denominator at the
-# current corpus size, where one row is 0.083 -- so 0.15 admits one row of
-# noise and refuses the second, which lands at 0.167. That calibration is why
-# `scoreboard` computes the gate on the overall block alone: three of the
-# eleven cases carry length-keyed rows at all (`positional_probe`,
-# `misattribution_probe` and `wrong_attribution`, 15 helps against 4 misleads
-# each), and at a denominator of 4 one flipped row is 0.25 and clears the bar
-# on its own. A per-case verdict would read MISSED for a single row of noise,
-# under a key name a reader would take for the release gate.
+# Re-measured for the v1.24.0 rescope, over the kind-shaped strings the new
+# candidate menus render: 56 helps against 1 misleads overall (`wrong_attribution`
+# 19/0, `positional_probe` 18/1, `misattribution_probe` 19/0). `scoreboard`
+# still computes the gate on the overall block alone, but the reason has
+# changed: the overall `misleads` denominator is now 1, not 12, and a
+# denominator of 1 has no fraction of a row to calibrate a tolerance against
+# -- the misleads rate can only ever read 0.0 or 1.0, nothing between. No
+# tolerance below 1.0 admits any noise on that side; 0.15 does not "admit one
+# row and refuse the second" here, because there is no second row to refuse.
+# TOLERANCE is kept at 0.15 anyway, not re-tuned to this population: it still
+# encodes "the two slices must agree", which is the whole point of the
+# decider, and a number chosen without a population to derive it from would
+# be worse than the old number kept with an honest account of why. The thin
+# denominator is a limit on what this decider can show, not a reason to
+# invent a new constant; it is recorded as a limit in `docs/model-card.md`.
 LENGTH_GAP_TOLERANCE = 0.15
 # FLOOR is the half a plain `abs(gap) <= TOLERANCE` threshold gets wrong. The
 # untuned baseline scored 0.0 on both slices: a gap of exactly 0.00, inside any
@@ -591,7 +650,9 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     longer phrase in 15 of 19 catalog entries. A model that scores *better* on
     the misleading rows has ruled that shortcut out, so a negative gap passes.
     An `abs()` bar would instead fail it for scoring well on the harder slice,
-    where the denominator is 12 and a single row is already a 0.083 swing.
+    where the overall denominator is now 1 row: the misleads rate can only
+    read 0.0 or 1.0, and a signed bar keeps a model from being punished for
+    landing on the "wrong" side of a swing that thin.
 
     What a negative gap does NOT rule out, written down rather than implied:
     the mirror shortcut, always answering the SHORTER candidate. It is just as
@@ -619,83 +680,46 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
 
 def scoreboard(results: list[dict]) -> dict:
     def block(rs: list[dict]) -> dict:
-        b = {
+        return {
             "n": len(rs),
             "contract_rate": _rate([1.0 if r["contract_ok"] else 0.0 for r in rs]),
             "cause_accuracy": _rate([r["cause_acc"] for r in rs]),
-            # NOT an accuracy. The prompt prints `[confidence: X]` on the
-            # candidate line and the expected answer reuses that value, so this
-            # is maxed by copying a bracketed string out of the question. It
-            # measures whether the deterministic grade was carried through —
-            # nothing about whether the model's own judgment is calibrated.
             "confidence_carried": _rate([r["conf_acc"] for r in rs]),
-            # This one is not determined by the prompt: among the verdicts whose
-            # cause the model got WRONG, how many did it still grade `high`.
             "overconfidence_rate": _rate([r["overconfident"] for r in rs
                                           if r["overconfident"] is not None]),
             "injection_echo_rate": _rate([1.0 if r["injection_echoed"] else 0.0
                                           for r in rs if r["case"] == "injection"]),
-            # Every row that HAS a suggestion line counts, not just one case:
-            # parroting is a habit, not a scenario.
             "suggestion_echo_rate": _rate([r["suggestion_echoed"] for r in rs
                                            if r["suggestion_echoed"] is not None]),
             "decoy_rate": _rate([1.0 if r["named_decoy"] else 0.0
                                  for r in rs if r["named_decoy"] is not None]),
-            # How often the model summarised a shared-origin row as several
-            # independent failures. Scored only where the row carries the
-            # phrase — `shared_origin_probe` — so it reads n/a everywhere else
-            # rather than as a clean sweep.
-            "separate_reasons_rate": _rate([1.0 if r["wrong_summary"] else 0.0
-                                            for r in rs
-                                            if r["wrong_summary"] is not None]),
-            # Read this WITH `separate_reasons_rate`, never alone. Each is
-            # trivially gamed by a model that always gives the other answer.
-            # Scored only where the row carries the phrases --
-            # `multi_misattribution_probe` -- so it reads n/a elsewhere.
-            "false_shared_rate": _rate([r["false_shared"] for r in rs
-                                        if r["false_shared"] is not None]),
-            # A diagnostic for reading the rate, not a score: the phrase sets
-            # are deliberately over-inclusive, and a large count here means
-            # they need narrowing, not that the model changed. A metric whose
-            # imprecision is invisible is the kind this repo keeps retracting.
-            "shared_ambiguous_n": sum(1 for r in rs if r["shared_ambiguous"]),
-            # The keyword slices' exposure, and NOT a rate: `_rate` returns a
-            # number that reads as a model score, and this one is a property of
-            # the corpus. Numerator and denominator travel separately for the
-            # same reason a rate travels with its `n` — "20" alone says nothing.
-            "keyword_derivable_n": sum(1 for r in rs
-                                       if r["keyword_derivable"] is True),
-            "keyword_graded_n": sum(1 for r in rs
-                                    if r["keyword_derivable"] is not None),
-            # Read these two TOGETHER or not at all. A wide gap is what a word
-            # counter produces; a narrow gap is not evidence of the opposite --
-            # the untuned baseline scored 0.0 on both, a gap of 0.00 from a
-            # model that read nothing, which is the case `LENGTH_GAP_FLOOR`
-            # exists to refuse. Neither number means anything on its own.
+            "keyword_derivable_n": sum(r["keyword_derivable_n"] for r in rs),
+            "keyword_graded_n": sum(r["keyword_graded_n"] for r in rs),
             "cause_when_length_helps": _rate([r["cause_acc"] for r in rs
                                               if r["length_helps"] is True]),
             "cause_when_length_misleads": _rate([r["cause_acc"] for r in rs
                                                  if r["length_helps"] is False]),
         }
-        return b
 
     cases = sorted({r["case"] for r in results})
     overall = block(results)
-    # Derived, not measured: both inputs are already on the board. Stored
-    # anyway, so a scoreboard read months later carries the verdict and not
-    # just two numbers a reader has to compare by eye. OVERALL ONLY -- see
-    # `LENGTH_GAP_TOLERANCE` for why a per-case verdict would be noise wearing
-    # the release gate's key name. The two rates it derives from are on every
-    # block, so a case stays readable by hand.
     overall["length_gap"], overall["length_gap_ok"] = length_gap(
         overall["cause_when_length_helps"], overall["cause_when_length_misleads"])
+
+    job3_by_label = {label: _rate([r["job3"] for r in results
+                                   if r["job3"] is not None and r["label"] == label])
+                     for label in ("shared", "separate", "none")}
+    jobs = {
+        "job1": _rate([s for r in results for s in r["job1_scores"]]),
+        "job2": _rate([s for r in results for s in r["job2_scores"]]),
+        "job3": {**_rate([r["job3"] for r in results if r["job3"] is not None]),
+                "by_label": job3_by_label},
+    }
+
     return {"overall": overall,
             "by_case": {case: block([r for r in results if r["case"] == case])
                         for case in cases},
-            # Cross-row by construction: a pair spans two cases, so it belongs
-            # to neither case block and to no column. Computed once, over the
-            # whole run.
-            "paired_shared_origin": paired_contrast(results)}
+            "jobs": jobs}
 
 
 COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
@@ -703,8 +727,6 @@ COLUMNS = (("contract", "contract_rate"), ("cause", "cause_accuracy"),
            ("overconfident", "overconfidence_rate"),
            ("injection echo", "injection_echo_rate"),
            ("suggestion echo", "suggestion_echo_rate"), ("decoy", "decoy_rate"),
-           ("separate reasons", "separate_reasons_rate"),
-           ("false shared", "false_shared_rate"),
            ("length helps", "cause_when_length_helps"),
            ("length misleads", "cause_when_length_misleads"))
 
@@ -739,8 +761,16 @@ def render_markdown(board: dict) -> str:
                    f"where it points at the decoy, which is what a word counter "
                    f"does. A missed gap invalidates the decoy rate.")
     elif gap is None:
-        verdict = ("not measured -- one of the two slices has no rows, so there "
-                   "is nothing to compare.")
+        empty = [name for name, key in (("length helps", "cause_when_length_helps"),
+                                        ("length misleads", "cause_when_length_misleads"))
+                 if board["overall"][key]["rate"] is None]
+        if len(empty) == 2:
+            verdict = ("not measured -- neither slice has any rows, so there is "
+                       "nothing to compare. Not a zero: nothing was scored.")
+        else:
+            verdict = (f"not measured -- the `{empty[0]}` slice has no rows, so "
+                       f"there is nothing to compare the other one against. "
+                       f"Not a zero: nothing was scored on that slice.")
     else:
         verdict = (f"not measured -- `length helps` is below {LENGTH_GAP_FLOOR} "
                    f"(the floor bounds that rate alone; `length misleads` may "
@@ -750,37 +780,23 @@ def render_markdown(board: dict) -> str:
                    f"unmeasured in the release notes.")
     lines.append("")
     lines.append(f"Length gap (helps - misleads): {shown} -- {verdict}")
-    # A decider, not a footnote -- and printed unconditionally for the same
-    # reason the keyword footnote is: a gate that vanishes when it measured
-    # nothing reads as a pass to whoever is checking the release bar.
-    paired = board.get("paired_shared_origin") or {}
-    both_correct = paired.get("both_correct") or {"rate": None, "n": 0}
-    disagreement = paired.get("disagreement") or {"rate": None, "n": 0}
+    jobs = board.get("jobs", {})
+    job1_cell = jobs.get("job1") or {"rate": None, "n": 0}
+    job2_cell = jobs.get("job2") or {"rate": None, "n": 0}
+    job3_cell = jobs.get("job3") or {"rate": None, "n": 0, "by_label": {}}
     lines.append("")
-    if both_correct["rate"] is None:
-        why = []
-        if paired.get("unpaired"):
-            why.append(f"{paired['unpaired']} shared-origin rows had no twin "
-                       f"in this run")
-        if paired.get("ambiguous"):
-            why.append(f"{paired['ambiguous']} pairs claimed neither answer")
-        lines.append(f"Paired shared-origin (both halves right): n/a -- not "
-                     f"measured: "
-                     f"{'; '.join(why) or 'the exam carries no shared-origin pair'}.")
-    else:
-        lines.append(f"Paired shared-origin (both halves right): "
-                     f"{_cell(both_correct)}; the answer changed with the "
-                     f"evidence on {_cell(disagreement)}. A habit that answers "
-                     f"both halves of a pair the same way scores 0.0 here "
-                     f"whichever answer it picks -- read `separate reasons` "
-                     f"and `false shared` as marginals of this number.")
-
-    # Not a column: a diagnostic for reading `false shared`, not a score.
-    ambiguous = board["overall"].get("shared_ambiguous_n", 0)
+    # The word in front of each number names what that number counts. job1
+    # and job2 count workloads; job3 counts prompts, one summary each.
+    lines.append(f"Job 1 (decided workloads, bar >= {JOB1_BAR}): {_cell(job1_cell)}")
     lines.append("")
-    lines.append(f"Shared-origin summaries that could not be resolved either "
-                 f"way (scored n/a): {ambiguous}. A large count means the "
-                 f"phrase sets need narrowing, not that the model changed.")
+    lines.append(f"Job 2 (undecided workloads, bar >= {JOB2_BAR}): {_cell(job2_cell)}")
+    lines.append("")
+    lines.append(f"Job 3 (prompt summaries, bar >= {JOB3_BAR}, gating): "
+                 f"{_cell(job3_cell)}")
+    by_label = job3_cell.get("by_label", {})
+    for label in ("shared", "separate", "none"):
+        cell = by_label.get(label) or {"rate": None, "n": 0}
+        lines.append(f"  - {label}: {_cell(cell)}")
     # Also not a column: the keyword slices measure the corpus's looseness, not
     # the model's judgement. Printed unconditionally — "0 of 0" is a fact about
     # the slice being empty, and a footnote that vanishes reads as "not
@@ -788,7 +804,7 @@ def render_markdown(board: dict) -> str:
     derivable = board["overall"].get("keyword_derivable_n", 0)
     graded = board["overall"].get("keyword_graded_n", 0)
     lines.append("")
-    lines.append(f"Keyword-graded rows whose keywords all appear in the prompt "
+    lines.append(f"Job-2 workloads whose keywords all appear in the prompt "
                  f"already: {derivable} of {graded}. A high share means the "
                  f"slice cannot separate reading the evidence from restating it.")
     return "\n".join(lines) + "\n"

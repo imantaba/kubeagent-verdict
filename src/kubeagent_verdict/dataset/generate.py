@@ -48,10 +48,11 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 
 
 # `multi` gave up four points to `shared_origin` when the case was added,
-# rather than the mix growing: `false_shared_rate` is the other half of the
+# rather than the mix growing: job3's honesty check is the other half of the
 # same release decider, and a model that learns to claim a shared origin
-# everywhere has traded one failure for its mirror. The shared answer stays
-# the minority among multi-workload rows, asserted by test: every
+# everywhere fails it on the decoy twin, trading one failure for its
+# mirror. The shared answer stays the minority among multi-workload rows,
+# asserted by test: every
 # `shared_origin` row has a `shared_origin_decoy` twin that answers "separate
 # reasons", and `multi` answers the same.
 # `shared_origin` and `shared_origin_decoy` MUST hold equal shares. They are
@@ -158,6 +159,20 @@ def generate(seed: int, size: int) -> list[Example]:
         # neither stands in for the other.
         healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
         out.append(cases.multi(pairs, rng, healthy_origin=healthy))
+    # Training-only: worker-containerd-stop paired with itself at two different
+    # (ns, node) draws. Both stay confirmed (its node object is intent="cause",
+    # so _multi_objects never draws it) -- two different node names give two
+    # different group_text values, so this row's label always comes out
+    # "separate". Not one of the CASE_MIX-counted "multi" rows.
+    worker_containerd_stop = catalog.by_slug()["worker-containerd-stop"]
+    names_a = names.draw(rng)
+    while True:
+        names_b = names.draw(rng)
+        if names_b.ns != names_a.ns and names_b.node != names_a.node:
+            break
+    out.append(cases.multi(
+        [(worker_containerd_stop, names_a), (worker_containerd_stop, names_b)],
+        rng, healthy_origin=None))
     for i in range(counts["shared_origin"]):
         p = train_scen[i % len(train_scen)]
         # Vary the width the way `probe_sets` does: a row that always renders
@@ -310,10 +325,11 @@ def probe_sets() -> list[Example]:
 
     out: list[Example] = []
     for entry in catalog.trainable():
-        if not entry.losers:
+        if not entry.objects:
             continue
+        positional_rng = _entry_rng("positional-probe", entry.key)
         out.append(cases.positional_probe(
-            entry, names.draw(_entry_rng("positional-probe", entry.key))))
+            entry, names.draw(positional_rng), positional_rng))
         out.append(cases.misattribution_probe(
             entry, names.draw(_entry_rng("misattribution-probe", entry.key))))
 
@@ -326,9 +342,9 @@ def probe_sets() -> list[Example]:
     # strategy the training data never once contradicts in that shape. Neither
     # probe above can catch it there: both render a single workload. Each entry
     # is paired with the next so every entry appears twice, in both positions.
-    with_losers = [e for e in catalog.trainable() if e.losers]
-    for i, entry in enumerate(with_losers):
-        other = with_losers[(i + 1) % len(with_losers)]
+    with_objects = [e for e in catalog.trainable() if e.objects]
+    for i, entry in enumerate(with_objects):
+        other = with_objects[(i + 1) % len(with_objects)]
         first = names.draw(_entry_rng("multi-probe-a", entry.key))
         second = names.draw(_entry_rng("multi-probe-b", entry.key, other.key))
         # A collision used to `continue` here, which silently shrank the slice
@@ -351,7 +367,7 @@ def probe_sets() -> list[Example]:
     # `cases.contradiction_probe`'s docstring for the full retraction; the
     # slice is kept for the three shortcuts it does defeat.
     for entry in catalog.trainable():
-        if not entry.losers or not entry.contradiction:
+        if not entry.objects or not entry.contradiction:
             continue
         out.append(cases.contradiction_probe(
             entry, names.draw(_entry_rng("contradiction-probe", entry.key))))

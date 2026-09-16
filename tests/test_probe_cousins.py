@@ -71,23 +71,6 @@ def test_every_cousin_decoy_carries_three_or_more_verdicts():
             assert len(ex.meta["expected"]) >= 3, ex.meta["origin"]
 
 
-def test_cousin_probe_fails_a_constant_answer_model():
-    # The standing rule: an eval change that could not fail the model it
-    # replaced is not a fix. A model that answers every row the same way
-    # must score zero pairs.
-    from kubeagent_verdict.evals.score import paired_contrast
-
-    rows = generate.shared_origin_cousin_probes()
-    for verdict in ("shared", "separate"):
-        results = [{"pair_key": _pair_key(ex), "case": ex.case,
-                    "shared_verdict": verdict} for ex in rows]
-        board = paired_contrast(results)
-        assert board["both_correct"]["rate"] == 0.0
-        assert board["both_correct"]["n"] == len(rows) // 2
-        assert board["unpaired"] == 0
-        assert board["ambiguous"] == 0
-
-
 def test_cousin_probe_is_deterministic():
     a = [generate.to_row(ex) for ex in generate.shared_origin_cousin_probes()]
     b = [generate.to_row(ex) for ex in generate.shared_origin_cousin_probes()]

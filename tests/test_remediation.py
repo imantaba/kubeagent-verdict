@@ -7,9 +7,9 @@ training prompt that carries any other string teaches the model to read an
 answer off a field that, at serve time, will say something else — which is a
 train/serve skew, not a cosmetic difference.
 
-The two golden rows are the anchor: contract/golden/input.json is a
-byte-for-byte capture of the real binary's output, so its next_step and
-command values are ground truth rather than a transcription of the Go source.
+The golden rows are the anchor: contract/golden/input.json is a byte-for-byte
+capture of the real binary's output, so its next_step and command values are
+ground truth rather than a transcription of the Go source.
 """
 import json
 from pathlib import Path
@@ -25,7 +25,9 @@ def test_mirror_reproduces_the_captured_golden_rows():
     assert rows, "golden capture carries no findings — the anchor is gone"
     for f, w in rows:
         # The capture renders "<pod>" literally where the pod name was redacted.
-        got = r.suggest(f["issue"], ns=w["namespace"], pod="<pod>", container="app")
+        # The capture's own fixture never sets a container on a finding, so no
+        # captured command carries a "-c <container>" clause either.
+        got = r.suggest(f["issue"], ns=w["namespace"], pod="<pod>", container="")
         assert got.next_step == f["next_step"], f["issue"]
         assert got.command == f["command"], f["issue"]
 

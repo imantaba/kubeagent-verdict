@@ -1,93 +1,15 @@
 {
-  "cluster": {
-    "degraded": true,
-    "node_issues": [
-      "worker-2 NotReady (KubeletNotReady)"
-    ],
-    "nodes_ready": 2,
-    "nodes_total": 3,
-    "system_issues": []
-  },
-  "platform_line": "",
-  "reads": [
-    {
-      "label": "describe node /worker-1",
-      "content": "node worker-1: unschedulable=false\n  condition Ready=False (KubeletNotReady): container runtime is down\n  taint node.kubernetes.io/not-ready=:NoSchedule\n"
-    },
-    {
-      "label": "describe node /worker-2",
-      "content": "node worker-2: unschedulable=false\n  condition Ready=True (KubeletReady): kubelet is posting ready status\n"
-    },
-    {
-      "label": "describe pvc db/aux-0",
-      "content": "pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442\n"
-    },
-    {
-      "label": "describe pvc db/data-0",
-      "content": "pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821\n"
-    },
-    {
-      "label": "describe pvc db/cache-0",
-      "content": "pvc db/cache-0: phase=Pending storageClass=standard volume=\n"
-    },
-    {
-      "label": "events img/one-7c9d4b5f6-abcde",
-      "content": "events for img/one-7c9d4b5f6-abcde:\n  Failed: Failed to pull image \"registry.invalid/img/one:1.0\": connection refused (x4)\n"
-    },
-    {
-      "label": "events img/five-7c9d4b5f6-defgh",
-      "content": "no events for img/five-7c9d4b5f6-defgh"
-    },
-    {
-      "label": "describe node /worker-7",
-      "content": "read failed: nodes \"worker-7\" is forbidden"
-    }
-  ],
-  "service_issues": [
-    {
-      "detail": "service has 0 ready endpoints",
-      "name": "api",
-      "namespace": "shop",
-      "type": "NoReadyEndpoints"
-    }
-  ],
-  "summary": {
-    "cpu": {
-      "allocatable": "6",
-      "limits": "5400m",
-      "limits_pct": 90,
-      "requests": "4200m",
-      "requests_pct": 70
-    },
-    "memory": {
-      "allocatable": "12Gi",
-      "limits": "11Gi",
-      "limits_pct": 91,
-      "requests": "9Gi",
-      "requests_pct": 75
-    },
-    "metrics_available": false
+  "kubeagent": {
+    "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd",
+    "tag": "v1.24.0"
   },
   "workloads": [
     {
       "namespace": "web",
       "name": "frontend",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 5,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n web describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/web/frontend:2.1\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "frontend-5b8d7f6c9-q2w3e",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/web/frontend:2.1",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -139,29 +61,53 @@
           "fresh_read_evidence": "a pull event shows an image error: manifest unknown; this pull fails for this image, not the host"
         }
       ],
-      "decided": true,
-      "decided_cause": "node worker-1 (NotReady)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "node worker-1 (NotReady)",
+        "outcome": "confirmed",
+        "evidence": "Ready condition is False now",
+        "group_key": "node/worker-1",
+        "group_text": "node worker-1 (NotReady)",
+        "decisions": [
+          {
+            "candidate": "node worker-1 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "Ready condition is False now"
+          },
+          {
+            "candidate": "node worker-3 (kubelet not heartbeating)",
+            "outcome": "unverified",
+            "evidence": "not re-read: the read budget was spent first"
+          },
+          {
+            "candidate": "node worker-5 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "Ready condition is Unknown now"
+          },
+          {
+            "candidate": "node worker-6 (NotReady)",
+            "outcome": "confirmed",
+            "evidence": "the node has no Ready condition"
+          },
+          {
+            "candidate": "node worker-7 (NotReady)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: nodes \"worker-7\" is forbidden"
+          },
+          {
+            "candidate": "registry registry.invalid",
+            "outcome": "refuted",
+            "evidence": "a pull event shows an image error: manifest unknown; this pull fails for this image, not the host"
+          }
+        ]
+      }
     },
     {
       "namespace": "db",
       "name": "postgres",
-      "kind": "StatefulSet",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n db describe pod \u003cpod\u003e",
-          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
-          "issue": "Pending",
-          "log_cause": "",
-          "next_step": "inspect the object for details",
-          "reason": "pod is not scheduled"
-        }
-      ],
+      "pod": "postgres-0",
+      "issue": "Pending",
+      "image": "",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -262,29 +208,43 @@
           "fresh_read_evidence": ""
         }
       ],
-      "decided": true,
-      "decided_cause": "PVC data-0 (FailedBinding)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "PVC data-0 (FailedBinding)",
+        "outcome": "confirmed",
+        "evidence": "phase is Lost",
+        "group_key": "pvc/db/data-0",
+        "group_text": "PVC data-0 (FailedBinding)",
+        "decisions": [
+          {
+            "candidate": "PVC aux-0 (ProvisioningFailed)",
+            "outcome": "refuted",
+            "evidence": "phase is Bound now"
+          },
+          {
+            "candidate": "PVC aux-1 (ProvisioningFailed)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: persistentvolumeclaims \"aux-1\" is forbidden"
+          },
+          {
+            "candidate": "PVC aux-2 (ProvisioningFailed)",
+            "outcome": "unverified",
+            "evidence": "phase is not one kubeagent expects"
+          },
+          {
+            "candidate": "PVC data-0 (FailedBinding)",
+            "outcome": "confirmed",
+            "evidence": "phase is Lost"
+          }
+        ]
+      }
     },
     {
       "namespace": "db",
       "name": "cache",
-      "kind": "StatefulSet",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n db describe pod \u003cpod\u003e",
-          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
-          "issue": "Pending",
-          "log_cause": "",
-          "next_step": "inspect the object for details",
-          "reason": "pod is not scheduled"
-        }
-      ],
+      "pod": "cache-0",
+      "issue": "Pending",
+      "image": "",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -385,29 +345,33 @@
           "fresh_read_evidence": ""
         }
       ],
-      "decided": true,
-      "decided_cause": "PVC cache-0 (ProvisionerNotResponding)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "PVC cache-0 (ProvisionerNotResponding)",
+        "outcome": "confirmed",
+        "evidence": "phase is still Pending",
+        "group_key": "storageclass/standard/ProvisionerNotResponding",
+        "group_text": "storage class standard (ProvisionerNotResponding)",
+        "decisions": [
+          {
+            "candidate": "node worker-2 (no kubelet lease)",
+            "outcome": "unverified",
+            "evidence": "Ready condition is True, but the kubelet lease was not re-read"
+          },
+          {
+            "candidate": "PVC cache-0 (ProvisionerNotResponding)",
+            "outcome": "confirmed",
+            "evidence": "phase is still Pending"
+          }
+        ]
+      }
     },
     {
       "namespace": "db",
       "name": "search",
-      "kind": "StatefulSet",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n db describe pod \u003cpod\u003e",
-          "evidence": "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
-          "issue": "Pending",
-          "log_cause": "",
-          "next_step": "inspect the object for details",
-          "reason": "pod is not scheduled"
-        }
-      ],
+      "pod": "search-0",
+      "issue": "Pending",
+      "image": "",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -508,29 +472,28 @@
           "fresh_read_evidence": "phase is still Pending"
         }
       ],
-      "decided": true,
-      "decided_cause": "PVC search-0 (ProvisionerNotResponding)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "PVC search-0 (ProvisionerNotResponding)",
+        "outcome": "confirmed",
+        "evidence": "phase is still Pending",
+        "group_key": "storageclass/standard/ProvisionerNotResponding",
+        "group_text": "storage class standard (ProvisionerNotResponding)",
+        "decisions": [
+          {
+            "candidate": "PVC search-0 (ProvisionerNotResponding)",
+            "outcome": "confirmed",
+            "evidence": "phase is still Pending"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "one",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/img/one:1.0\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "one-7c9d4b5f6-abcde",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/one:1.0",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -582,29 +545,28 @@
           "fresh_read_evidence": "a pull event shows a connection error: connection refused"
         }
       ],
-      "decided": true,
-      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "confirmed",
+        "evidence": "a pull event shows a connection error: connection refused",
+        "group_key": "registry/registry.invalid",
+        "group_text": "registry registry.invalid (7 workloads failing to pull)",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "confirmed",
+            "evidence": "a pull event shows a connection error: connection refused"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "two",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/img/two:1.0\"",
-          "issue": "ErrImagePull",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "two-7c9d4b5f6-bcdef",
+      "issue": "ErrImagePull",
+      "image": "registry.invalid/img/two:1.0",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -656,29 +618,28 @@
           "fresh_read_evidence": "a pull event shows a connection error: i/o timeout"
         }
       ],
-      "decided": true,
-      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
-      "decided_outcome": "confirmed"
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "confirmed",
+        "evidence": "a pull event shows a connection error: i/o timeout",
+        "group_key": "registry/registry.invalid",
+        "group_text": "registry registry.invalid (7 workloads failing to pull)",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "confirmed",
+            "evidence": "a pull event shows a connection error: i/o timeout"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "three",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/img/three:1.0\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "three-7c9d4b5f6-cdefg",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/three:1.0",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -730,29 +691,28 @@
           "fresh_read_evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host"
         }
       ],
-      "decided": true,
-      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
-      "decided_outcome": "unverified"
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "a pull event shows an auth error: unauthorized; that can be one image or the whole host"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "five",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/img/five:1.0\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "five-7c9d4b5f6-defgh",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/five:1.0",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -804,37 +764,28 @@
           "fresh_read_evidence": "no pull event names the failure; events may have aged out"
         }
       ],
-      "decided": true,
-      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
-      "decided_outcome": "unverified"
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "no pull event names the failure; events may have aged out",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "no pull event names the failure; events may have aged out"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "six",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 2,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img logs \u003cpod\u003e --previous",
-          "evidence": "back-off 5m0s restarting failed container",
-          "issue": "CrashLoopBackOff",
-          "log_cause": "",
-          "next_step": "starts then crashes — inspect the crash output",
-          "reason": "container keeps exiting"
-        },
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"registry.invalid/img/six:1.0\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "six-6f8e9d0a1-crash",
+      "issue": "CrashLoopBackOff",
+      "image": "",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -886,29 +837,28 @@
           "fresh_read_evidence": "events of the pulling pod were not read"
         }
       ],
-      "decided": true,
-      "decided_cause": "registry registry.invalid (7 workloads failing to pull)",
-      "decided_outcome": "unverified"
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "events of the pulling pod were not read",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "events of the pulling pod were not read"
+          }
+        ]
+      }
     },
     {
       "namespace": "img",
       "name": "lone",
-      "kind": "Deployment",
-      "ready": 0,
-      "desired": 1,
-      "status": "Progressing",
-      "restarts": 0,
-      "confidence": "",
-      "findings": [
-        {
-          "command": "kubectl -n img describe pod \u003cpod\u003e",
-          "evidence": "Failed to pull image \"mirror.invalid/img/lone:1.0\"",
-          "issue": "ImagePullBackOff",
-          "log_cause": "",
-          "next_step": "the image can't be pulled — verify the tag exists and the registry credentials",
-          "reason": "image pull keeps failing"
-        }
-      ],
+      "pod": "lone-7c9d4b5f6-efghi",
+      "issue": "ImagePullBackOff",
+      "image": "mirror.invalid/img/lone:1.0",
       "candidates": [
         {
           "cause": "node worker-1 (NotReady)",
@@ -960,9 +910,199 @@
           "fresh_read_evidence": ""
         }
       ],
-      "decided": false,
-      "decided_cause": "",
-      "decided_outcome": ""
+      "result": {
+        "decided": false,
+        "cause": "",
+        "outcome": "",
+        "evidence": "",
+        "group_key": "",
+        "group_text": "",
+        "decisions": []
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "seven",
+      "pod": "seven-7c9d4b5f6-fghij",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/seven:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "fresh read failed: events is forbidden"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "fresh read failed: events is forbidden",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "fresh read failed: events is forbidden"
+          }
+        ]
+      }
+    },
+    {
+      "namespace": "img",
+      "name": "eight",
+      "pod": "eight-7c9d4b5f6-ghijk",
+      "issue": "ImagePullBackOff",
+      "image": "registry.invalid/img/eight:1.0",
+      "candidates": [
+        {
+          "cause": "node worker-1 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-2 (no kubelet lease)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-3 (kubelet not heartbeating)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-5 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-6 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "node worker-7 (NotReady)",
+          "verdict": "ruled_out",
+          "reason": "no pod of this workload is scheduled on it",
+          "fresh_read_outcome": "",
+          "fresh_read_evidence": ""
+        },
+        {
+          "cause": "registry registry.invalid (7 workloads failing to pull)",
+          "verdict": "attributed",
+          "reason": "7 workloads failing to pull from this host clear the threshold of 2",
+          "fresh_read_outcome": "unverified",
+          "fresh_read_evidence": "not re-read: the read budget was spent first"
+        }
+      ],
+      "result": {
+        "decided": true,
+        "cause": "registry registry.invalid (7 workloads failing to pull)",
+        "outcome": "unverified",
+        "evidence": "not re-read: the read budget was spent first",
+        "group_key": "",
+        "group_text": "",
+        "decisions": [
+          {
+            "candidate": "registry registry.invalid (7 workloads failing to pull)",
+            "outcome": "unverified",
+            "evidence": "not re-read: the read budget was spent first"
+          }
+        ]
+      }
+    }
+  ],
+  "shared": [
+    "2 workloads share one upstream cause: registry registry.invalid (7 workloads failing to pull)",
+    "2 workloads share one upstream cause: storage class standard (ProvisionerNotResponding)"
+  ],
+  "reads": [
+    {
+      "label": "describe node /worker-1",
+      "content": "node worker-1: unschedulable=false\n  condition Ready=False (KubeletNotReady): container runtime is down\n  taint node.kubernetes.io/not-ready=:NoSchedule\n"
+    },
+    {
+      "label": "describe node /worker-2",
+      "content": "node worker-2: unschedulable=false\n  condition Ready=True (KubeletReady): kubelet is posting ready status\n"
+    },
+    {
+      "label": "describe pvc db/aux-0",
+      "content": "pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442\n"
+    },
+    {
+      "label": "describe pvc db/data-0",
+      "content": "pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821\n"
+    },
+    {
+      "label": "describe pvc db/cache-0",
+      "content": "pvc db/cache-0: phase=Pending storageClass=standard volume=\n"
+    },
+    {
+      "label": "events img/one-7c9d4b5f6-abcde",
+      "content": "events for img/one-7c9d4b5f6-abcde:\n  Failed: Failed to pull image \"registry.invalid/img/one:1.0\": connection refused (x4)\n"
+    },
+    {
+      "label": "events img/five-7c9d4b5f6-defgh",
+      "content": "no events for img/five-7c9d4b5f6-defgh"
+    },
+    {
+      "label": "describe node /worker-7",
+      "content": "read failed: nodes \"worker-7\" is forbidden"
     }
   ]
 }

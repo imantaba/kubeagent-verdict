@@ -193,18 +193,21 @@ score every answer automatically.
 The 263 questions are not one exam — they are thirteen, and several are traps
 built specifically to catch a model that is cheating rather than reasoning:
 
-| Slice | Rows | What it catches |
-|---|---|---|
-| `positional_probe` | 19 | A model that always picks the **first** candidate. The right answer is placed last. |
-| `misattribution_probe` | 19 | A model that always trusts the `attributed` **tag**. The tag is deliberately on a wrong candidate. |
-| `multi_misattribution_probe` | 19 | The same trap, but with two workloads at once. |
-| `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. |
-| `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. |
-| `contradiction_probe` | 19 | Evidence that contradicts itself. |
-| the other 7 slices | 167 | Ordinary competence across the nine question types |
+| Slice | Rows | What it catches | Job |
+|---|---|---|---|
+| `positional_probe` | 19 | A model that always picks the **first** candidate. The right answer is placed last. | 1 or 2 |
+| `misattribution_probe` | 19 | A model that always trusts the `attributed` **tag**. The tag is deliberately on a wrong candidate. | 2 |
+| `multi_misattribution_probe` | 19 | The same trap, but with two workloads at once. | 1 or 2, plus 3 |
+| `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
+| `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
+| `contradiction_probe` | 19 | Evidence that contradicts itself. | 1, always decided |
+| the other 7 slices | 167 | Ordinary competence across the nine question types | 1 or 2 |
+
+The job column says which pass bar reads a slice's rows, now that
+kubeagent v1.24.0 decides some of them before the model ever answers.
 
 A model that beats the untuned base model on every number is still not good
-enough. **Six things decide whether a model may be released**, and they exist
+enough. **Five things decide whether a model may be released**, and they exist
 because each one caught a real cheat that had already fooled us:
 
 1. **Contract validity = 1.0.** Every answer must be valid JSON in the exact
@@ -220,18 +223,15 @@ because each one caught a real cheat that had already fooled us:
 4. **Overconfidence rate.** Of the causes it got *wrong*, how many did it still
    mark `high` confidence? A model that is confidently wrong is worse than one
    that says `low`.
-5. **Shared origin vs. coincidence — read as a pair.** Two numbers:
-   `separate_reasons_rate` (it wrongly called one shared failure several
-   independent ones) and `false_shared_rate` (it wrongly blamed one cause for
-   genuinely unrelated failures). Either one alone is trivially cheatable, and
-   the cheat for one is the failure mode of the other. **They must be read
-   together.** The two now have a matched pair of slices to be measured on:
-   `shared_origin_probe` for the first, `shared_origin_decoy_probe` for the
-   second, built from the same ten scenarios so that no answering habit can win
-   both.
-6. **Suggestion echo = 0.** Every prompt contains kubeagent's own generic
+5. **Suggestion echo = 0.** Every prompt contains kubeagent's own generic
    "suggested fix" line. Handing that back is the cheapest wrong answer
    available — fluent, on-topic, and already in the context. Zero tolerance.
+
+There were six until the v1.24.0 rescope. The sixth was the paired
+shared-origin join, and it was retired there because the exam it read no
+longer has two halves to join. Parts 2 and 3 below record runs that were
+judged against six, so a "six" in a record of one of those runs is what was
+in force then, not a claim about today. Five decide a release now.
 
 ---
 
@@ -385,8 +385,9 @@ This was deliberate and it has a cost. Decider 5 has two halves that pull in
 opposite directions: teach too little shared-origin and the model calls
 everything independent (the failure we had); teach too much and the model
 starts blaming one cause for genuinely unrelated failures — which is the *same
-decider*, failing from the other side. `false_shared_rate` is currently a clean
-0.0 and we are not willing to trade one failure for its mirror. So
+decider*, failing from the other side. kubeagent v1.24.0 retired
+`false_shared_rate`; job 3 grades that same failure now, and we are not
+willing to trade one failure for its mirror. So
 the shared answer is deliberately the minority answer to a multi-workload
 question, and a test enforces that. It used to demand that `multi` alone
 outnumber `shared_origin`. The decoy twin answers "separate reasons" too,
@@ -913,7 +914,7 @@ The exam did not move: 263 questions, the same checksum.
 
 What the final retrain will tell us:
 
-- **All six deciders pass:** the model ships. The wide and cousin probes are
+- **All five deciders pass:** the model ships. The wide and cousin probes are
   reported beside it, and a poor probe score does not stop it.
 - **Decider 1 fails again on a three-verdict decoy:** the data now shows
   that shape often, so the fault is in the recipe, not in coverage. The
@@ -925,6 +926,10 @@ What the final retrain will tell us:
 - **Decider 5c fails and both probes are high:** the exam's six origins are
   harder than their cousins. Read the pair-level rows before deciding
   anything.
+
+Decider 5 — the paired shared-origin join, and the 5a/5c readings under it —
+was retired in the v1.24.0 rescope. The three branches above are kept as the
+reasoning of the time, not as a test anyone can still run.
 
 This page does not authorise that retrain either. It records what the
 textbook now holds and why.
@@ -947,4 +952,4 @@ textbook now holds and why.
 | **decoy** | A wrong candidate placed in the question on purpose, to see if the model bites. |
 | **negative control** | Checking that a new exam actually *fails* the old model — proof the exam got harder, not that the model got better. |
 | **slice** | One named group of exam questions, scored separately. |
-| **decider** | One of the six numbers that must hold before a model may be released. |
+| **decider** | One of the five numbers that must hold before a model may be released. |

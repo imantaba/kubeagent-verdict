@@ -27,7 +27,7 @@ GENERATE_PY = (Path(__file__).resolve().parents[1]
 # training data rewards is not a shortcut the eval can detect.
 EVAL_ONLY = frozenset({"positional_probe", "misattribution_probe",
                        "multi_misattribution_probe", "contradiction_probe",
-                       "shared_origin_probe"})
+                       "shared_origin_probe", "shared_origin_decoy_probe"})
 
 
 def _module() -> ast.Module:
@@ -135,3 +135,19 @@ def test_held_out_cases_all_reach_the_test_set():
     present = {ex.case for ex in generate.test_set()}
     missing = set(generate.HELD_OUT_CASES) - present
     assert not missing, f"held-out cases absent from the test set: {sorted(missing)}"
+
+
+def test_probe_sets_selects_on_objects_not_losers():
+    """probe_sets() gates positional_probe/misattribution_probe/contradiction_probe/
+    multi_misattribution_probe eligibility on entry.objects, never entry.losers.
+    entry.contradiction stays a separate guard for contradiction_probe."""
+    import inspect
+
+    from kubeagent_verdict.dataset import generate
+
+    src = inspect.getsource(generate.probe_sets)
+    assert ".losers" not in src, (
+        "probe_sets must select entries by e.objects, not e.losers "
+        "(entry.contradiction stays a separate guard)")
+    assert ".objects" in src
+    assert ".contradiction" in src

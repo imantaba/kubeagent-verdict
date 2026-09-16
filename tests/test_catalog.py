@@ -12,6 +12,122 @@ SAMPLE = {
 }
 
 
+def test_catalog_entry_objects_field_defaults_to_empty():
+    e = catalog.CatalogEntry(key="t", covered_slugs=(), covered_kinds=(), trains=False)
+    assert e.objects == ()
+
+
+def test_entries_slugs_declare_their_objects():
+    from kubeagent_verdict.dataset.objects import Fresh, Object
+
+    expected = {
+        "memory-limit-oomkill": (
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
+        "deployment-bad-image-tag": (
+            Object(kind="registry", name="registry.example.com", scan_reason="2",
+                   placement="", fresh=Fresh(literal="dial tcp"), intent="decoy"),
+        ),
+        "node-cordon-diskfull": (
+            Object(kind="node", name="{node}", scan_reason="no kubelet lease",
+                   placement="on", fresh=Fresh(ready="True"), intent="decoy"),
+        ),
+        "networkpolicy-deny-all": (
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
+        "coredns-corefile-broken": (
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
+        "worker-containerd-stop": (
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="cause"),
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0947"),
+                   intent="decoy"),
+        ),
+        "oversized-job-unschedulable": (
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
+        "crashloop-pod": (
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=Fresh(ready="False"), intent="decoy"),
+        ),
+    }
+    by_key = {e.key: e.objects for e in catalog.all_entries()}
+    for key, objects in expected.items():
+        assert by_key[key] == objects, key
+
+
+def test_entries_kinds_declare_their_objects():
+    from kubeagent_verdict.dataset.objects import Fresh, Object
+
+    node_decoy = Object(kind="node", name="{node}", scan_reason="NotReady",
+                         placement="on", fresh=Fresh(ready="False"), intent="decoy")
+    expected = {
+        "probe-failure": (node_decoy,),
+        "container-start-error": (node_decoy,),
+        "create-container-config-error": (
+            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0442"),
+                   intent="decoy"),
+        ),
+        "init-crashloop": (node_decoy,),
+        "init-config-error": (node_decoy,),
+        "init-errimagepull": (node_decoy,),
+        "init-imagepullbackoff": (node_decoy,),
+        "init-oomkilled": (node_decoy,),
+        "restart-loop": (node_decoy,),
+        "volume-attach-error": (
+            Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
+        "volume-mount-error": (
+            Object(kind="pvc", name="aux-1", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
+                   intent="decoy"),
+        ),
+    }
+    by_key = {e.key: e.objects for e in catalog.all_entries()}
+    for key, objects in expected.items():
+        assert by_key[key] == objects, key
+
+
+def test_19_entries_declare_an_object_and_9_declare_none():
+    entries = catalog.all_entries()
+    assert len(entries) == 28
+    with_objects = {e.key for e in entries if e.objects}
+    without_objects = {e.key for e in entries if not e.objects}
+    assert len(with_objects) == 19
+    assert len(without_objects) == 9
+    assert with_objects.isdisjoint(without_objects)
+    assert with_objects | without_objects == {e.key for e in entries}
+
+
+def test_worker_containerd_stop_declares_its_cause_node_and_a_decoy_pvc():
+    entry = next(e for e in catalog.all_entries() if e.key == "worker-containerd-stop")
+    assert len(entry.objects) == 2
+    assert {o.kind for o in entry.objects} == {"node", "pvc"}
+    assert {o.intent for o in entry.objects} == {"cause", "decoy"}
+
+
+def test_every_declared_catalog_object_passes_check_declaration():
+    from kubeagent_verdict.dataset import rules
+
+    for e in catalog.all_entries():
+        rules.check_declaration(e.key, e.objects)
+
+
 def test_every_slug_covered_exactly_once():
     count = {s: 0 for s in vocab.FAULT_SLUGS}
     for e in catalog.all_entries():

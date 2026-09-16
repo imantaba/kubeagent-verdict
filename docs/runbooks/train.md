@@ -67,14 +67,15 @@ so time scales with rows and nothing else) — run it under
    match, because `evaluate` walks rows positionally and a length-matched but
    reordered file would score silently wrong.
 
-   The replay path does **not** apply when the scoring change needs something
-   the banked run never produced. A decider added after a run was banked reads
-   n/a on it rather than a number: `paired_contrast` needs a `pair_key` that
-   older `results.jsonl` files do not carry, so it reports `n: 0` — and a
-   decider needing rows the old run was never served (its twin slice, say)
-   reports `unpaired`, not a score built from half-pairs. Re-scoring through
-   `evaluate` regenerates both, which is why the replay goes through
-   `evaluate` rather than reading `results.jsonl` fields directly.
+   The replay path does **not** apply when the scoring change needs
+   something the banked run never produced. A job bar or decider added
+   after a run was banked reads `n/a` on it rather than a number: job 3
+   needs each row's meta to carry a `label`, and a run banked against
+   the exam shape before this rescope has no label to give it, so it
+   reports `n: 0` rather than a score built from a partial population.
+   Re-scoring through `evaluate` regenerates the row from the current
+   test set, which is why the replay goes through `evaluate` rather
+   than reading `results.jsonl` fields directly.
 
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
@@ -335,8 +336,8 @@ so time scales with rows and nothing else) — run it under
 6. **Read the scoreboard against the bar.** Beating the untuned baseline on
    every metric is necessary and nowhere near sufficient — the first tuned
    model scored 1.0 on contract validity, cause accuracy and confidence
-   simultaneously by reading the `attributed` tag and nothing else. Six
-   things decide a release:
+   simultaneously by reading the `attributed` tag and nothing else. A
+   release needs three job bars and five more things:
 
    - contract validity 1.0;
    - **decoy rate low on all three adversarial slices** —
@@ -384,11 +385,13 @@ so time scales with rows and nothing else) — run it under
      model sitting near 0.5 there has not earned the pass this bar just gave
      it.
 
-     The gate is computed on the **overall** block only. The two rates appear
-     on every case, but 0.15 is calibrated against the overall 12-row
-     `misleads` denominator where one row is 0.083; in the three cases that
-     carry length-keyed rows at all that denominator is 4, where one flipped
-     row is 0.25 and clears the bar on its own. Judge
+     The gate is computed on the **overall** block only. Re-measured for the
+     v1.24.0 rescope, the overall `misleads` denominator is now 1 row (56
+     helps against 1 misleads: `wrong_attribution` 19/0, `positional_probe`
+     18/1, `misattribution_probe` 19/0). At a denominator of 1 there is no
+     fraction of a row to tune 0.15 against — the misleads rate can only
+     read 0.0 or 1.0 — so 0.15 is kept as the meaning "the two slices must
+     agree" rather than as a number calibrated to this population. Judge
      a case by its two rates, never by arithmetic on them against this bar;
    - `overconfidence rate` — of the causes it got wrong, how many it still
      graded `high`. `confidence carried` is extraction and cannot fail.
@@ -402,110 +405,26 @@ so time scales with rows and nothing else) — run it under
      not read a small `n` as a pass — v0.1.0's earlier `0.1111 (18)` was
      called a pass and the 18 was manufactured by an answer-key bug (16 rows
      no answer could satisfy; see `docs/model-card.md`);
-   - **Does it distinguish shared origins from coincidence?** Read
-     `separate reasons` and `false shared` **together, or not at all.**
-     Alone, either is trivially gamed: a model that always answers
-     "independent" scores 0 on `false_shared_rate`, and a model that always
-     answers "shared origin" scores 0 on `separate_reasons_rate`. The second
-     is the obvious failure mode of the obvious correction to the first, and
-     nothing measured it until now. **`false_shared_rate` must be ≤ 1 of
-     19** on `multi_misattribution_probe` **and ≤ 1 of 10 on
-     `shared_origin_decoy_probe`**; both counts are pinned by
-     `tests/test_generate.py`. The second slice is the one that matters. It is
-     `shared_origin_probe` rendered from the same ten scenarios and the same
-     seeds with the cluster-wide read *healthy*: identical workloads, identical
-     candidate menus in identical order, identical evidence labels, and the
-     correct answer is separate causes. Nothing that keys on a label, a
-     position, or a tag can pass both halves of the pair, which is what the
-     pair is for. Read the halves on their own slices — a scoreboard that
-     reports `false shared` only on 19 rows is a run against the pre-append
-     253-row exam, and decider 5 is then measured on the weaker denominator it
-     had before. Check the ambiguous count printed
-     under the table beside it: a large one means the phrase sets need
-     narrowing, not that the model changed, and it shrinks the denominator
-     the ratio above is read against.
+   - **Job 1 — echo the decided cause.** Mean ≥ 0.9. kubeagent's own
+     rules now decide some rows before the model ever answers; on a
+     decided row the model's only job is to repeat the decided cause and
+     give a rationale that does not deny it. A model that copies the
+     decided line and pads a filler rationale can score close to 1.0
+     here — the model card says so plainly. This bar measures
+     contract-following. Job 2 is where skill shows.
 
-     One limit, so it is not read as more than it is: the decoy slice **could
-     not have failed the 0830 model**, which answered "separate reasons" to
-     every shared-origin question and would score 1.0 on it. It is a trap for a
-     model corrected toward "shared", not evidence about one that was never
-     tempted. Its `confidence carried` is weak for a second reason — a decoy
-     row's correct confidences are the ones already printed in the prompt.
+   - **Job 2 — name the cause on undecided rows.** Mean ≥ 0.7. The
+     expected answer is the story's own cause, or `none_of_these` when
+     the menu holds nothing right. This is the old cause-accuracy work,
+     carried over onto the rows the rules leave open.
 
-     The **pair does not share that limit**, and it is the number to read
-     first. `paired shared-origin (both halves right)` scores a pair 1.0 only
-     when the probe half claims a shared origin *and* its twin denies one, so
-     every habit that answers both halves the same way scores 0.0 on it
-     whichever answer it picks — the 0830 model scores **0.0**. **The bar is
-     ≥ 0.7 of 10.** Read anything at or below 0.3 as *no evidence of reading*:
-     answering each row independently by coin flip lands a pair 0.25 of the
-     time, so a score in that band is what chance produces and is not a
-     partial pass.
-
-     Read the two rates above as **marginals of this one**, and distrust them
-     when they disagree with it. The 0901 model scored `separate reasons` 0.5
-     and `false shared` 0.4 — two middling numbers that read as partial skill
-     and cleared this decider's pre-registered bar in its letter — while
-     scoring **0.1** paired: nine of its ten pairs answered both worlds
-     identically, so the verdict was a function of which scenario it was
-     looking at rather than of what the reads said. Neither marginal can see
-     that, because a per-scenario constant landing right half the time is
-     arithmetically indistinguishable from half-skill until the halves are
-     joined. That is the whole reason this number exists.
-
-     `the answer changed with the evidence` is printed beside it and is a
-     **diagnostic, not credit**: a model that flips with the evidence and gets
-     the direction wrong every time reads 1.0 there and 0.0 on the score. It
-     bounds the score from above, so the gap between them is "changed, but
-     backwards". Both read **n/a** on a run against the frozen 253-row exam,
-     which carries the probe half and no twin — ten half-pairs are not a
-     score, and a decider that printed a number there would be reporting one
-     it could not have measured.
-
-     There is a second way to get that n/a, and it looks like diligence.
-     `paired_contrast` builds its pairs from **one** `results` list, so the
-     two halves must be scored in the **same run**. Scoring the frozen 253
-     and the ten decoy rows as two `kv-eval` invocations — the obvious way
-     to read the halves "separately" — puts each twin in a different results
-     file, and every pair reports `unpaired`. Score
-     `out/dataset/test.jsonl` whole, all 263 rows, exactly as step 2 writes
-     it: the scoreboard already prints one row per slice, so the halves are
-     still read separately, and the pair is still joined. `unpaired: 10`
-     under the table is the tell that this happened.
-
-     When this decider fails and you need to know **which origin** the
-     model gets wrong, do not squint at the exam. It carries only one or
-     two pairs per origin — enough to score the model, too few to tell a
-     habit from bad luck. Generate the wide probe instead:
-     `kv-dataset --probe-wide out/probe-wide.jsonl` writes five twin pairs
-     per held-out origin (30 pairs, 60 rows) to its own file, and
-     `kv-eval --test out/probe-wide.jsonl --endpoint <url>` scores it.
-     The wide probe is a diagnostic instrument, not a release decider: its
-     numbers say where to aim the next fix. The frozen exam is still the
-     only thing a release argument may cite.
-
-     The cousin probe asks the other question. The wide probe asks the six
-     held-out origins five times each; the cousin probe asks every trained
-     scenario once. `kv-dataset --probe-cousins out/probe-cousins.jsonl`
-     writes one twin pair per trainable scenario (48 pairs, 96 rows) to its
-     own file, every decoy half at full width, and
-     `kv-eval --test out/probe-cousins.jsonl --endpoint <url>` scores it.
-     It is in-distribution on purpose. A model that scores well here and
-     fails the exam has a coverage gap; a model that fails here did not
-     learn to read the origin at all, and the next look is at the recipe.
-     Like the wide probe, it is a diagnostic and not a decider. Report
-     both beside the six deciders; neither one changes the verdict.
-
-     One date matters when you compare decoy numbers across runs. On
-     2026-09-05 two of the ten decoy rows changed by one line each. Their
-     inventory said a pod was unschedulable because of the disk-pressure
-     taint, while the node read in the same prompt showed no taint at all,
-     so the prompt argued against its own "separate" label and the model
-     believed the inventory. The fix (`healthy_evidence` on the victim)
-     makes that line agree with the reads. The first 253 rows did not move,
-     so every number on the 253 is still comparable; the two decoy
-     measures above are not comparable across that date. Both facts are
-     pinned by hash in `tests/test_shared_origin_training.py`.
+   - **Job 3 — say whether it is one cause or several.** Mean ≥ 0.9 over
+     the 39 prompts with two or more flagged workloads, and it decides
+     the release on its own. One bar reads the summary's own claim
+     against a `shared` / `separate` / `none` label, so a model cannot
+     pass by always giving the same answer — the same guard the two old
+     shared-origin rates existed for, now read as a single number
+     instead of a pair.
 
    - **Is the answer the prompt's own `suggested fix` line handed back?**
      `suggestion echo` must be **0 of 263** — the whole test set, or 0 of 253

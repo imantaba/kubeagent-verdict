@@ -22,3 +22,10 @@ def test_drawn_values_come_from_the_allowlist():
     assert re.fullmatch(rf"{n.name}-[0-9a-f]{{9}}-[a-z0-9]{{5}}", n.pod)
     assert re.fullmatch(r"registry\.example\.com/[a-z]+/[a-z]+:v\d\.\d\.\d", n.image)
     assert 1 <= n.restarts <= 40
+
+
+def test_pad_pvcs_are_nine_names_disjoint_from_pvcs():
+    assert len(names.PAD_PVCS) == 9
+    assert len(set(names.PAD_PVCS)) == 9
+    assert set(names.PAD_PVCS).isdisjoint(names.PVCS)
+    assert names.PAD_PVCS == tuple(f"aux-{i}" for i in range(9))

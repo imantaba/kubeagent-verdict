@@ -1,0 +1,597 @@
+//go:build goldencapture
+
+// Golden capture for kubeagent-verdict. This file lives in
+// kubeagent-verdict as contract/capture/kv_capture_test.go.txt and is
+// copied into a throwaway worktree of kubeagent to run. It never lands
+// in kubeagent.
+//
+// The five steps, from /home/ubuntu/git/kubeagent (HEAD at tag v1.24.0):
+//   1. git worktree add "$SCRATCH/ka-v1.24.0" v1.24.0
+//   2. cp /home/ubuntu/git/kubeagent-verdict/contract/capture/kv_capture_test.go.txt \
+//         "$SCRATCH/ka-v1.24.0/internal/investigate/kv_capture_test.go"
+//   3. cd "$SCRATCH/ka-v1.24.0" && export PATH=$PATH:/usr/local/go/bin && \
+//      KV_GOLDEN_DIR="$SCRATCH/capture" go test -tags goldencapture \
+//         -run TestCaptureVerdictGolden ./internal/investigate -v
+//   4. copy rules_golden.json to tests/fixtures/ and the other three files
+//      to contract/capture/out/ in kubeagent-verdict; record the tag and
+//      commit in contract/PIN.md
+//   5. git worktree remove --force "$SCRATCH/ka-v1.24.0" && \
+//      git worktree prune && git status --short   # must print nothing
+//
+// Re-run these five steps only by the re-pin procedure in contract/PIN.md.
+
+package investigate
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/imantaba/kubeagent/internal/clusterhealth"
+	"github.com/imantaba/kubeagent/internal/diagnose"
+	"github.com/imantaba/kubeagent/internal/hypothesis"
+	"github.com/imantaba/kubeagent/internal/inventory"
+	"github.com/imantaba/kubeagent/internal/pvchealth"
+	"github.com/imantaba/kubeagent/internal/remediation"
+	"github.com/imantaba/kubeagent/internal/resources"
+	"github.com/imantaba/kubeagent/internal/rootcause"
+	"github.com/imantaba/kubeagent/internal/svchealth"
+)
+
+const (
+	kvTag    = "v1.24.0"
+	kvCommit = "15ec5649bbd2d07558eae945b71430afc8f231fd"
+	regHost  = "registry.invalid"
+)
+
+// Pod names are fixed so the prompt and the fixture are reproducible.
+var pods = map[string]string{
+	"web/frontend": "frontend-5b8d7f6c9-q2w3e",
+	"db/postgres":  "postgres-0",
+	"db/cache":     "cache-0",
+	"db/search":    "search-0",
+	"img/one":      "one-7c9d4b5f6-abcde",
+	"img/two":      "two-7c9d4b5f6-bcdef",
+	"img/three":    "three-7c9d4b5f6-cdefg",
+	"img/five":     "five-7c9d4b5f6-defgh",
+	"img/six-a":    "six-6f8e9d0a1-crash",
+	"img/six-b":    "six-6f8e9d0a1-pulls",
+	"img/lone":     "lone-7c9d4b5f6-efghi",
+	"img/seven":    "seven-7c9d4b5f6-fghij",
+	"img/eight":    "eight-7c9d4b5f6-ghijk",
+}
+
+// goldenCluster, goldenSummary, goldenServiceIssues and goldenPlatformLine
+// carry the same fixture values the pre-rescope capture used for
+// contract/golden/input.json's cluster, summary, platform_line and
+// service_issues (docs/superpowers/plans/2026-08-22-kubeagent-verdict.md,
+// kubeagent repo, Task 3 Step 2): a degraded 2/3-node cluster, a CPU/memory
+// summary with no live metrics, and one ClusterIP service with zero ready
+// endpoints. Those sections of the prompt keep today's bytes; only the
+// candidates/evidence sections below are new. svchealth.Issue has both a
+// Type and a Problem field at v1.24.0; BuildInventoryPrompt prints Type, so
+// the fixture's NoReadyEndpoints value goes in Type, exactly where the
+// pre-rescope capture had it.
+func goldenCluster() clusterhealth.ClusterHealth {
+	return clusterhealth.ClusterHealth{
+		Verdict:    "Degraded",
+		NodesReady: 2,
+		NodesTotal: 3,
+		NodeIssues: []string{"worker-2 NotReady (KubeletNotReady)"},
+	}
+}
+
+func goldenSummary() *resources.Summary {
+	return &resources.Summary{
+		CPU: resources.Line{
+			Allocatable: "6", Requests: "4200m", RequestsPct: 70,
+			Limits: "5400m", LimitsPct: 90,
+		},
+		Memory: resources.Line{
+			Allocatable: "12Gi", Requests: "9Gi", RequestsPct: 75,
+			Limits: "11Gi", LimitsPct: 91,
+		},
+	}
+}
+
+func goldenServiceIssues() []svchealth.Issue {
+	return []svchealth.Issue{
+		{Namespace: "shop", Name: "api", Type: "NoReadyEndpoints", Detail: "service has 0 ready endpoints"},
+	}
+}
+
+func goldenPlatformLine() string { return "" }
+
+func pullFinding(ns, pod, issue, image string) diagnose.Finding {
+	return diagnose.Finding{
+		Pod:      ns + "/" + pod,
+		Issue:    issue,
+		Reason:   "image pull keeps failing",
+		Evidence: `Failed to pull image "` + image + `"`,
+		Image:    image,
+	}
+}
+
+func pendingFinding(ns, pod string) diagnose.Finding {
+	return diagnose.Finding{
+		Pod:      ns + "/" + pod,
+		Issue:    "Pending",
+		Reason:   "pod is not scheduled",
+		Evidence: "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+	}
+}
+
+func crashFinding(ns, pod string) diagnose.Finding {
+	return diagnose.Finding{
+		Pod:      ns + "/" + pod,
+		Issue:    "CrashLoopBackOff",
+		Reason:   "container keeps exiting",
+		Evidence: "back-off 5m0s restarting failed container",
+	}
+}
+
+func puller(ns, name, issue, node string) inventory.Workload {
+	image := regHost + "/" + ns + "/" + name + ":1.0"
+	pod := pods[ns+"/"+name]
+	return inventory.Workload{
+		Namespace: ns, Name: name, Kind: "Deployment",
+		Ready: 0, Desired: 1, Status: "Progressing",
+		Findings: []diagnose.Finding{pullFinding(ns, pod, issue, image)},
+		Pods:     []inventory.PodRow{{Name: pod, Node: node}},
+	}
+}
+
+func captureWorkloads() []inventory.Workload {
+	frontendImage := regHost + "/web/frontend:2.1"
+	frontendPods := []inventory.PodRow{
+		{Name: pods["web/frontend"], Node: "worker-1"},
+		{Name: "frontend-5b8d7f6c9-r4t5y", Node: "worker-3"},
+		{Name: "frontend-5b8d7f6c9-u6i7o", Node: "worker-5"},
+		{Name: "frontend-5b8d7f6c9-p8a9s", Node: "worker-6"},
+		{Name: "frontend-5b8d7f6c9-d0f1g", Node: "worker-7"},
+	}
+	six := inventory.Workload{
+		Namespace: "img", Name: "six", Kind: "Deployment",
+		Ready: 0, Desired: 2, Status: "Progressing",
+		Findings: []diagnose.Finding{
+			crashFinding("img", pods["img/six-a"]),
+			pullFinding("img", pods["img/six-b"], "ImagePullBackOff", regHost+"/img/six:1.0"),
+		},
+		Pods: []inventory.PodRow{
+			{Name: pods["img/six-a"], Node: "worker-4"},
+			{Name: pods["img/six-b"], Node: "worker-4"},
+		},
+	}
+	lone := puller("img", "lone", "ImagePullBackOff", "worker-4")
+	lone.Findings[0].Image = "mirror.invalid/img/lone:1.0"
+	lone.Findings[0].Evidence = `Failed to pull image "mirror.invalid/img/lone:1.0"`
+	return []inventory.Workload{
+		{
+			Namespace: "web", Name: "frontend", Kind: "Deployment",
+			Ready: 0, Desired: 5, Status: "Progressing",
+			Findings: []diagnose.Finding{pullFinding("web", pods["web/frontend"], "ImagePullBackOff", frontendImage)},
+			Pods:     frontendPods,
+		},
+		{
+			Namespace: "db", Name: "postgres", Kind: "StatefulSet",
+			Ready: 0, Desired: 1, Status: "Progressing",
+			Findings: []diagnose.Finding{pendingFinding("db", pods["db/postgres"])},
+			Pods:     []inventory.PodRow{{Name: pods["db/postgres"], Node: "worker-4"}},
+		},
+		{
+			Namespace: "db", Name: "cache", Kind: "StatefulSet",
+			Ready: 0, Desired: 1, Status: "Progressing",
+			Findings: []diagnose.Finding{pendingFinding("db", pods["db/cache"])},
+			Pods:     []inventory.PodRow{{Name: pods["db/cache"], Node: "worker-2"}},
+		},
+		{
+			Namespace: "db", Name: "search", Kind: "StatefulSet",
+			Ready: 0, Desired: 1, Status: "Progressing",
+			Findings: []diagnose.Finding{pendingFinding("db", pods["db/search"])},
+			Pods:     []inventory.PodRow{{Name: pods["db/search"], Node: "worker-4"}},
+		},
+		puller("img", "one", "ImagePullBackOff", "worker-4"),
+		puller("img", "two", "ErrImagePull", "worker-4"),
+		puller("img", "three", "ImagePullBackOff", "worker-4"),
+		puller("img", "five", "ImagePullBackOff", "worker-4"),
+		six,
+		lone,
+		puller("img", "seven", "ImagePullBackOff", "worker-4"),
+		puller("img", "eight", "ImagePullBackOff", "worker-4"),
+	}
+}
+
+func capturePodPVCs() map[string][]string {
+	return map[string][]string{
+		"db/" + pods["db/postgres"]: {"aux-0", "aux-1", "aux-2", "data-0"},
+		"db/" + pods["db/cache"]:    {"cache-0"},
+		"db/" + pods["db/search"]:   {"search-0"},
+	}
+}
+
+func capturePVCIssues() []pvchealth.Issue {
+	issue := func(name, reason, class string) pvchealth.Issue {
+		return pvchealth.Issue{Namespace: "db", Name: name, Phase: "Pending",
+			Reason: reason, Detail: "waiting for a volume", StorageClass: class}
+	}
+	return []pvchealth.Issue{
+		issue("aux-0", "ProvisioningFailed", "fast-ssd"),
+		issue("aux-1", "ProvisioningFailed", "fast-ssd"),
+		issue("aux-2", "ProvisioningFailed", "fast-ssd"),
+		issue("aux-3", "ProvisioningFailed", "fast-ssd"),
+		issue("aux-4", "ProvisioningFailed", "fast-ssd"),
+		issue("data-0", "FailedBinding", "fast-ssd"),
+		issue("cache-0", "ProvisionerNotResponding", "standard"),
+		issue("search-0", "ProvisionerNotResponding", "standard"),
+	}
+}
+
+func nodeWith(name string, unschedulable bool, conds []corev1.NodeCondition, taints []corev1.Taint) *corev1.Node {
+	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	n.Spec.Unschedulable = unschedulable
+	n.Spec.Taints = taints
+	n.Status.Conditions = conds
+	return n
+}
+
+func ready(status corev1.ConditionStatus, reason, msg string) corev1.NodeCondition {
+	return corev1.NodeCondition{Type: corev1.NodeReady, Status: status, Reason: reason, Message: msg}
+}
+
+func pvcWith(name string, phase corev1.PersistentVolumeClaimPhase, class, volume string) *corev1.PersistentVolumeClaim {
+	p := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: "db", Name: name}}
+	p.Spec.VolumeName = volume
+	if class != "" {
+		c := class
+		p.Spec.StorageClassName = &c
+	}
+	p.Status.Phase = phase
+	return p
+}
+
+func pullEvent(image, tail string) corev1.Event {
+	return corev1.Event{Reason: "Failed", Count: 4,
+		Message: `Failed to pull image "` + image + `": ` + tail}
+}
+
+func captureReads() hypothesis.Reads {
+	notReadyTaint := []corev1.Taint{{Key: "node.kubernetes.io/not-ready", Effect: corev1.TaintEffectNoSchedule}}
+	return hypothesis.Reads{
+		Nodes: map[string]*corev1.Node{
+			"worker-1": nodeWith("worker-1", false,
+				[]corev1.NodeCondition{ready(corev1.ConditionFalse, "KubeletNotReady", "container runtime is down")}, notReadyTaint),
+			"worker-2": nodeWith("worker-2", false,
+				[]corev1.NodeCondition{ready(corev1.ConditionTrue, "KubeletReady", "kubelet is posting ready status")}, nil),
+			"worker-5": nodeWith("worker-5", false,
+				[]corev1.NodeCondition{ready(corev1.ConditionUnknown, "NodeStatusUnknown", "Kubelet stopped posting node status.")}, nil),
+			"worker-6": nodeWith("worker-6", false, nil, nil),
+		},
+		PVCs: map[string]*corev1.PersistentVolumeClaim{
+			"db/aux-0":    pvcWith("aux-0", corev1.ClaimBound, "fast-ssd", "pv-0442"),
+			"db/aux-2":    pvcWith("aux-2", corev1.PersistentVolumeClaimPhase("Released"), "fast-ssd", ""),
+			"db/data-0":   pvcWith("data-0", corev1.ClaimLost, "fast-ssd", "pv-0821"),
+			"db/cache-0":  pvcWith("cache-0", corev1.ClaimPending, "standard", ""),
+			"db/search-0": pvcWith("search-0", corev1.ClaimPending, "standard", ""),
+		},
+		Events: map[string][]corev1.Event{
+			"img/" + pods["img/one"]:      {pullEvent(regHost+"/img/one:1.0", "connection refused")},
+			"img/" + pods["img/two"]:      {pullEvent(regHost+"/img/two:1.0", "i/o timeout")},
+			"img/" + pods["img/three"]:    {pullEvent(regHost+"/img/three:1.0", "unauthorized: authentication required")},
+			"img/" + pods["img/five"]:     {},
+			"img/" + pods["img/six-a"]:    {{Reason: "BackOff", Count: 9, Message: "Back-off restarting failed container"}},
+			"web/" + pods["web/frontend"]: {pullEvent(regHost+"/web/frontend:2.1", "manifest unknown")},
+		},
+		Failed: map[string]string{
+			"node/worker-7":                    `nodes "worker-7" is forbidden`,
+			"pvc/db/aux-1":                      `persistentvolumeclaims "aux-1" is forbidden`,
+			"events/img/" + pods["img/seven"]:   "events is forbidden",
+		},
+	}
+}
+
+type readJSON struct {
+	Label   string `json:"label"`
+	Content string `json:"content"`
+}
+
+// captureBundle is the eight reads the prompt shows, in gather order:
+// nodes, then PVCs, then events. describeNode, describePVC and
+// formatEvents live in reader.go (same package; reader.go:238, :250, :312
+// at v1.24.0); open it for their exact signatures and call them with the
+// objects captureReads holds so the content bytes are the gather's own.
+func captureBundle(reads hypothesis.Reads) []readJSON {
+	return []readJSON{
+		{"describe node /worker-1", describeNode(reads.Nodes["worker-1"])},
+		{"describe node /worker-2", describeNode(reads.Nodes["worker-2"])},
+		{"describe pvc db/aux-0", describePVC(reads.PVCs["db/aux-0"])},
+		{"describe pvc db/data-0", describePVC(reads.PVCs["db/data-0"])},
+		{"describe pvc db/cache-0", describePVC(reads.PVCs["db/cache-0"])},
+		{"events img/" + pods["img/one"], formatEvents("img", pods["img/one"], reads.Events["img/"+pods["img/one"]])},
+		{"events img/" + pods["img/five"], formatEvents("img", pods["img/five"], nil)},
+		{"describe node /worker-7", "read failed: " + reads.Failed["node/worker-7"]},
+	}
+}
+
+type candidateJSON struct {
+	Cause             string `json:"cause"`
+	Verdict           string `json:"verdict"`
+	Reason            string `json:"reason"`
+	FreshReadOutcome  string `json:"fresh_read_outcome"`
+	FreshReadEvidence string `json:"fresh_read_evidence"`
+}
+
+type decisionJSON struct {
+	Candidate string `json:"candidate"`
+	Outcome   string `json:"outcome"`
+	Evidence  string `json:"evidence"`
+}
+
+type resultJSON struct {
+	Decided   bool           `json:"decided"`
+	Cause     string         `json:"cause"`
+	Outcome   string         `json:"outcome"`
+	Evidence  string         `json:"evidence"`
+	GroupKey  string         `json:"group_key"`
+	GroupText string         `json:"group_text"`
+	Decisions []decisionJSON `json:"decisions"`
+}
+
+type fixtureWorkloadJSON struct {
+	Namespace  string          `json:"namespace"`
+	Name       string          `json:"name"`
+	Pod        string          `json:"pod"`
+	Issue      string          `json:"issue"`
+	Image      string          `json:"image"`
+	Candidates []candidateJSON `json:"candidates"`
+	Result     resultJSON      `json:"result"`
+}
+
+type fixtureJSON struct {
+	Kubeagent map[string]string     `json:"kubeagent"`
+	Workloads []fixtureWorkloadJSON `json:"workloads"`
+	Shared    []string              `json:"shared"`
+	Reads     []readJSON            `json:"reads"`
+}
+
+func candidatesJSON(w inventory.Workload, r hypothesis.Result) []candidateJSON {
+	out := make([]candidateJSON, 0, len(w.RootCauseTrace))
+	for _, h := range w.RootCauseTrace {
+		c := candidateJSON{Cause: h.Cause, Verdict: string(h.Verdict), Reason: h.Reason}
+		for _, d := range r.Decisions {
+			if d.Candidate.Cause == h.Cause {
+				c.FreshReadOutcome, c.FreshReadEvidence = string(d.Outcome), d.Evidence
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func resultToJSON(r hypothesis.Result) resultJSON {
+	out := resultJSON{Decided: r.Decided, Cause: r.Cause, Outcome: string(r.Outcome),
+		Evidence: r.Evidence, GroupKey: r.GroupKey, GroupText: r.GroupText,
+		Decisions: []decisionJSON{}}
+	for _, d := range r.Decisions {
+		out.Decisions = append(out.Decisions, decisionJSON{d.Candidate.Cause, string(d.Outcome), d.Evidence})
+	}
+	return out
+}
+
+func firstPod(w inventory.Workload) (pod, issue, image string) {
+	f := w.Findings[0]
+	if i := strings.IndexByte(f.Pod, '/'); i >= 0 {
+		pod = f.Pod[i+1:]
+	}
+	return pod, f.Issue, f.Image
+}
+
+// clusterJSON, lineJSON, summaryJSON, serviceIssuesJSON and findingsJSON
+// mirror kubeagent's own field shapes into the same JSON key names
+// contract/golden/input.json already uses (snake_case, "type" for a
+// service issue's kind). Go's json encoder sorts a map's keys, so the
+// insertion order here does not matter.
+func clusterJSON(c clusterhealth.ClusterHealth) map[string]any {
+	nodeIssues := c.NodeIssues
+	if nodeIssues == nil {
+		nodeIssues = []string{}
+	}
+	systemIssues := c.SystemIssues
+	if systemIssues == nil {
+		systemIssues = []string{}
+	}
+	return map[string]any{
+		"degraded":      c.Verdict == "Degraded",
+		"nodes_ready":   c.NodesReady,
+		"nodes_total":   c.NodesTotal,
+		"node_issues":   nodeIssues,
+		"system_issues": systemIssues,
+	}
+}
+
+func lineJSON(l resources.Line) map[string]any {
+	return map[string]any{
+		"allocatable":  l.Allocatable,
+		"requests":     l.Requests,
+		"requests_pct": l.RequestsPct,
+		"limits":       l.Limits,
+		"limits_pct":   l.LimitsPct,
+	}
+}
+
+func summaryJSON(s *resources.Summary) map[string]any {
+	if s == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"cpu":               lineJSON(s.CPU),
+		"memory":            lineJSON(s.Memory),
+		"metrics_available": s.MetricsAvailable,
+	}
+}
+
+func serviceIssuesJSON(issues []svchealth.Issue) []map[string]any {
+	out := make([]map[string]any, 0, len(issues))
+	for _, iss := range issues {
+		out = append(out, map[string]any{
+			"namespace": iss.Namespace,
+			"name":      iss.Name,
+			"type":      iss.Type,
+			"detail":    iss.Detail,
+		})
+	}
+	return out
+}
+
+// findingsJSON converts a workload's findings into the JSON shape today's
+// golden uses. next_step/command are remediation's own deterministic
+// suggestion for the finding's Issue, exactly as the prompt's "suggested
+// fix" line reports it: explain.go's suggestionFor masks f.Pod to <pod>
+// before calling remediation.For whenever the finding's pod differs from
+// the owning workload's own namespace/name, and this mirrors that rule so
+// input.json's command values match the prompt's masked run: lines byte
+// for byte.
+func findingsJSON(w inventory.Workload, findings []diagnose.Finding) []map[string]any {
+	out := make([]map[string]any, 0, len(findings))
+	for _, f := range findings {
+		if f.Pod != "" && f.Pod != w.Namespace+"/"+w.Name {
+			if i := strings.IndexByte(f.Pod, '/'); i >= 0 {
+				f.Pod = f.Pod[:i+1] + "<pod>"
+			} else {
+				f.Pod = "<pod>"
+			}
+		}
+		s := remediation.For(f)
+		out = append(out, map[string]any{
+			"issue":     f.Issue,
+			"reason":    f.Reason,
+			"evidence":  f.Evidence,
+			"log_cause": f.LogCause,
+			"next_step": s.NextStep,
+			"command":   s.Command,
+		})
+	}
+	return out
+}
+
+func writeFile(t *testing.T, dir, name string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureVerdictGolden(t *testing.T) {
+	dir := os.Getenv("KV_GOLDEN_DIR")
+	if dir == "" {
+		t.Skip("KV_GOLDEN_DIR not set")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	wl := captureWorkloads()
+	down := []clusterhealth.DownNode{
+		{Name: "worker-1", Reason: "NotReady"},
+		{Name: "worker-2", Reason: "no kubelet lease"},
+		{Name: "worker-3", Reason: "kubelet not heartbeating"},
+		{Name: "worker-5", Reason: "NotReady"},
+		{Name: "worker-6", Reason: "NotReady"},
+		{Name: "worker-7", Reason: "NotReady"},
+	}
+	rootcause.Annotate(wl, down)
+	rootcause.AnnotatePVC(wl, capturePodPVCs(), capturePVCIssues())
+	rootcause.AnnotateRegistry(wl)
+
+	reads := captureReads()
+	results := make([]hypothesis.Result, len(wl))
+	for i := range wl {
+		results[i] = hypothesis.Decide(wl[i], reads)
+	}
+	shared := hypothesis.Shared(results)
+
+	// The prompt shows the first ten workloads: the gather's cap.
+	scoped, scopedResults := wl[:10], results[:10]
+	bundle := captureBundle(reads)
+	var b strings.Builder
+	var trail []string
+	spent := 0
+	for _, r := range bundle {
+		appendRead(&b, &trail, &spent, r.Label, r.Content)
+	}
+	cluster := goldenCluster()
+	summary := goldenSummary()
+	issues := goldenServiceIssues()
+	prompt := buildVerdictPrompt(cluster, summary, nil, issues, scoped, scopedResults, b.String())
+	writeFile(t, dir, "user_message.txt", []byte(prompt))
+	writeFile(t, dir, "system_prompt.txt", []byte(verdictSystemPrompt))
+
+	// input.json: today's keys, plus the five new ones. The cluster,
+	// summary, platform_line, service_issues and findings blocks use the
+	// same conversion the old template used (see the note above the code).
+	type workloadJSON struct {
+		Namespace      string           `json:"namespace"`
+		Name           string           `json:"name"`
+		Kind           string           `json:"kind"`
+		Ready          int              `json:"ready"`
+		Desired        int              `json:"desired"`
+		Status         string           `json:"status"`
+		Restarts       int              `json:"restarts"`
+		Confidence     string           `json:"confidence"`
+		Findings       []map[string]any `json:"findings"`
+		Candidates     []candidateJSON  `json:"candidates"`
+		Decided        bool             `json:"decided"`
+		DecidedCause   string           `json:"decided_cause"`
+		DecidedOutcome string           `json:"decided_outcome"`
+	}
+	input := map[string]any{
+		"cluster":        clusterJSON(cluster),
+		"summary":        summaryJSON(summary),
+		"platform_line":  goldenPlatformLine(),
+		"service_issues": serviceIssuesJSON(issues),
+		"reads":          bundle,
+	}
+	var wj []workloadJSON
+	for i, w := range scoped {
+		r := scopedResults[i]
+		wj = append(wj, workloadJSON{
+			Namespace: w.Namespace, Name: w.Name, Kind: w.Kind,
+			Ready: int(w.Ready), Desired: int(w.Desired), Status: w.Status,
+			Restarts: int(w.Restarts), Confidence: w.RootCauseConfidence,
+			Findings: findingsJSON(w, w.Findings), Candidates: candidatesJSON(w, r),
+			Decided: r.Decided, DecidedCause: r.Cause, DecidedOutcome: string(r.Outcome),
+		})
+	}
+	input["workloads"] = wj
+	data, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "input.json", append(data, '\n'))
+
+	fx := fixtureJSON{
+		Kubeagent: map[string]string{"tag": kvTag, "commit": kvCommit},
+		Shared:    shared, Reads: bundle,
+	}
+	if fx.Shared == nil {
+		fx.Shared = []string{}
+	}
+	for i, w := range wl {
+		pod, issue, image := firstPod(w)
+		fx.Workloads = append(fx.Workloads, fixtureWorkloadJSON{
+			Namespace: w.Namespace, Name: w.Name, Pod: pod, Issue: issue, Image: image,
+			Candidates: candidatesJSON(w, results[i]), Result: resultToJSON(results[i]),
+		})
+	}
+	data, err = json.MarshalIndent(fx, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "rules_golden.json", append(data, '\n'))
+	t.Logf("wrote 4 files under %s; %d workloads in the fixture, %d in the prompt, %d shared lines",
+		dir, len(wl), len(scoped), len(shared))
+}

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from kubeagent_verdict.dataset.objects import Object
+
 
 @dataclass(frozen=True)
 class CatalogEntry:
@@ -46,6 +48,13 @@ class CatalogEntry:
     network_policies: tuple[str, ...] = ()
     service_issue: tuple[str, str] | None = None  # (type, detail template)
     notes: str = ""
+    # The nodes, PVCs and registries this entry puts on the menu. Empty for
+    # the 9 entries with no fault-side object (control-plane read failures,
+    # Service-only issues, a deleted namespace, policy/GitOps findings with
+    # no workload, and the two healthy-cluster entries). Exactly one
+    # non-empty tuple per producing entry, except worker-containerd-stop,
+    # which declares both its own cause node and a decoy PVC.
+    objects: tuple[Object, ...] = ()
 
 
 def all_entries() -> tuple[CatalogEntry, ...]:

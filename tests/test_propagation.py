@@ -15,10 +15,30 @@ any attempt is made to correct it.
 """
 
 import json
+from dataclasses import replace
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import propagation
+from kubeagent_verdict.dataset import objects, propagation
+from kubeagent_verdict.dataset.objects import Fresh, Object
+
+
+def test_victim_and_propagation_gain_the_declaration_fields():
+    v = propagation.Victim(
+        workload_kind="Deployment", status="Running", issue="ProbeFailure",
+        reason="r", evidence="e", local_cause="c", local_reason="cr",
+        read=("label", "content"),
+    )
+    assert v.on_origin is False
+    assert v.objects == ()
+    p = propagation.Propagation(
+        key="t", blast_radius="node", scope_field="node", origin="o",
+        shared_cause="sc", shared_reason="sr", distractor_cause="dc",
+        distractor_reason="dr", rationale="ra", remedy="re", confidence="high",
+        origin_read=("label", "content"), victims=(v,),
+    )
+    assert p.origin_object is None
+    assert p.healthy_origin_fresh is None
 
 
 def test_every_scenario_has_a_closed_blast_radius():
@@ -330,3 +350,211 @@ def test_the_eval_six_declare_no_variants_and_no_state():
     for p in propagation.all_scenarios():
         assert p.origin_variants == (), p.key
         assert p.origin_state == ("", ""), p.key
+
+
+def test_the_shared_scenarios_declare_an_origin_object():
+    by_key = {p.key: p for p in propagation.all_scenarios()}
+
+    node_lost = by_key["node-not-ready"]
+    assert node_lost.origin_object == Object(
+        kind="node", name="{node}", scan_reason="NotReady", placement="on",
+        fresh=Fresh(ready="False"), intent="cause")
+    assert node_lost.healthy_origin_fresh == Fresh(ready="True")
+
+    storage = by_key["storage-provisioner-down"]
+    assert storage.origin_object == Object(
+        kind="pvc", name="{pvc}", scan_reason="ProvisionerNotResponding",
+        placement="mounted",
+        fresh=Fresh(phase="Pending", storage_class="standard"), intent="cause")
+    assert storage.healthy_origin_fresh == Fresh(phase="Bound", storage_class="standard")
+
+    registry = by_key["registry-unreachable"]
+    assert registry.origin_object == Object(
+        kind="registry", name="registry.example.com", scan_reason="3", placement="",
+        fresh=Fresh(literal="dial tcp"), intent="cause")
+    assert registry.healthy_origin_fresh == Fresh(literal="manifest unknown")
+
+    for key in ("coredns-down", "node-disk-pressure", "networkpolicy-deny-all"):
+        p = by_key[key]
+        assert p.origin_object is None, key
+        assert p.healthy_origin_fresh is None, key
+
+
+def test_the_six_scenarios_declare_what_the_graft_table_says():
+    by_key = {p.key: p for p in propagation.all_scenarios()}
+
+    coredns = by_key["coredns-down"]
+    names = [v.objects[0].name for v in coredns.victims]
+    assert names == ["worker-1", "worker-2", "worker-3"]
+    for v in coredns.victims:
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].placement == "on"
+        assert v.on_origin is False
+
+    node_lost = by_key["node-not-ready"]
+    v1, v2 = node_lost.victims
+    assert v1.on_origin is True and v1.objects == ()
+    assert v2.on_origin is True and v2.objects == ()
+
+    storage = by_key["storage-provisioner-down"]
+    sv1, sv2, sv3 = storage.victims
+    assert sv1.on_origin is True and sv1.objects == ()
+    assert sv2.on_origin is True and sv2.objects == ()
+    assert sv3.on_origin is True and sv3.objects == ()
+
+    registry = by_key["registry-unreachable"]
+    for v in registry.victims:
+        assert v.on_origin is True
+        assert v.objects == ()
+
+    disk = by_key["node-disk-pressure"]
+    d1, d2, d3 = disk.victims
+    assert [v.objects[0].placement for v in (d1, d2, d3)] == ["off", "on", "on"]
+    for v in disk.victims:
+        assert v.on_origin is False
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].name == "{node}"
+
+    netpol = by_key["networkpolicy-deny-all"]
+    n1, n2 = netpol.victims
+    assert n1.objects[0].name == "worker-1"
+    assert n2.objects[0].name == "worker-2"
+    for v in netpol.victims:
+        assert v.on_origin is False
+        assert len(v.objects) == 1
+        assert v.objects[0].kind == "node"
+        assert v.objects[0].placement == "on"
+
+
+def test_every_scenario_object_passes_check_declaration():
+    from kubeagent_verdict.dataset import rules
+
+    for p in propagation.all_scenarios():
+        origin_objects = (p.origin_object,) if p.origin_object is not None else ()
+        rules.check_declaration(p.key, origin_objects)
+        for i, v in enumerate(p.victims):
+            rules.check_declaration(f"{p.key}/victim{i}", v.objects)
+
+
+def test_victim_decoy_objects_declare_their_contents():
+    """Every victim decoy is a node decoy, declared the same way."""
+    for prop in propagation.all_scenarios():
+        for i, v in enumerate(prop.victims, 1):
+            for obj in v.objects:
+                where = f"{prop.key}/victim{i}/{obj.kind}:{obj.name}"
+                assert obj.intent == "decoy", where
+                assert obj.kind == "node", where
+                assert obj.scan_reason == "NotReady", where
+                assert obj.fresh.how == "read", where
+    # A victim decoy's declared `fresh` never reaches a prompt: every node
+    # ending replaces it. Pin that, so the comment above `objects` stays true.
+    for ending in ("lease", "read_failed"):
+        sample = propagation.by_key()["coredns-down"].victims[0].objects[0]
+        assert objects.unverify(sample, ending).fresh != sample.fresh, ending
+    sample = propagation.by_key()["coredns-down"].victims[0].objects[0]
+    assert objects.refute(sample).fresh.ready == "True"
+    # `kind`, `name` and `placement` are the only declared values every ending
+    # keeps. Pin all three endings, so the comment above `objects` stays true.
+    for drawn in (objects.refute(sample), objects.unverify(sample, "lease"),
+                  objects.unverify(sample, "read_failed")):
+        assert (drawn.kind, drawn.name, drawn.placement) == (
+            sample.kind, sample.name, sample.placement)
+    # `scan_reason` is a placeholder under two of the three endings. Declare a
+    # different one, so the check cannot pass by coincidence.
+    probe = replace(sample, scan_reason="kubelet not heartbeating")
+    assert objects.refute(probe).scan_reason == "NotReady"
+    assert objects.unverify(probe, "lease").scan_reason == "no kubelet lease"
+    assert objects.unverify(probe, "read_failed").scan_reason == (
+        "kubelet not heartbeating")
+
+
+def test_shared_origin_meta_is_derived_from_the_object_not_declared():
+    """R21: job/decided_* meta for a shared-origin victim comes from running rules.decide
+    over the bound origin_object, not from a hand-set 'job: 1' literal."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
+
+    assert set(r.meta) == {"workloads", "label", "decoy_by_workload"}
+    assert len(r.meta["workloads"]) == 2
+    for meta in r.meta["workloads"].values():
+        assert set(meta) == {
+            "job", "decided", "decided_cause", "decided_outcome",
+            "decided_evidence", "expected_cause", "own_cause_keywords"}
+        assert meta["job"] == 1
+        assert meta["decided"] is True
+    assert r.meta["label"] in ("shared", "separate", "none")
+    assert set(r.meta["decoy_by_workload"]) == set(r.meta["workloads"])
+
+
+def test_shared_origin_decoy_meta_is_not_decided_when_healthy():
+    """The healthy half swaps in healthy_origin_fresh; 0 victims are confirmed on the
+    origin, so none of them are decided by it."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
+
+    assert all(meta["decided"] is False for meta in r.meta["workloads"].values())
+
+
+def test_registry_unreachable_shared_read_agrees_with_the_declared_object():
+    """The registry-events consistency rule, checked the one place _render_shared_origin
+    renders a registry object: rules.decide on the declared origin_object/healthy_origin_fresh
+    must land on the same outcome the origin_read/healthy_origin_content prose already tells."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    assert "dial tcp" in p.origin_read[1]
+    assert p.origin_object.fresh.literal == "dial tcp"
+    broken = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
+    for meta in broken.meta["workloads"].values():
+        assert meta["decided"] is True
+        assert meta["decided_outcome"] == "confirmed"
+
+    assert "manifest unknown" in p.healthy_origin_content
+    assert p.healthy_origin_fresh.literal == "manifest unknown"
+    healthy = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
+    for meta in healthy.meta["workloads"].values():
+        assert meta["decided"] is False
+
+
+def test_shared_origin_wrappers_merge_the_new_meta_without_losing_existing_keys():
+    """The four thin wrappers keep every key they write today and gain 'workloads',
+    'label', 'decoy_by_workload' from _render_shared_origin's r.meta."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
+
+    ex = cases.shared_origin(p, random.Random(3))
+    for key in ("case", "origin", "expected", "expected_confidence", "origin_read_label"):
+        assert key in ex.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex.meta
+
+    ex_decoy = cases.shared_origin_decoy(p, random.Random(3))
+    assert "expected_confidence" not in ex_decoy.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_decoy.meta
+
+    ex_probe = cases.shared_origin_probe(p, random.Random(3))
+    for key in ("decoy_causes", "distractor_cause", "wrong_summary_phrase"):
+        assert key in ex_probe.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_probe.meta
+
+    ex_decoy_probe = cases.shared_origin_decoy_probe(p, random.Random(3))
+    assert "shared_claim_phrases" in ex_decoy_probe.meta
+    for key in ("workloads", "label", "decoy_by_workload"):
+        assert key in ex_decoy_probe.meta

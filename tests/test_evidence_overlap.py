@@ -58,10 +58,10 @@ POD = re.compile(r"<NAME>-[a-z0-9]{3,}(?:-[a-z0-9]{3,})?")
 DECLARED = {
     # Reuses attributed's reads by design -- the candidate menu is the only
     # perturbation, which IS the whole measurement. Costs nothing.
-    "positional_probe": (23, 25),
-    "misattribution_probe": (24, 25),
+    "positional_probe": (20, 20),
+    "misattribution_probe": (14, 20),
     # Same, in the multi shape: _reads(e, n)[:2] per constituent.
-    "multi_misattribution_probe": (47, 50),
+    "multi_misattribution_probe": (39, 40),
     # THIS ROW IS THE POINT OF THE INSTRUMENT. It reuses none_of_these_case's
     # read text verbatim, and none_of_these is a fixed 15% of every curriculum
     # via CASE_MIX -- which is why this slice cannot catch a model reciting an
@@ -81,7 +81,7 @@ DECLARED = {
     # reads 17/19. The build size moving to 8000, this task's own change,
     # does not touch it: it already read 17/19 at size 5500 with the same
     # mix and pool, so the size is not what moved this row.
-    "contradiction_probe": (17, 19),
+    "contradiction_probe": (19, 38),
     # THIS ROW IS THE POINT OF THE ALLOWLIST. Its rows come from
     # dataset.propagation, not the catalog, so it shares nothing -- which is
     # what shows the guard discriminates rather than rubber-stamping.
