@@ -31,9 +31,12 @@ that matters most:
   the attributed tag" scores 1.0 here and 0.0 on `shared_origin_probe`, and
   "always take the outranked candidate" scores exactly the reverse. Neither
   heuristic can win both, and the menu offers no third tag to try;
-* the summary -- job3 grades each row against its own label, so a model
-  that answers "shared origin" everywhere and one that answers "separate
-  reasons" everywhere both fail, each on the slice the other passes.
+* the summary -- job3 grades each row against its own label, and neither
+  constant answer wins both slices: a constant "shared origin" scores 0 of
+  10 here and 5 of 10 on the probe twin. The twin does not mirror this
+  slice -- a constant "separate reasons" sweeps this slice 10 of 10 and
+  still only reaches 5 of 10 there, because half the probe rows carry
+  label `none`, which a denial passes.
 
 Two things it does NOT do, stated rather than implied.
 
@@ -199,7 +202,7 @@ def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
 
 
 def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
-    """The two meta fields this slice needs, and the one it must not carry.
+    """The one meta field this slice needs, and the one it must not carry.
 
     `shared_claim_phrases` is written for the pinned hash blob and read by
     no scorer -- job3's honesty check runs on its own copy of the phrases in

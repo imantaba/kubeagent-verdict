@@ -969,8 +969,11 @@ def shared_origin_probe(p: prop.Propagation, rng: random.Random,
               # that names the shared cause on every row and then summarises
               # the workloads as independent has half-learned the correction.
               # No scorer reads this field anymore -- job3 grades the summary
-              # against this row's own `label` ("shared" here), so that
-              # half-learned answer scores 0 the same way any denial would.
+              # against the row's own `label`, which is `shared` where the
+              # deterministic pass confirms a shared group and `none` on the
+              # rest (5 and 5 in the frozen exam). The half-learned answer
+              # scores 0 on the `shared` rows and 1.0 on the `none` rows, so
+              # this slice only penalises it half the time.
               "wrong_summary_phrase": prop.SEPARATE_REASONS,
               **r.meta})
 
@@ -1005,9 +1008,12 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
       tag" sweeps this slice and scores zero on the twin; "take the outranked
       candidate" does exactly the reverse. Neither wins both, and the menu
       offers no third tag;
-    * the summary -- job3 grades each row against its own label, so
-      answering "shared origin" everywhere and answering "separate reasons"
-      everywhere each fail on the slice the other passes. `wrong_summary_phrase`
+    * the summary -- job3 grades each row against its own label, and
+      neither constant answer wins both slices: a constant "shared origin"
+      scores 0 of 10 here and 5 of 10 on the probe twin. The twin does not
+      mirror this slice -- a constant "separate reasons" sweeps this slice
+      10 of 10 and still only reaches 5 of 10 there, because half the probe
+      rows carry label `none`, which a denial passes. `wrong_summary_phrase`
       is deliberately ABSENT from this row's meta: independence is the CORRECT
       summary here, and carrying it would score the right answer as a failure.
 
