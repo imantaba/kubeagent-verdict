@@ -634,6 +634,12 @@ prompt now, and a bot that copies it scores 1.0 (limit 1 below). 0908 reads
 0.1783 — the lowest of the three jobs, not the highest. It is not reading the
 line that hands it the answer.
 
+Job 2 has a floor under it for the same reason. A bot that pastes the prompt
+back as its cause, reading nothing, scores 0.366 (limit 7 below). 0908 reads
+0.2418. So on the job that carries the diagnosis, 0908 is below what copying
+would have scored — the number is not a weak reading, it is worse than no
+reading at all.
+
 Job 3's 39 prompts split 5 `shared`, 0 `separate`, 34 `none`. The `separate`
 label carries no exam row, so there is nothing to score there — its rate reads
 `n/a`, not `0.0`. 0908 scored 1.0 on the 5 `shared` rows and 0.6765 on the 34
@@ -665,7 +671,7 @@ The overconfidence reading is the overall one, over 167 wrong causes. It is not
 a slice, and it is not blind — a zero denominator would be written `not
 measured`, and this one is far from zero.
 
-Six limits on this reading, carried from the design that scored it:
+Seven limits on this reading, carried from the design that scored it:
 
 1. Job 1 has a measured ceiling: a bot that regex-copies the decided line out
    of the prompt and pads a filler rationale scores exactly 1.0, on all 157
@@ -688,3 +694,12 @@ Six limits on this reading, carried from the design that scored it:
    run does not clear the floor, so nothing on the board above turns on it
    today — but the next run that does will still have only one row deciding
    the gap.
+7. Job 2 has a measured ceiling too, and it is not zero. Job 2 marks a cause
+   right when every keyword its answer key requires appears in the reply, and
+   for 56 of the 114 keyword-graded workloads those keywords are already
+   printed in the prompt. A bot that hands the prompt back scores 0.366 on
+   that alone. A test pins it, so it is a measurement rather than an estimate.
+   The bar is 0.7, so this exposure cannot pass job 2 by itself — but any job-2
+   score at or under 0.366 is not evidence that a model read anything. Closing
+   it means rewriting the answer keys of those 56 workloads, which would
+   retire every job-2 number measured so far, including this one.
