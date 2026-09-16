@@ -313,6 +313,12 @@ than re-generated, so `scoreboard.json`'s `run` block carries a
 `rescored_from` key naming the run they came from — read that block before
 reading any number in the file.
 
+`separate_reasons_rate` and `false_shared_rate` were both retired in the
+v1.24.0 rescope. The bar this page argues for above no longer exists to
+carry. `docs/runbooks/train.md` step 6 names the three job bars and five
+deciders that replaced it, and "0908 against the v1.24.0 exam" below reports
+how this model reads against them.
+
 ### `cause` is a closed-set selection score, not free-text accuracy
 
 A rate cannot tell you which of those two things it is, so this was
@@ -586,3 +592,53 @@ than guessed" in [how-training-works.md](how-training-works.md). The short
 version is that the curriculum change did land — 440 shared-origin lessons are
 in the built dataset — and the model still answers most of them from the
 scenario rather than from the one line that distinguishes the two halves.
+
+### 0908 against the v1.24.0 exam
+
+**Fail.** 0908 does not clear the v1.24.0 exam, and it adds nothing under
+v1.24.0: no version bump, no tag, no release. Run: `out/eval/0908`,
+0916.
+
+Job 1 was expected to have the best chance of clearing, since a model that
+just copies the decided line can score close to 1.0 there (limit 1,
+below). That did not happen: job 1 read the lowest of the three jobs, not
+the highest, and far under its 0.9 bar.
+
+Before this run, the smoke set (not gated) scored 0908 against three real
+`--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3
+of 12 (`contract/smoke/README.md`).
+
+| job | reading | bar | verdict |
+|---|---|---|---|
+| job 1 — echo the decided cause | 0.0845 (142) | ≥ 0.9 | MISSED |
+| job 2 — name the cause on an undecided row | 0.296 (125) | ≥ 0.7 | MISSED |
+| job 3 — agree with the shared-cause line | 0.6923 (39) | ≥ 0.9, gating | MISSED |
+
+Job 3's 39 prompts split 5 `shared`, 0 `separate`, 34 `none`. 0908 scored
+0.6 (5) on the `shared` rows and 0.7059 (34) on the `none` rows — it missed
+on both halves, not just the harder one.
+
+| decider | reading | verdict |
+|---|---|---|
+| contract validity `1.0` | 0.9772 (263) | MISSED |
+| decoy rate low on every decoy-bearing workload | `0.0` (19) misattribution_probe; nonzero on every other slice — `0.0377` (53) attributed, `0.0526` (19) contradiction_probe, `0.4211` (19) injection, `0.0526` (19) none_of_these, `0.0526` (19) own_cause, `0.1667` (18) positional_probe, `0.2` (10) shared_origin_decoy_probe, `0.2` (10) shared_origin_probe, `0.2632` (19) truncated, `0.0526` (19) wrong_attribution | MISSED |
+| `length_gap` ≤ 0.15, and not at the floor | n/a — one of the two slices has no rows, so there is nothing to compare | not measured |
+| overconfidence on wrong causes | 0.1454 (180) | MISSED |
+| suggestion echo `0` of `263` | `0.0` (261) — 2 of the 263 rows had nothing to check and are excluded from this rate | met |
+
+`multi_misattribution_probe`'s `0.1111 (18)` decoy rate is excluded from
+the row above, not folded into it: all of its workload identities appear
+in the training data, the same contamination the earlier release-bar table
+names for this case. Every other decoy-bearing case type reads nonzero
+regardless, so this decider misses on its own.
+
+Four limits on this reading, carried from the design that scored it:
+
+1. Job 1 has a regex ceiling: a bot that copies the decided line scores
+   about 1.0.
+2. On option-A rows the rules fix a node the story says is not the
+   cause, and the exam grades the echo, not the story.
+3. The `separate` label is 0 in the exam. Only a scorer test and one
+   training-only prompt pin it.
+4. 0908 was trained on the v1.23.0 prompt shape. It never saw a
+   fresh-read or decided line in training.
