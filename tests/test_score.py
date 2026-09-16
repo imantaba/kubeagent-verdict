@@ -1553,3 +1553,161 @@ def test_paired_decider_symbols_are_deleted():
     for name in ("PAIRED_CASES", "_shared_verdict", "paired_contrast"):
         assert not hasattr(score, name), (
             f"score.{name} should be deleted once evaluate()/scoreboard() no longer call it")
+
+
+# --------------------------------------------------- baseline bots (D9)
+
+
+def _corpus_rows() -> list[dict]:
+    return [generate.to_row(ex) for ex in generate.test_set()]
+
+
+def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
+    rows = _corpus_rows()
+    expected_job1_n = sum(1 for r in rows
+                          if any(wm.get("job") == 1
+                                 for wm in r["meta"]["workloads"].values()))
+    expected_job2_n = sum(1 for r in rows
+                          if any(wm.get("job") == 2
+                                 for wm in r["meta"]["workloads"].values()))
+    expected_job3_n = sum(1 for r in rows if len(r["meta"]["workloads"]) >= 2)
+
+    results = score.evaluate(rows, lambda messages: "")
+    board = score.scoreboard(results)
+
+    assert board["jobs"]["job1"] == {"rate": 0.0, "n": expected_job1_n}
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": expected_job2_n}
+    assert board["jobs"]["job3"]["rate"] == 0.0
+    assert board["jobs"]["job3"]["n"] == expected_job3_n
+    assert expected_job1_n > 0
+    assert expected_job2_n > 0
+
+
+def _echo_the_decided_cause_bot(rows: list[dict]):
+    """A bot that never reads the prompt's English and never invents a cause
+    -- it looks up each flagged workload's OWN meta and echoes back exactly
+    what the rule engine already decided for it, the same string the prompt
+    shows the model in evidence. A job-1 (decided) workload's `decided_cause`
+    is non-empty, so the echo is exact and clean -- job1's first two
+    conditions (cause matches, no denial phrase) pass by construction, and
+    the rationale below carries no `OVERCLAIM_WORDS` and no `DENIAL_PHRASES`
+    hit for any kind. A job-2 (undecided) workload's `decided_cause` is the
+    empty string (Task 6's contract), so the bot falls back to a fixed
+    non-answer that names no real diagnosis and so cannot contain any
+    workload's `own_cause_keywords` -- job2 comes out at 0.0 on every one of
+    them, which is the whole point of this bot: it proves job1 and job2
+    cannot be satisfied by the same lazy answer.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        workloads = row["meta"]["workloads"]
+        verdicts = []
+        for name, wm in workloads.items():
+            cause = wm.get("decided_cause") or "no attribution available"
+            verdicts.append({
+                "workload": name,
+                "cause": cause,
+                "confidence": "high" if wm.get("decided") else "low",
+                "rationale": "the evidence shown above points to this cause",
+            })
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_echo_the_decided_cause_bot_clears_job1_and_scores_zero_on_job2():
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _echo_the_decided_cause_bot(rows))
+    board = score.scoreboard(results)
+
+    assert board["jobs"]["job1"]["rate"] >= score.JOB1_BAR
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": board["jobs"]["job2"]["n"]}
+
+
+def _never_say_shared_bot(rows: list[dict]):
+    """Answers every workload correctly (so job1/job2 do not confound the
+    reading below) but writes the same flat, uncommitted summary on every
+    multi-workload row -- one that names neither a shared cause nor an
+    independence phrase. Against job 3's table (Step 25) that summary scores
+    1.0 on a `none` row (neither claims nor denies -- correct) and 0.0 on a
+    `shared` row (must claim and does not). There are no `separate` rows in
+    the real corpus today (Task 6's pinned count: 5 shared / 0 separate / 34
+    none of 39), so this bot's job3 rate is exactly the `none` share: 34/39.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        expected = json.loads(row["messages"][2]["content"])
+        expected = dict(expected)
+        expected["summary"] = "see the verdicts above for details"
+        return json.dumps(expected)
+
+    return chat_fn
+
+
+def test_never_say_shared_bot_scores_34_of_39_on_job3():
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _never_say_shared_bot(rows))
+    board = score.scoreboard(results)
+
+    assert board["jobs"]["job3"]["n"] == 39
+    assert board["jobs"]["job3"]["rate"] == round(34 / 39, 4)
+    assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 5
+    assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 0
+    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 34
+    assert board["jobs"]["job3"]["by_label"]["shared"]["rate"] == 0.0
+    assert board["jobs"]["job3"]["by_label"]["none"]["rate"] == 1.0
+
+
+def _always_none_of_these_bot(rows: list[dict]):
+    """Answers every flagged workload with `none_of_these`, regardless of
+    what the prompt actually shows -- the hedge that costs nothing to say.
+    Job 2's bar rewards real diagnosis, not a safe default: this bot only
+    clears the minority of job-2 workloads whose `expected_cause` really is
+    `none_of_these`.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        workloads = row["meta"]["workloads"]
+        verdicts = [{"workload": name, "cause": "none_of_these",
+                     "confidence": "medium",
+                     "rationale": "none of the candidates shown fit the evidence"}
+                    for name in workloads]
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
+    """job2's rate is a row-weighted mean of means: the score per row
+    first, then the mean of those row scores -- not one flat mean over
+    every job-2 workload in the corpus. The flat, workload-level share of
+    `none_of_these` job-2 workloads is 19/153 = 0.1242, close to design
+    spec section 6's 0.1 estimate. But every one of those 19 workloads is
+    the ONLY job-2 workload in its row, so each one's row mean is 1.0 (not
+    diluted by any sibling workload), which pulls the row-weighted mean up
+    to 19/125 = 0.152. Both numbers describe the same corpus; job2 reports
+    the second one.
+
+    0.152 is pinned with a tight tolerance on purpose: a change to this
+    number means the corpus moved (a different `none_of_these` count, or a
+    different split of job-2 workloads across rows), and that is worth
+    noticing, not smoothing over. The property this test actually exists
+    to defend -- a bot that always says "none of these" scores far below
+    the job2 bar -- is asserted on its own so it never depends on getting
+    the exact figure right.
+    """
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _always_none_of_these_bot(rows))
+    board = score.scoreboard(results)
+
+    assert board["jobs"]["job2"]["n"] > 0
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.152, abs=0.005)
+    assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
