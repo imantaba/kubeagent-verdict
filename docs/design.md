@@ -335,8 +335,8 @@ on the kept pile, so neither can be claimed by measuring the other. Second, the 
 paragraph closes on the training side: seven of the ten `shared_origin_probe`
 rows carry a read label appearing in none of the other 243 test rows, so
 answering "one shared cause" on those four labels and "separate causes"
-everywhere else passes BOTH halves of decider 5 while reading no evidence at
-all. That is now closed too, from the exam side, by `shared_origin_decoy_probe`
+everywhere else clears job 3 and the decoy rate on these same rows while
+reading no evidence at all. That is now closed too, from the exam side, by `shared_origin_decoy_probe`
 — ten rows rendering the same six scenarios with the origin read showing the
 component HEALTHY, drawn from the same rng salts as their twins so each pair is
 a minimal contrast: identical inventory, identical candidate menus, identical

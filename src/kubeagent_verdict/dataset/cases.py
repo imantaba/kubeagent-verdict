@@ -1035,7 +1035,7 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
     {node}` -- that appears on no other row in the exam, and on every row
     carrying it the answer is one shared cause. So "a cluster-wide read is
     present, therefore one shared cause" scores that slice perfectly while
-    reading nothing, and passes both halves of decider 5 doing it.
+    reading nothing, and clears job 3 and the decoy rate doing it.
 
     This is the counter-example. Drawn from the SAME rng salt as its twin, so
     the two rows are a minimal contrast: identical candidate menus, identical

@@ -1,6 +1,6 @@
 """`_stratified` decides what a short eval run actually looks at."""
 
-from kubeagent_verdict.evals.cli import _stratified
+from kubeagent_verdict.evals.cli import _format_smoke_line, _stratified
 
 CASES = ["attributed", "empty_candidates", "injection", "misattribution_probe",
          "none_of_these", "own_cause", "positional_probe", "shared_origin_probe",
@@ -66,3 +66,14 @@ def test_dropped_cases_are_named_rather_than_dropped_in_silence():
     dropped = _dropped_cases(rows, _stratified(rows, len(probes)))
     assert set(dropped) == set(CASES) - probes
     assert _dropped_cases(rows, _stratified(rows, len(CASES))) == []
+
+
+# The smoke block scores real kubeagent rule rows, not exam workloads, and its
+# print text said so once before drifting to "decided workloads" -- the exam's
+# own job-1 population name -- when job 1's population was renamed elsewhere.
+# This pins the smoke line's wording so that drift fails a test instead of
+# only a design-doc grep.
+def test_smoke_line_names_rule_rows_not_decided_workloads():
+    line = _format_smoke_line("02", 1, 4)
+    assert line == "  02: job 1 scored 1 of 4 rule rows"
+    assert "decided workloads" not in line

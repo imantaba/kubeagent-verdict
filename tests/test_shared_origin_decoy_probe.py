@@ -8,7 +8,7 @@ close and says the fix belongs elsewhere:
 
     the exam cannot detect this shortcut even now -- seven of the ten
     `shared_origin_probe` rows carry a read label that appears in none of the
-    other 243, so label-matching alone passes both halves of decider 5.
+    other 243, so label-matching alone clears job 3 and the decoy rate.
 
 This is elsewhere. `shared_origin_decoy_probe` renders the SAME six scenarios
 with the origin read showing the component healthy, and the correct answer

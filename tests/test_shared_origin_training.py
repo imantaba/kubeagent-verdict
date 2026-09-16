@@ -33,7 +33,7 @@ third of the `multi` counter-examples and none of the `shared_origin` rows,
 so the emitted ~48/52 reaches the optimizer as ~62/38. And the exam cannot
 detect this shortcut even now — seven of the ten `shared_origin_probe` rows
 carry a read label that appears in none of the other 243, so label-matching
-alone passes both halves of decider 5. Fixing that is an exam-side change and
+alone clears job 3 and the decoy rate. Fixing that is an exam-side change and
 does not belong in this module.
 """
 

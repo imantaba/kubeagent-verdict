@@ -164,6 +164,18 @@ def _dropped_cases(rows: list[dict], kept: list[dict]) -> list[str]:
     return sorted({_case(r) for r in rows} - {_case(r) for r in kept})
 
 
+def _format_smoke_line(pair: str, job1_scored: int, total: int) -> str:
+    """One smoke-block print line, isolated so its wording is unit-tested.
+
+    The smoke set scores real kubeagent rule rows (`contract/smoke/README.md`,
+    the design spec's `:800-804`), never the exam's job-1 "decided workloads"
+    population -- that name belongs to `job1` alone. This function is the one
+    place the line is built, so a rename that drifts the two apart fails a
+    test instead of only a doc grep.
+    """
+    return f"  {pair}: job 1 scored {job1_scored} of {total} rule rows"
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="kv-eval")
     p.add_argument("--test", type=Path, required=True)
@@ -209,5 +221,4 @@ def main() -> None:
             (smoke_dir / f"{pair}-response.json").read_text(encoding="utf-8"))
         pair_scores = smoke.score_smoke_pair(smoke_request, smoke_response)
         job1_scored = sum(1 for value in pair_scores if value == 1.0)
-        print(f"  {pair}: job 1 scored {job1_scored} of {len(pair_scores)} "
-              f"decided workloads")
+        print(_format_smoke_line(pair, job1_scored, len(pair_scores)))
