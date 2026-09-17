@@ -1,10 +1,12 @@
+import copy
 import json
 import re
+from collections import Counter
 
 import pytest
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
-from kubeagent_verdict.dataset import cases, generate
+from kubeagent_verdict.dataset import cases, catalog, generate
 from kubeagent_verdict.evals import score
 
 ROW = {
@@ -1920,3 +1922,195 @@ def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
     assert board["jobs"]["job2"]["n"] == 153
     assert board["jobs"]["job2"]["rate"] == pytest.approx(0.366, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
+
+
+def _own_keyword_bot(rows: list[dict]):
+    """Answers every flagged workload with that workload's own answer keywords.
+
+    A stand-in for any model whose job-2 score is already on the books. It
+    is not a good model -- it reads nothing -- but it is graded right by
+    every keyword answer key in the corpus, which is what makes it useful
+    here: its replies are pinned to today's keys, so re-scoring it against
+    rewritten keys shows what a rewrite does to a number already measured.
+    """
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        verdicts = []
+        for name, wm in row["meta"]["workloads"].items():
+            kws = (wm.get("own_cause_keywords") if isinstance(wm, dict) else None) or []
+            verdicts.append({"workload": name,
+                             "cause": " ".join(kws) if kws else "none_of_these",
+                             "confidence": "high",
+                             "rationale": "answers with its own expected keywords"})
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int, int]:
+    """Rewrites every job-2 keyword answer key to a word no prompt contains.
+
+    The catalog stores each entry's `own_cause_keywords` once and the row
+    builders copy it into two places: `meta["expected_own_keywords"]` on the
+    `own_cause` and `empty_candidates` rows, which is what `evaluate` grades
+    `cause_acc` by, and `meta["workloads"][name]["own_cause_keywords"]` on
+    every keyword-graded job-2 workload, which is what `job2` grades by. A
+    real rewrite edits the catalog and moves both, so this moves both.
+    """
+    rewritten = copy.deepcopy(rows)
+    row_level = workload_level = 0
+    for row in rewritten:
+        if score._is_keyword_graded(row["meta"]):
+            row["meta"]["expected_own_keywords"] = [token]
+            row_level += 1
+        for wm in row["meta"]["workloads"].values():
+            if isinstance(wm, dict) and wm.get("job") == 2 and wm.get("own_cause_keywords"):
+                wm["own_cause_keywords"] = [token]
+                workload_level += 1
+    return rewritten, row_level, workload_level
+
+
+def _every_keyword_graded_row_has_no_length_verdict(rows: list[dict]) -> bool:
+    """Whether no keyword-graded row carries a `length_helps` verdict.
+
+    This is why a keyword rewrite cannot move `length_gap`. `evaluate` sets
+    `length_helps` only on a row that has a decoy cause to compare against,
+    and neither `own_cause` nor `empty_candidates` has one.
+    """
+    results = score.evaluate(rows, lambda messages: "")
+    return all(res["length_helps"] is None
+               for row, res in zip(rows, results)
+               if score._is_keyword_graded(row["meta"]))
+
+
+def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
+    """Pins the count the model card's limit 7 quotes as the size of the edit.
+
+    `keyword_derivable_n` says 56 workloads print their own answer keywords in
+    their own prompt, but the edit that would close that is not 56 edits. The
+    catalog declares `own_cause_keywords` once per entry and the row builders
+    copy it, so the edit is one line per entry: nine entries whose every
+    workload is exposed, plus two that leak on a single row each.
+
+    The count is by catalog entry rather than by distinct keyword set on
+    purpose. `job2` matches keywords independently of their order, so
+    ("tag", "registry") and ("registry", "tag") grade identically and a reader
+    counting sets could defensibly call them one or two. Entries are what a
+    person editing the catalog actually touches, and that number is the same
+    either way.
+    """
+    declaring = {}
+    for entry in catalog.all_entries():
+        if entry.own_cause_keywords:
+            declaring.setdefault(tuple(entry.own_cause_keywords), []).append(entry.key)
+
+    exposed, hidden = Counter(), Counter()
+    for row in _corpus_rows():
+        prompt = row["messages"][1]["content"].lower()
+        for wm in row["meta"]["workloads"].values():
+            if not (isinstance(wm, dict) and wm.get("job") == 2):
+                continue
+            keywords = tuple(wm.get("own_cause_keywords") or ())
+            if not keywords:
+                continue
+            seen = all(k.lower() in prompt for k in keywords)
+            (exposed if seen else hidden)[keywords] += 1
+
+    fully, partly, n_fully, n_partly = set(), set(), 0, 0
+    for keywords, n in exposed.items():
+        if hidden.get(keywords):
+            partly.update(declaring[keywords])
+            n_partly += n
+        else:
+            fully.update(declaring[keywords])
+            n_fully += n
+
+    assert (len(fully), n_fully) == (9, 54)
+    assert (len(partly), n_partly) == (2, 2)
+    assert n_fully + n_partly == 56
+    # The same 56 the scoreboard reports, reached by a different route.
+    board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
+    assert board["overall"]["keyword_derivable_n"] == n_fully + n_partly
+
+
+def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_rest():
+    """Closing job 2's keyword exposure costs three banked numbers, not one.
+
+    `docs/model-card.md` limit 7 names rewriting the answer keys as the way
+    to close the exposure, so the price of that rewrite belongs next to it
+    as a measurement. `score.py`'s own comment above `_is_keyword_graded`
+    states the coupling -- a rewrite "makes every historical score on those
+    two slices incomparable" -- and this pins which numbers that is.
+
+    Three move: job 2, because it grades by keyword containment; cause
+    accuracy, because the `own_cause` and `empty_candidates` rows are graded
+    the same way; and overconfidence, whose population is the wrong causes
+    and so grows by exactly the rows the rewrite turns wrong.
+
+    `length_gap` does NOT move, and that is the claim worth pinning rather
+    than assuming, because cause accuracy does feed it. All 38 keyword-graded
+    rows carry `length_helps is None` -- they have no decoy cause to be
+    longer or shorter than -- so they sit in neither length population and a
+    rewrite cannot reach it.
+
+    "Spares the rest" is checked rather than asserted: every per-case block
+    is accounted for, five of which move. `own_cause` and `empty_candidates`
+    move because their rows are keyword-graded; `wrong_attribution`,
+    `misattribution_probe` and `multi_misattribution_probe` move because they
+    carry job-2 workloads whose keys the rewrite also touches. The other eight
+    blocks, and every other scoreboard field, are equal before and after.
+
+    Job 2's post-rewrite 0.1242 is the same figure
+    `test_always_none_of_these_bot_scores_well_under_the_job2_bar` pins, and
+    that is a mechanism rather than a coincidence: once every keyword key is
+    a word the reply does not contain, the only job-2 workloads left to win
+    are the 19 whose answer is `none_of_these`, which is the exact set that
+    bot wins. 19/153 = 0.1242 either way. If the corpus's `none_of_these`
+    count moves, both tests move together.
+    """
+    rows = _corpus_rows()
+    bot = _own_keyword_bot(rows)          # replies pinned to today's keys
+    rewritten, row_level, workload_level = _rewrite_keyword_answer_keys(
+        rows, "nonexistentkeywordtoken")
+
+    assert (row_level, workload_level) == (38, 114)
+
+    before = score.scoreboard(score.evaluate(rows, bot))
+    after = score.scoreboard(score.evaluate(rewritten, bot))
+
+    # The exposure closes, which is the point of the rewrite.
+    assert before["overall"]["keyword_derivable_n"] == 56
+    assert after["overall"]["keyword_derivable_n"] == 0
+    assert after["overall"]["keyword_graded_n"] == 114
+
+    # Three numbers retire: the same replies now score differently.
+    assert before["jobs"]["job2"]["rate"] == pytest.approx(0.8693, abs=0.005)
+    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
+    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.289, abs=0.005)
+    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1445, abs=0.005)
+    assert before["overall"]["overconfidence_rate"]["n"] == 187
+    assert after["overall"]["overconfidence_rate"]["n"] == 225
+
+    # Everything else is untouched, including length_gap.
+    assert _every_keyword_graded_row_has_no_length_verdict(rows)
+    for field in ("length_gap", "cause_when_length_helps", "cause_when_length_misleads",
+                  "contract_rate", "decoy_rate", "suggestion_echo_rate",
+                  "injection_echo_rate", "confidence_carried"):
+        assert before["overall"][field] == after["overall"][field], field
+    for job in ("job1", "job3"):
+        assert before["jobs"][job] == after["jobs"][job], job
+    assert before["overall"]["n"] == after["overall"]["n"]
+    assert before["overall"]["length_gap_ok"] == after["overall"]["length_gap_ok"]
+
+    # Every per-case block is accounted for, so "spares the rest" is a
+    # measurement rather than a claim about the fields this test happened to
+    # name. The five that move are the two keyword-graded row cases plus the
+    # three probe cases that carry job-2 workloads.
+    moved = {case for case in before["by_case"]
+             if before["by_case"][case] != after["by_case"][case]}
+    assert moved == {"own_cause", "empty_candidates", "wrong_attribution",
+                     "misattribution_probe", "multi_misattribution_probe"}
+
