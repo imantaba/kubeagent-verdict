@@ -1151,6 +1151,65 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return combined
 
 
+_WORKER_NAMES = ("worker-1", "worker-2", "worker-3")
+
+
+def _is_node_story(p: prop.Propagation) -> bool:
+    """A node story's healthy origin read names a node: its label or its
+    healthy-content template still carries the `{node}` placeholder."""
+    return "{node}" in p.origin_read[0] or "{node}" in p.healthy_origin_content
+
+
+def _node_clashes(name: str, objects: tuple) -> bool:
+    """True when the row already carries a node object of this name whose
+    fresh read failed, or whose Ready condition is not True -- a healthy
+    origin read naming it would contradict that object. A node the rules
+    refuted or left on a stale lease still reads Ready True, so it does
+    not clash."""
+    return any(
+        obj.kind == "node" and obj.name == name
+        and (obj.fresh.how == "read_failed"
+             or (obj.fresh.how == "read" and obj.fresh.ready != "True"))
+        for obj in objects)
+
+
+def _multi_healthy_origin_node(h_node: str, all_objects: tuple) -> str | None:
+    """The node name a node-story healthy-origin read should use: `h_node`
+    itself when it does not clash, else the first of worker-1/2/3 free of
+    a clash, else None when all three clash too (the read is dropped).
+    No RNG draw: a row without a clash never moves the stream."""
+    for candidate in (h_node, *_WORKER_NAMES):
+        if not _node_clashes(candidate, all_objects):
+            return candidate
+    return None
+
+
+def _resolve_multi_healthy_origin(
+        healthy_origin: prop.Propagation, h: Names, all_objects: tuple,
+) -> tuple[str, str] | None:
+    """The (label, content) for `multi`'s prepended healthy-origin read, or
+    None when section 2's collision rules say to drop it entirely.
+
+    Registry rule: the two ruled registry stories' read is a cluster-wide
+    events read; showing it next to a registry candidate's own account
+    would contradict that candidate, so the read is dropped outright.
+
+    Node rule: see `_multi_healthy_origin_node`.
+    """
+    if (healthy_origin.origin_object is not None
+            and healthy_origin.origin_object.kind == "registry"
+            and any(obj.kind == "registry" for obj in all_objects)):
+        return None
+    node_name = h.node
+    if _is_node_story(healthy_origin):
+        node_name = _multi_healthy_origin_node(h.node, all_objects)
+        if node_name is None:
+            return None
+    hh = h if node_name == h.node else dataclasses.replace(h, node=node_name)
+    return (_fmt(healthy_origin.origin_read[0], hh),
+           _fmt(healthy_origin.healthy_origin_content, hh))
+
+
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
           healthy_origin: prop.Propagation | None = None) -> Example:
     """Several workloads, several independent causes.
@@ -1170,14 +1229,19 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     workloads_meta: dict[str, dict] = {}
     decoy_by_workload: dict[str, list[str]] = {}
     results: list[rules.Result] = []
+    healthy_read: tuple[str, str] | None = None
     if healthy_origin is not None:
         # Formatted against the first workload's names, as the positive case
         # formats against its anchor. A cluster-scoped read names nothing
         # workload-specific; a node- or namespace-scoped one names this row's.
+        # The collision rules (section 2) can rename the node or drop the
+        # read outright, so the read is resolved against every object the
+        # row will carry, not against `h` alone.
         h = pairs[0][1]
-        all_reads.append(c.EvidenceRead(
-            label=_fmt(healthy_origin.origin_read[0], h),
-            content=_fmt(healthy_origin.healthy_origin_content, h)))
+        all_objects = tuple(obj for objs in combined_objects for obj in objs)
+        healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
+        if healthy_read is not None:
+            all_reads.append(c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]))
     for i, (e, n) in enumerate(pairs):
         objects = combined_objects[i]
         conf = _confidence(e)
@@ -1225,7 +1289,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
                    assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
                    meta={"case": "multi",
                          "expected": {r["workload"]: r["cause"] for r in rows},
-                         **({} if healthy_origin is None else {
+                         **({} if healthy_read is None else {
                              "origin_read_label": healthy_origin.origin_read[0],
                              "origin_healthy": True}),
                          **extra_meta})
