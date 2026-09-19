@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-19
 **Branch:** `fix-training-targets` (off `main` @ `abdc0be`)
-**Status:** approved in chat (option A and rulings A–F); written here for review
+**Status:** approved in chat (option A and rulings A–F); revised after an
+adversarial spec review; written here for review
 
 ## The decision, up front
 
@@ -20,11 +21,13 @@ This slice does five things:
 3. Six new training stories where the rules *do* confirm a shared cause.
    Today no training row carries the `shared` label at all.
 4. A new case mix, so every story still has enough training rows after the
-   held-out drop.
+   held-out drop, and the shared answer stays a minority of multi-workload
+   rows.
 5. Oracle gates: before any training, the gold answers must score perfectly
    on our own scorer wherever a perfect score is possible.
 
-Then we retrain once on the training host, with a check at step 400 of 798.
+Then we retrain once on the training host, with a check at step 400 of
+about 796.
 
 The exam changes on 14 of its 263 rows. What the scorer reads does not
 change, and a pinned hash (the "graded view", section 9) proves it. So
@@ -115,8 +118,8 @@ checking the design against code. Two were found while writing this.
 1. **One pair in five, not one in three, and the share rises to 15%.**
    One ruled pair in three at today's 12% leaves 16 of the 48 plain stories
    below the floor of 12 kept pairs (the lowest keeps 8). One in five at
-   15% leaves none below it (the lowest keeps 13). Section 6 has the
-   numbers.
+   15% leaves none below it (the lowest keeps 15 with the final mix).
+   Section 6 has the numbers.
 2. **The unverified twin is node-only.** Section 5 says why PVC and
    registry cannot have one.
 3. **"The exam tests exactly this twice" was wrong.** Two of the exam's
@@ -133,9 +136,40 @@ checking the design against code. Two were found while writing this.
    writing. Exam row 252 says "3 workloads failing to pull" with 2
    workloads flagged. The new stories must not copy that. Section 4.
 
+### Changed after the spec review
+
+An adversarial review of the first draft confirmed 16 findings: 4
+important, 12 minor. What they changed:
+
+1. **`multi` rises from 11% to 13%.** The first draft's mix put the
+   shared-answer ratio at exactly 0.4000 at the real build size. A test
+   fails above 0.40, and `docs/design.md` already said the next raise must
+   move `multi` up too. The two extra points come from `attributed` and
+   `none_of_these`, the same cases the approved design took from. Section 6.
+2. **The ruled registry stories get their own read label.** The first
+   draft gave them `get_events (cluster-wide, reason=Failed)`, a label only
+   the exam's registry story uses today. They now use
+   `get_events (cluster-wide, type=Warning)`, and a new test keeps every
+   exam-only label out of training. Section 4.
+3. **Plain broken twins keep the shared cause on every row.** A reviewer
+   asked us to name each victim's local cause instead. We kept the shared
+   cause and wrote down why (section 3). The cost is now spelled out in
+   section 12, and gate 7 reads two of these rows by hand.
+4. **Gates 1 and 2 say how to compute them.** Gate 1 names the job-2
+   population to average over; the obvious scoreboard number reads about
+   0.42 on a correct dataset. Gate 2 gives today's job 1 next to the
+   target. Section 10.
+5. **The run says what to do when a step fails:** a byte mismatch between
+   the two builds, and a crash mid-run. Section 11.
+6. **Smaller fixes.** Two line citations, the model card's test hash
+   (it is not recorded there yet), the clash counts in section 2, the rows
+   `FROZEN_253_SHA256` covers, one missed test pin
+   (`test_evidence_overlap.py`), three missed doc passages, and one new
+   disclosed limit (empty `decoy_by_workload` on ruled rows).
+
 ## 1. The `multi` fix
 
-`cases.multi` (`dataset/cases.py:1131-1204`) runs the real rules on each
+`cases.multi` (`dataset/cases.py:1131-1203`) runs the real rules on each
 workload. Then it throws the answer away and writes the catalog entry's
 hand-written `winner_cause` into the gold row, decided or not.
 
@@ -203,10 +237,11 @@ that name whose fresh read failed, or whose Ready condition is not
 read for that row.
 
 Measured over today's rows: 79 have a node-story healthy read. The rule
-keeps 41, renames 37 and drops 1. In the kept training rows, every clash
-is one of the two kinds above: a forbidden read (20 rows) or a confirmed
-NotReady node (3 rows). A node that the rules refuted or left on a stale
-lease shows Ready True too, so it does not clash.
+keeps 41, renames 37 and drops 1. In `train.jsonl` (after the split and
+the held-out drop), 22 of the 48 such rows clash. Each clash is a
+forbidden read, a confirmed NotReady node, or both: one row draws three
+node objects all named `worker-1`. A node that the rules refuted or left
+on a stale lease shows Ready True too, so it does not clash.
 
 **Registry rule (new).** The two ruled registry stories' healthy read is a
 cluster-wide events read. If the row holds any registry object, drop the
@@ -242,7 +277,8 @@ The fix:
 
 - **Decided rows** get `result.cause` and `_rule_rationale(result)`.
 - **Other rows** keep `decoy if healthy else shared_cause`, with today's
-  confidence and rationale.
+  confidence and rationale. Plain broken twins are the main case; see
+  below.
 - **The summary follows the label:**
 
 | Label | Summary |
@@ -258,6 +294,33 @@ different confirmed groups, which this function cannot produce. A test
 forces the branch with a monkeypatched `rules.label` and checks the error.
 This settles the second critic finding: the branch exists and is tested,
 but no row can reach it.
+
+**Row causes in a `none` summary.** Both `none` summaries list row causes.
+A cause holding a shared-claim phrase ("upstream", "cascading", …) would
+make job 3 read the summary as a claim and fail it. Today no story's
+`shared_cause` or victim `local_cause` holds one: 0 hits across all 54
+stories (48 trainable, 6 exam), and none in `names.py` either. A test
+keeps the story texts that way, the new stories included; the oracle gate
+catches anything the names add.
+
+**Plain broken twins keep the shared cause (a review finding, kept).** In
+a plain broken twin every row names the story's `shared_cause`, while the
+summary says the rules confirmed no one cause. A reviewer asked us to name
+each victim's own `local_cause` instead. We keep the shared cause, for two
+reasons:
+
+1. The origin read in that row shows the origin broken. Each victim's
+   local cause is then not the most probable cause, and the system prompt
+   asks for the most probable one. Teaching the local cause would teach the
+   model to ignore the origin read.
+2. The rows and the summary say different things, and both are true. The
+   rows say what the evidence shows. The summary says what the rules did:
+   they cannot check a plain story's origin, so they confirmed nothing.
+   That is the line job 3 grades: claim a shared cause only when the rules
+   confirmed one.
+
+The cost is written down in section 12, and gate 7 reads two of these
+rows by hand.
 
 **The critic's first finding is overruled.** Two exam stories,
 `coredns-down` and `node-disk-pressure`, reach a rules decision through a
@@ -289,8 +352,8 @@ story carry no per-victim objects (`v.objects` is empty).
 | node 2 | node, scan reason `NotReady` | Ready `Unknown` | Ready `True` (refuted) | `describe node {node}` |
 | PVC 1 | PVC, `ProvisionerNotResponding`, mounted | phase `Pending` | phase `Bound` (refuted) | `get_related storageclass {sc}` |
 | PVC 2 | PVC, `MissingStorageClass`, mounted | phase `Pending` | phase `Bound` (refuted) | `get_related storageclass {sc}` |
-| registry 1 | registry `mirror.invalid` | literal `no such host` | literal `manifest unknown` (refuted) | `get_events (cluster-wide, reason=Failed)` |
-| registry 2 | registry `registry.invalid` | literal `toomanyrequests` | literal `manifest unknown` (refuted) | `get_events (cluster-wide, reason=Failed)` |
+| registry 1 | registry `mirror.invalid` | literal `no such host` | literal `manifest unknown` (refuted) | `get_events (cluster-wide, type=Warning)` |
+| registry 2 | registry `registry.invalid` | literal `toomanyrequests` | literal `manifest unknown` (refuted) | `get_events (cluster-wide, type=Warning)` |
 
 Rules each story relies on (from `dataset/rules.py`):
 
@@ -308,6 +371,19 @@ Authoring rules:
   other code uses. The classes already taken are `fast-ssd`, `standard`,
   `ssd-premium`, `block-ssd`, `archive-hdd`, `encrypted-ssd`, `bulk-nvme`
   and `replicated-ssd`.
+- **Read labels.** No new story uses an origin-read label that only exam
+  stories use today. At `abdc0be` that set has four labels:
+  `describe kube-system/coredns (Deployment)`,
+  `get_related storageclass standard`,
+  `get_events (cluster-wide, reason=Failed)` and
+  `get_related networkpolicy {ns}/default-deny`. A static test pins the
+  set as a literal and fails if any trainable story's origin-read label is
+  in it. It is pinned, not computed: a computed set would shrink the moment
+  a training story took a label, and pass. `describe node {node}` is not
+  in the set, because seven training stories use it today. The registry
+  stories' `type=Warning` qualifier appears nowhere in `src/` or `tests/`
+  today, and four training stories already use other
+  `get_events (cluster-wide, …)` labels.
 - **Registry hosts.** `mirror.invalid` and `registry.invalid`, unused in
   `src/` today. Victim images are rewritten to the story's host at render
   time, with no random draw. For `registry.example.com` this is a no-op, so
@@ -395,15 +471,16 @@ for i in range(counts["shared_origin"]):
 Plain pairs walk the same story and victim sequence as today. Their salts
 differ, because the ruled pairs now draw salts between them.
 
-**New case mix.** Three points each move from `attributed` and
-`none_of_these` to the two shared-origin cases:
+**New case mix.** Eight points move. Four each come out of `attributed`
+and `none_of_these`. Three each go to the two shared-origin cases, and two
+go to `multi`:
 
 | Case | Today | New |
 |---|---|---|
-| attributed | 10 | 7 |
-| none_of_these | 15 | 12 |
+| attributed | 10 | 6 |
+| none_of_these | 15 | 11 |
 | own_cause | 10 | 10 |
-| multi | 11 | 11 |
+| multi | 11 | 13 |
 | shared_origin | 12 | 15 |
 | shared_origin_decoy | 12 | 15 |
 | truncated | 5 | 5 |
@@ -411,28 +488,49 @@ differ, because the ruled pairs now draw salts between them.
 | empty_candidates | 5 | 5 |
 | wrong_attribution | 10 | 10 |
 
-Simulated at seed 17, size 8000 (numbers are training rows after the
-held-out drop):
+**Why `multi` must rise too.** A test in `test_shared_origin_training.py`
+(about line 500) counts the shared answer's share of multi-workload rows:
+`shared_origin` ÷ (`shared_origin` + `multi` + `shared_origin_decoy`), in
+train plus val after the held-out drop, at size 800. It fails above 0.40.
+Raising only the shared-origin cases lands exactly on that cap at the real
+build size: 1200 ÷ (1200 + 600 + 1200) = 0.4000. `docs/design.md` and the
+test's own docstring already say the next raise must move `multi` up with
+it. At 13%, `multi` brings the ratio back near today's (0.3839 against
+0.3797 at size 8000).
 
-| Option | Lowest plain story | Plain stories below 12 | Ruled pairs in train | Kept rows | Steps |
-|---|---|---|---|---|---|
-| today, no ruled stories | 15 | 0 | 0 | 6353 | 794 |
-| 12%, one in three | 8 | 16 | 288 | 6351 | 792 |
-| 12%, one in four | 10 | 1 | 218 | 6357 | 794 |
-| **15%, one in five (chosen)** | **13** | **0** | **213** | **6395** | **798** |
-| 16%, one in four (fallback) | 15 | 0 | 294 | 6468 | 808 |
+Simulated at seed 17 (the floor columns count training rows after the
+held-out drop, at size 8000; the ratio is at size 8000, then 800):
+
+| Option | Lowest plain story | Plain stories below 12 | Ruled pairs in train | Kept rows | Steps | Ratio 8000 (800) |
+|---|---|---|---|---|---|---|
+| today, no ruled stories | 15 | 0 | 0 | 6353 | 794 | 0.3797 (0.3810) |
+| 12%, one in three | 8 | 16 | 288 | 6351 | 792 | not measured |
+| 12%, one in four | 10 | 1 | 218 | 6357 | 794 | not measured |
+| 15%, one in five, `multi` 11 (first draft) | 13 | 0 | 213 | 6395 | 798 | 0.4000 (0.3974) |
+| **15%, one in five, `multi` 13 (chosen)** | **15** | **0** | **213** | **6369** | **796** | **0.3839 (0.3822)** |
+| 16%, one in four, `multi` 13 (fallback) | 15 | 0 | 294 | 6409 | 800 | 0.3904 (0.3926) |
+
+The chosen mix is the first draft's with two points moved into `multi`,
+one from each of `attributed` and `none_of_these`. The fallback is
+attributed 5, none_of_these 10, `multi` 13 and 16% each.
 
 At 15%: 1200 pairs. 240 are ruled (40 per story) and 960 plain (20 per
 story). Of the 240 ruled pairs, 26 are unverified node pairs (13 per node
 story). About 186 to 190 broken twins in train carry the `shared` label.
 
 The simulation used stand-in groups for the ruled pairs. The real build is
-re-measured. If any plain story falls below 12, we switch to the fallback
-(16%, one in four, attributed 6, none_of_these 11) and say so in the
-commit.
+re-measured, and two checks decide what ships:
 
-`test_counts_for_follows_the_mix` at size 1000 moves to attributed 70,
-none_of_these 120, shared_origin 150 and shared_origin_decoy 150.
+- If any plain story falls below 12, switch to the fallback.
+- If the ratio is above 0.395 at either size, move one more point from
+  `none_of_these` to `multi` and measure again. Both measured mixes sit
+  under that line (0.3839 and 0.3904 at the real size).
+
+Either switch is named in the commit.
+
+`test_counts_for_follows_the_mix` (`tests/test_generate.py:57`) at size
+1000 moves to attributed 60, none_of_these 110, multi 130, shared_origin
+150 and shared_origin_decoy 150.
 
 ## 7. Test moves
 
@@ -469,11 +567,24 @@ none_of_these 120, shared_origin 150 and shared_origin_decoy 150.
 - `test_healthy_evidence.py:31` and `:196`.
 - `test_shared_origin_training_pair.py:143` still holds; it is checked,
   not moved.
+- `test_generate.py:57`: the counts in section 6.
+- The shared-answer ratio test in `test_shared_origin_training.py` (about
+  lines 480-504): its docstring says the next raise must move `multi` up.
+  This raise does, so the docstring says so, with the new measured ratio.
+  The 0.40 cap stays.
+- `test_evidence_overlap.py`: `DECLARED` pins eval-to-training evidence
+  reuse counts at seed 17, size 8000. Its own docstring says a `CASE_MIX`
+  change moves them. Re-measure, and re-pin by hand with a dated comment
+  if they move.
 
 **New tests:**
 
-- The oracle tests (section 10).
+- The oracle tests (section 10). Job 2 is averaged only over the
+  workloads gate 1 names, never read off `scoreboard()`.
 - The coherence test (section 4).
+- No trainable story uses an exam-only origin-read label (section 4).
+- No story's `shared_cause` or `local_cause` holds a shared-claim phrase
+  (section 3).
 - The graded-view pin (section 9).
 - A shared label only comes from an origin object: every `shared` row is
   a ruled story's broken twin or one of the exam's three origin-object
@@ -490,20 +601,30 @@ comment.
 
 - `README.md:125-127`: "the correct answer names the same shared cause on
   every row" becomes the label-driven rule.
+- `README.md:170-177`: the share, pool and build-size history ("the share
+  went to 12% each, the pool … from 24 to 48") gains a dated step for this
+  retrain: 15% each, 54 stories, `multi` at 13%.
 - `docs/how-training-works.md:92`: the `shared_origin` row's "name the same
   cause on every one", and its share (12% to 15%).
+- `docs/how-training-works.md:318`: "it is 12% now" becomes 15%.
+- `docs/how-training-works.md:905-910`: the cousin probe writes 54 pairs
+  and 108 rows, not 48 and 96 (the same move as `test_probe_cousins.py`).
 - `docs/design.md:269-270` and `:284-296`: the two 12% rows, "risen to
-  12%", and the shared-answer ratio ("about 38 of every 100", "a test
-  fails above 40") are re-measured.
+  12%", "paid out of `attributed` both times" (this raise is paid out of
+  `attributed` and `none_of_these`, and moves `multi` up too), and the
+  shared-answer ratio ("about 38 of every 100", "a test fails above 40")
+  are re-measured.
 - `docs/runbooks/train.md`: line 11 ("about 28 hours"), lines 39 and 65
   ("~2¼ hours"), and lines 83, 87-88 and 133 ("17½ hours", "17h42m",
   "4,292 examples") get this run's measured numbers.
-- `docs/model-card.md`: the 0908 v1.24.0 section records the test hash
-  `c2d22b6e…`. It gains a dated re-pin entry saying the exam moved on 14
-  rows and the graded view did not.
+- `docs/model-card.md`: the 0908 v1.24.0 section gains the test hash
+  `c2d22b6e…`. Today that hash is recorded only in
+  `out/eval/0908/scoreboard.json` (`test_sha256`). The section also gains a
+  dated re-pin entry saying the exam moved on 14 rows and the graded view
+  did not.
 - `contract/PIN.md` "Dataset pin moves": a new dated entry, in the same
   style as the two before it.
-- The `propagation.py` module docstring (lines 60-125) and the comment on
+- The `propagation.py` module docstring (lines 1-123) and the comment on
   `origin_object`.
 - `generate.py`: a dated comment on the `CASE_MIX` change, and the
   rotation comment (section 2).
@@ -527,8 +648,9 @@ Only the gold answer changes on those rows, plus the meta that mirrors it
 not change. Every other exam row must stay byte-identical. If any other
 case changes, that is a failure, not a re-pin.
 
-Both pins move. `FROZEN_253_SHA256` covers rows 1-253, which include rows
-244-252. `EVAL_SET_SHA256` covers all 263. Both are re-pinned by hand in
+Both pins move. `FROZEN_253_SHA256` covers rows 1-253, which include all
+ten `shared_origin_probe` rows (244-253). `EVAL_SET_SHA256` covers all
+263. Both are re-pinned by hand in
 `tests/test_shared_origin_training.py`, with a dated entry in the history
 comment at lines 721-748.
 
@@ -582,11 +704,24 @@ them; the pin is how we know it did not.
 All of these pass before the dataset goes to the training host:
 
 1. **Oracle, train and val.** Gold-as-reply scores job 1 = 1.0 and job 3 =
-   1.0. Job 2 = 1.0 on rows it grades by keyword.
-2. **Oracle, exam.** Job 1 = 0.879 (138 of 157). The 19 misses are all
-   `contradiction_probe`, which this slice does not touch. Job 3 is
-   measured and expected to be 1.0 (today 34 of 39; the 5 misses are the
-   `none` rows with the shared template).
+   1.0, read off `score.scoreboard`. Job 2 = 1.0 on every job-2 workload it
+   can grade: those where
+   `score._is_job2_keyword_graded(wm, wm["own_cause_keywords"])` is true,
+   and those whose `expected_cause` is `none_of_these` (exact match). The
+   test averages `score.job2` over exactly those workloads.
+   - Do not read job 2 off `scoreboard()`. Its job-2 rate averages every
+     job-2 workload, and 4312 of the 7433 in today's train (58%, all
+     shared-origin) carry no keywords, so job 2 scores them 0 whatever the
+     reply says (out of scope). On a correct dataset that rate reads about
+     0.42.
+   - Do not use `_is_keyword_graded` either. It feeds a diagnostic
+     footnote, not a score.
+   - Today, on the keyword-graded workloads: 0.9149 (1990 of 2175 in
+     train).
+2. **Oracle, exam.** Job 1 = 0.879 (138 of 157); today it is 0.7006 (110
+   of 157). The 19 misses are all `contradiction_probe`, which this slice
+   does not touch. Job 3 is measured and expected to be 1.0 (today 34 of
+   39; the 5 misses are the `none` rows with the shared template).
 3. **Length.** Every row fits in 4096 tokens with the real Qwen tokenizer.
    No row is dropped for length.
 4. **Tests.** The full suite and ruff pass, including every new test in
@@ -595,8 +730,8 @@ All of these pass before the dataset goes to the training host:
    hash does not.
 6. **Negative control.** The 0908 replay in section 9.
 7. **Hand read.** A person reads a sample: two rows per ruled story (both
-   twins), two unverified node twins, five fixed `multi` rows and all 14
-   changed exam rows.
+   twins), two unverified node twins, two plain broken twins, five fixed
+   `multi` rows and all 14 changed exam rows.
 
 ## 11. The run
 
@@ -604,14 +739,19 @@ All of these pass before the dataset goes to the training host:
    Pull, reinstall, and use a fresh `--out`.
 2. **Build on both machines.** Run `.venv/bin/kv-dataset --seed 17 --size
    8000` on the workstation and on the training host. The four files (train, val,
-   test, manifest) must match byte for byte.
+   test, manifest) must match byte for byte. If they do not, stop. Diff
+   the two manifests, look for a version or config drift between the
+   checkouts, and do not train until they match.
 3. **Smoke run.** `--limit 32 --epochs 1` on the training host. It must finish
    and write a checkpoint.
-4. **Full run.** 798 steps. Launch with `nohup env HF_HUB_OFFLINE=1
-   kv-train --dataset … --out … > … 2>&1 &`. Time estimate: 0908 took
-   31.8 hours for 12,577,240 training tokens, so this run takes 31.8 hours
-   × (new tokens ÷ 12,577,240). That is about 32 to 34 hours. Check it is
-   alive by the change in CPU time (`ps -o times=`).
+4. **Full run.** About 796 steps; the real build sets the count. Launch
+   with `nohup env HF_HUB_OFFLINE=1 kv-train --dataset … --out … > …
+   2>&1 &`. Time estimate: 0908 took 31.8 hours for 12,577,240 training
+   tokens, so this run takes 31.8 hours × (new tokens ÷ 12,577,240). That
+   is about 32 to 34 hours. Check it is alive by the change in CPU time
+   (`ps -o times=`). If the run dies, follow `docs/runbooks/train.md`'s
+   resume section: it covers `--resume` and how to tell a crash from a
+   power loss.
 5. **Step 400.** When `progress.json` shows 400 optimizer steps, copy the
    checkpoint directory aside with `cp -a`. Export it on the workstation to
    `dist-retrain-<date>-step400/`, serve it with Ollama and run `kv-eval
@@ -643,7 +783,18 @@ These stay true after this slice. Each will be written in the model card.
   reasoning. Job 1 cannot see the difference.
 - **Plain broken twins.** Every row names the same origin cause, while the
   summary says the rules confirmed no one cause. Both are true: the rules
-  cannot check a plain story's origin. But the pairing may read oddly.
+  cannot check a plain story's origin. But the pairing may read oddly, and
+  it has a training cost. 960 plain pairs are built, and at least 15 of
+  each story's 20 land in train. Each broken twin pairs a per-row cause
+  with a summary that will not call it shared. A model could learn "never
+  call a cause shared". The ruled broken twins (about 186 to 190 in train,
+  with the `shared` label) teach the other side. §3 gives the reason for
+  the choice; gate 7 reads two of these rows by hand.
+- **No decoy rate on ruled stories.** Ruled-story rows, both twins, carry
+  an empty `decoy_by_workload` for every victim (`dataset/cases.py:877-878`,
+  unchanged by this slice). Today that covers 3 exam-only stories. After
+  this slice it also covers about 240 ruled pairs, so the decoy-rate
+  diagnostic sees none of them.
 - **Two read formats for one node.** A `multi` row can show a node both in
   kubeagent's gather format (`describe node /worker-2`) and in the
   story's `describe node worker-2` format. The exam's node story does the
@@ -675,6 +826,16 @@ only, and keep a copy of the old behavior for the two probes.
 - What you learn: whether job 1 improves on its own.
 - Downside: 862 wrong summaries stay in training, and there are still 0
   `shared` rows. Job 3 would stay untrained on the label it grades.
+
+**Take `multi`'s two points from `wrong_attribution` (mix E).** Keep
+`attributed` at 7, and set `wrong_attribution` to 9 and `none_of_these`
+to 11.
+
+- Cost: one more case moves.
+- What you learn: slightly more job-1 rows (2585 workloads against 2519)
+  and a plain-story floor of 16 instead of 15.
+- Downside: fewer job-2 keyword workloads (2169 against 2286) while job 2
+  is also failing. And it moves a case the approved design did not touch.
 
 **Recommendation:** the full slice as written. It is the only option where
 every gold answer agrees with the rules the model will run under.
