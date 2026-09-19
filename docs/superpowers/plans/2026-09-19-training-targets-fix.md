@@ -282,8 +282,8 @@ Two things are checked here:
    `rules._check_pvc` and `rules._check_registry` -- built from real
    `objects.Object`s, decided with the real `rules.attribute`/`decide`
    pair -- produces a rationale that `score.job1` accepts. A branch
-   `rules.py` itself marks unreachable (its two `# pragma: no cover`
-   defaults, both closed by a validated `Object`) is not in this list.
+   `rules.py` itself marks unreachable (its one `# pragma: no cover`
+   default, closed by a validated `Object`) is not in this list.
 2. Every valid `objects.unverify(kind, how)` ending -- the six
    (kind, how) pairs `objects.unverify` accepts -- produces evidence
    that holds no denial phrase and no overclaim word, checked with
@@ -655,7 +655,7 @@ by hand.
 
 `generate.generate` + `split` + `drop_held_out` (seed 17, size 8000,
 exactly what `kv-dataset --seed 17 --size 8000` runs) plus scoring both
-take well under a second, so the oracle runs as an ordinary pytest
+take about a second, so the oracle runs as an ordinary pytest
 module. The build and its scored results are cached at module scope --
 every test below shares the same train/val split and the same gold-as-
 reply results, built once.
@@ -4972,13 +4972,14 @@ new:
     # undeclared slice is not measured at all, so the guard's coverage would
     # silently lag the exam every time the exam grows. One hit is the same
     # ruled-PVC boilerplate as `shared_origin_probe` above (the "Unable to
-    # attach or mount volumes" read). The other is unrelated to Task 9's
-    # pool merge: "Normal Started kubelet Started container" is generic
-    # enough that it also appears verbatim on two plain node-story training
-    # rows (`node-kubelet-halted`, `node-kubelet-unresponsive`) once the mix
-    # and RNG draws shifted -- the same "a count moved because the mix moved
-    # every later random draw" mechanism `contradiction_probe` documents
-    # above, not new sharing. It also still shares 6 of its 34 reads with
+    # attach or mount volumes" read). The other comes straight from Task 9's
+    # pool merge (spec section 6): "Normal Started kubelet Started container"
+    # is generic enough that it also appears verbatim on the two ruled
+    # node-story training rows (`node-kubelet-halted`,
+    # `node-kubelet-unresponsive`), and that merge is what first puts those
+    # two stories in the trained pool at all. The shared text is kubelet
+    # boilerplate both stories happen to narrate the same way, not the exam's
+    # own wording. It also still shares 6 of its 34 reads with
     # `shared_origin_probe` itself, by construction: five of the sixteen
     # eval victims carry evidence that reads the same whether the origin is
     # broken or not, and those are rendered verbatim in both worlds. That is
@@ -6014,9 +6015,10 @@ cd /home/ubuntu/git/kubeagent-verdict && \
 test(dataset): confirm a shared label never comes from a plain trainable story
 
 test_a_shared_label_only_comes_from_an_origin_object covered only the six
-eval scenarios, since no trainable story decided before Task 9. Now that
-trainable_scenarios() carries the six ruled stories alongside the 48 plain
-ones, extend the same check to that pool with the training row-builder:
+eval scenarios, since no trainable story decided until the ruled stories
+entered the pool. Now that trainable_scenarios() carries the six ruled
+stories alongside the 48 plain ones, extend the same check to that pool
+with the training row-builder:
 exactly the six ruled stories label shared and every plain one labels none,
 confirmed by direct measurement, matching the docstring's own claim that a
 shared row is always a ruled story's broken twin or an eval origin-object
