@@ -566,6 +566,67 @@ def test_registry_unreachable_shared_read_agrees_with_the_declared_object():
         assert meta["decided"] is False
 
 
+def test_registry_count_template_fills_in_the_rendered_victim_count():
+    """A ruled registry story's `scan_reason` is the literal `"{count}"`
+    template (spec section 4, "Registry count"): `_render_shared_origin`
+    fills it in with however many victims that row actually renders. This
+    is the fix for the bug the exam's row 252 disclosed, where a fixed
+    count baked into `scan_reason` (`"3"`) stayed "3" even on a row that
+    rendered only 2 victims, so the rules pass's own cause line claimed
+    more workloads than the row showed.
+    """
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    p = replace(base, origin_object=replace(
+        base.origin_object, name="mirror.invalid", scan_reason="{count}"))
+
+    two = cases.shared_origin(p, random.Random(1), victims=2)
+    assert "registry mirror.invalid (2 workloads failing to pull)" in two.user
+
+    three = cases.shared_origin(p, random.Random(1), victims=3)
+    assert "registry mirror.invalid (3 workloads failing to pull)" in three.user
+
+
+def test_registry_origin_rewrites_victim_images_to_the_declared_host():
+    """Spec section 4, "Registry hosts": a ruled registry story's victim
+    images are rewritten to the story's own host at render time, with no
+    random draw, so the row never shows a victim pulling from a registry
+    other than the one the origin object names."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    p = replace(base, origin_object=replace(base.origin_object, name="mirror.invalid"))
+
+    e = cases.shared_origin(p, random.Random(4), victims=3)
+    assert "registry.example.com/" not in e.user
+    assert e.user.count("mirror.invalid/") >= 3
+
+
+def test_registry_example_com_host_is_a_no_op_rewrite():
+    """The exam's own registry story already names `registry.example.com`
+    -- the rewrite must leave its images untouched so the exam's rows and
+    hashes do not move."""
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    assert p.origin_object.name == "registry.example.com"
+
+    drawn, _scope = cases._propagation_names(p, random.Random(9), 3)
+    rewritten = [
+        dataclasses.replace(n, image=p.origin_object.name + n.image[n.image.index("/"):])
+        for n in drawn
+    ]
+    assert [n.image for n in drawn] == [n.image for n in rewritten]
+
+
 def test_shared_origin_wrappers_merge_the_new_meta_without_losing_existing_keys():
     """The four thin wrappers keep every key they write today and gain 'workloads',
     'label', 'decoy_by_workload' from _render_shared_origin's r.meta."""

@@ -873,6 +873,16 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         raise ValueError(f"{p.key}: {count} victims plus the origin read exceeds the budget")
 
     drawn, scope_value = _propagation_names(p, rng, count)
+    # A ruled registry story's victim images move to the origin's own host
+    # (spec section 4, "Registry hosts"): every drawn Names' image is
+    # rewritten from names.draw()'s default `registry.example.com/...` to
+    # `<host>/...`, no rng draw. For registry.example.com -- the exam's own
+    # host -- the two strings are equal, so this is a no-op and the exam's
+    # rows and hashes do not move.
+    if p.origin_object is not None and p.origin_object.kind == "registry":
+        host = p.origin_object.name
+        drawn = [dataclasses.replace(n, image=host + n.image[n.image.index("/"):])
+                for n in drawn]
     # The pinned field is identical across `drawn`, so formatting the shared
     # strings against any one of them yields the one answer every row repeats.
     # The discriminating read varies inside a scenario, so what separates the
@@ -909,6 +919,13 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         # body, so the names and the endings come out byte-identical to the
         # order this block used to run in.
         names_dict = dataclasses.asdict(n)
+        # A ruled registry story's scan_reason may be the literal "{count}"
+        # template (spec section 4, "Registry count"): filled in here with
+        # however many victims THIS row renders, so the rules pass's own
+        # cause line never claims a workload count the row does not show.
+        # A harmless no-op for every other story -- render.bind's .format()
+        # only consumes a key a template actually names.
+        names_dict["count"] = str(count)
         key = f"{n.ns}/{n.name}"
         if p.origin_object is not None:
             decide_obj = render.bind(p.origin_object, names_dict)
