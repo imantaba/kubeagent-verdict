@@ -700,6 +700,22 @@ Seven limits on this reading, carried from the design that scored it:
    printed in the prompt. A bot that hands the prompt back scores 0.366 on
    that alone. A test pins it, so it is a measurement rather than an estimate.
    The bar is 0.7, so this exposure cannot pass job 2 by itself — but any job-2
-   score at or under 0.366 is not evidence that a model read anything. Closing
-   it means rewriting the answer keys of those 56 workloads, which would
-   retire every job-2 number measured so far, including this one.
+   score at or under 0.366 is not evidence that a model read anything.
+
+   Closing it is a smaller edit and a bigger bill than it looks. The 56
+   workloads do not carry 56 separate answer keys. The catalog declares a
+   keyword set once per entry, and nine of those entries account for 54 of the
+   56; two more leak on a single row each. But rewriting those eleven keys
+   retires three banked numbers, not just job 2's. Job 2 goes, because it
+   grades by keyword. Cause accuracy goes, because the `own_cause` and
+   `empty_candidates` rows are graded by keyword too. Overconfidence goes,
+   because it grades the wrong causes, and a rewrite changes which causes are
+   wrong. `length_gap` does not go: no keyword-graded row has a decoy cause, so
+   none of them sits in either length population. Tests pin that count and
+   those four facts, so the price is measured rather than guessed.
+
+   The trigger for paying it is already written down, in the comment above
+   `_is_keyword_graded`: the rewrite waits for evidence that a model is
+   clearing this slice while failing elsewhere. 0908 is not that evidence. It
+   scored 0.2418, below the 0.366 a copier gets, so it did not exploit the
+   exposure — its job-2 number simply cannot prove it read anything.
