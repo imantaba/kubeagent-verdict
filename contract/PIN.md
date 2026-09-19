@@ -97,3 +97,25 @@ without someone saying why. This is where the why is recorded.
   `:845`). The override is removed; `**r.meta`'s derived label stands
   again. Every job-3 number measured against the `separate` re-pin above
   is retired.
+
+- **2026-09-19 — `_render_shared_origin`'s decided-row fix.** Both hashes
+  moved again. A decided victim's row cause and rationale used to render
+  the row's formatted `shared_cause` sentence even when the rules had
+  already decided that victim on its own local evidence; they now render
+  the rules' own answer (`result.cause`, `_rule_rationale(result)`)
+  instead, and a `none`-labeled row's summary no longer claims a shared
+  cause it did not find — it now says kubeagent's rules did not confirm
+  one cause on two or more workloads. The footprint was measured by
+  building the exam at the pre-fix commit and at the fixed one and diffing
+  every row: exactly 14 of the 263 rows change, byte for byte, and nothing
+  else does — the ten `shared_origin_probe` rows (244-253, inside the
+  frozen slice, which is why `FROZEN_253_SHA256` moved) plus 4 of the ten
+  `shared_origin_decoy_probe` rows (254-263, outside it — the two origins
+  whose victims decide the same way regardless of `healthy`; the other six
+  decoy rows, whose healthy world decides nothing, do not move). Each of
+  the 14 changed rows differs only in the assistant message and, inside
+  `meta`, only `expected`/`expected_cause`. The exam's own job 3, oracle-
+  read, stays at 1.0 after the fix (5 of 5 `shared`-labeled rows, 34 of 34
+  `none`-labeled rows), and the graded-view pin (`tests/
+  test_exam_graded_view.py`) passes unchanged, so this re-pin is the two
+  hashes only — no other frozen artifact moved.

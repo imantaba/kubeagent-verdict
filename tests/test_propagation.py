@@ -190,16 +190,40 @@ def test_builder_renders_one_verdict_row_per_victim():
 
 
 def test_every_row_names_the_same_shared_cause():
-    """The whole point: one origin, one answer, repeated.
+    """The whole point, on a `shared`-labeled row: every victim's cause
+    comes from ONE `rules.shared()` group, and every victim is decided.
 
-    `multi` renders N different causes and says so. This row renders N
-    workloads whose correct cause is one string.
+    `multi` renders N different causes and says so. A `shared`-labeled
+    shared-origin row instead renders N workloads the rules confirmed
+    together under one shared-origin object. On the two scope-pinned
+    stories (`node-not-ready`, `registry-unreachable`) that means the
+    identical cause string, because every victim binds the same node or
+    registry name. `storage-provisioner-down`'s origin binds a PER-VICTIM
+    PVC name, so its `shared` group holds one storage class across
+    DIFFERENT PVC causes (`rules.py`'s group-key storage-class fallback)
+    -- still one group, not one string. A `none`-labeled row makes neither
+    promise (spec section 3): its undecided victims still share
+    `p.shared_cause`, but a victim the rules separately decided, off its
+    own unrelated evidence, carries its own cause instead.
+    `test_a_shared_label_only_comes_from_an_origin_object` in
+    `tests/test_shared_origin_decided.py` is the reverse check: no
+    `none`-labeled row is ever mistaken for a `shared` one.
     """
     from kubeagent_verdict.dataset import cases, generate
+    saw_shared = saw_none = False
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        causes = {r["cause"] for r in json.loads(ex.assistant)["verdicts"]}
-        assert len(causes) == 1, p.key
+        verdicts = json.loads(ex.assistant)["verdicts"]
+        if ex.meta["label"] == "shared":
+            saw_shared = True
+            assert all(ex.meta["workloads"][v["workload"]]["decided"]
+                      for v in verdicts), p.key
+            causes = {v["cause"] for v in verdicts}
+            if p.key != "storage-provisioner-down":
+                assert len(causes) == 1, p.key
+        else:
+            saw_none = True
+    assert saw_shared and saw_none, "both labels must be exercised"
 
 
 def test_the_summary_never_says_the_workloads_fail_for_separate_reasons():
@@ -224,24 +248,32 @@ def _menu_blocks(ex):
 
 
 def test_the_decoy_leads_every_candidate_menu_and_the_answer_trails():
-    """Tag AND position both point away from the answer, on every workload.
+    """Tag AND position both point away from the shared-cause candidate, on
+    every workload.
 
     Three candidates per victim in a fixed order: the local decoy carrying
     `attributed` first, the evidence-refuted distractor second, the shared
     cause carrying `outranked` last. A model answering by index or by tag
     scores zero; a model reading the evidence is unaffected.
+
+    The menu is built from `p.shared_cause`/`p.shared_verdict` regardless of
+    what the rules later decide (spec section 3), so its shape never moves;
+    what CAN move off it is a workload's own verdict, checked by
+    `test_every_row_names_the_same_shared_cause` above. This reads the
+    shared-cause candidate straight off the menu rather than off
+    `verdicts[0]`, which a decided workload can now carry a cause the menu
+    never lists.
     """
     from kubeagent_verdict.dataset import cases, generate
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
         blocks = _menu_blocks(ex)
         assert len(blocks) == len(p.victims), p.key
-        cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
         for block, decoy in zip(blocks, ex.meta["decoy_causes"]):
             assert len(block) == 3, p.key
             assert block[0].startswith(f"{decoy}: attributed "), p.key
             assert block[1].startswith(f"{ex.meta['distractor_cause']}: ruled out "), p.key
-            assert block[2].startswith(f"{cause}: outranked "), p.key
+            assert f": {p.shared_verdict} " in block[2], p.key
 
 
 def test_the_shared_cause_is_a_candidate_line_on_every_workload():
@@ -251,12 +283,18 @@ def test_the_shared_cause_is_a_candidate_line_on_every_workload():
     verbatim". Putting the shared cause on each menu keeps the correct answer
     inside that vocabulary, so a wrong answer is a judgement failure and never
     a phrasing one.
+
+    Read off the menu's own shared-cause candidate (every block's third line,
+    byte-identical across a row's workloads by construction) rather than off
+    `verdicts[0]["cause"]`, which a decided workload can now move off the
+    menu entirely (spec section 3).
     """
     from kubeagent_verdict.dataset import cases, generate
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
         menu = ex.user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
-        cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
+        blocks = _menu_blocks(ex)
+        cause = blocks[0][2].split(f": {p.shared_verdict} ")[0]
         assert menu.count(f"considered {cause}: ") == len(p.victims), p.key
 
 

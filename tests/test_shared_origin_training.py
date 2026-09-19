@@ -696,9 +696,21 @@ def test_a_shared_origin_training_row_never_says_separate_reasons(rows):
 
 
 def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
+    """Label-aware (spec section 3, ruling C): a `shared`-labeled row is
+    decided end to end, one cause per victim, except a PVC-scoped origin
+    (`rules.py`'s group-key storage-class fallback) can decide several
+    victims to several PVC causes and still be one `shared` group. No
+    trainable scenario decides today (the trainable pool's own oracle tests
+    hold job 3 at 1.0 without ever reaching a decided victim), so this is
+    future-proofing rather than a live path today.
+    """
     for e in _by_case(rows, "shared_origin"):
+        if e.meta["label"] != "shared":
+            continue
         causes = set(e.meta["expected"].values())
-        assert len(causes) == 1, e.meta["origin"]
+        assert all(w["decided"] for w in e.meta["workloads"].values())
+        if e.meta["origin"] != "storage-provisioner-down":
+            assert len(causes) == 1, e.meta["origin"]
 
 
 # ------------------------------------------------------ the eval must not move
@@ -730,7 +742,19 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 # line, so every row it should appear in was missing the thing being graded.
 # Adding it changed the rendered bytes of every decided row. A job-1 number
 # from before this fix measures something else and is retired on purpose.
-FROZEN_253_SHA256 = "4d772776179aa6406c73d8fbe7714b6f14e26af09ecf25322a5a0088529ffc4f"
+#
+# It moved a third time, on 2026-09-19, for `_render_shared_origin`'s
+# decided-row fix (section 3 of the 2026-09-19 training-targets design): all ten
+# `shared_origin_probe` rows (244-253, inside this frozen slice) change.
+# A decided victim's row cause and rationale now come from the rules
+# (`result.cause`, `_rule_rationale(result)`) instead of always the
+# formatted `shared_cause`, and a `none`-labeled row's summary now says
+# "kubeagent's rules did not confirm one cause on two or more of them"
+# instead of falsely claiming a shared one. A key-by-key diff of the exam
+# before and after the fix measured the footprint: exactly these 10 rows
+# plus 4 of the 10 `shared_origin_decoy_probe` rows (outside this frozen
+# slice, see `EVAL_SET_SHA256` below) change, and nothing else does.
+FROZEN_253_SHA256 = "b327cc397c0e0550881791be5d7d14c45bce5d9030a11fd5d5f2c5d4d6be6faf"
 
 # The whole exam, 253 plus the ten `shared_origin_decoy_probe` rows. First
 # captured on `main` @ `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were
@@ -771,9 +795,19 @@ FROZEN_253_SHA256 = "4d772776179aa6406c73d8fbe7714b6f14e26af09ecf25322a5a0088529
 # line and the `decoy_cause` key from the previous re-pin stay; only the
 # label moved, from `separate` back to `none`. This changes the rendered
 # bytes of the ten decoy rows again, so every job-3 number banked against
-# the `separate` re-pin above is retired. `FROZEN_253_SHA256` does not
-# move: the ten relabelled rows are 254-263, outside the frozen slice.
-EVAL_SET_SHA256 = "0b943307d46a052a7f24c097d353cee27be1de2d81d9d873360179bbf9233468"
+# the `separate` re-pin above is retired.
+#
+# Re-pinned once more on 2026-09-19, in the same commit and for the same
+# `_render_shared_origin` fix that moved `FROZEN_253_SHA256` above (see
+# its 2026-09-19 entry). Four of the ten `shared_origin_decoy_probe` rows
+# change too -- exactly the ones with a decided victim this draw (two
+# coredns-down, two node-disk-pressure): their decided victim's row cause
+# and rationale move the same way, off the SAME per-victim decide, which
+# never read `healthy` before or after this fix. The other six decoy rows
+# (the three origin-object stories, whose healthy world decides nothing)
+# do not move. 14 of the 263 rows change in total, byte for byte, and
+# each only in the assistant message and the meta that mirrors it.
+EVAL_SET_SHA256 = "b962dad6c287f06832058bb4be7e899f3dc0d6a21f1f8cd3881bdc9f626f01e7"
 
 
 def _digest(rows) -> str:

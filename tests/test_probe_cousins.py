@@ -41,6 +41,14 @@ def test_cousin_probe_uses_only_trainable_origins():
 
 
 def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
+    """Label-aware, the same way `test_probe_wide.py`'s twin check is (spec
+    section 3, ruling C). No trainable scenario decides today -- the
+    trainable pool's own oracle tests hold job 3 at 1.0 without ever
+    reaching a `decided` victim -- so every cousin pair is `none`-labeled in
+    practice and the `shared` branch below is future-proofing rather than a
+    live path; `test_cousin_probe_uses_only_trainable_origins` above already
+    pins the pool this draws from.
+    """
     rows = generate.shared_origin_cousin_probes()
     seen: set[str] = set()
     assert len(rows) % 2 == 0
@@ -55,11 +63,14 @@ def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
         seen.add(key)
         # The discriminating read must differ, or the pair asks nothing.
         assert probe.user != decoy.user
-        # Probe half: every victim shares ONE cause. Decoy half: none of the
-        # victims' correct causes is that shared cause.
-        shared = set(probe.meta["expected"].values())
-        assert len(shared) == 1
-        assert shared.isdisjoint(set(decoy.meta["expected"].values()))
+        # A `shared`-labeled probe half is decided end to end and disjoint
+        # from its decoy twin. A `none`-labeled half makes neither promise:
+        # a decided victim's cause does not depend on `healthy`, so it can
+        # repeat across the pair.
+        if probe.meta["label"] == "shared":
+            shared = set(probe.meta["expected"].values())
+            assert all(w["decided"] for w in probe.meta["workloads"].values())
+            assert shared.isdisjoint(set(decoy.meta["expected"].values()))
 
 
 def test_every_cousin_decoy_carries_three_or_more_verdicts():

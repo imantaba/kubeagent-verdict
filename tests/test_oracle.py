@@ -57,6 +57,12 @@ def _val_results() -> tuple[dict, ...]:
     return tuple(_gold_results(_train_and_val()[1]))
 
 
+@functools.lru_cache(maxsize=1)
+def _exam() -> tuple[list, tuple[dict, ...]]:
+    exam = generate.test_set()
+    return exam, tuple(_gold_results(exam))
+
+
 def _job2_gate(examples: list) -> dict:
     """job2 averaged over exactly the population spec section 10 gate 1
     defines: a workload where `score._is_job2_keyword_graded` is true, or
@@ -130,6 +136,31 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2175}
 
 
+def test_oracle_job3_is_perfect_on_train():
+    """Task 5's label-driven summary: every gold summary in the built
+    dataset matches its own row's label, train side. `shared` never
+    appears here -- no trainable scenario decides today (see
+    `test_shared_origin_training.py`'s docstring on the same point) -- and
+    `separate` is `multi`'s own bucket, not a shared-origin one; the
+    `_render_shared_origin` `ValueError` guards a label `rules.label` can
+    never actually return, not this one."""
+    board = score.scoreboard(list(_train_results()))
+    assert board["jobs"]["job3"] == {
+        "rate": 1.0, "n": 2263,
+        "by_label": {"shared": {"rate": None, "n": 0},
+                     "separate": {"rate": 1.0, "n": 1},
+                     "none": {"rate": 1.0, "n": 2262}}}
+
+
+def test_oracle_job3_is_perfect_on_val():
+    board = score.scoreboard(list(_val_results()))
+    assert board["jobs"]["job3"] == {
+        "rate": 1.0, "n": 265,
+        "by_label": {"shared": {"rate": None, "n": 0},
+                     "separate": {"rate": None, "n": 0},
+                     "none": {"rate": 1.0, "n": 265}}}
+
+
 def test_oracle_multi_job1_matches_the_spec_measurement():
     """The exact number spec section 1 cites for the `multi` fix alone:
     every decided `multi` workload passes job1, 996 of 996 in train and
@@ -140,3 +171,35 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
 
     assert multi_job1(_train_results()) == (996.0, 996)
     assert multi_job1(_val_results()) == (121.0, 121)
+
+
+def test_exam_oracle_job1_misses_only_contradiction_probe():
+    """spec section 10 gate 2: the frozen exam's own job1, oracle-read.
+    138 of 157 pass; the 19 misses are exactly the `contradiction_probe`
+    rows, a case whose gold reply is engineered to contradict what job1
+    grades by design -- not a shared-origin regression. No `multi`,
+    `shared_origin_probe` or `shared_origin_decoy_probe` row misses."""
+    exam, results = _exam()
+    scores = [s for r in results for s in r["job1_scores"]]
+    assert (len(scores), sum(scores)) == (157, 138.0)
+    misses = [e.case for e, r in zip(exam, results)
+             if sum(r["job1_scores"]) < len(r["job1_scores"])]
+    assert len(misses) == 19
+    assert set(misses) == {"contradiction_probe"}
+
+
+def test_exam_oracle_job3_is_perfect():
+    """spec section 10 gate 2's other half, and a stop condition: if the
+    exam's own job3, oracle-read, were not 1.0 after the label-driven
+    summary, the gold summaries would be wrong and re-pinning
+    `FROZEN_253_SHA256` / `EVAL_SET_SHA256` over them would bank the error.
+    It reads 1.0 -- 5 of 5 `shared`-labeled rows (the three origin-object
+    stories' `shared_origin_probe` halves) and 34 of 34 `none`-labeled
+    rows."""
+    _, results = _exam()
+    board = score.scoreboard(list(results))
+    assert board["jobs"]["job3"] == {
+        "rate": 1.0, "n": 39,
+        "by_label": {"shared": {"rate": 1.0, "n": 5},
+                     "separate": {"rate": None, "n": 0},
+                     "none": {"rate": 1.0, "n": 34}}}

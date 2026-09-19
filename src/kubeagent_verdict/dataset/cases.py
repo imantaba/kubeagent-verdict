@@ -755,6 +755,63 @@ def _victim_finding(v: prop.Victim, n: Names, healthy: bool = False) -> c.Findin
     )
 
 
+def _shared_origin_row(result: rules.Result, *, healthy: bool, decoy: str,
+                       shared_cause: str) -> tuple[str, str | None]:
+    """One victim's (cause, rationale) for a shared-origin row.
+
+    A decided workload -- confirmed or unverified -- gets the rules' own
+    cause and rationale, exactly as `multi` already does (spec section 3):
+    a decided workload never disagrees with what the rules found, whatever
+    world the row is rendered in. An undecided workload keeps today's
+    answer, held fixed by `healthy` alone: the decoy in the healthy world,
+    the shared cause in the broken one. The `None` rationale tells the
+    caller to keep applying its own per-world template, since there is no
+    rules evidence to build one from.
+    """
+    if result.decided:
+        return result.cause, _rule_rationale(result)
+    return (decoy if healthy else shared_cause), None
+
+
+def _shared_origin_summary(label: str, *, healthy: bool, count: int, origin: str,
+                           shared_cause: str, remedy: str, rows: list[dict],
+                           key: str) -> list[str]:
+    """The shared-origin row's summary lines, chosen by `rules.label` rather
+    than by `healthy` alone (spec section 3).
+
+    `label == "shared"` means the rules themselves confirmed one group
+    across two or more victims: today's unchanged three-line summary.
+    `label == "separate"` cannot happen here and is refused rather than
+    silently mis-rendered -- every victim in one propagation scenario binds
+    the SAME origin object (or none), so two confirmed results always fall
+    in one `rules.shared` group; `label` only reads `separate` off a lone
+    size-1 group, which this builder cannot produce. Otherwise (`"none"`):
+    a healthy-world row whose per-workload causes are now all distinct
+    still reads as ordinary independent failures; every other `"none"` row
+    -- broken-world, or healthy with a repeated cause -- says plainly that
+    the rules did not confirm one cause on two or more workloads, and
+    carries no remedy, because none was confirmed.
+    """
+    if label == "separate":
+        raise ValueError(
+            f"{key}: rules.label returned 'separate' for a shared-origin row, "
+            "which _render_shared_origin cannot produce -- every victim in "
+            "one propagation scenario binds the same origin object (or none), "
+            "so two confirmed results always share one rules.shared group")
+    if label == "shared":
+        lines = [f"{count} workloads share one upstream cause: {origin}.",
+                f"Root cause: {shared_cause}.", remedy]
+    else:
+        causes = {r["cause"] for r in rows}
+        if healthy and len(causes) == len(rows):
+            lines = [f"{count} workloads are failing for separate reasons."]
+        else:
+            lines = [(f"{count} workloads are failing, and kubeagent's rules "
+                     "did not confirm one cause on two or more of them.")]
+        lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
+    return lines
+
+
 class _SharedOrigin(NamedTuple):
     """Everything both shared-origin builders need, rendered once.
 
@@ -884,14 +941,17 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
             decided_outcome=result.outcome))
         content = (v.healthy_read_content or v.read[1]) if healthy else v.read[1]
         reads.append(c.EvidenceRead(label=_fmt(v.read[0], n), content=_fmt(content, n)))
-        row_cause = decoy if healthy else shared_cause
+        row_cause, row_rationale = _shared_origin_row(
+            result, healthy=healthy, decoy=decoy, shared_cause=shared_cause)
+        if row_rationale is None:
+            row_rationale = _fmt(v.local_reason if healthy else p.rationale, n)
         rows.append({"workload": f"{n.ns}/{n.name}",
                      "cause": row_cause,
                      # The pass's own grade for its own attribution. When that
                      # attribution is right, so is the grade -- see
                      # `shared_origin_decoy_probe` on what that costs.
                      "confidence": v.pass_confidence if healthy else p.confidence,
-                     "rationale": _fmt(v.local_reason if healthy else p.rationale, n)})
+                     "rationale": row_rationale})
 
         # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
         # never the raw kind/name identifier. The origin-object branch carries this
@@ -912,15 +972,10 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
 
     group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
     user = _user_message(None, None, "", (), tuple(workloads), tuple(reads), key=group)
-    if healthy:
-        # Verbatim `multi`'s shape: this IS the ordinary independent answer,
-        # and a different wording would separate the classes by phrasing.
-        lines = [f"{count} workloads are failing for separate reasons."]
-        lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    else:
-        lines = [f"{count} workloads share one upstream cause: {_fmt(p.origin, anchor)}.",
-                 f"Root cause: {shared_cause}.",
-                 _fmt(p.remedy, anchor)]
+    lines = _shared_origin_summary(
+        label, healthy=healthy, count=count, origin=_fmt(p.origin, anchor),
+        shared_cause=shared_cause, remedy=_fmt(p.remedy, anchor), rows=rows,
+        key=p.key)
     return _SharedOrigin(drawn=drawn, scope_value=scope_value, anchor=anchor,
                          shared_cause=shared_cause, distractor_cause=distractor_cause,
                          decoys=decoys, user=user,

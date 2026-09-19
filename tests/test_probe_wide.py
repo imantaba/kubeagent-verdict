@@ -38,6 +38,21 @@ def test_wide_probe_uses_no_trainable_origin():
 
 
 def test_wide_rows_are_adjacent_twins_with_unique_pair_keys():
+    """A `shared`-labeled probe half is decided end to end: every victim's
+    cause comes from the rules, disjoint from its decoy twin's causes (spec
+    section 3). On the two scope-pinned origins (node-not-ready,
+    registry-unreachable) that is one string, because every victim binds the
+    same node or registry name. storage-provisioner-down's origin binds a
+    PER-VICTIM PVC name, so its `shared` group can hold more than one PVC
+    cause (`rules.py`'s group-key storage-class fallback) -- still disjoint
+    from the decoy twin, just not one string.
+
+    A `none`-labeled probe half makes neither promise. A victim the rules
+    decide on its own evidence gets the same cause regardless of `healthy` --
+    the per-victim decide branch never reads it -- so it can appear on BOTH
+    halves of the pair; only the undecided victims still swap between the
+    decoy and shared causes.
+    """
     rows = generate.shared_origin_wide_probes()
     seen: set[str] = set()
     assert len(rows) % 2 == 0
@@ -52,11 +67,12 @@ def test_wide_rows_are_adjacent_twins_with_unique_pair_keys():
         seen.add(key)
         # The discriminating read must differ, or the pair asks nothing.
         assert probe.user != decoy.user
-        # Probe half: every victim shares ONE cause. Decoy half: none of the
-        # victims' correct causes is that shared cause.
         shared = set(probe.meta["expected"].values())
-        assert len(shared) == 1
-        assert shared.isdisjoint(set(decoy.meta["expected"].values()))
+        if probe.meta["label"] == "shared":
+            assert all(w["decided"] for w in probe.meta["workloads"].values())
+            if probe.meta["origin"] != "storage-provisioner-down":
+                assert len(shared) == 1
+            assert shared.isdisjoint(set(decoy.meta["expected"].values()))
 
 
 def test_wide_probe_is_deterministic():

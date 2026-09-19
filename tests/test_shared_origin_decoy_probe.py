@@ -197,17 +197,26 @@ def test_the_summary_says_separate_reasons(decoys):
         assert propagation.SEPARATE_REASONS in summary, e.meta["origin"]
 
 
-def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys, probes):
+def test_the_shared_cause_is_the_decoy_the_scorer_watches(decoys):
     """`named_decoy` must fire on the trap this slice sets, not on nothing.
 
-    Compared against the TWIN's expected answers rather than the raw
-    `shared_cause` template: `{node}` and `{ns}` are substituted per row, and
-    the twin -- same salt, same names -- is where the formatted string lives.
+    `decoy_causes` (spec section 9: protected, unconditional) is always the
+    one formatted `shared_cause` sentence, never a decided victim's own
+    terse cause -- checked against the scenario's own `shared_cause`
+    template rather than against either twin's `expected` values, because
+    neither half is a reliable source any more: this row's own `expected`
+    never holds it (a decoy row's undecided victims render their own local
+    cause, not the shared one -- `test_the_correct_answer_is_each_workload_
+    s_own_local_cause` above), and the twin probe's `expected` only holds it
+    when the probe still has an undecided victim left -- an origin-object
+    story that happens to draw every victim decided leaves nothing in `expected`
+    for the trap to match, even though the trap itself is still set.
     """
-    for d, t in zip(decoys, probes):
-        want = set(t.meta["expected"].values())
-        assert len(want) == 1, d.meta["origin"]
-        assert d.meta["decoy_causes"] == list(want), d.meta["origin"]
+    for e in decoys:
+        assert len(e.meta["decoy_causes"]) == 1, e.meta["origin"]
+        template = propagation.by_key()[e.meta["origin"]].shared_cause
+        pattern = re.sub(r"\\\{\w+\\\}", ".+", re.escape(template))
+        assert re.fullmatch(pattern, e.meta["decoy_causes"][0]), e.meta["origin"]
 
 
 def test_the_slice_carries_shared_claim_phrases_and_no_wrong_summary_phrase(decoys):
@@ -248,17 +257,33 @@ def _menu_pick(example, verdict: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("verdict", ["attributed", "outranked"])
 def test_no_tag_heuristic_wins_both_shared_origin_slices(decoys, probes, verdict):
-    """One tag sweeps one slice and scores zero on the other, both ways."""
-    def hits(examples):
-        got = total = 0
-        for e in examples:
-            picks = _menu_pick(e, verdict)
-            for workload, want in e.meta["expected"].items():
-                total += 1
-                got += int(picks.get(workload) == want)
-        return got, total
+    """One tag sweeps one slice and scores zero on the other, both ways.
 
-    on_decoy, on_probe = hits(decoys), hits(probes)
+    Over the workloads UNDECIDED ON BOTH HALVES of the pair -- the
+    local-decoy-vs-shared-cause tension this tag pair exists to measure.
+    Excluded jointly, not per half: an origin-object story's victims decide
+    on the broken half and undecide on the healthy half (a healthy origin object
+    confirms nothing), so a per-half filter would drop a different set of
+    workloads from each side and the two totals would stop matching. A
+    decided workload's correct answer is the rules' terse cause, which
+    never appears on the fixed three-candidate menu (decoy/distractor/
+    shared_cause) at all; it lives on the separate `decided by rules:` line
+    `_menu_pick` does not read, so every tag pick misses it on both slices
+    and it carries no signal either way.
+    """
+    got_decoy = total_decoy = got_probe = total_probe = 0
+    for d, p in zip(decoys, probes):
+        decoy_picks, probe_picks = _menu_pick(d, verdict), _menu_pick(p, verdict)
+        for workload, want_decoy in d.meta["expected"].items():
+            if d.meta["workloads"][workload]["decided"] or \
+                    p.meta["workloads"][workload]["decided"]:
+                continue
+            total_decoy += 1
+            got_decoy += int(decoy_picks.get(workload) == want_decoy)
+            total_probe += 1
+            got_probe += int(probe_picks.get(workload) == p.meta["expected"][workload])
+
+    on_decoy, on_probe = (got_decoy, total_decoy), (got_probe, total_probe)
     assert on_decoy[1] == on_probe[1] > 0
     won, lost = (on_decoy, on_probe) if verdict == "attributed" else (on_probe, on_decoy)
     assert won[0] == won[1], f"{verdict} should sweep its slice: {won}"
@@ -298,31 +323,68 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     one shared cause" would emit here -- the real failure, not a caricature of
     it.
 
-    Averaged across the whole corpus this would barely move `cause_accuracy`.
-    This is the measurement that makes it cost something: cause accuracy
-    collapses to 0, every row names the decoy, and job3 -- which grades this
-    `label: none` slice on whether the summary claims a shared cause -- reads
-    0.0, on a slice where the 0830 model, which answered independence
-    everywhere, would have scored perfectly.
+    Cause accuracy no longer collapses to a flat 0 on every row: a decided
+    workload's cause does not depend on `healthy` (its own local evidence,
+    not the row's origin, decides it), so the twin's answer for it is
+    already correct here too.
+
+    `named_decoy` splits by the PROBE's own label, not this row's (which is
+    always `none` -- see `test_the_shared_cause_is_the_decoy_the_scorer_
+    watches`'s docstring). On the three `none`-labeled origins the twin's
+    answer still fires the trap on every row, but not the trap this
+    docstring's title names: `decoy_by_workload` (spec section 9: protected,
+    unchanged) holds `[result.cause]` for a workload the rules decided, and
+    the twin decides that SAME workload to that SAME cause (healthy-
+    insensitive), so the twin's own reply matches its own listed decoy --
+    the pre-existing quirk `test_a_model_that_reads_the_evidence_passes_
+    this_slice` below names on a fully honest reply. On the three
+    `shared`-labeled origins (ruled stories) the twin is fully decided too,
+    but `decoy_by_workload` is unconditionally empty there (spec section
+    12's "no decoy rate on ruled stories"), and the row-level trap
+    (`shared_cause`) never appears in a fully-decided twin's answer, so
+    nothing fires.
+
+    job3 grades the summary against THIS row's own `none` label, so it
+    tracks what the twin's summary actually claims, not which origin it is:
+    a `shared`-labeled twin (the three origin-object stories) still writes "N
+    workloads share one upstream cause", which is false here, so job3 reads
+    0.0. A `none`-labeled twin (the other three) already writes today's
+    honest "kubeagent's rules did not confirm one cause on two or more of
+    them" -- the label-driven summary's whole point is that this no longer claims a shared
+    origin on a `none`-labeled row, so pasting it here, where the label is
+    also `none`, is not the failure this test is naming, and job3 reads 1.0.
     """
     twin = {d.user: t.assistant for d, t in zip(decoys, probes)}
     results = score.evaluate([generate.to_row(e) for e in decoys],
                              lambda m: twin[m[1]["content"]])
     assert all(r["contract_ok"] for r in results)
-    assert all(r["cause_acc"] == 0.0 for r in results)
-    assert all(r["named_decoy"] is True for r in results)
-    assert all(r["job3"] == 0.0 for r in results)
+    for e, t, r in zip(decoys, probes, results):
+        decided = [w["decided"] for w in e.meta["workloads"].values()]
+        assert r["cause_acc"] == sum(decided) / len(decided), e.meta["origin"]
+        assert r["named_decoy"] is (t.meta["label"] != "shared"), e.meta["origin"]
+        assert r["job3"] == (0.0 if t.meta["label"] == "shared" else 1.0), e.meta["origin"]
 
 
 def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
-    """Non-vacuity: the assertions above are about the ANSWER, not the shape."""
+    """Non-vacuity: the assertions above are about the ANSWER, not the shape.
+
+    `named_decoy` no longer reads False across the board: `decoy_by_workload`
+    (spec section 9: protected, unchanged) holds a decided workload's own
+    candidate list, which -- for the per-victim decided branch this slice's
+    two `none`-labeled rows with an embedded decided victim exercise -- is
+    just `[result.cause]`, so even the CORRECT reply names its own workload
+    as its own "decoy". It reads True exactly where the row decides at
+    least one workload, never on a fully undecided row.
+    """
     by_prompt = {e.user: e.assistant for e in decoys}
     results = score.evaluate([generate.to_row(e) for e in decoys],
                              lambda m: by_prompt[m[1]["content"]])
     assert all(r["cause_acc"] == 1.0 for r in results)
     assert all(r["conf_acc"] == 1.0 for r in results)
-    assert all(r["named_decoy"] is False for r in results)
     assert all(r["job3"] == 1.0 for r in results)
+    for e, r in zip(decoys, results):
+        n_decided = sum(1 for w in e.meta["workloads"].values() if w["decided"])
+        assert r["named_decoy"] is (n_decided > 0), e.meta["origin"]
 
 
 # ------------------------------------------- the training set must not move
