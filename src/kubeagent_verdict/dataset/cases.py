@@ -1186,10 +1186,15 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
             issue=e.issue, kind=e.workload_kind, status=e.status, rng=rng)
         workloads.append(workload)
         results.append(result)
-        expected_cause = _fmt(e.winner_cause, n)
+        if result.decided:
+            expected_cause = result.cause
+            rationale = _rule_rationale(result)
+        else:
+            expected_cause = _fmt(e.own_cause, n)
+            rationale = _fmt(e.rationale, n)
         all_reads.extend(reads[:2])  # stay under the 8-read budget at 4 workloads
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
-                     "confidence": conf, "rationale": _fmt(e.rationale, n)})
+                     "confidence": conf, "rationale": rationale})
         key = f"{n.ns}/{n.name}"
         candidates = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
         # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
