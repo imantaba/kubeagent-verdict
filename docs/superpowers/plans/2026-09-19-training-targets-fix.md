@@ -133,18 +133,27 @@ The gated numbers -- the three job bars, contract validity, decoy rate
 and suggestion echo -- never see a whole row. They see the system and
 user messages, which workloads the gold JSON's `verdicts` list flags,
 and the per-workload meta fields job 1 and job 2 grade. `view(row)`
-reduces a row to that shape. It drops `meta["expected"]` and each
-workload's `expected_cause` string -- a model never sees either -- and
-keeps one boolean instead, `expects_none_of_these`, the only fact about
-`expected_cause` job 2 switches on (exact match vs. keyword match).
-The ungated extras -- cause accuracy, confidence carried, overconfidence
-and the length gap -- also read the gold answer's cause or confidence,
-which this view drops, so they can move while this pin holds.
+reduces a row to that shape. It drops the `meta["expected"]` dict and
+each workload's `expected_cause` string -- a model never sees either --
+and keeps one boolean instead, `expects_none_of_these`, the only fact
+about `expected_cause` job 2 switches on (exact match vs. keyword
+match).
+
+Two gold fields do survive, at the top of `meta`, where a
+single-workload row mirrors them: `expected_cause` on 224 of the 263
+rows and `expected_confidence` on 234. This view keeps both. That makes
+the pin stricter than the gated numbers need, never looser: a gold
+cause or confidence that moved on one of those rows fails this test
+instead of slipping past it. So the ungated extras -- cause accuracy,
+confidence carried, overconfidence and the length gap -- are only
+partly free to move. They read those two fields, and a row that carries
+one of them is pinned on it.
 
 `GRADED_VIEW_SHA256` pins the sha256 of that view over the whole exam
 (`generate.test_set()`, 263 rows). This is not a TDD red test: it
 passes today, before the training-targets fix, because the fix only
-ever touches the gold answer, never anything this view keeps.
+touches shared-origin rows, and this view keeps none of the fields it
+changes there -- their gold cause lives in the `meta["expected"]` dict.
 The 14-row exam move in a later task must leave this hash unchanged --
 that is the whole point of pinning it here first.
 """
