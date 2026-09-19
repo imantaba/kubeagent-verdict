@@ -55,6 +55,29 @@ def _fmt(tpl: str, n: Names) -> str:
                       pvc=n.pvc, restarts=n.restarts)
 
 
+_NOUN = {"node": "node", "pvc": "claim", "registry": "registry"}
+
+
+def _rule_rationale(result: rules.Result) -> str:
+    """A decided rule row's rationale, built from the rules' own evidence.
+
+    Every rule row's cause comes straight from `rules.decide` (never a
+    hand-written string), so the rationale explaining it must agree with
+    the same evidence the rules found -- this is what makes that true.
+    `result.outcome` is always "confirmed" or "unverified" here:
+    `rules.decide` never returns a decided Result with any other outcome.
+    """
+    kind, name = result.cause.split(" ", 2)[:2]
+    noun = _NOUN[kind.lower()]
+    evidence = result.evidence[0].lower() + result.evidence[1:]
+    if result.outcome == "confirmed":
+        return (f"The fresh read of {noun} {name} confirms it: {evidence}, "
+                f"so the {noun}'s own state is why the flagged workload is failing.")
+    return (f"The fresh read of {noun} {name} did not clear the earlier finding: "
+            f"{evidence}, so {name} stays the named cause rather than something "
+            f"the read ruled out.")
+
+
 def _suggestion(issue: str, n: Names) -> rem.Suggestion:
     """The `suggested fix` line kubeagent would render for this finding.
 
