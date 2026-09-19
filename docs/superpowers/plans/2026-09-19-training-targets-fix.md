@@ -802,10 +802,12 @@ Why job2 needs a hand-rolled gate rather than reading `scoreboard()`'s
 own `jobs.job2` rate: `evaluate` puts every job==2 workload into
 `job2_scores`, including one with no keywords at all (`job2` scores
 that 0.0 unconditionally, whatever the reply says -- out of scope for
-this gate, not a failure of it). Read directly, `scoreboard()`'s job2
-rate on today's (unfixed) train is 0.9407 over 3121 -- higher than the
-0.9149 the spec cites, because that raw rate already averages in 946
-`none_of_these` workloads that score near-perfectly today. Gate 1
+this gate, not a failure of it). `scoreboard()`'s own job2 rate answers
+a different question: it reads all 7433 job-2 workloads, and after this
+task's fix it is 0.4199. The gate population is 3121 -- the 2175
+keyword-graded workloads plus 946 `none_of_these` -- and on today's
+(unfixed) train that population scores 0.9407, higher than the 0.9149
+the spec cites, because those 946 score near-perfectly today. Gate 1
 defines the population as keyword-graded OR `none_of_these`
 (`_job2_gate` above, matching that exactly); the narrower keyword-only
 slice (`_job2_keyword_only`) is kept as a second test only because the
