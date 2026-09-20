@@ -6682,3 +6682,790 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
 def trainable_scenarios() -> tuple[Propagation, ...]:
     """The origins training may see. Disjoint from `all_scenarios()` by test."""
     return _TRAINING_SCENARIOS
+
+
+_RULED_NODE_1 = Propagation(
+    key="node-kubelet-halted",
+    blast_radius="node",
+    scope_field="node",
+    origin="a node's kubelet process crashed outright, so the node reports "
+           "Ready False",
+    shared_cause="node {node}'s kubelet process crashed and the node reports "
+                 "Ready False, so the pods it held cannot come back on it",
+    shared_reason="{node} shows Ready False and its kubelet reports no "
+                  "successful status update",
+    distractor_cause="an operator cordoned {node} for planned maintenance",
+    distractor_reason="{node} carries no cordon annotation and stays "
+                      "schedulable",
+    rationale="the workload's symptom is what a crashed kubelet on {node} "
+              "does to it, not a change in the workload itself",
+    remedy="Restart the kubelet on {node} or replace the node; the flagged "
+           "workloads need no change.",
+    confidence="high",
+    origin_object=Object(kind="node", name="{node}", scan_reason="NotReady",
+                          placement="on", fresh=Fresh(ready="False"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(ready="True"),
+    origin_read=(
+        "describe node {node}",
+        ("Ready condition: False\nConditions:\n"
+         "  Ready   False   KubeletNotReady   PLEG is not healthy: pleg was "
+         "last seen active\n"
+         "Taints:  node.kubernetes.io/not-ready:NoExecute\n"
+         "         node.kubernetes.io/not-ready:NoSchedule"),
+    ),
+    healthy_origin_content=(
+        "Ready condition: True\nConditions:\n"
+        "  Ready   True    KubeletReady   kubelet is posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_variants=(
+        (("Ready condition: False\nConditions:\n"
+          "  Ready   False   KubeletNotReady   PLEG is not healthy: pleg was "
+          "last seen active\n"
+          "Taints:  node.kubernetes.io/not-ready:NoExecute\n"
+          "         node.kubernetes.io/not-ready:NoSchedule"),
+         ("Ready condition: True\nConditions:\n"
+          "  Ready   True    KubeletReady   kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("systemd unit kubelet.service: failed\n"
+          "ExitCode=137, restart suppressed by admin override\n"
+          "node condition Ready: False"),
+         ("systemd unit kubelet.service: active (running)\n"
+          "restart count: 0\n"
+          "node condition Ready: True")),
+        (("node agent process: not running\n"
+          "process exited 4 minutes ago and has not restarted\n"
+          "node condition Ready: False"),
+         ("node agent process: running\n"
+          "process has been running for 9 days without a restart\n"
+          "node condition Ready: True")),
+        (("cluster view of the node: unreachable from the API server\n"
+          "kubelet process exited with signal 9\n"
+          "node condition Ready: False"),
+         ("cluster view of the node: reachable from the API server\n"
+          "kubelet process has not restarted\n"
+          "node condition Ready: True")),
+    ),
+    origin_state=("False", "True"),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Degraded",
+            issue="ContainerStartError",
+            reason="the container image was resolved but the container "
+                   "could not be started",
+            evidence="RunContainerError: failed to create containerd task: "
+                     "failed to create shim task: context deadline exceeded",
+            local_cause="the container's init step waits on a config file a "
+                        "sidecar has not written yet",
+            local_reason="the container exits before the sidecar finishes "
+                         "writing its config",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: RunContainerError: "
+                   "failed to create containerd task: failed to create shim "
+                   "task: context deadline exceeded")),
+            healthy_read_content="Normal  Started  kubelet  Started container",
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted for {pod}",
+            evidence="MountVolume.SetUp failed: rpc error: code = "
+                     "DeadlineExceeded desc = context deadline exceeded",
+            local_cause="the CSI node plugin on this pod's node is stuck "
+                        "initializing",
+            local_reason="the mount request never reaches a running CSI node "
+                         "plugin",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  FailedMount  kubelet  MountVolume.SetUp "
+                   "failed: rpc error: code = DeadlineExceeded desc = "
+                   "context deadline exceeded")),
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="CrashLoopBackOff",
+            issue="CrashLoopBackOff",
+            reason="container {container} has restarted {restarts} times",
+            evidence="back-off restarting failed container",
+            log_cause="dial tcp: i/o timeout dialing a local endpoint",
+            local_cause="the agent's own retry budget runs out before its "
+                        "dependency starts answering",
+            local_reason="the agent gives up after a fixed retry budget "
+                         "instead of waiting",
+            read=("get_log_causes {ns}/{pod}",
+                  ("classified cause: connection attempt timed out dialing a "
+                   "local endpoint (3 of 3 sampled restarts)")),
+            pass_confidence="low",
+            on_origin=True,
+        ),
+    ),
+)
+
+_RULED_NODE_2 = Propagation(
+    key="node-kubelet-unresponsive",
+    blast_radius="node",
+    scope_field="node",
+    origin="a node's kubelet stopped answering the control plane, so its "
+           "status reads Unknown",
+    shared_cause="node {node} reports Ready Unknown because its kubelet "
+                 "stopped answering the control plane, so the pods it held "
+                 "are gone",
+    shared_reason="{node} shows Ready Unknown and the control plane cannot "
+                  "reach its kubelet at all",
+    distractor_cause="a rollout paused every workload on {node} mid-deploy",
+    distractor_reason="every controller on {node} still reports its prior "
+                      "generation as current",
+    rationale="the workload's symptom is what {node} going unreachable does "
+              "to it, not a change in the workload itself",
+    remedy="Restore network reachability to {node} or replace it; the "
+           "flagged workloads need no change.",
+    confidence="high",
+    origin_object=Object(kind="node", name="{node}", scan_reason="NotReady",
+                          placement="on", fresh=Fresh(ready="Unknown"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(ready="True"),
+    origin_read=(
+        "describe node {node}",
+        ("Ready condition: Unknown\nConditions:\n"
+         "  Ready   Unknown   NodeStatusUnknown   node has not responded to "
+         "the control plane\n"
+         "Taints:  node.kubernetes.io/unreachable:NoExecute\n"
+         "         node.kubernetes.io/unreachable:NoSchedule"),
+    ),
+    healthy_origin_content=(
+        "Ready condition: True\nConditions:\n"
+        "  Ready   True    KubeletReady   kubelet is posting ready status\n"
+        "Taints:  <none>"
+    ),
+    origin_variants=(
+        (("Ready condition: Unknown\nConditions:\n"
+          "  Ready   Unknown   NodeStatusUnknown   node has not responded to "
+          "the control plane\n"
+          "Taints:  node.kubernetes.io/unreachable:NoExecute\n"
+          "         node.kubernetes.io/unreachable:NoSchedule"),
+         ("Ready condition: True\nConditions:\n"
+          "  Ready   True    KubeletReady   kubelet is posting ready "
+          "status\n"
+          "Taints:  <none>")),
+        (("control plane connection to the node: timed out\n"
+          "the node has not been reachable this cycle\n"
+          "node condition Ready: Unknown"),
+         ("control plane connection to the node: established\n"
+          "the node answered this cycle\n"
+          "node condition Ready: True")),
+        (("node network interface: no response to any probe\n"
+          "every probe to the node has failed this cycle\n"
+          "node condition Ready: Unknown"),
+         ("node network interface: responds to every probe\n"
+          "every probe to the node has succeeded this cycle\n"
+          "node condition Ready: True")),
+        (("kube-apiserver's node watcher: marked the node unreachable\n"
+          "no update has arrived from this node\n"
+          "node condition Ready: Unknown"),
+         ("kube-apiserver's node watcher: marked the node reachable\n"
+          "updates keep arriving from this node\n"
+          "node condition Ready: True")),
+    ),
+    origin_state=("Unknown", "True"),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="Degraded", issue="RestartLoop",
+            reason="container {container} keeps restarting on this node",
+            evidence="Back-off restarting failed container {container}",
+            local_cause="a leftover lock file from a prior run blocks the "
+                        "container's own startup",
+            local_reason="the container's own init step refuses to proceed "
+                         "while the lock file exists",
+            read=("get_events {ns}/{name}",
+                  ("Warning  BackOff  kubelet  Back-off restarting failed "
+                   "container {container}")),
+            healthy_read_content="Normal  Started  kubelet  Started container",
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="StatefulSet", status="ContainerCreating",
+            issue="VolumeAttachError",
+            reason="volume {pvc} could not be attached to this pod's node",
+            evidence="AttachVolume.Attach failed: rpc error: code = "
+                     "Unavailable desc = the node is not answering attach "
+                     "requests",
+            local_cause="a second pod on a different node already holds the "
+                        "exclusive attachment for {pvc}",
+            local_reason="the attach controller reports the claim already "
+                         "attached from elsewhere",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Bound\nAccess Modes: RWO\n"
+                   "Attached to node: {node}  (node condition Ready: "
+                   "Unknown)")),
+            healthy_read_content=(
+                "Status: Bound\nAccess Modes: RWO\n"
+                "Attached to node: {node}  (node condition Ready: True)"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="Degraded", issue="ProbeFailure",
+            reason="container {container}'s readiness probe fails from this "
+                   "node",
+            evidence="Readiness probe failed: dial tcp: i/o timeout",
+            local_cause="the probe's own timeout is shorter than the "
+                        "dependency it checks ever answers within",
+            local_reason="the probe fails on its own schedule, regardless of "
+                         "what is reachable",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Unhealthy  kubelet  Readiness probe "
+                   "failed: dial tcp: i/o timeout")),
+            pass_confidence="low",
+            on_origin=True,
+        ),
+    ),
+)
+
+_RULED_PVC_1 = Propagation(
+    key="pvc-provisioner-not-responding",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the dynamic provisioner for one storage class stopped "
+           "responding to new claims",
+    shared_cause="the capacity-hdd storage class's provisioner is not "
+                 "responding, so no claim against it can bind",
+    shared_reason="no PersistentVolume on the capacity-hdd class has bound "
+                  "cluster-wide in the current window",
+    distractor_cause="a namespace quota is refusing new pods",
+    distractor_reason="the quota reports well under its pod limit in every "
+                      "namespace",
+    rationale="the workload is waiting on a capacity-hdd volume that "
+              "nothing is left to create",
+    remedy="Restore the capacity-hdd provisioner; the pending claims bind "
+           "on their own afterwards.",
+    confidence="high",
+    origin_object=Object(kind="pvc", name="{pvc}",
+                          scan_reason="ProvisionerNotResponding",
+                          placement="mounted",
+                          fresh=Fresh(phase="Pending",
+                                     storage_class="capacity-hdd"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(phase="Bound", storage_class="capacity-hdd"),
+    origin_read=(
+        "get_related storageclass capacity-hdd",
+        ("provisioner status: stalled\n"
+         "provisioner: example.com/capacity-hdd-csi\n"
+         "controller capacity-hdd-provisioner: 0/1 ready, CrashLoopBackOff\n"
+         "PersistentVolumes bound on this class in the last 20m: 0"),
+    ),
+    healthy_origin_content=(
+        "provisioner status: healthy\n"
+        "provisioner: example.com/capacity-hdd-csi\n"
+        "controller capacity-hdd-provisioner: 1/1 ready, Running\n"
+        "PersistentVolumes bound on this class in the last 20m: 6"
+    ),
+    origin_variants=(
+        (("provisioner status: stalled\n"
+          "provisioner: example.com/capacity-hdd-csi\n"
+          "controller capacity-hdd-provisioner: 0/1 ready, CrashLoopBackOff\n"
+          "PersistentVolumes bound on this class in the last 20m: 0"),
+         ("provisioner status: healthy\n"
+          "provisioner: example.com/capacity-hdd-csi\n"
+          "controller capacity-hdd-provisioner: 1/1 ready, Running\n"
+          "PersistentVolumes bound on this class in the last 20m: 6")),
+        (("controller capacity-hdd-provisioner: CrashLoopBackOff, restart "
+          "count climbing\n"
+          "provisioner status: stalled\n"
+          "last successful provision: none this window"),
+         ("controller capacity-hdd-provisioner: Running, no restarts\n"
+          "provisioner status: healthy\n"
+          "last successful provision: within the last minute")),
+        (("capacity-hdd claims waiting on a volume: 4\n"
+          "provisioner status: stalled\n"
+          "provisioner pod is not accepting new work"),
+         ("capacity-hdd claims waiting on a volume: 0\n"
+          "provisioner status: healthy\n"
+          "provisioner pod is accepting new work")),
+        (("capacity-hdd provision requests: queued, none completing\n"
+          "provisioner status: stalled\n"
+          "the provisioner container has not emitted a log line this "
+          "window"),
+         ("capacity-hdd provision requests: none queued, all completing\n"
+          "provisioner status: healthy\n"
+          "the provisioner container is emitting log lines normally")),
+    ),
+    origin_state=("stalled", "healthy"),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending",
+            issue="Unschedulable",
+            reason="pod has unbound immediate PersistentVolumeClaims",
+            evidence="0/4 nodes are available: 4 pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="the claim asks for more capacity than any volume in "
+                        "the pool can offer",
+            local_reason="the claim never leaves Pending because no volume "
+                         "that size exists",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Pending\nStorageClass: capacity-hdd\n"
+                   "Events: Normal  ExternalProvisioning  waiting for a "
+                   "volume to be created by the external provisioner")),
+            healthy_read_content=(
+                "Status: Bound\nStorageClass: capacity-hdd\n"
+                "Events: Normal  ProvisioningSucceeded  successfully "
+                "provisioned volume"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="pod has unbound immediate PersistentVolumeClaims",
+            evidence="0/4 nodes are available: 4 pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="the Job's own retry backoff keeps it from ever "
+                        "re-requesting the claim",
+            local_reason="the pod template's own restart policy stalls the "
+                         "request rather than retrying it",
+            read=("get_events {ns}/{name}",
+                  ("Normal  WaitForFirstConsumer  persistentvolume-controller "
+                   " waiting for first consumer to be created before "
+                   "binding\n"
+                   "Normal  ExternalProvisioning  waiting for a volume to be "
+                   "created")),
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted",
+            evidence="MountVolume.SetUp failed: timed out waiting for the "
+                     "condition",
+            local_cause="the filesystem on {pvc} needs an fsck that has not "
+                        "been triggered",
+            local_reason="the mount times out rather than failing outright",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  FailedMount  kubelet  Unable to attach "
+                   "or mount volumes: unmounted volumes=[{pvc}], timed out "
+                   "waiting for the condition")),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+    ),
+)
+
+_RULED_PVC_2 = Propagation(
+    key="pvc-storageclass-missing",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="a storage class every new claim names was deleted, so nothing "
+           "on it can provision",
+    shared_cause="the cache-nvme storage class no longer exists, so no "
+                 "claim naming it can bind",
+    shared_reason="cache-nvme is absent from the cluster's storage class "
+                  "list and every claim on it stays Pending",
+    distractor_cause="the cluster autoscaler is refusing to add capacity",
+    distractor_reason="the autoscaler reports headroom on every existing "
+                      "node",
+    rationale="the workload is waiting on a cache-nvme volume that no "
+              "storage class exists to create",
+    remedy="Recreate the cache-nvme storage class; the pending claims bind "
+           "on their own afterwards.",
+    confidence="high",
+    origin_object=Object(kind="pvc", name="{pvc}",
+                          scan_reason="MissingStorageClass",
+                          placement="mounted",
+                          fresh=Fresh(phase="Pending",
+                                     storage_class="cache-nvme"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(phase="Bound", storage_class="cache-nvme"),
+    origin_read=(
+        "get_related storageclass cache-nvme",
+        ("storage class lookup: missing\n"
+         "requested class: cache-nvme\n"
+         "matching StorageClass objects in the cluster: 0\n"
+         "PersistentVolumeClaims stuck Pending on this class: 5"),
+    ),
+    healthy_origin_content=(
+        "storage class lookup: present\n"
+        "requested class: cache-nvme\n"
+        "matching StorageClass objects in the cluster: 1\n"
+        "PersistentVolumeClaims bound on this class in the last 20m: 4"
+    ),
+    origin_variants=(
+        (("storage class lookup: missing\n"
+          "requested class: cache-nvme\n"
+          "matching StorageClass objects in the cluster: 0\n"
+          "PersistentVolumeClaims stuck Pending on this class: 5"),
+         ("storage class lookup: present\n"
+          "requested class: cache-nvme\n"
+          "matching StorageClass objects in the cluster: 1\n"
+          "PersistentVolumeClaims bound on this class in the last 20m: 4")),
+        (("PersistentVolumeClaims referencing cache-nvme: 5 Pending\n"
+          "storage class lookup: missing\n"
+          "no provisioner is registered for this class name"),
+         ("PersistentVolumeClaims referencing cache-nvme: 0 Pending, 4 "
+          "Bound\n"
+          "storage class lookup: present\n"
+          "a provisioner is registered for this class name")),
+        (("cluster storage class list: cache-nvme is absent\n"
+          "storage class lookup: missing\n"
+          "no operator has recreated it since it was removed"),
+         ("cluster storage class list: cache-nvme is present\n"
+          "storage class lookup: present\n"
+          "the class has been recreated and claims are binding again")),
+        (("admission check for new claims naming cache-nvme: rejected, "
+          "unknown class\n"
+          "storage class lookup: missing\n"
+          "every new claim on this class fails at admission"),
+         ("admission check for new claims naming cache-nvme: accepted\n"
+          "storage class lookup: present\n"
+          "new claims on this class pass admission normally")),
+    ),
+    origin_state=("missing", "present"),
+    victims=(
+        Victim(
+            workload_kind="StatefulSet", status="Pending",
+            issue="Unschedulable",
+            reason="pod has unbound immediate PersistentVolumeClaims",
+            evidence="0/4 nodes are available: 4 pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="the StatefulSet's replica count outgrew the volumes "
+                        "already provisioned for it",
+            local_reason="the newest replica's claim is the only one still "
+                         "Pending",
+            read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
+                  ("Status: Pending\nStorageClass: cache-nvme\n"
+                   "Events: Warning  ProvisioningFailed  "
+                   "persistentvolume-controller  storageclass.storage.k8s.io "
+                   '"cache-nvme" not found')),
+            healthy_read_content=(
+                "Status: Bound\nStorageClass: cache-nvme\n"
+                "Events: Normal  ProvisioningSucceeded  successfully "
+                "provisioned volume"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Job", status="Pending", issue="Unschedulable",
+            reason="pod has unbound immediate PersistentVolumeClaims",
+            evidence="0/4 nodes are available: 4 pod has unbound immediate "
+                     "PersistentVolumeClaims",
+            local_cause="the Job's claim template was copied from a cluster "
+                        "that used a different class name",
+            local_reason="the claim requests a class name this cluster never "
+                         "had",
+            read=("get_events {ns}/{name}",
+                  ("Warning  ProvisioningFailed  persistentvolume-controller "
+                   ' storageclass.storage.k8s.io "cache-nvme" not found')),
+            healthy_read_content=(
+                "Normal  ProvisioningSucceeded  persistentvolume-controller "
+                " successfully provisioned volume for this claim"),
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Deployment", status="ContainerCreating",
+            issue="VolumeMountError",
+            reason="volume {pvc} could not be mounted",
+            evidence="MountVolume.SetUp failed: timed out waiting for the "
+                     "condition",
+            local_cause="a stale CSI socket file on this pod's node blocks "
+                        "the mount",
+            local_reason="the mount times out rather than failing outright",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  FailedMount  kubelet  Unable to attach "
+                   "or mount volumes: unmounted volumes=[{pvc}], timed out "
+                   "waiting for the condition")),
+            pass_confidence="low",
+            on_origin=True,
+        ),
+    ),
+)
+
+_RULED_REGISTRY_1 = Propagation(
+    key="registry-mirror-unreachable",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the cluster's image mirror stopped resolving in DNS, so every "
+           "pull through it fails before any manifest is requested",
+    shared_cause="the mirror.invalid registry cannot be resolved, so no "
+                 "workload pulling through it can start",
+    shared_reason="every pull naming mirror.invalid fails at DNS "
+                  "resolution, before any manifest is requested",
+    distractor_cause="the images were removed from the mirror's catalog",
+    distractor_reason="the pulls never get far enough to ask for a "
+                      "manifest",
+    rationale="the workload cannot start because the mirror it pulls from "
+              "cannot be resolved at all, which is true of every image "
+              "behind it right now",
+    remedy="Restore DNS resolution for mirror.invalid; no workload manifest "
+           "needs editing.",
+    confidence="high",
+    origin_object=Object(kind="registry", name="mirror.invalid",
+                          scan_reason="{count}", placement="",
+                          fresh=Fresh(literal="no such host"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(literal="manifest unknown"),
+    origin_read=(
+        "get_events (cluster-wide, type=Warning)",
+        ("pulls through mirror.invalid: all failing\n"
+         "every pod pulling through mirror.invalid reports the same "
+         "error:\n"
+         "  Failed to pull image: rpc error: code = Unknown desc = failed "
+         "to resolve reference: dial tcp: lookup mirror.invalid: no such "
+         "host"),
+    ),
+    healthy_origin_content=(
+        "pulls through mirror.invalid: succeeding\n"
+        "pods pulling through mirror.invalid report ordinary image errors, "
+        "not connection errors:\n"
+        "  Failed to pull image: rpc error: code = Unknown desc = manifest "
+        "unknown"
+    ),
+    origin_variants=(
+        (("pulls through mirror.invalid: all failing\n"
+          "every pod pulling through mirror.invalid reports the same "
+          "error:\n"
+          "  Failed to pull image: rpc error: code = Unknown desc = failed "
+          "to resolve reference: dial tcp: lookup mirror.invalid: no such "
+          "host"),
+         ("pulls through mirror.invalid: succeeding\n"
+          "pods pulling through mirror.invalid report ordinary image "
+          "errors, not connection errors:\n"
+          "  Failed to pull image: rpc error: code = Unknown desc = "
+          "manifest unknown")),
+        (("DNS lookup for mirror.invalid: NXDOMAIN\n"
+          "resolution failures this window: every pull naming "
+          "mirror.invalid\n"
+          "sample error: dial tcp: lookup mirror.invalid: no such host"),
+         ("DNS lookup for mirror.invalid: resolves normally\n"
+          "resolution failures this window: none naming mirror.invalid\n"
+          "sample error: manifest unknown")),
+        (("mirror.invalid reachability probe: failed\n"
+          "every image pull naming this host times out at resolution\n"
+          "sample error: no such host"),
+         ("mirror.invalid reachability probe: succeeded\n"
+          "image pulls naming this host resolve and proceed to the "
+          "manifest\n"
+          "sample error: manifest unknown")),
+        (("image pull error clustering: one failure mode, one host\n"
+          "all failures name mirror.invalid and the same resolution "
+          "error\n"
+          "sample error: no such host"),
+         ("image pull error clustering: ordinary per-image errors\n"
+          "failures name several images behind mirror.invalid, no "
+          "resolution error among them\n"
+          "sample error: manifest unknown")),
+    ),
+    origin_state=("no such host", "manifest unknown"),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="ImagePullBackOff",
+            issue="ImagePullBackOff",
+            reason="container {container} cannot pull {image}",
+            evidence="Back-off pulling image {image}",
+            local_cause="the image tag {image} was retagged and no longer "
+                        "points at a built image",
+            local_reason="the pull is retried and backed off repeatedly",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Failed to pull image "
+                   "{image}: dial tcp: lookup mirror.invalid: no such "
+                   "host")),
+            healthy_read_content=(
+                "Events: Warning  Failed  kubelet  Failed to pull image "
+                "{image}: manifest unknown"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="ErrImagePull",
+            issue="ErrImagePull",
+            reason="container {container} cannot pull {image}",
+            evidence="failed to resolve reference for {image}",
+            local_cause="the image reference for {image} was built against "
+                        "a registry path this cluster never mirrors",
+            local_reason="the pull fails before the image layers are "
+                         "fetched",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: ErrImagePull\n"
+                   "Warning  Failed  kubelet  failed to resolve reference: "
+                   "dial tcp: lookup mirror.invalid: no such host")),
+            healthy_read_content=(
+                "Warning  Failed  kubelet  Error: ErrImagePull\n"
+                "Warning  Failed  kubelet  failed to resolve reference: "
+                "manifest unknown"),
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Job", status="ImagePullBackOff",
+            issue="ImagePullBackOff",
+            reason="init container {init_container} cannot pull its image",
+            evidence="Back-off pulling image for init container "
+                     "{init_container}",
+            local_cause="the init container's image name carries a typo "
+                        "that only this Job's template has",
+            local_reason="the init container never starts",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}:\n"
+                   "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                   "  Warning  Failed  kubelet  dial tcp: lookup "
+                   "mirror.invalid: no such host")),
+            healthy_read_content=(
+                "Init Containers:\n  {init_container}:\n"
+                "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                "  Warning  Failed  kubelet  manifest unknown"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+    ),
+)
+
+_RULED_REGISTRY_2 = Propagation(
+    key="registry-rate-limited",
+    blast_radius="cluster",
+    scope_field=None,
+    origin="the image registry is throttling every pull from inside the "
+           "cluster",
+    shared_cause="registry.invalid is rate-limiting the cluster's pulls, so "
+                 "no workload pulling from it can finish",
+    shared_reason="every pull naming registry.invalid fails with the same "
+                  "rate-limit response, before any manifest is served",
+    distractor_cause="a new admission policy blocks the affected pods' "
+                     "image references",
+    distractor_reason="the policy's own audit log shows no denial for any "
+                      "of the affected pods",
+    rationale="the workload cannot start because the registry it pulls "
+              "from is throttling every request right now, which is true "
+              "of every image behind it",
+    remedy="Raise or clear the rate limit on registry.invalid; no workload "
+           "manifest needs editing.",
+    confidence="high",
+    origin_object=Object(kind="registry", name="registry.invalid",
+                          scan_reason="{count}", placement="",
+                          fresh=Fresh(literal="toomanyrequests"),
+                          intent="cause"),
+    healthy_origin_fresh=Fresh(literal="manifest unknown"),
+    origin_read=(
+        "get_events (cluster-wide, type=Warning)",
+        ("pulls from registry.invalid: all rate-limited\n"
+         "every pod pulling from registry.invalid reports the same error:\n"
+         "  Failed to pull image: rpc error: code = Unknown desc = "
+         "toomanyrequests: too many requests to registry.invalid"),
+    ),
+    healthy_origin_content=(
+        "pulls from registry.invalid: succeeding\n"
+        "pods pulling from registry.invalid report ordinary image errors, "
+        "not rate-limit errors:\n"
+        "  Failed to pull image: rpc error: code = Unknown desc = manifest "
+        "unknown"
+    ),
+    origin_variants=(
+        (("pulls from registry.invalid: all rate-limited\n"
+          "every pod pulling from registry.invalid reports the same "
+          "error:\n"
+          "  Failed to pull image: rpc error: code = Unknown desc = "
+          "toomanyrequests: too many requests to registry.invalid"),
+         ("pulls from registry.invalid: succeeding\n"
+          "pods pulling from registry.invalid report ordinary image "
+          "errors, not rate-limit errors:\n"
+          "  Failed to pull image: rpc error: code = Unknown desc = "
+          "manifest unknown")),
+        (("registry.invalid response code on every pull: 429\n"
+          "rate-limit window: exceeded for the whole cluster\n"
+          "sample error: toomanyrequests"),
+         ("registry.invalid response code on every pull: 200 to the "
+          "manifest request\n"
+          "rate-limit window: not exceeded\n"
+          "sample error: manifest unknown")),
+        (("registry.invalid request budget: exhausted\n"
+          "every pull queues behind the same limit\n"
+          "sample error: toomanyrequests"),
+         ("registry.invalid request budget: available\n"
+          "pulls proceed without queuing\n"
+          "sample error: manifest unknown")),
+        (("pull error signature across the cluster: single host, single "
+          "failure mode\n"
+          "all failures name registry.invalid and the same rate-limit "
+          "error\n"
+          "sample error: toomanyrequests"),
+         ("pull error signature across the cluster: many hosts, many "
+          "failure modes\n"
+          "failures name several images behind registry.invalid, no "
+          "rate-limit error among them\n"
+          "sample error: manifest unknown")),
+    ),
+    origin_state=("toomanyrequests", "manifest unknown"),
+    victims=(
+        Victim(
+            workload_kind="Deployment", status="ImagePullBackOff",
+            issue="ImagePullBackOff",
+            reason="container {container} cannot pull {image}",
+            evidence="Back-off pulling image {image}",
+            local_cause="the image {image} was deleted from the registry's "
+                        "catalog",
+            local_reason="the pull is retried and backed off repeatedly",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Events: Warning  Failed  kubelet  Failed to pull image "
+                   "{image}: toomanyrequests: too many requests to "
+                   "registry.invalid")),
+            healthy_read_content=(
+                "Events: Warning  Failed  kubelet  Failed to pull image "
+                "{image}: manifest unknown"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="DaemonSet", status="ErrImagePull",
+            issue="ErrImagePull",
+            reason="container {container} cannot pull {image}",
+            evidence="failed to resolve reference for {image}",
+            local_cause="the image {image} was built for a different CPU "
+                        "architecture than this node runs",
+            local_reason="the pull fails before the image layers are "
+                         "fetched",
+            read=("get_events {ns}/{name}",
+                  ("Warning  Failed  kubelet  Error: ErrImagePull\n"
+                   "Warning  Failed  kubelet  toomanyrequests: too many "
+                   "requests to registry.invalid")),
+            healthy_read_content=(
+                "Warning  Failed  kubelet  Error: ErrImagePull\n"
+                "Warning  Failed  kubelet  manifest unknown"),
+            pass_confidence="medium",
+            on_origin=True,
+        ),
+        Victim(
+            workload_kind="Job", status="ImagePullBackOff",
+            issue="ImagePullBackOff",
+            reason="init container {init_container} cannot pull its image",
+            evidence="Back-off pulling image for init container "
+                     "{init_container}",
+            local_cause="the init container's image reference still names a "
+                        "tag that was retired last release",
+            local_reason="the init container never starts",
+            read=("describe {ns}/{pod} (Pod)",
+                  ("Init Containers:\n  {init_container}:\n"
+                   "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                   "  Warning  Failed  kubelet  toomanyrequests: too many "
+                   "requests to registry.invalid")),
+            healthy_read_content=(
+                "Init Containers:\n  {init_container}:\n"
+                "    State: Waiting\n    Reason: ImagePullBackOff\n"
+                "  Warning  Failed  kubelet  manifest unknown"),
+            pass_confidence="high",
+            on_origin=True,
+        ),
+    ),
+)
+
+
+_RULED_SCENARIOS = (_RULED_NODE_1, _RULED_NODE_2, _RULED_PVC_1, _RULED_PVC_2,
+                    _RULED_REGISTRY_1, _RULED_REGISTRY_2)
+
+
+def ruled_scenarios() -> tuple[Propagation, ...]:
+    """The six stories whose origin the rules pass itself decides (spec
+    section 4). Not part of `trainable_scenarios()` -- the pool merge is a
+    later task."""
+    return _RULED_SCENARIOS
