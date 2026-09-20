@@ -836,7 +836,8 @@ class _SharedOrigin(NamedTuple):
 
 def _render_shared_origin(p: prop.Propagation, rng: random.Random,
                           victims: int | None,
-                          healthy: bool = False) -> _SharedOrigin:
+                          healthy: bool = False,
+                          unverified: bool = False) -> _SharedOrigin:
     """Render one propagation scenario, in the broken world or the healthy one.
 
     `healthy=True` swaps the CONTENT of the origin read for
@@ -865,7 +866,26 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     staleness reaches one `distractor_reason` (registry-unreachable's), which
     is collateral rather than the subject; the healthy origin read refutes
     that distractor on its own.
+
+    `unverified=True` (spec section 5) is a third, BROKEN-world variant: the
+    origin read fails outright rather than confirming or refuting anything.
+    It requires a node `origin_object` -- a PVC story's origin is named per
+    claim, one read per victim, and a registry story's unverified endings all
+    contradict the broken pull events the victims already show (see the
+    spec) -- and it is mutually exclusive with `healthy`, which is a
+    different, refuting world. The origin variant is still drawn, spending
+    the same rng call the healthy and plain-broken twins spend, so all three
+    stay in lockstep and a caller building more than one from the same salt
+    gets the same names and the same candidate menus. Only the origin read's
+    own content, and `objects.unverify`'s fresh read on the decided object,
+    differ.
     """
+    if unverified and (p.origin_object is None or p.origin_object.kind != "node"):
+        raise ValueError(f"{p.key}: unverified=True requires a node origin_object "
+                         "(spec section 5) -- this story has none, or a different kind")
+    if unverified and healthy:
+        raise ValueError(f"{p.key}: unverified and healthy are different broken/healthy "
+                         "worlds and cannot both be rendered in one call")
     count = len(p.victims) if victims is None else victims
     if not 2 <= count <= len(p.victims):
         raise ValueError(f"{p.key}: cannot render {count} of {len(p.victims)} victims")
@@ -909,6 +929,11 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     # The origin read leads: the evidence for the one cause is stated once,
     # not restated per victim, which is how a real gather would present it.
     origin_content = healthy_origin if healthy else broken_origin
+    if unverified:
+        # Spec section 5: the origin read fails outright. `{node}` is the
+        # same anchor field the origin_object's own name template binds to
+        # below, so the read names the same node the decided cause does.
+        origin_content = 'read failed: nodes "{node}" is forbidden'
     reads = [c.EvidenceRead(label=_fmt(p.origin_read[0], anchor),
                             content=_fmt(origin_content, anchor))]
     for v, n in zip(p.victims[:count], drawn):
@@ -931,6 +956,13 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
             decide_obj = render.bind(p.origin_object, names_dict)
             if healthy:
                 decide_obj = dataclasses.replace(decide_obj, fresh=p.healthy_origin_fresh)
+            elif unverified:
+                # Spec section 5: `objects.unverify`'s own "read_failed"
+                # message for a node is `nodes "{name}" is forbidden` --
+                # exactly what the origin read above already says, prefixed
+                # with "read failed: " there and with "fresh read failed: "
+                # by `rules._check_node` in the rationale.
+                decide_obj = unverify(decide_obj, "read_failed")
             decide_objects: tuple = (decide_obj,)
         elif v.objects:
             decoy_obj = render.draw_ending(render.bind(v.objects[0], names_dict), rng)
@@ -1001,7 +1033,8 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
 
 
 def shared_origin(p: prop.Propagation, rng: random.Random,
-                  victims: int | None = None) -> Example:
+                  victims: int | None = None,
+                  unverified: bool = False) -> Example:
     """TRAINING: the counterexample `multi` never gave the model.
 
     Same shape as `shared_origin_probe` and deliberately so, drawn from
@@ -1014,8 +1047,11 @@ def shared_origin(p: prop.Propagation, rng: random.Random,
     component healthy, and the two sets are asserted equal. It is the RAW
     template, not the formatted label -- `describe node {node}` renders
     differently per row, and a set of formatted labels would never match.
+
+    `unverified=True` (spec section 5) renders the third, unverified-origin
+    world instead of the plain broken one -- see `_render_shared_origin`.
     """
-    r = _render_shared_origin(p, rng, victims)
+    r = _render_shared_origin(p, rng, victims, unverified=unverified)
     return Example(
         case="shared_origin", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
         assistant=_answer(r.rows, r.summary),

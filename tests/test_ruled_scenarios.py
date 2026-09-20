@@ -14,6 +14,7 @@ refuted, and the label flips to "none". That is asserted directly, by
 rendering both twins, rather than trusted from the story's shape.
 """
 
+import json
 import random
 import re
 
@@ -21,6 +22,7 @@ import pytest
 
 from kubeagent_verdict import vocab
 from kubeagent_verdict.dataset import cases, propagation
+from kubeagent_verdict.evals import score
 
 RULED = propagation.ruled_scenarios()
 TRAINABLE = propagation.trainable_scenarios()
@@ -359,3 +361,109 @@ def test_ruled_registry_row_names_its_own_rendered_victim_count(key, host):
     for victims in (2, 3):
         r = cases._render_shared_origin(p, random.Random(7), victims, healthy=False)
         assert f"registry {host} ({victims} workloads failing to pull)" in r.user
+
+
+# --------------------------------------------------- the unverified twin
+
+# Spec section 5: one node pair in three gets an unverified broken twin
+# instead of the confirmed one. `shared_origin(..., unverified=True)` is
+# only ever the BROKEN half -- there is no unverified decoy variant --
+# so every check below compares it against the plain broken twin's
+# names/menus/labels (both consume the rng identically: the origin
+# variant draw, then one draw per victim's own name) and against the
+# healthy twin's summary shape only where the two are expected to differ.
+
+PVC_KEYS = set(PVC_STORAGE_CLASSES)
+NOT_NODE_KEYS = PVC_KEYS | REGISTRY_KEYS
+
+
+@pytest.mark.parametrize("key", sorted(NOT_NODE_KEYS))
+def test_unverified_true_raises_for_a_ruled_pvc_or_registry_story(key):
+    p = next(s for s in RULED if s.key == key)
+    with pytest.raises(ValueError, match="unverified"):
+        cases._render_shared_origin(p, random.Random(1), 2, unverified=True)
+
+
+def test_unverified_true_raises_for_a_plain_trainable_story():
+    plain = next(s for s in TRAINABLE if s.origin_object is None)
+    with pytest.raises(ValueError, match="unverified"):
+        cases._render_shared_origin(plain, random.Random(1), 2, unverified=True)
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+@pytest.mark.parametrize("victims", (2, 3))
+def test_unverified_node_twin_labels_none_with_the_did_not_confirm_summary(key, victims):
+    p = next(s for s in RULED if s.key == key)
+    for salt in (1, 2, 3, 4, 5):
+        r = cases._render_shared_origin(p, random.Random(salt), victims, unverified=True)
+        assert r.meta["label"] == "none", (key, victims, salt)
+        assert r.summary.startswith(
+            f"{victims} workloads are failing, and kubeagent's rules did "
+            "not confirm one cause on two or more of them."), (key, victims, salt)
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+def test_unverified_node_twin_origin_read_says_read_failed_is_forbidden(key):
+    p = next(s for s in RULED if s.key == key)
+    r = cases._render_shared_origin(p, random.Random(1), 2, unverified=True)
+    node = p.origin_object.name  # "{node}" -- the template, not the drawn value
+    assert node == "{node}"
+    drawn_node = r.drawn[0].node
+    assert f'read failed: nodes "{drawn_node}" is forbidden' in r.user
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+@pytest.mark.parametrize("victims", (2, 3))
+def test_unverified_node_twin_every_row_decided_unverified_with_rules_cause(key, victims):
+    p = next(s for s in RULED if s.key == key)
+    r = cases._render_shared_origin(p, random.Random(2), victims, unverified=True)
+    assert len(r.rows) == victims
+    for row in r.rows:
+        assert row["cause"].startswith("node ") and row["cause"].endswith("(NotReady)"), row
+        assert "did not clear the earlier finding" in row["rationale"], row
+        assert "is forbidden" in row["rationale"], row
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+def test_unverified_node_twin_workloads_meta_marks_decided_outcome_unverified(key):
+    p = next(s for s in RULED if s.key == key)
+    ex = cases.shared_origin(p, random.Random(3), victims=2, unverified=True)
+    assert ex.meta["workloads"], key
+    for wm in ex.meta["workloads"].values():
+        assert wm["decided"] is True, key
+        assert wm["decided_outcome"] == "unverified", key
+        assert wm["job"] == 1, key
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+@pytest.mark.parametrize("victims", (2, 3))
+def test_unverified_node_twin_job1_accepts_every_row(key, victims):
+    p = next(s for s in RULED if s.key == key)
+    ex = cases.shared_origin(p, random.Random(4), victims=victims, unverified=True)
+    verdicts = {row["workload"]: row for row in json.loads(ex.assistant)["verdicts"]}
+    assert set(verdicts) == set(ex.meta["workloads"])
+    for wkey, wm in ex.meta["workloads"].items():
+        assert score.job1(wm, verdicts[wkey]) == 1.0, (key, victims, wkey)
+
+
+@pytest.mark.parametrize("key", sorted(NODE_KEYS))
+def test_unverified_node_twin_matches_the_healthy_twins_names_menus_and_labels(key):
+    """Both calls draw the origin variant, then one name per victim, in the
+    same order and with no other rng draw (the origin-object branch takes
+    no `render.draw_ending` draw) -- so at the same salt the two twins'
+    drawn names, candidate menus and read labels line up exactly. Only the
+    origin read's own content, and the per-victim reads a broken origin
+    touches, are allowed to differ."""
+    p = next(s for s in RULED if s.key == key)
+    for victims in (2, 3):
+        for salt in (1, 2, 3):
+            unverified = cases._render_shared_origin(
+                p, random.Random(salt), victims, unverified=True)
+            healthy = cases._render_shared_origin(
+                p, random.Random(salt), victims, healthy=True)
+            assert unverified.drawn == healthy.drawn, (key, victims, salt)
+            assert unverified.decoys == healthy.decoys, (key, victims, salt)
+            assert unverified.shared_cause == healthy.shared_cause, (key, victims, salt)
+            assert unverified.distractor_cause == healthy.distractor_cause, (key, victims, salt)
+            assert [r["workload"] for r in unverified.rows] == \
+                [r["workload"] for r in healthy.rows], (key, victims, salt)
