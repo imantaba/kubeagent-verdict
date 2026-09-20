@@ -744,3 +744,80 @@ Seven limits on this reading, carried from the design that scored it:
    clearing this slice while failing elsewhere. 0908 is not that evidence. It
    scored 0.2418, below the 0.366 a copier gets, so it did not exploit the
    exposure — its job-2 number simply cannot prove it read anything.
+
+## Known limits of the training data and the exam
+
+These are known limits of the training data and the exam this build uses.
+They are written down here before training, from the design that fixed the
+training targets (`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md`,
+section 12). They are not new problems found after a run — they are choices
+and trade-offs made on purpose, disclosed up front so a reader can weigh a
+future result against them. When the next retrain's results are added to
+this file, that section must link back here and check its numbers
+against these.
+
+1. **The exam's `node-not-ready` row says two things about node readiness.**
+   The gold rationale says the Ready condition is False. The origin read
+   printed in the same row says `Unknown`. Both are true readings of the
+   same fault, worded two different ways — a model that expects the two
+   words to match will not find them matching here.
+2. **The exam's decoy-node rows put two reasons on one node.** In
+   `coredns-down` and `node-disk-pressure`, the rule rationale talks about
+   the decoy node while the rest of the row is about CoreDNS or disk
+   pressure. Rows 248 and 258 (both `node-disk-pressure`) go further: the
+   same node, worker-3, is named under two different rule reasons —
+   "NotReady" and "no kubelet lease" — in the same row, and neither reason
+   is what the row's own evidence shows for that node (disk pressure).
+3. **The exam's storage story shows `Pending` where an internal field says
+   `Bound`.** The row a model reads always says the claim is `Pending`,
+   which is correct — the claim really is stuck. The propagation table that
+   built the row also carries a `Bound` value, on the field that would
+   apply if the origin were healthy. That field is never printed into the
+   prompt; the mismatch is a fact about the code, not something a model
+   can read.
+4. **The exam's row 252 says "3 workloads failing to pull" and shows 2.**
+   The rule's cause string names a fixed count from the story: "3
+   workloads failing to pull". This probe row flags only 2 of those 3
+   workloads, so the count written into the text and the count of rows a
+   model is asked to judge do not match.
+5. **One fixed rationale template.** Every rule row's rationale comes from
+   one function, `_rule_rationale` in `dataset/cases.py`. A model could
+   learn the template's wording instead of the reasoning behind it — job 1,
+   which grades whether the model repeats the decided cause, cannot tell
+   the two apart.
+6. **Plain broken twins always deny a shared cause, even though both rows
+   name the same origin.** A plain story's two twin rows both point at the
+   same real cause, but the rules cannot check a plain story's origin, so
+   the summary on both rows says the rules did not confirm one cause. A
+   model could learn "never call a cause shared" from this pattern alone.
+   The ruled broken twins teach the other side, because the rules can check
+   a ruled story's origin: in this build 192 of them land in train and 22
+   in val, all carrying the `shared` label. This build has 960 plain pairs
+   and 240 ruled pairs (1,200 in all), and every one of the 48 plain
+   stories keeps at least 15 of its 20 pairs in train. Three stories tie
+   for the lowest, at 15 (`sidecar-injector-broken`, `node-corrupt-overlay`
+   and `cluster-maintenance-taint`), and the highest is 20. A further 26 of the 240
+   ruled pairs, drawn only from the two node-kind ruled stories, are
+   deliberately rendered "unverified" instead of confirmed (25 land in
+   train, 1 in val): the origin read is made to fail, so the rules cannot
+   confirm or deny it, and the label is `none`, not `shared`. That is a
+   third pattern, not a second copy of "plain" — it teaches "the rules
+   could not check" as its own answer.
+7. **No decoy rate on ruled stories.** Every ruled-story row, both twins in
+   the pair, carries an empty `decoy_by_workload` — the field the
+   decoy-rate check reads — because `_render_shared_origin` in
+   `dataset/cases.py` leaves it empty whenever the story has a fixed origin
+   object: a ruled story, or one of the exam-only stories that also fixes
+   one. Today that covers 3 exam-only stories: `node-not-ready`,
+   `storage-provisioner-down` and `registry-unreachable`. After this build
+   it also covers the 240 ruled pairs, so the decoy-rate diagnostic sees
+   none of them.
+8. **Two read formats for one node.** kubeagent labels a node's own trail
+   read `describe node /worker-2`, with a leading slash, and `read_text` in
+   `dataset/rules.py` copies that label. The node stories in
+   `dataset/propagation.py` write their own evidence heading as `describe
+   node worker-2`, with no slash. Most rows print only one of the two. In
+   this build, 62 `multi` rows in train and 9 in val print both in the same
+   row, and in 42 of the 62 train rows it is the same node both times. The
+   exam's node-story rows print only the story form. A model that expects
+   one fixed format will see both.

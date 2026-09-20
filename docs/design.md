@@ -327,10 +327,10 @@ tags in identical order, identical read labels in identical order — so the
 victims are held byte-identical and symptom coherence cannot separate the
 classes. Every trainable scenario is taught under both answers, and nothing
 about the scenario predicts the label. `drop_held_out` takes pairs whole,
-since both halves share a group key, so the paired core (440 against 440 at
+since both halves share a group key, so the paired core (1200 against 1200 at
 the build size) survives the filter exactly. The residual lean is now the
 surviving `multi` negatives, which have no positive twin: the kept pile reads
-~0.57 toward the INDEPENDENT answer,
+~0.543 toward the INDEPENDENT answer,
 the opposite direction from the ~62/38 toward shared recorded before, and no
 longer confounded with anything the model can read off the victims. Those
 negatives are kept rather than balanced away — a healthy read over arbitrary
