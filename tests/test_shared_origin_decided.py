@@ -164,11 +164,25 @@ def test_a_shared_label_only_comes_from_an_origin_object():
     """Every `shared` row is a ruled story's broken twin or one of the exam's
     three origin-object stories -- never a plain story, which has no
     candidate the rules could confirm twice under one group key.
+
+    Extended 2026-09-19 (Task 9, spec section 6): before Task 9 no trainable
+    story decided, so only the eval half of this claim had a pool to check
+    against. Task 9 merged the six ruled stories into `trainable_scenarios()`;
+    the second loop below walks that fifty-four-story pool with the TRAINING
+    builder (`cases.shared_origin`, not the eval-only `shared_origin_probe`)
+    and confirms the same rule holds there too -- exactly the six ruled
+    stories decide, and every one of the forty-eight plain stories does not.
     """
     for p in prop.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
         if ex.meta["label"] == "shared":
             assert p.origin_object is not None, p.key
+    for p in prop.trainable_scenarios():
+        ex = cases.shared_origin(p, generate._entry_rng("t", p.key), victims=2)
+        if ex.meta["label"] == "shared":
+            assert p.origin_object is not None, p.key
+        else:
+            assert p.origin_object is None, p.key
 
 
 def test_exactly_two_of_ten_shared_origin_probe_rows_families_are_shared():
