@@ -418,8 +418,10 @@ is 8000, and the floor test now pins 12 pairs at that recipe (seed 17, size
 On 2026-09-19 both halves moved again, to 15%, and `multi` moved with them,
 to 13%: the budget came out of `attributed` and `none_of_these` this time,
 not out of `attributed` alone, because raising only the shared-origin
-halves would have pushed the shared answer's share of multi-workload rows
-onto the 0.40 cap a test pins. The pool also grew, from 48 stories to 54:
+halves would have pushed the `shared_origin` case family's share of
+multi-workload rows onto the 0.40 cap a test pins. That cap covers the
+case family, not the answer: about 7 of every 100 multi-workload rows
+carry a gold answer claiming a shared origin, and no test caps that. The pool also grew, from 48 stories to 54:
 six new "ruled" stories give kubeagent's own rules pass an origin object it
 can check, so a fifth of shared-origin pairs can now carry a `shared`
 label the rules confirm. Before this, no training row carried one. Spec

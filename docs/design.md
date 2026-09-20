@@ -298,7 +298,7 @@ rows onto the cap below. That case family stays the minority of the
 100), and a test fails above 40 of every 100. The cap guards that
 case-family share, not the answer itself: of the rows the model actually
 reads, about 7 of every 100 multi-workload rows carry a gold answer that
-claims a shared origin (192 of 2,790 at build size 8000).
+claims a shared origin (214 of 3,126 at build size 8000).
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
 from the six the `shared_origin_probe` eval slice draws from — disjoint in key
