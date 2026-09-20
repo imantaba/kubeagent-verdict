@@ -51,10 +51,12 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # rather than the mix growing: job3's honesty check is the other half of the
 # same release decider, and a model that learns to claim a shared origin
 # everywhere fails it on the decoy twin, trading one failure for its
-# mirror. The shared answer stays the minority among multi-workload rows,
-# asserted by test: every
-# `shared_origin` row has a `shared_origin_decoy` twin that answers "separate
-# reasons", and `multi` answers the same.
+# mirror. The shared answer stays the minority among multi-workload rows:
+# every `shared_origin` row has a `shared_origin_decoy` twin that answers
+# "separate reasons", and `multi` answers the same. The cap test below pins
+# the `shared_origin` case family's share, about 38 of every 100. The share
+# of rows whose answer actually claims a shared origin is a different and
+# much smaller number, about 7 of every 100; no test caps it.
 # `shared_origin` and `shared_origin_decoy` MUST hold equal shares. They are
 # not two cases but two halves of one: every row of the first is emitted with a
 # twin from the same salt, differing only in what the origin read says. An
@@ -82,8 +84,9 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # spec section 6's loop). `attributed` and `none_of_these` each give up
 # four points; two of the eight go to `multi` (11% -> 13%) rather than to
 # the shared-origin halves alone, because raising only the shared side
-# would put the shared answer's share of multi-workload rows exactly on
-# the 0.40 cap (test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows)
+# would put the `shared_origin` case family's share of multi-workload rows
+# exactly on the 0.40 cap
+# (test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows)
 # -- Task 9 of the 2026-09-19 training-targets plan measures the mixes
 # this was chosen over.
 CASE_MIX = (("attributed", 6), ("none_of_these", 11), ("own_cause", 10),
