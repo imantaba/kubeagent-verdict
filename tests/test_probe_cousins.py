@@ -1,13 +1,14 @@
 """The cousin probe: one fresh twin pair per trainable scenario.
 
 The wide probe (tests/test_probe_wide.py) asks the six held-out origins
-five times each. This probe asks the 48 trained scenarios once each: 48
-pairs, 96 rows, every pair at full width, so every decoy half carries three
-or four verdicts. It is in-distribution on purpose. A model that reads the
-origin on the scenarios it studied and still fails the exam has a coverage
-problem; one that fails here has a recipe problem. It is written to its
-own file, scored on its own, and decides nothing. The frozen exam does not
-move.
+five times each. This probe asks the trained scenarios once each -- 54
+pairs, 108 rows since Task 9 merged the six ruled stories into
+`trainable_scenarios()` (spec section 6; was 48 pairs, 96 rows) -- every
+pair at full width, so every decoy half carries three or four verdicts. It
+is in-distribution on purpose. A model that reads the origin on the
+scenarios it studied and still fails the exam has a coverage problem; one
+that fails here has a recipe problem. It is written to its own file, scored
+on its own, and decides nothing. The frozen exam does not move.
 """
 
 from kubeagent_verdict.dataset import generate, propagation
@@ -20,7 +21,8 @@ def _pair_key(ex) -> str:
 def test_cousin_probe_counts_and_balance():
     rows = generate.shared_origin_cousin_probes()
     trainable = {p.key for p in propagation.trainable_scenarios()}
-    assert len(trainable) == 48
+    # Re-measured 2026-09-19 (Task 9's pool merge, spec section 6): 48 to 54.
+    assert len(trainable) == 54
     assert len(rows) == len(trainable) * 2
     per: dict[str, list[str]] = {}
     for ex in rows:
@@ -41,8 +43,19 @@ def test_cousin_probe_uses_only_trainable_origins():
 
 
 def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
+    """Label-aware, the same way `test_probe_wide.py`'s twin check is (spec
+    section 3, ruling C). Re-measured 2026-09-19: before Task 9, no
+    trainable scenario decided, so every cousin pair was `none`-labeled and
+    the `shared` branch below was future-proofing rather than a live path.
+    Task 9 merged the six ruled stories into `trainable_scenarios()` (spec
+    section 6); their broken-origin twins DO decide, so 6 of the 54 cousin
+    pairs are now `shared`-labeled and this branch is live.
+    `test_cousin_probe_uses_only_trainable_origins` above already pins the
+    pool this draws from.
+    """
     rows = generate.shared_origin_cousin_probes()
     seen: set[str] = set()
+    saw_shared = False
     assert len(rows) % 2 == 0
     for probe, decoy in zip(rows[0::2], rows[1::2]):
         assert probe.case == "shared_origin_probe"
@@ -55,11 +68,19 @@ def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
         seen.add(key)
         # The discriminating read must differ, or the pair asks nothing.
         assert probe.user != decoy.user
-        # Probe half: every victim shares ONE cause. Decoy half: none of the
-        # victims' correct causes is that shared cause.
-        shared = set(probe.meta["expected"].values())
-        assert len(shared) == 1
-        assert shared.isdisjoint(set(decoy.meta["expected"].values()))
+        # A `shared`-labeled probe half is decided end to end and disjoint
+        # from its decoy twin. A `none`-labeled half makes neither promise:
+        # a decided victim's cause does not depend on `healthy`, so it can
+        # repeat across the pair.
+        if probe.meta["label"] == "shared":
+            saw_shared = True
+            shared = set(probe.meta["expected"].values())
+            assert all(w["decided"] for w in probe.meta["workloads"].values())
+            assert shared.isdisjoint(set(decoy.meta["expected"].values()))
+    # The branch above went live only when the ruled stories joined the
+    # pool (Task 9). This assertion is what keeps that comment true if the
+    # ruled stories ever fell back out of `trainable_scenarios()`.
+    assert saw_shared, "no cousin pair was `shared`-labelled"
 
 
 def test_every_cousin_decoy_carries_three_or_more_verdicts():
@@ -99,7 +120,8 @@ def test_cli_probe_cousins_writes_only_the_standalone_file(tmp_path, monkeypatch
     monkeypatch.setattr("sys.argv", ["kv-dataset", "--probe-cousins", str(out)])
     cli.main()
     lines = out.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 96
+    # Re-measured 2026-09-19 (Task 9's pool merge, spec section 6): 96 to 108.
+    assert len(lines) == 108
     first = json.loads(lines[0])
     assert first["meta"]["case"] == "shared_origin_probe"
     # Standalone means standalone: no train/val/test/manifest beside it.

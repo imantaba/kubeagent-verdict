@@ -10,6 +10,7 @@ from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import cases, catalog, render
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset.render import object_reads
+from kubeagent_verdict.evals import score
 
 
 def _entry(key):
@@ -403,7 +404,16 @@ def test_multi_objects_injects_foreign_nodes_ruled_out():
 
 def test_multi_derives_job_and_label_from_the_objects():
     """R21: multi's job/decided_* meta is derived by running rules.decide over the
-    transformed objects, and the row gains 'workloads', 'label', 'decoy_by_workload'."""
+    transformed objects, and the row gains 'workloads', 'label', 'decoy_by_workload'.
+
+    These two node-bearing entries decide on a DIFFERENT object than either
+    entry's own hand-written `winner_cause`: multi's foreign-node injection
+    (each pair gains the other pair's node, ruled out) still leaves both
+    workloads' own combined objects able to decide, and here they decide
+    on the other workload's node rather than their own catalog story. That
+    makes this pair a real regression check, not just a shape check: the
+    gold cause and rationale must follow what `rules.decide` actually
+    found, never the catalog's `winner_cause`."""
     node_entries = [e for e in catalog.trainable() if any(o.kind == "node" for o in e.objects)]
     assert len(node_entries) >= 2
     e1, e2 = node_entries[0], node_entries[1]
@@ -421,8 +431,20 @@ def test_multi_derives_job_and_label_from_the_objects():
         assert meta["job"] in (1, 2)
     assert ex.meta["label"] in ("shared", "separate", "none")
     assert set(ex.meta["decoy_by_workload"]) == {key1, key2}
-    assert ex.meta["expected"] == {key1: cases._fmt(e1.winner_cause, n1),
-                                   key2: cases._fmt(e2.winner_cause, n2)}
+
+    wm1, wm2 = ex.meta["workloads"][key1], ex.meta["workloads"][key2]
+    assert wm1["decided"] and wm2["decided"], "fixture drifted: both rows must decide here"
+    # The bug this pins against: the catalog's own winner_cause is NOT what
+    # the rules decided for either workload in this exact draw.
+    assert wm1["decided_cause"] != cases._fmt(e1.winner_cause, n1)
+    assert wm2["decided_cause"] != cases._fmt(e2.winner_cause, n2)
+    assert ex.meta["expected"] == {key1: wm1["decided_cause"], key2: wm2["decided_cause"]}
+
+    answer = json.loads(ex.assistant)
+    verdicts = {r["workload"]: r for r in answer["verdicts"]}
+    for key, wm in ((key1, wm1), (key2, wm2)):
+        assert verdicts[key]["cause"] == wm["decided_cause"]
+        assert score.job1(wm, verdicts[key]) == 1.0, key
 
 
 # `multi` is 12.7% of the curriculum and had ZERO test rows, and cases.multi()

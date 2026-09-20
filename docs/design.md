@@ -262,12 +262,12 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~10% | Pick the candidate **verbatim**; calibrate confidence |
-| `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
+| Candidate attributed, evidence supports it | ~6% | Pick the candidate **verbatim**; calibrate confidence |
+| `none_of_these` — evidence rules all candidates out | ~11% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
-| Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
-| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~12% | Naming the SAME cause on every row when the evidence says one thing broke |
-| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~12% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
+| Multi-workload prompts (2–4 flagged, mixed causes) | ~13% | One verdict row per listed workload, no extras |
+| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on every row the rules do not decide and the rules' own cause on every row they do; calling it shared only when the rules confirm it |
+| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~15% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -288,11 +288,17 @@ and claiming one everywhere fails on the healthy twin. The
 share has since doubled to 8% and then risen to 12%, paid out of
 `attributed` both times, so that every trainable scenario keeps at least 12
 pairs in train after the validation split; a test pins that floor at the
-build recipe (seed 17, size 8000). The shared answer stays the minority
-answer to a multi-workload question: in the pile the model reads it is
-about 38 of every 100 of the `multi`, `shared_origin` and
-`shared_origin_decoy` rows together, and a test fails above 40 of every
-100.
+build recipe (seed 17, size 8000). On 2026-09-19 it rose again, to 15%,
+paid out of `attributed` and `none_of_these` together this time, and
+`multi` moved up too, to 13%, so raising the shared-origin halves alone
+could not push the shared_origin case family's share of multi-workload
+rows onto the cap below. That case family stays the minority of the
+`multi`, `shared_origin` and `shared_origin_decoy` rows together: about
+38 of every 100 (re-measured at the 15% mix: still about 38 of every
+100), and a test fails above 40 of every 100. The cap guards that
+case-family share, not the answer itself: of the rows the model actually
+reads, about 7 of every 100 multi-workload rows carry a gold answer that
+claims a shared origin (214 of 3,126 at build size 8000).
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
 from the six the `shared_origin_probe` eval slice draws from — disjoint in key
@@ -322,10 +328,10 @@ tags in identical order, identical read labels in identical order — so the
 victims are held byte-identical and symptom coherence cannot separate the
 classes. Every trainable scenario is taught under both answers, and nothing
 about the scenario predicts the label. `drop_held_out` takes pairs whole,
-since both halves share a group key, so the paired core (440 against 440 at
+since both halves share a group key, so the paired core (1200 against 1200 at
 the build size) survives the filter exactly. The residual lean is now the
 surviving `multi` negatives, which have no positive twin: the kept pile reads
-~0.57 toward the INDEPENDENT answer,
+~0.543 toward the INDEPENDENT answer,
 the opposite direction from the ~62/38 toward shared recorded before, and no
 longer confounded with anything the model can read off the victims. Those
 negatives are kept rather than balanced away — a healthy read over arbitrary
@@ -406,10 +412,10 @@ truncated or thin → low), so calibration is trained, not guessed.
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
-- The third closes a hole the first two could not see. `multi` is ~11% of
+- The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
-  swaps a tag — so across all 1,683 constituent workloads it contributes to
-  train and val at `--seed 17 --size 8000` (2,645 before `drop_held_out`),
+  swaps a tag — so across all 2,127 constituent workloads it contributes to
+  train and val at `--seed 17 --size 8000` (3,160 before `drop_held_out`),
   "trust the `attributed` tag" is a strategy the training data never once
   contradicts in that shape. Both single-workload probes render one
   workload, so neither can reach it. `multi_misattribution_probe` renders

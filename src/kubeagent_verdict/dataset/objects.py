@@ -102,8 +102,9 @@ def validate(obj: Object) -> None:
         if f.how == "read" and not f.phase:
             raise _err(obj, "phase must be set on a read PVC")
     else:
-        if not obj.scan_reason.isdigit():
-            raise _err(obj, "scan_reason must be the count of workloads failing to pull")
+        if obj.scan_reason != "{count}" and not obj.scan_reason.isdigit():
+            raise _err(obj, "scan_reason must be the count of workloads failing to "
+                            'pull, or the "{count}" template filled in at render time')
         if obj.placement != "":
             raise _err(obj, "placement must be empty on a registry")
         if f.how == "read" and f.literal and f.literal not in PULL_LITERALS:

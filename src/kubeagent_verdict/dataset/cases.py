@@ -55,6 +55,29 @@ def _fmt(tpl: str, n: Names) -> str:
                       pvc=n.pvc, restarts=n.restarts)
 
 
+_NOUN = {"node": "node", "pvc": "claim", "registry": "registry"}
+
+
+def _rule_rationale(result: rules.Result) -> str:
+    """A decided rule row's rationale, built from the rules' own evidence.
+
+    Every rule row's cause comes straight from `rules.decide` (never a
+    hand-written string), so the rationale explaining it must agree with
+    the same evidence the rules found -- this is what makes that true.
+    `result.outcome` is always "confirmed" or "unverified" here:
+    `rules.decide` never returns a decided Result with any other outcome.
+    """
+    kind, name = result.cause.split(" ", 2)[:2]
+    noun = _NOUN[kind.lower()]
+    evidence = result.evidence[0].lower() + result.evidence[1:]
+    if result.outcome == "confirmed":
+        return (f"The fresh read of {noun} {name} confirms it: {evidence}, "
+                f"so the {noun}'s own state is why the flagged workload is failing.")
+    return (f"The fresh read of {noun} {name} did not clear the earlier finding: "
+            f"{evidence}, so {name} stays the named cause rather than something "
+            f"the read ruled out.")
+
+
 def _suggestion(issue: str, n: Names) -> rem.Suggestion:
     """The `suggested fix` line kubeagent would render for this finding.
 
@@ -732,6 +755,63 @@ def _victim_finding(v: prop.Victim, n: Names, healthy: bool = False) -> c.Findin
     )
 
 
+def _shared_origin_row(result: rules.Result, *, healthy: bool, decoy: str,
+                       shared_cause: str) -> tuple[str, str | None]:
+    """One victim's (cause, rationale) for a shared-origin row.
+
+    A decided workload -- confirmed or unverified -- gets the rules' own
+    cause and rationale, exactly as `multi` already does (spec section 3):
+    a decided workload never disagrees with what the rules found, whatever
+    world the row is rendered in. An undecided workload keeps today's
+    answer, held fixed by `healthy` alone: the decoy in the healthy world,
+    the shared cause in the broken one. The `None` rationale tells the
+    caller to keep applying its own per-world template, since there is no
+    rules evidence to build one from.
+    """
+    if result.decided:
+        return result.cause, _rule_rationale(result)
+    return (decoy if healthy else shared_cause), None
+
+
+def _shared_origin_summary(label: str, *, healthy: bool, count: int, origin: str,
+                           shared_cause: str, remedy: str, rows: list[dict],
+                           key: str) -> list[str]:
+    """The shared-origin row's summary lines, chosen by `rules.label` rather
+    than by `healthy` alone (spec section 3).
+
+    `label == "shared"` means the rules themselves confirmed one group
+    across two or more victims: today's unchanged three-line summary.
+    `label == "separate"` cannot happen here and is refused rather than
+    silently mis-rendered -- every victim in one propagation scenario binds
+    the SAME origin object (or none), so two confirmed results always fall
+    in one `rules.shared` group; `label` only reads `separate` off a lone
+    size-1 group, which this builder cannot produce. Otherwise (`"none"`):
+    a healthy-world row whose per-workload causes are now all distinct
+    still reads as ordinary independent failures; every other `"none"` row
+    -- broken-world, or healthy with a repeated cause -- says plainly that
+    the rules did not confirm one cause on two or more workloads, and
+    carries no remedy, because none was confirmed.
+    """
+    if label == "separate":
+        raise ValueError(
+            f"{key}: rules.label returned 'separate' for a shared-origin row, "
+            "which _render_shared_origin cannot produce -- every victim in "
+            "one propagation scenario binds the same origin object (or none), "
+            "so two confirmed results always share one rules.shared group")
+    if label == "shared":
+        lines = [f"{count} workloads share one upstream cause: {origin}.",
+                f"Root cause: {shared_cause}.", remedy]
+    else:
+        causes = {r["cause"] for r in rows}
+        if healthy and len(causes) == len(rows):
+            lines = [f"{count} workloads are failing for separate reasons."]
+        else:
+            lines = [(f"{count} workloads are failing, and kubeagent's rules "
+                     "did not confirm one cause on two or more of them.")]
+        lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
+    return lines
+
+
 class _SharedOrigin(NamedTuple):
     """Everything both shared-origin builders need, rendered once.
 
@@ -756,7 +836,8 @@ class _SharedOrigin(NamedTuple):
 
 def _render_shared_origin(p: prop.Propagation, rng: random.Random,
                           victims: int | None,
-                          healthy: bool = False) -> _SharedOrigin:
+                          healthy: bool = False,
+                          unverified: bool = False) -> _SharedOrigin:
     """Render one propagation scenario, in the broken world or the healthy one.
 
     `healthy=True` swaps the CONTENT of the origin read for
@@ -785,7 +866,26 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     staleness reaches one `distractor_reason` (registry-unreachable's), which
     is collateral rather than the subject; the healthy origin read refutes
     that distractor on its own.
+
+    `unverified=True` (spec section 5) is a third, BROKEN-world variant: the
+    origin read fails outright rather than confirming or refuting anything.
+    It requires a node `origin_object` -- a PVC story's origin is named per
+    claim, one read per victim, and a registry story's unverified endings all
+    contradict the broken pull events the victims already show (see the
+    spec) -- and it is mutually exclusive with `healthy`, which is a
+    different, refuting world. The origin variant is still drawn, spending
+    the same rng call the healthy and plain-broken twins spend, so all three
+    stay in lockstep and a caller building more than one from the same salt
+    gets the same names and the same candidate menus. Only the origin read's
+    own content, and `objects.unverify`'s fresh read on the decided object,
+    differ.
     """
+    if unverified and (p.origin_object is None or p.origin_object.kind != "node"):
+        raise ValueError(f"{p.key}: unverified=True requires a node origin_object "
+                         "(spec section 5) -- this story has none, or a different kind")
+    if unverified and healthy:
+        raise ValueError(f"{p.key}: unverified and healthy are different broken/healthy "
+                         "worlds and cannot both be rendered in one call")
     count = len(p.victims) if victims is None else victims
     if not 2 <= count <= len(p.victims):
         raise ValueError(f"{p.key}: cannot render {count} of {len(p.victims)} victims")
@@ -793,16 +893,27 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         raise ValueError(f"{p.key}: {count} victims plus the origin read exceeds the budget")
 
     drawn, scope_value = _propagation_names(p, rng, count)
+    # A ruled registry story's victim images move to the origin's own host
+    # (spec section 4, "Registry hosts"): every drawn Names' image is
+    # rewritten from names.draw()'s default `registry.example.com/...` to
+    # `<host>/...`, no rng draw. For registry.example.com -- the exam's own
+    # host -- the two strings are equal, so this is a no-op and the exam's
+    # rows and hashes do not move.
+    if p.origin_object is not None and p.origin_object.kind == "registry":
+        host = p.origin_object.name
+        drawn = [dataclasses.replace(n, image=host + n.image[n.image.index("/"):])
+                for n in drawn]
     # The pinned field is identical across `drawn`, so formatting the shared
     # strings against any one of them yields the one answer every row repeats.
     # The discriminating read varies inside a scenario, so what separates the
     # two halves is the relation the contents stand for rather than two literal
     # strings the model can memorise. Drawn from the passed-in rng, before the
-    # `healthy` branch: `generate.py:156-159` draws ONE salt and builds a
-    # separate `random.Random(salt)` for each half, so both replay an identical
-    # stream and both draw the SAME variant -- exactly the way they already
-    # draw the same names. Only when the scenario declares variants; the eval
-    # six declare none and must consume the RNG exactly as they did before.
+    # `healthy` branch: `generate.generate`'s shared-origin selection loop
+    # draws ONE salt and builds a separate `random.Random(salt)` for each
+    # half, so both replay an identical stream and both draw the SAME
+    # variant -- exactly the way they already draw the same names. Only when
+    # the scenario declares variants; the eval six declare none and must
+    # consume the RNG exactly as they did before.
     broken_origin, healthy_origin = p.origin_read[1], p.healthy_origin_content
     if p.origin_variants:
         broken_origin, healthy_origin = rng.choice(p.origin_variants)
@@ -819,6 +930,11 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     # The origin read leads: the evidence for the one cause is stated once,
     # not restated per victim, which is how a real gather would present it.
     origin_content = healthy_origin if healthy else broken_origin
+    if unverified:
+        # Spec section 5: the origin read fails outright. `{node}` is the
+        # same anchor field the origin_object's own name template binds to
+        # below, so the read names the same node the decided cause does.
+        origin_content = 'read failed: nodes "{node}" is forbidden'
     reads = [c.EvidenceRead(label=_fmt(p.origin_read[0], anchor),
                             content=_fmt(origin_content, anchor))]
     for v, n in zip(p.victims[:count], drawn):
@@ -829,11 +945,25 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         # body, so the names and the endings come out byte-identical to the
         # order this block used to run in.
         names_dict = dataclasses.asdict(n)
+        # A ruled registry story's scan_reason may be the literal "{count}"
+        # template (spec section 4, "Registry count"): filled in here with
+        # however many victims THIS row renders, so the rules pass's own
+        # cause line never claims a workload count the row does not show.
+        # A harmless no-op for every other story -- render.bind's .format()
+        # only consumes a key a template actually names.
+        names_dict["count"] = str(count)
         key = f"{n.ns}/{n.name}"
         if p.origin_object is not None:
             decide_obj = render.bind(p.origin_object, names_dict)
             if healthy:
                 decide_obj = dataclasses.replace(decide_obj, fresh=p.healthy_origin_fresh)
+            elif unverified:
+                # Spec section 5: `objects.unverify`'s own "read_failed"
+                # message for a node is `nodes "{name}" is forbidden` --
+                # exactly what the origin read above already says, prefixed
+                # with "read failed: " there and with "fresh read failed: "
+                # by `rules._check_node` in the rationale.
+                decide_obj = unverify(decide_obj, "read_failed")
             decide_objects: tuple = (decide_obj,)
         elif v.objects:
             decoy_obj = render.draw_ending(render.bind(v.objects[0], names_dict), rng)
@@ -861,14 +991,17 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
             decided_outcome=result.outcome))
         content = (v.healthy_read_content or v.read[1]) if healthy else v.read[1]
         reads.append(c.EvidenceRead(label=_fmt(v.read[0], n), content=_fmt(content, n)))
-        row_cause = decoy if healthy else shared_cause
+        row_cause, row_rationale = _shared_origin_row(
+            result, healthy=healthy, decoy=decoy, shared_cause=shared_cause)
+        if row_rationale is None:
+            row_rationale = _fmt(v.local_reason if healthy else p.rationale, n)
         rows.append({"workload": f"{n.ns}/{n.name}",
                      "cause": row_cause,
                      # The pass's own grade for its own attribution. When that
                      # attribution is right, so is the grade -- see
                      # `shared_origin_decoy_probe` on what that costs.
                      "confidence": v.pass_confidence if healthy else p.confidence,
-                     "rationale": _fmt(v.local_reason if healthy else p.rationale, n)})
+                     "rationale": row_rationale})
 
         # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
         # never the raw kind/name identifier. The origin-object branch carries this
@@ -889,15 +1022,10 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
 
     group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
     user = _user_message(None, None, "", (), tuple(workloads), tuple(reads), key=group)
-    if healthy:
-        # Verbatim `multi`'s shape: this IS the ordinary independent answer,
-        # and a different wording would separate the classes by phrasing.
-        lines = [f"{count} workloads are failing for separate reasons."]
-        lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    else:
-        lines = [f"{count} workloads share one upstream cause: {_fmt(p.origin, anchor)}.",
-                 f"Root cause: {shared_cause}.",
-                 _fmt(p.remedy, anchor)]
+    lines = _shared_origin_summary(
+        label, healthy=healthy, count=count, origin=_fmt(p.origin, anchor),
+        shared_cause=shared_cause, remedy=_fmt(p.remedy, anchor), rows=rows,
+        key=p.key)
     return _SharedOrigin(drawn=drawn, scope_value=scope_value, anchor=anchor,
                          shared_cause=shared_cause, distractor_cause=distractor_cause,
                          decoys=decoys, user=user,
@@ -906,7 +1034,8 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
 
 
 def shared_origin(p: prop.Propagation, rng: random.Random,
-                  victims: int | None = None) -> Example:
+                  victims: int | None = None,
+                  unverified: bool = False) -> Example:
     """TRAINING: the counterexample `multi` never gave the model.
 
     Same shape as `shared_origin_probe` and deliberately so, drawn from
@@ -919,8 +1048,11 @@ def shared_origin(p: prop.Propagation, rng: random.Random,
     component healthy, and the two sets are asserted equal. It is the RAW
     template, not the formatted label -- `describe node {node}` renders
     differently per row, and a set of formatted labels would never match.
+
+    `unverified=True` (spec section 5) renders the third, unverified-origin
+    world instead of the plain broken one -- see `_render_shared_origin`.
     """
-    r = _render_shared_origin(p, rng, victims)
+    r = _render_shared_origin(p, rng, victims, unverified=unverified)
     return Example(
         case="shared_origin", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
         assistant=_answer(r.rows, r.summary),
@@ -1128,6 +1260,65 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return combined
 
 
+_WORKER_NAMES = ("worker-1", "worker-2", "worker-3")
+
+
+def _is_node_story(p: prop.Propagation) -> bool:
+    """A node story's healthy origin read names a node: its label or its
+    healthy-content template still carries the `{node}` placeholder."""
+    return "{node}" in p.origin_read[0] or "{node}" in p.healthy_origin_content
+
+
+def _node_clashes(name: str, objects: tuple) -> bool:
+    """True when the row already carries a node object of this name whose
+    fresh read failed, or whose Ready condition is not True -- a healthy
+    origin read naming it would contradict that object. A node the rules
+    refuted or left on a stale lease still reads Ready True, so it does
+    not clash."""
+    return any(
+        obj.kind == "node" and obj.name == name
+        and (obj.fresh.how == "read_failed"
+             or (obj.fresh.how == "read" and obj.fresh.ready != "True"))
+        for obj in objects)
+
+
+def _multi_healthy_origin_node(h_node: str, all_objects: tuple) -> str | None:
+    """The node name a node-story healthy-origin read should use: `h_node`
+    itself when it does not clash, else the first of worker-1/2/3 free of
+    a clash, else None when all three clash too (the read is dropped).
+    No RNG draw: a row without a clash never moves the stream."""
+    for candidate in (h_node, *_WORKER_NAMES):
+        if not _node_clashes(candidate, all_objects):
+            return candidate
+    return None
+
+
+def _resolve_multi_healthy_origin(
+        healthy_origin: prop.Propagation, h: Names, all_objects: tuple,
+) -> tuple[str, str] | None:
+    """The (label, content) for `multi`'s prepended healthy-origin read, or
+    None when section 2's collision rules say to drop it entirely.
+
+    Registry rule: the two ruled registry stories' read is a cluster-wide
+    events read; showing it next to a registry candidate's own account
+    would contradict that candidate, so the read is dropped outright.
+
+    Node rule: see `_multi_healthy_origin_node`.
+    """
+    if (healthy_origin.origin_object is not None
+            and healthy_origin.origin_object.kind == "registry"
+            and any(obj.kind == "registry" for obj in all_objects)):
+        return None
+    node_name = h.node
+    if _is_node_story(healthy_origin):
+        node_name = _multi_healthy_origin_node(h.node, all_objects)
+        if node_name is None:
+            return None
+    hh = h if node_name == h.node else dataclasses.replace(h, node=node_name)
+    return (_fmt(healthy_origin.origin_read[0], hh),
+           _fmt(healthy_origin.healthy_origin_content, hh))
+
+
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
           healthy_origin: prop.Propagation | None = None) -> Example:
     """Several workloads, several independent causes.
@@ -1147,14 +1338,19 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     workloads_meta: dict[str, dict] = {}
     decoy_by_workload: dict[str, list[str]] = {}
     results: list[rules.Result] = []
+    healthy_read: tuple[str, str] | None = None
     if healthy_origin is not None:
         # Formatted against the first workload's names, as the positive case
         # formats against its anchor. A cluster-scoped read names nothing
         # workload-specific; a node- or namespace-scoped one names this row's.
+        # The collision rules (section 2) can rename the node or drop the
+        # read outright, so the read is resolved against every object the
+        # row will carry, not against `h` alone.
         h = pairs[0][1]
-        all_reads.append(c.EvidenceRead(
-            label=_fmt(healthy_origin.origin_read[0], h),
-            content=_fmt(healthy_origin.healthy_origin_content, h)))
+        all_objects = tuple(obj for objs in combined_objects for obj in objs)
+        healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
+        if healthy_read is not None:
+            all_reads.append(c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]))
     for i, (e, n) in enumerate(pairs):
         objects = combined_objects[i]
         conf = _confidence(e)
@@ -1163,10 +1359,15 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
             issue=e.issue, kind=e.workload_kind, status=e.status, rng=rng)
         workloads.append(workload)
         results.append(result)
-        expected_cause = _fmt(e.winner_cause, n)
+        if result.decided:
+            expected_cause = result.cause
+            rationale = _rule_rationale(result)
+        else:
+            expected_cause = _fmt(e.own_cause, n)
+            rationale = _fmt(e.rationale, n)
         all_reads.extend(reads[:2])  # stay under the 8-read budget at 4 workloads
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
-                     "confidence": conf, "rationale": _fmt(e.rationale, n)})
+                     "confidence": conf, "rationale": rationale})
         key = f"{n.ns}/{n.name}"
         candidates = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
         # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
@@ -1197,7 +1398,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
                    assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
                    meta={"case": "multi",
                          "expected": {r["workload"]: r["cause"] for r in rows},
-                         **({} if healthy_origin is None else {
+                         **({} if healthy_read is None else {
                              "origin_read_label": healthy_origin.origin_read[0],
                              "origin_healthy": True}),
                          **extra_meta})

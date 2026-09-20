@@ -613,6 +613,31 @@ label the rules derive for those ten rows — `none` — stands again. The first
 re-pin moved both dataset hashes. The second moved only `EVAL_SET_SHA256`: the
 ten relabelled rows sit outside the frozen first 253, so `FROZEN_253_SHA256`
 held. That is the proof the revert touched nothing else (`contract/PIN.md`).
+This run's exam hash: `test_sha256` `c2d22b6e2d3b3ceeda82c7cadd150d67945e69afe85ac43b7f2eec3e9d9b45e2`
+(`out/eval/0908/scoreboard.json`).
+
+The exam has since been re-pinned a third time, on 2026-09-19, for
+`_render_shared_origin`'s decided-row fix (section 3 of
+`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md`): 14 of
+the 263 rows change their gold answer, byte for byte, and nothing else
+does. All ten `shared_origin_probe` rows (244-253) change — a decided
+victim's row cause and rationale now come from the rules
+(`result.cause`, `_rule_rationale(result)`) instead of always the
+formatted shared cause, and a `none`-labelled row's summary now says
+kubeagent's rules did not confirm one cause instead of falsely claiming a
+shared one. Four of the ten `shared_origin_decoy_probe` rows (254-263)
+change too — the two `coredns-down` and two `node-disk-pressure` rows,
+whose decided victim moves off the same per-victim decide; the other six
+decoy rows (the three stories with an origin object, whose healthy world
+decides nothing) do not move. The graded view — everything the three job
+bars, contract validity, decoy rate and suggestion echo read off a row —
+does not move; a pinned hash over that view proves it. The table below
+still reads on the old exam bytes: 0908 was scored before this re-pin.
+Replaying 0908's banked outputs against the new exam gives the same job
+1, job 2 and job 3 numbers, and the same contract validity, decoy rate,
+length gap and suggestion echo. Overconfidence, which no bar gates, moves from
+0.1717 (167 rows) to 0.2093 (176 rows): it compares replies with the gold
+cause, and 14 gold causes changed.
 
 Before this run, the smoke set (not gated) scored 0908 against three real
 `--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3 of
@@ -719,3 +744,112 @@ Seven limits on this reading, carried from the design that scored it:
    clearing this slice while failing elsewhere. 0908 is not that evidence. It
    scored 0.2418, below the 0.366 a copier gets, so it did not exploit the
    exposure — its job-2 number simply cannot prove it read anything.
+
+## Known limits of the training data and the exam
+
+These are known limits of the training data and the exam this build uses.
+They are written down here before training, from the design that fixed the
+training targets (`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md`,
+section 12). They are not new problems found after a run — they are choices
+and trade-offs made on purpose, disclosed up front so a reader can weigh a
+future result against them. When the next retrain's results are added to
+this file, that section must link back here and check its numbers
+against these.
+
+1. **The exam's `node-not-ready` row says two things about node readiness.**
+   The gold rationale says the Ready condition is False. The origin read
+   printed in the same row says `Unknown`. Both are true readings of the
+   same fault, worded two different ways — a model that expects the two
+   words to match will not find them matching here.
+2. **The exam's decoy-node rows put two reasons on one node.** In
+   `coredns-down` and `node-disk-pressure`, the rule rationale talks about
+   the decoy node while the rest of the row is about CoreDNS or disk
+   pressure. Rows 248 and 258 (both `node-disk-pressure`) go further: the
+   same node, worker-3, is named under two different rule reasons —
+   "NotReady" and "no kubelet lease" — in the same row, and neither reason
+   is what the row's own evidence shows for that node (disk pressure).
+3. **The exam's storage story shows `Pending` where an internal field says
+   `Bound`.** The row a model reads always says the claim is `Pending`,
+   which is correct — the claim really is stuck. The propagation table that
+   built the row also carries a `Bound` value, on the field that would
+   apply if the origin were healthy. That field is never printed into the
+   prompt; the mismatch is a fact about the code, not something a model
+   can read.
+4. **The exam's row 252 says "3 workloads failing to pull" and shows 2.**
+   The rule's cause string names a fixed count from the story: "3
+   workloads failing to pull". This probe row flags only 2 of those 3
+   workloads, so the count written into the text and the count of rows a
+   model is asked to judge do not match.
+5. **Two rationale-template builders, not all of them.** Only two call
+   sites build a rule row's rationale from one function, `_rule_rationale`
+   in `dataset/cases.py`: the shared-origin family's `_shared_origin_row`
+   (used by `shared_origin`, `shared_origin_decoy`, `shared_origin_probe`
+   and `shared_origin_decoy_probe`) and `multi`. Every other rule row
+   carries a catalog rationale instead. In this build the template covers
+   1,746 of the 3,056 decided rows in train and 28 of the 157 in the exam.
+   On those rows, a model could learn the template's wording instead of the
+   reasoning behind it — job 1, which grades whether the model repeats the
+   decided cause, cannot tell the two apart.
+6. **Plain broken twins always deny a shared cause, even though both rows
+   name the same origin.** A plain story's two twin rows both point at the
+   same real cause, but the rules cannot check a plain story's origin, so
+   the summary on both rows says the rules did not confirm one cause. A
+   model could learn "never call a cause shared" from this pattern alone.
+   The ruled broken twins teach the other side, because the rules can check
+   a ruled story's origin: in this build 192 of them land in train and 22
+   in val, all carrying the `shared` label. This build has 960 plain pairs
+   and 240 ruled pairs (1,200 in all), and every one of the 48 plain
+   stories keeps at least 15 of its 20 pairs in train. Three stories tie
+   for the lowest, at 15 (`sidecar-injector-broken`, `node-corrupt-overlay`
+   and `cluster-maintenance-taint`), and the highest is 20. A further 26 of the 240
+   ruled pairs, drawn only from the two node-kind ruled stories, are
+   deliberately rendered "unverified" instead of confirmed (25 land in
+   train, 1 in val): the origin read is made to fail, so the rules cannot
+   confirm or deny it, and the label is `none`, not `shared`. That is a
+   third pattern, not a second copy of "plain" — it teaches "the rules
+   could not check" as its own answer.
+7. **No decoy rate on any shared-origin-family row built from a trainable
+   story — for two different reasons.** Every row from `shared_origin`,
+   `shared_origin_decoy`, and the `--probe-cousins` diagnostic carries an
+   empty `decoy_by_workload` — the field the decoy-rate check reads. On the
+   6 ruled stories, and on the 3 exam-only stories that also fix an origin
+   object (`node-not-ready`, `storage-provisioner-down` and
+   `registry-unreachable`), `_render_shared_origin` in `dataset/cases.py`
+   forces the list empty outright: the branch that runs when
+   `origin_object is not None` never builds a candidate list. On the 48
+   plain stories that branch does build the list from the victim's own
+   decoy candidates, but it still comes out empty, because none of the 48
+   plain stories' victims declare a decoy object to draw one from. In this
+   build that is 2,400 of the shared-origin/shared-origin-decoy train and
+   val rows and all 108 `--probe-cousins` rows, every one of them empty, so
+   the decoy-rate diagnostic never sees this family outside the exam. (The
+   exam's `shared_origin_probe`/`shared_origin_decoy_probe` rows differ:
+   three of their six scenarios — `coredns-down`, `node-disk-pressure` and
+   `networkpolicy-deny-all` — do declare decoy objects and do carry a
+   decoy rate there.)
+8. **Two read formats for one node.** kubeagent labels a node's own trail
+   read `describe node /worker-2`, with a leading slash, and `read_text` in
+   `dataset/rules.py` copies that label. The node stories in
+   `dataset/propagation.py` write their own evidence heading as `describe
+   node worker-2`, with no slash. Most rows print only one of the two. In
+   this build, 62 `multi` rows in train and 9 in val print both in the same
+   row, and in 42 of the 62 train rows it is the same node both times. The
+   exam's node-story rows print only the story form. A model that expects
+   one fixed format will see both.
+9. **The rule rationale asserts read results the prompt never shows.**
+   `_rule_rationale`'s sentence quotes `result.evidence`, the rules
+   engine's own one-line summary of a fresh read (`ready condition is
+   False now`, `fresh read failed: nodes "worker-3" is forbidden`).
+   `multi`'s candidate list reprints that same string as a `fresh read:
+   <outcome> — <evidence>` line, so its rule rows quote something the
+   prompt does show — none of its 1,209 rule-decided train rows are
+   affected. The shared-origin family's candidate list never prints a
+   `fresh read:` line at all, only `decided by rules: <candidate> —
+   <outcome>`, so every one of its rule rows asserts a summary sentence
+   that appears nowhere in the prompt; the raw `== describe ... ==` block
+   the prompt does show is worded differently and does not substitute for
+   it. In this build that is all 537 of the shared-origin family's
+   rule-decided train rows and all 28 of the exam's. Limit 1 above is the
+   special case where this invented text also happens to contradict
+   something the prompt does print (`Unknown` against `False`); this is
+   the general case, and the bigger fact.

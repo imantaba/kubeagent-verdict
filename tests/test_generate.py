@@ -56,9 +56,9 @@ def test_to_row_schema():
 
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
-    assert counts == {"attributed": 100, "none_of_these": 150, "own_cause": 100,
-                      "multi": 110, "shared_origin": 120,
-                      "shared_origin_decoy": 120, "truncated": 50,
+    assert counts == {"attributed": 60, "none_of_these": 110, "own_cause": 100,
+                      "multi": 130, "shared_origin": 150,
+                      "shared_origin_decoy": 150, "truncated": 50,
                       "injection": 100, "empty_candidates": 50,
                       "wrong_attribution": 100}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed

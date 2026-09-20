@@ -162,16 +162,34 @@ def test_a_pair_does_not_read_the_same_things(rows):
         assert shared.user != decoy.user
 
 
+# A PVC-scoped origin groups by storage class (`rules.py`'s group-key
+# fallback), so several distinct PVC objects on the same class can decide to
+# several distinct per-PVC causes under one `shared` verdict -- see the same
+# exemption in tests/test_shared_origin_training.py. Re-measured 2026-09-19
+# (Task 9, spec section 6): the two ruled PVC stories now exercise this for
+# real, e.g. `{'PVC cache-0 (ProvisionerNotResponding)',
+# 'PVC media-assets (ProvisionerNotResponding)'}` on
+# `pvc-provisioner-not-responding`.
+_PVC_SCOPED_ORIGINS = frozenset({
+    "storage-provisioner-down",
+    "pvc-provisioner-not-responding",
+    "pvc-storageclass-missing",
+})
+
+
 def test_the_answer_flips_with_the_read(rows):
     for shared, decoy in _pairs(rows):
         one = json.loads(shared.assistant)
         sep = json.loads(decoy.assistant)
         assert propagation.SEPARATE_REASONS not in one["summary"]
         assert propagation.SEPARATE_REASONS in sep["summary"]
-        # One cause for every workload on the shared half; each workload's own
-        # local cause on the decoy half. Same workloads, different answers.
+        # One cause for every workload on the shared half, except a
+        # PVC-scoped origin, which may decide several workloads to several
+        # per-PVC causes; each workload's own local cause on the decoy half.
+        # Same workloads, different answers.
         causes = {v["cause"] for v in one["verdicts"]}
-        assert len(causes) == 1
+        if shared.meta["origin"] not in _PVC_SCOPED_ORIGINS:
+            assert len(causes) == 1
         assert shared.meta["expected"] != decoy.meta["expected"]
 
 

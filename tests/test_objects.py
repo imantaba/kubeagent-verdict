@@ -83,6 +83,14 @@ def test_bad_registry_values_name_the_object(bad, text):
     assert text in str(err.value)
 
 
+def test_registry_scan_reason_accepts_the_count_template():
+    """A ruled registry story fills `scan_reason` in at render time (spec
+    section 4, "Registry count"): the literal template string `"{count}"`
+    must construct, alongside the digit strings every other registry
+    object already uses."""
+    registry(scan_reason="{count}")
+
+
 def test_refute_gives_each_kind_its_healthy_ending():
     n = o.refute(node(scan_reason="no kubelet lease", fresh=o.Fresh(how="read_failed", message="x")))
     assert (n.scan_reason, n.fresh.how, n.fresh.ready, n.fresh.message) == ("NotReady", "read", "True", "")

@@ -190,16 +190,40 @@ def test_builder_renders_one_verdict_row_per_victim():
 
 
 def test_every_row_names_the_same_shared_cause():
-    """The whole point: one origin, one answer, repeated.
+    """The whole point, on a `shared`-labeled row: every victim's cause
+    comes from ONE `rules.shared()` group, and every victim is decided.
 
-    `multi` renders N different causes and says so. This row renders N
-    workloads whose correct cause is one string.
+    `multi` renders N different causes and says so. A `shared`-labeled
+    shared-origin row instead renders N workloads the rules confirmed
+    together under one shared-origin object. On the two scope-pinned
+    stories (`node-not-ready`, `registry-unreachable`) that means the
+    identical cause string, because every victim binds the same node or
+    registry name. `storage-provisioner-down`'s origin binds a PER-VICTIM
+    PVC name, so its `shared` group holds one storage class across
+    DIFFERENT PVC causes (`rules.py`'s group-key storage-class fallback)
+    -- still one group, not one string. A `none`-labeled row makes neither
+    promise (spec section 3): its undecided victims still share
+    `p.shared_cause`, but a victim the rules separately decided, off its
+    own unrelated evidence, carries its own cause instead.
+    `test_a_shared_label_only_comes_from_an_origin_object` in
+    `tests/test_shared_origin_decided.py` is the reverse check: no
+    `none`-labeled row is ever mistaken for a `shared` one.
     """
     from kubeagent_verdict.dataset import cases, generate
+    saw_shared = saw_none = False
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        causes = {r["cause"] for r in json.loads(ex.assistant)["verdicts"]}
-        assert len(causes) == 1, p.key
+        verdicts = json.loads(ex.assistant)["verdicts"]
+        if ex.meta["label"] == "shared":
+            saw_shared = True
+            assert all(ex.meta["workloads"][v["workload"]]["decided"]
+                      for v in verdicts), p.key
+            causes = {v["cause"] for v in verdicts}
+            if p.key != "storage-provisioner-down":
+                assert len(causes) == 1, p.key
+        else:
+            saw_none = True
+    assert saw_shared and saw_none, "both labels must be exercised"
 
 
 def test_the_summary_never_says_the_workloads_fail_for_separate_reasons():
@@ -224,24 +248,32 @@ def _menu_blocks(ex):
 
 
 def test_the_decoy_leads_every_candidate_menu_and_the_answer_trails():
-    """Tag AND position both point away from the answer, on every workload.
+    """Tag AND position both point away from the shared-cause candidate, on
+    every workload.
 
     Three candidates per victim in a fixed order: the local decoy carrying
     `attributed` first, the evidence-refuted distractor second, the shared
     cause carrying `outranked` last. A model answering by index or by tag
     scores zero; a model reading the evidence is unaffected.
+
+    The menu is built from `p.shared_cause`/`p.shared_verdict` regardless of
+    what the rules later decide (spec section 3), so its shape never moves;
+    what CAN move off it is a workload's own verdict, checked by
+    `test_every_row_names_the_same_shared_cause` above. This reads the
+    shared-cause candidate straight off the menu rather than off
+    `verdicts[0]`, which a decided workload can now carry a cause the menu
+    never lists.
     """
     from kubeagent_verdict.dataset import cases, generate
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
         blocks = _menu_blocks(ex)
         assert len(blocks) == len(p.victims), p.key
-        cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
         for block, decoy in zip(blocks, ex.meta["decoy_causes"]):
             assert len(block) == 3, p.key
             assert block[0].startswith(f"{decoy}: attributed "), p.key
             assert block[1].startswith(f"{ex.meta['distractor_cause']}: ruled out "), p.key
-            assert block[2].startswith(f"{cause}: outranked "), p.key
+            assert f": {p.shared_verdict} " in block[2], p.key
 
 
 def test_the_shared_cause_is_a_candidate_line_on_every_workload():
@@ -251,12 +283,18 @@ def test_the_shared_cause_is_a_candidate_line_on_every_workload():
     verbatim". Putting the shared cause on each menu keeps the correct answer
     inside that vocabulary, so a wrong answer is a judgement failure and never
     a phrasing one.
+
+    Read off the menu's own shared-cause candidate (every block's third line,
+    byte-identical across a row's workloads by construction) rather than off
+    `verdicts[0]["cause"]`, which a decided workload can now move off the
+    menu entirely (spec section 3).
     """
     from kubeagent_verdict.dataset import cases, generate
     for p in propagation.all_scenarios():
         ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
         menu = ex.user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
-        cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
+        blocks = _menu_blocks(ex)
+        cause = blocks[0][2].split(f": {p.shared_verdict} ")[0]
         assert menu.count(f"considered {cause}: ") == len(p.victims), p.key
 
 
@@ -526,6 +564,67 @@ def test_registry_unreachable_shared_read_agrees_with_the_declared_object():
     healthy = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
     for meta in healthy.meta["workloads"].values():
         assert meta["decided"] is False
+
+
+def test_registry_count_template_fills_in_the_rendered_victim_count():
+    """A ruled registry story's `scan_reason` is the literal `"{count}"`
+    template (spec section 4, "Registry count"): `_render_shared_origin`
+    fills it in with however many victims that row actually renders. This
+    is the fix for the bug the exam's row 252 disclosed, where a fixed
+    count baked into `scan_reason` (`"3"`) stayed "3" even on a row that
+    rendered only 2 victims, so the rules pass's own cause line claimed
+    more workloads than the row showed.
+    """
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    p = replace(base, origin_object=replace(
+        base.origin_object, name="mirror.invalid", scan_reason="{count}"))
+
+    two = cases.shared_origin(p, random.Random(1), victims=2)
+    assert "registry mirror.invalid (2 workloads failing to pull)" in two.user
+
+    three = cases.shared_origin(p, random.Random(1), victims=3)
+    assert "registry mirror.invalid (3 workloads failing to pull)" in three.user
+
+
+def test_registry_origin_rewrites_victim_images_to_the_declared_host():
+    """Spec section 4, "Registry hosts": a ruled registry story's victim
+    images are rewritten to the story's own host at render time, with no
+    random draw, so the row never shows a victim pulling from a registry
+    other than the one the origin object names."""
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    p = replace(base, origin_object=replace(base.origin_object, name="mirror.invalid"))
+
+    e = cases.shared_origin(p, random.Random(4), victims=3)
+    assert "registry.example.com/" not in e.user
+    assert e.user.count("mirror.invalid/") >= 3
+
+
+def test_registry_example_com_host_is_a_no_op_rewrite():
+    """The exam's own registry story already names `registry.example.com`
+    -- the rewrite must leave its images untouched so the exam's rows and
+    hashes do not move."""
+    import dataclasses
+    import random
+
+    from kubeagent_verdict.dataset import cases
+
+    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
+    assert p.origin_object.name == "registry.example.com"
+
+    drawn, _scope = cases._propagation_names(p, random.Random(9), 3)
+    rewritten = [
+        dataclasses.replace(n, image=p.origin_object.name + n.image[n.image.index("/"):])
+        for n in drawn
+    ]
+    assert [n.image for n in drawn] == [n.image for n in rewritten]
 
 
 def test_shared_origin_wrappers_merge_the_new_meta_without_losing_existing_keys():

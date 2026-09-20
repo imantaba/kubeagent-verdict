@@ -81,16 +81,16 @@ proportions, and each kind teaches one specific skill:
 
 | Question type | Share | The skill it teaches |
 |---|---|---|
-| `attributed` | 10% | The obvious candidate is right — pick it, word for word |
-| `none_of_these` | 15% | Sometimes *every* offered candidate is wrong. Say so. |
+| `attributed` | 6% | The obvious candidate is right — pick it, word for word |
+| `none_of_these` | 11% | Sometimes *every* offered candidate is wrong. Say so. |
 | `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
 | `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
 | `injection` | 10% | The evidence may contain text saying "ignore your instructions." It is data. Ignore *it*. |
-| `multi` | 11% | Several broken workloads in one question, each broken for its **own separate reason** |
+| `multi` | 13% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
 | `empty_candidates` | 5% | Nothing is actually wrong. Do not invent a problem. |
-| `shared_origin` | 12% | Several broken workloads, **all broken by one single thing** — name the same cause on every one |
-| `shared_origin_decoy` | 12% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
+| `shared_origin` | 15% | Several broken workloads, all downstream of one thing — name that thing on every one (in the rules' own words where the rules checked it), and call it one shared cause only when the rules confirm it |
+| `shared_origin_decoy` | 15% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
 
 Those last two rows are new, and they are one row really: every
 `shared_origin` question is generated together with its `shared_origin_decoy`
@@ -315,10 +315,12 @@ not change at all.**
 
 **Change 1 — a new lesson type, from its own private scenarios.**
 
-`shared_origin` entered the curriculum at 4% (it is 12% now: Change 4 below
-says how it reached 8%, and the last section of Part 3 says why it went on
-to 12%): several workloads, one upstream cause, the same answer on every
-row.
+`shared_origin` entered the curriculum at 4% (it is 15% now: Change 4 below
+says how it reached 8%, the last section of Part 3 says why it went on to
+12%, and a 2026-09-19 change took it to 15% so a pair in five could come
+from six new stories the rules pass can confirm on its own): several
+workloads, one upstream cause, and an answer that calls it shared only when
+the rules confirm it.
 
 The obvious way to build it would have been to reuse the six scenarios the exam
 already uses, with different names drawn. That would have been a trap. The
@@ -412,6 +414,20 @@ recipe (seed 17, size 5500). 7% was tried first and left one scenario at 11.
 Both halves are 12% since the final retrain's data landed, the build size
 is 8000, and the floor test now pins 12 pairs at that recipe (seed 17, size
 8000). The last section of Part 3 says why.
+
+On 2026-09-19 both halves moved again, to 15%, and `multi` moved with them,
+to 13%: the budget came out of `attributed` and `none_of_these` this time,
+not out of `attributed` alone, because raising only the shared-origin
+halves would have pushed the `shared_origin` case family's share of
+multi-workload rows onto the 0.40 cap a test pins. That cap covers the
+case family, not the answer: about 7 of every 100 multi-workload rows
+carry a gold answer claiming a shared origin, and no test caps that. The pool also grew, from 48 stories to 54:
+six new "ruled" stories give kubeagent's own rules pass an origin object it
+can check, so a fifth of shared-origin pairs can now carry a `shared`
+label the rules confirm. Before this, no training row carried one. Spec
+section 6 of
+`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md` has the
+detail.
 
 | | 4% build | 8% build | 12% build |
 |---|---|---|---|
@@ -852,7 +868,7 @@ Two deciders failed.
 
 The other deciders were met. Beside the exam, the wide probe scored 19 of
 30 pairs. An earlier cousin probe of 30 pairs, made before `kv-dataset
---probe-cousins` existed, scored 30 of 30. The new 48-pair cousin probe
+--probe-cousins` existed, scored 30 of 30. The cousin probe, now 54 pairs,
 has no 0907 score yet. So the model read the origin on the scenarios it
 had studied, and missed on the ones it had not.
 
@@ -906,7 +922,8 @@ What this change does about it:
   textbook grew from 5,500 to 8,000 questions so that every scenario still
   keeps at least 12 pairs in train.
 - **A cousin probe.** `kv-dataset --probe-cousins` writes one fresh pair per
-  trained scenario, 48 pairs and 96 rows, every decoy half at full width.
+  trained scenario, 54 pairs and 108 rows since the 2026-09-19 pool grew
+  from 48 to 54 stories, every decoy half at full width.
   It asks whether the model reads the origin on what it studied. It decides
   nothing.
 

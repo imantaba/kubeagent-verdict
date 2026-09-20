@@ -82,21 +82,39 @@ DECLARED = {
     # does not touch it: it already read 17/19 at size 5500 with the same
     # mix and pool, so the size is not what moved this row.
     "contradiction_probe": (19, 38),
-    # THIS ROW IS THE POINT OF THE ALLOWLIST. Its rows come from
-    # dataset.propagation, not the catalog, so it shares nothing -- which is
-    # what shows the guard discriminates rather than rubber-stamping.
-    "shared_origin_probe": (0, 34),
-    # Its healthy-origin twin, and declared rather than left out on purpose:
-    # an undeclared slice is not measured at all, so the guard's coverage
-    # would silently lag the exam every time the exam grows. Same structural
-    # reason for the zero -- the rows come from dataset.propagation, whose
-    # eval scenarios never enter the training pile. It does share 6 of its 34
-    # reads with `shared_origin_probe` itself, by construction: five of the
-    # sixteen eval victims carry evidence that reads the same whether the
-    # origin is broken or not, and those are rendered verbatim in both worlds.
-    # That is sharing WITHIN the exam, which this instrument does not measure
-    # and does not need to -- neither slice is anything the model studied.
-    "shared_origin_decoy_probe": (0, 34),
+    # THIS ROW WAS THE POINT OF THE ALLOWLIST at 0/34: its rows come from
+    # dataset.propagation, not the catalog, so an eval scenario itself is
+    # never trained on. That is still true. What moved is generic PVC
+    # boilerplate: Task 9 (2026-09-19) merged two ruled PVC-provisioning
+    # stories (`pvc-provisioner-not-responding`) into the trainable pool
+    # (spec section 6), and their provisioner-stall events -- "Normal
+    # WaitForFirstConsumer ... waiting for first consumer to be created" and
+    # "Unable to attach or mount volumes" -- are the same generic PVC-events
+    # vocabulary the eval-only `storage-provisioner-down` scenario reads.
+    # After identity masking the two are byte-identical, so 3 of the eval
+    # scenario's reads now land in the trained set. No eval SCENARIO is
+    # trained on; a training scenario now happens to narrate the same kind
+    # of PVC stall in the same event vocabulary, which is the sharing this
+    # guard is built to detect and re-declare, not to prevent.
+    "shared_origin_probe": (3, 34),
+    # Its healthy-origin twin, declared rather than left out on purpose: an
+    # undeclared slice is not measured at all, so the guard's coverage would
+    # silently lag the exam every time the exam grows. One hit is the same
+    # ruled-PVC boilerplate as `shared_origin_probe` above (the "Unable to
+    # attach or mount volumes" read). The other comes straight from Task 9's
+    # pool merge (spec section 6): "Normal Started kubelet Started container"
+    # is generic enough that it also appears verbatim on the two ruled
+    # node-story training rows (`node-kubelet-halted`,
+    # `node-kubelet-unresponsive`), and that merge is what first puts those
+    # two stories in the trained pool at all. The shared text is kubelet
+    # boilerplate both stories happen to narrate the same way, not the exam's
+    # own wording. It also still shares 6 of its 34 reads with
+    # `shared_origin_probe` itself, by construction: five of the sixteen
+    # eval victims carry evidence that reads the same whether the origin is
+    # broken or not, and those are rendered verbatim in both worlds. That is
+    # sharing WITHIN the exam, which this instrument does not measure and
+    # does not need to.
+    "shared_origin_decoy_probe": (2, 34),
 }
 
 
