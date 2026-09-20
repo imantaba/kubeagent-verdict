@@ -866,7 +866,7 @@ Two deciders failed.
 
 The other deciders were met. Beside the exam, the wide probe scored 19 of
 30 pairs. An earlier cousin probe of 30 pairs, made before `kv-dataset
---probe-cousins` existed, scored 30 of 30. The new 48-pair cousin probe
+--probe-cousins` existed, scored 30 of 30. The cousin probe, now 54 pairs,
 has no 0907 score yet. So the model read the origin on the scenarios it
 had studied, and missed on the ones it had not.
 

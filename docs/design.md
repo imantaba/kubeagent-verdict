@@ -411,10 +411,10 @@ truncated or thin → low), so calibration is trained, not guessed.
   — never shuffled — because their purpose is to hold the shortcut fixed
   against the correct answer. Their groups are held out of train and val,
   so the model has never seen that (entry, workload) pair.
-- The third closes a hole the first two could not see. `multi` is ~11% of
+- The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
-  swaps a tag — so across all 1,683 constituent workloads it contributes to
-  train and val at `--seed 17 --size 8000` (2,645 before `drop_held_out`),
+  swaps a tag — so across all 2,127 constituent workloads it contributes to
+  train and val at `--seed 17 --size 8000` (3,160 before `drop_held_out`),
   "trust the `attributed` tag" is a strategy the training data never once
   contradicts in that shape. Both single-workload probes render one
   workload, so neither can reach it. `multi_misattribution_probe` renders

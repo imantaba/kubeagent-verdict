@@ -201,7 +201,7 @@ class Victim:
     on_origin: bool = False
     # This victim's own decoy objects — a node, PVC or registry its local,
     # wrong candidate points at. Exactly one node decoy on every victim of
-    # a scenario with no origin_object; empty on every victim where
+    # the three scenarios with no origin_object; empty on every victim where
     # on_origin is True, because the origin's own object already covers it.
     # The decoy is not chosen from the victim's local_cause wording: several
     # victims name nothing from the node/PVC/registry vocabulary and still

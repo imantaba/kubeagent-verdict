@@ -193,10 +193,11 @@ def generate(seed: int, size: int) -> list[Example]:
     # indices (`k` skips the one ruled slot out of every five `i`s, `j`/`t`
     # count ruled draws and full trips around the ruled pool) so each pool
     # cycles through its own stories evenly (20 draws per plain story, 40
-    # per ruled story), the same way the single `i % len(train_scen)` walk
-    # did before the ruled stories existed. Widths are near-even, not even:
-    # each ruled story's 40 draws split 21 at width 2 against 19 at width 3,
-    # since 40 does not divide evenly across the two widths. One node ruled
+    # per ruled story, at size 8000), the same way the single
+    # `i % len(train_scen)` walk did before the ruled stories existed.
+    # Widths are near-even, not even: each ruled story's 40 draws split 21
+    # at width 2 against 19 at width 3 at size 8000, since 40 does not
+    # divide evenly across the two widths. One node ruled
     # pair in three (every
     # third trip around the six-story ruled pool) renders the unverified
     # twin instead of the confirmed one (spec section 5); the label comes

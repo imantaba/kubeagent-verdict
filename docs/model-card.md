@@ -780,11 +780,16 @@ against these.
    workloads failing to pull". This probe row flags only 2 of those 3
    workloads, so the count written into the text and the count of rows a
    model is asked to judge do not match.
-5. **One fixed rationale template.** Every rule row's rationale comes from
-   one function, `_rule_rationale` in `dataset/cases.py`. A model could
-   learn the template's wording instead of the reasoning behind it — job 1,
-   which grades whether the model repeats the decided cause, cannot tell
-   the two apart.
+5. **Two rationale-template builders, not all of them.** Only two call
+   sites build a rule row's rationale from one function, `_rule_rationale`
+   in `dataset/cases.py`: the shared-origin family's `_shared_origin_row`
+   (used by `shared_origin`, `shared_origin_decoy`, `shared_origin_probe`
+   and `shared_origin_decoy_probe`) and `multi`. Every other rule row
+   carries a catalog rationale instead. In this build the template covers
+   1,746 of the 3,056 decided rows in train and 28 of the 157 in the exam.
+   On those rows, a model could learn the template's wording instead of the
+   reasoning behind it — job 1, which grades whether the model repeats the
+   decided cause, cannot tell the two apart.
 6. **Plain broken twins always deny a shared cause, even though both rows
    name the same origin.** A plain story's two twin rows both point at the
    same real cause, but the rules cannot check a plain story's origin, so
@@ -803,15 +808,25 @@ against these.
    confirm or deny it, and the label is `none`, not `shared`. That is a
    third pattern, not a second copy of "plain" — it teaches "the rules
    could not check" as its own answer.
-7. **No decoy rate on ruled stories.** Every ruled-story row, both twins in
-   the pair, carries an empty `decoy_by_workload` — the field the
-   decoy-rate check reads — because `_render_shared_origin` in
-   `dataset/cases.py` leaves it empty whenever the story has a fixed origin
-   object: a ruled story, or one of the exam-only stories that also fixes
-   one. Today that covers 3 exam-only stories: `node-not-ready`,
-   `storage-provisioner-down` and `registry-unreachable`. After this build
-   it also covers the 240 ruled pairs, so the decoy-rate diagnostic sees
-   none of them.
+7. **No decoy rate on any shared-origin-family row built from a trainable
+   story — for two different reasons.** Every row from `shared_origin`,
+   `shared_origin_decoy`, and the `--probe-cousins` diagnostic carries an
+   empty `decoy_by_workload` — the field the decoy-rate check reads. On the
+   6 ruled stories, and on the 3 exam-only stories that also fix an origin
+   object (`node-not-ready`, `storage-provisioner-down` and
+   `registry-unreachable`), `_render_shared_origin` in `dataset/cases.py`
+   forces the list empty outright: the branch that runs when
+   `origin_object is not None` never builds a candidate list. On the 48
+   plain stories that branch does build the list from the victim's own
+   decoy candidates, but it still comes out empty, because none of the 48
+   plain stories' victims declare a decoy object to draw one from. In this
+   build that is 2,400 of the shared-origin/shared-origin-decoy train and
+   val rows and all 108 `--probe-cousins` rows, every one of them empty, so
+   the decoy-rate diagnostic never sees this family outside the exam. (The
+   exam's `shared_origin_probe`/`shared_origin_decoy_probe` rows differ:
+   three of their six scenarios — `coredns-down`, `node-disk-pressure` and
+   `networkpolicy-deny-all` — do declare decoy objects and do carry a
+   decoy rate there.)
 8. **Two read formats for one node.** kubeagent labels a node's own trail
    read `describe node /worker-2`, with a leading slash, and `read_text` in
    `dataset/rules.py` copies that label. The node stories in
@@ -821,3 +836,20 @@ against these.
    row, and in 42 of the 62 train rows it is the same node both times. The
    exam's node-story rows print only the story form. A model that expects
    one fixed format will see both.
+9. **The rule rationale asserts read results the prompt never shows.**
+   `_rule_rationale`'s sentence quotes `result.evidence`, the rules
+   engine's own one-line summary of a fresh read (`ready condition is
+   False now`, `fresh read failed: nodes "worker-3" is forbidden`).
+   `multi`'s candidate list reprints that same string as a `fresh read:
+   <outcome> — <evidence>` line, so its rule rows quote something the
+   prompt does show — none of its 1,209 rule-decided train rows are
+   affected. The shared-origin family's candidate list never prints a
+   `fresh read:` line at all, only `decided by rules: <candidate> —
+   <outcome>`, so every one of its rule rows asserts a summary sentence
+   that appears nowhere in the prompt; the raw `== describe ... ==` block
+   the prompt does show is worded differently and does not substitute for
+   it. In this build that is all 537 of the shared-origin family's
+   rule-decided train rows and all 28 of the exam's. Limit 1 above is the
+   special case where this invented text also happens to contradict
+   something the prompt does print (`Unknown` against `False`); this is
+   the general case, and the bigger fact.
