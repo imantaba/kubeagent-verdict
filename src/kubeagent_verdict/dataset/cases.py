@@ -908,11 +908,12 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
     # The discriminating read varies inside a scenario, so what separates the
     # two halves is the relation the contents stand for rather than two literal
     # strings the model can memorise. Drawn from the passed-in rng, before the
-    # `healthy` branch: `generate.py:156-159` draws ONE salt and builds a
-    # separate `random.Random(salt)` for each half, so both replay an identical
-    # stream and both draw the SAME variant -- exactly the way they already
-    # draw the same names. Only when the scenario declares variants; the eval
-    # six declare none and must consume the RNG exactly as they did before.
+    # `healthy` branch: `generate.generate`'s shared-origin selection loop
+    # draws ONE salt and builds a separate `random.Random(salt)` for each
+    # half, so both replay an identical stream and both draw the SAME
+    # variant -- exactly the way they already draw the same names. Only when
+    # the scenario declares variants; the eval six declare none and must
+    # consume the RNG exactly as they did before.
     broken_origin, healthy_origin = p.origin_read[1], p.healthy_origin_content
     if p.origin_variants:
         broken_origin, healthy_origin = rng.choice(p.origin_variants)

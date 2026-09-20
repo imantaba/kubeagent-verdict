@@ -613,6 +613,31 @@ label the rules derive for those ten rows — `none` — stands again. The first
 re-pin moved both dataset hashes. The second moved only `EVAL_SET_SHA256`: the
 ten relabelled rows sit outside the frozen first 253, so `FROZEN_253_SHA256`
 held. That is the proof the revert touched nothing else (`contract/PIN.md`).
+This run's exam hash: `test_sha256` `c2d22b6e2d3b3ceeda82c7cadd150d67945e69afe85ac43b7f2eec3e9d9b45e2`
+(`out/eval/0908/scoreboard.json`).
+
+The exam has since been re-pinned a third time, on 2026-09-19, for
+`_render_shared_origin`'s decided-row fix (section 3 of
+`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md`): 14 of
+the 263 rows change their gold answer, byte for byte, and nothing else
+does. All ten `shared_origin_probe` rows (244-253) change — a decided
+victim's row cause and rationale now come from the rules
+(`result.cause`, `_rule_rationale(result)`) instead of always the
+formatted shared cause, and a `none`-labelled row's summary now says
+kubeagent's rules did not confirm one cause instead of falsely claiming a
+shared one. Four of the ten `shared_origin_decoy_probe` rows (254-263)
+change too — the two `coredns-down` and two `node-disk-pressure` rows,
+whose decided victim moves off the same per-victim decide; the other six
+decoy rows (the three stories with an origin object, whose healthy world
+decides nothing) do not move. The graded view — everything the three job
+bars, contract validity, decoy rate and suggestion echo read off a row —
+does not move; a pinned hash over that view proves it. The table below
+still reads on the old exam bytes: 0908 was scored before this re-pin.
+Replaying 0908's banked outputs against the new exam gives the same job
+1, job 2 and job 3 numbers, and the same contract validity, decoy rate,
+length gap and suggestion echo. Overconfidence, which no bar gates, moves from
+0.1717 (167 rows) to 0.2093 (176 rows): it compares replies with the gold
+cause, and 14 gold causes changed.
 
 Before this run, the smoke set (not gated) scored 0908 against three real
 `--investigate` calls: 12 rule rows, the cause echoed on 4, job 1 scored 3 of

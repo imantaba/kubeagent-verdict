@@ -79,9 +79,17 @@ and across the pool; 3-4 victims with kinds from `vocab.ISSUE_KINDS`;
 `origin_variants` whose first entry is the legacy pair and whose first lines
 are literal and distinct; an `origin_state` word pair present in every variant
 of its own half and absent from the other; no banned identifier shape
-anywhere; and, across the pool, forty-eight scenarios taught in equal shares,
-exercising all sixteen issue kinds, each rendering at least three of its
-variants, with no cause template over 12% and the top three under 30%.
+anywhere; and, across the pool, every scenario taught **within its own
+sub-pool** in equal shares (ruling A in section 7 of
+docs/superpowers/specs/2026-09-19-training-targets-fix-design.md) —
+forty-eight plain stories sharing one rate, and, since the six "ruled"
+stories joined the pool on 2026-09-19 (section 4 of the same spec), six
+ruled stories sharing a second rate: a fifth of `shared_origin` pairs is
+spread over six ruled stories and the other four fifths over forty-eight
+plain ones, so a ruled story gets twice a plain story's share. Together
+they exercise all sixteen issue kinds, each scenario rendering at least
+three of its variants, with no cause template over 12% and the top three
+under 30%.
 
 Judgment, and unenforced:
 
@@ -175,18 +183,25 @@ class Victim:
     pass_confidence: str = "high"
     network_policies: tuple[str, ...] = ()
     # Whether this victim hangs off a shared origin that has its own drawn
-    # Object. True on every victim of the three scenarios that declare an
-    # origin_object (node-not-ready, storage-provisioner-down,
-    # registry-unreachable), False on every victim of the three that do not
-    # (coredns-down, node-disk-pressure, networkpolicy-deny-all). It is
+    # Object. True on every victim of a scenario that declares an
+    # origin_object, False on every victim of one that does not. Among the
+    # eval six it is True for the three whose job-3 label is "shared/none"
+    # (node-not-ready, storage-provisioner-down, registry-unreachable) and
+    # False for the other three (coredns-down, node-disk-pressure,
+    # networkpolicy-deny-all). Since 2026-09-19, six training-only "ruled"
+    # stories declare their own origin_object too (section 4 of the
+    # 2026-09-19 training-targets design): node-kubelet-halted,
+    # node-kubelet-unresponsive, pvc-provisioner-not-responding,
+    # pvc-storageclass-missing, registry-mirror-unreachable and
+    # registry-rate-limited. It is True on their victims as well. It is
     # therefore redundant with `origin_object is not None` today; it is a
-    # per-victim field because the binding it drives is per-victim — it lets
-    # Task 6's builder bind the origin's own Object for this victim instead
-    # of a separate decoy.
+    # per-victim field because the binding it drives is per-victim — it
+    # lets Task 6's builder bind the origin's own Object for this victim
+    # instead of a separate decoy.
     on_origin: bool = False
     # This victim's own decoy objects — a node, PVC or registry its local,
     # wrong candidate points at. Exactly one node decoy on every victim of
-    # the three scenarios with no origin_object; empty on every victim where
+    # a scenario with no origin_object; empty on every victim where
     # on_origin is True, because the origin's own object already covers it.
     # The decoy is not chosen from the victim's local_cause wording: several
     # victims name nothing from the node/PVC/registry vocabulary and still
@@ -250,11 +265,20 @@ class Propagation:
     shared_verdict: str = "outranked"
     distractor_verdict: str = "ruled_out"
     notes: str = field(default="")
-    # The origin's own declared identity, for the three scenarios whose
-    # job-3 label is "shared/none": node-not-ready, storage-provisioner-down,
-    # registry-unreachable. None for the three "none/none" scenarios, whose
-    # victims still carry their own local decoys but whose shared origin is
-    # never itself offered as a candidate object.
+    # The origin's own declared identity. Among the eval six it is set for
+    # the three whose job-3 label is "shared/none" (node-not-ready,
+    # storage-provisioner-down, registry-unreachable) and None for the
+    # three "none/none" scenarios, whose victims still carry their own
+    # local decoys but whose shared origin is never itself offered as a
+    # candidate object. Since 2026-09-19 (section 4 of the training-targets
+    # design) it is also set on the six training-only "ruled" stories (two
+    # node, two PVC, two registry), so the rules pass has an origin object
+    # it can check on its own and training carries rows the rules label
+    # "shared" (before, no training row carried that label). A row can
+    # still come out "none" on a ruled scenario: the unverified node twin
+    # (section 5 of the same design) declares an origin_object the rules
+    # cannot check at all, and the healthy-read decoy twin (every scenario
+    # has one) declares one the rules refute.
     origin_object: Object | None = None
     # The origin's Fresh state once decided healthy — what
     # shared_origin_decoy_probe reads instead of the broken state. None

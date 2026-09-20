@@ -123,13 +123,16 @@ addition was strictly appended, so the rows any earlier run was scored on kept
 their bytes and their positions; v0.1.0 was scored against the probe separately.
 
 The slice puts 2–4 flagged workloads in one prompt, all downstream of a
-single broken component, so the correct answer names the same shared cause
-on every row. When it was added, nothing like it was in the training data —
-every multi-workload example there drew its constituents from distinct
-catalog entries and summarised them as "N workloads are failing for separate
-reasons," 825 rows of it with no counterexample anywhere. It added no
+single broken component. When it was added, the correct answer named the
+same shared cause on every row, and nothing like it was in the training
+data — every multi-workload example there drew its constituents from
+distinct catalog entries and summarised them as "N workloads are failing
+for separate reasons," 825 rows of it with no counterexample anywhere. It added no
 training rows and removed none: its group keys are namespaced, so
-`drop_held_out` cut exactly the same 913 rows with and without it.
+`drop_held_out` cut exactly the same 913 rows with and without it. Since
+2026-09-19 the answer follows kubeagent's rules: a row the rules decide
+takes the rules' own cause instead, and the answer calls the cause shared
+only when the rules confirm it.
 
 That is no longer true of the training data, and the numbers below are from
 before it changed. The slice measured what it was built to measure — twice,
@@ -174,8 +177,11 @@ decoy twin at another 8%. Two models trained on the earlier 4% share were
 scored on the exam and both failed the shared-origin decider; the raise to
 8% is the response. Since then the share went to 12% each, the pool of
 trained scenarios went from 24 to 48, and the build size went from 5500 to
-8000, all for the final retrain. Every number on this page still comes from
-a model that never saw the shape.
+8000, all for the final retrain. On 2026-09-19 the share went to 15% each,
+the pool went from 48 to 54 (six new stories the rules pass can confirm),
+and `multi` moved up too, to 13%, so the shared answer still stays the
+minority answer to a multi-workload question. Every number on this page
+still comes from a model that never saw the shape.
 
 kubeagent v1.24.0 retired this decider. Its two rates are gone; the exam
 now grades summary agreement as job 3 instead, and `docs/model-card.md`

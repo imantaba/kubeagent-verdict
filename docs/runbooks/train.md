@@ -15,6 +15,24 @@ so time scales with rows and nothing else) — run it under
 `nohup` and watch `out/adapter-checkpoint/progress.json` (step 3;
 **not** `train_log.json`, which does not exist until the run is over).
 
+**2026-09-19 pre-run estimate for this retrain's build (not yet run).**
+Budget about **33 hours**, not the 28 above. The 28 scales 0907's time
+per example by rows. This estimate scales 0908's time by tokens, the
+formula spec section 11 of
+`docs/superpowers/specs/2026-09-19-training-targets-fix-design.md` uses.
+0908, the most recent full run, took 31.8 hours for 12,577,240 training
+tokens (both epochs). This build's train split is 6,579,981 tokens per
+epoch with the real Qwen3-0.6B tokenizer, 13,159,962 across both epochs.
+So the training step takes about 31.8h × (13,159,962 ÷ 12,577,240) ≈
+**33h16m**. That is an estimate, not a measurement. `train_log.json`
+records no duration, so once the run finishes, measure it the way the
+17h42m figure below was measured — from process start to the adapter's
+own mtime — and put that number here and everywhere else this runbook
+quotes the estimate. The step count is exact, not estimated: the train
+split is 6,377 rows, so at grad_accum 16 the run is 2 × ⌊6377 ÷ 16⌋ =
+**796 optimizer steps**, and `train_log.json`'s `optimizer_steps`
+confirms it when the run ends.
+
 1. **Dataset** (seconds):
 
        kv-dataset --seed 17 --size 8000 --out out/dataset
@@ -45,6 +63,11 @@ so time scales with rows and nothing else) — run it under
    until it finishes. To watch progress, count `launch_slot_` lines in the
    llama-server log; do **not** count `print_timing` lines, which are
    incremental snapshots emitted several times within a single generation.
+   **2026-09-19 estimate:** the exam is 263 rows now, not 243. At the same
+   ~1.8 rows/minute that is about 146 minutes, **~2½ hours**. It is scaled
+   from the 149-row measurement above, not timed afresh: the 2026-09-19
+   fix replayed 0908's banked outputs instead of re-serving (see below),
+   so it produced no new timing.
    Note the endpoint: `kv-eval`
    defaults to Ollama's `http://localhost:11434/v1`, so a llama-server run
    without `--endpoint` silently scores whatever Ollama is serving.
@@ -62,7 +85,8 @@ so time scales with rows and nothing else) — run it under
 
    That is a real control, not a shortcut: the generations are the old model's,
    and every metric is recomputed by today's code. It cost seconds where
-   re-serving costs the ~2¼ hours below. It is valid only when the rows are the
+   re-serving costs the ~2¼ hours above (~2½ hours at today's 263-row exam,
+   2026-09-19 estimate). It is valid only when the rows are the
    same rows — assert `len(banked) == len(rows)` and confirm the test bytes
    match, because `evaluate` walks rows positionally and a length-matched but
    reordered file would score silently wrong.
@@ -80,19 +104,27 @@ so time scales with rows and nothing else) — run it under
    Then move the old model aside so nothing downstream picks it up:
    `mv dist/ dist-v<N>-superseded/`.
 
-3. **Train** (~17½ hours, CPU):
+3. **Train** (~33 hours at this build, a pre-run estimate; CPU):
 
        nohup kv-train --dataset out/dataset --out out/adapter > out/train.out 2>&1 &
 
-   **Budget about 17½ hours.** That is measured now, not estimated: one
-   run has been timed end to end at **17h42m** — 4,292 examples, two
-   epochs, 536 optimizer steps, just under two minutes per step. Two
+   **The older 4,292-example build took about 17½ hours.** That is
+   measured, not estimated: one run has been timed end to end at
+   **17h42m** — 4,292 examples, two epochs, 536 optimizer steps, just
+   under two minutes per step. Two
    earlier versions of this line under-budgeted, first at "several hours"
    and then at "upwards of 15 hours" offered as a floor because no
    completed run had both a start and an end on record. One does now, and
    the floor was low by nearly three hours. The attempt that stopped at
    12h19m in a power loss was roughly 70% through, not a run that was
    failing.
+
+   That 17h42m run and 0908 (31.8 hours, spec section 11) are both older,
+   smaller builds. **2026-09-19 pre-run estimate for this retrain's
+   build:** about **33h16m**, by the token-ratio formula in the box near
+   the top of this runbook. It is an estimate, not a measurement: nothing
+   has been trained on this build yet. Measure the real duration the way
+   the 17h42m was measured, and put it here in place of the estimate.
 
    A smoke run first is cheap and catches config errors:
    `kv-train --dataset out/dataset --out out/smoke-adapter --limit 32 --epochs 1`.
@@ -105,9 +137,11 @@ so time scales with rows and nothing else) — run it under
 
    *Is it still moving?* — a CPU-time delta, below. Do not use
    `progress.json` for this. At the pinned recipe the run is ~536 optimizer
-   steps, so at the default interval the file is rewritten about 21 times
-   across the whole run — tens of minutes apart on this hardware. An mtime
-   that has not moved for a few minutes means nothing.
+   steps on the older build measured above; this retrain's build is
+   **796 optimizer steps** (2 × ⌊6,377 ÷ 16⌋, exact — spec section 11 says
+   "about 796"), so at the default interval the file is rewritten about 32
+   times across the whole run — tens of minutes apart on this hardware. An
+   mtime that has not moved for a few minutes means nothing.
 
    Neither question is answered by the two things this runbook used to
    offer, and they were wrong in the same way. `train_log.json` cannot be
@@ -137,7 +171,11 @@ so time scales with rows and nothing else) — run it under
    older runs still offer only loose upper bounds — 17h and 24h between
    dataset-written and adapter-written, both including idle time before
    launch — so they stay bounds rather than durations, and the measurement
-   above does not come from them.
+   above does not come from them. The 17h42m measurement is history now
+   too: it is the 4,292-example build, not this one. **This retrain's build
+   is 6,377 train rows and 796 optimizer steps, and its own duration is not
+   measured yet.** The box near the top of this runbook carries the
+   2026-09-19 pre-run estimate (~33h16m) and says what replaces it.
 
    **Set `HF_HUB_OFFLINE=1`.** `kv-train` contacts the Hugging Face Hub for the
    base model even when it is already in `~/.cache/huggingface`, and a hub

@@ -262,12 +262,12 @@ The case mix is what adjudication means, in approximate proportions:
 
 | Case | Share | Teaches |
 |---|---|---|
-| Candidate attributed, evidence supports it | ~10% | Pick the candidate **verbatim**; calibrate confidence |
-| `none_of_these` — evidence rules all candidates out | ~15% | Refusing the offered menu |
+| Candidate attributed, evidence supports it | ~6% | Pick the candidate **verbatim**; calibrate confidence |
+| `none_of_these` — evidence rules all candidates out | ~11% | Refusing the offered menu |
 | Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
-| Multi-workload prompts (2–4 flagged, mixed causes) | ~11% | One verdict row per listed workload, no extras |
-| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~12% | Naming the SAME cause on every row when the evidence says one thing broke |
-| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~12% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
+| Multi-workload prompts (2–4 flagged, mixed causes) | ~13% | One verdict row per listed workload, no extras |
+| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on every row the rules do not decide and the rules' own cause on every row they do; calling it shared only when the rules confirm it |
+| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~15% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -288,10 +288,15 @@ and claiming one everywhere fails on the healthy twin. The
 share has since doubled to 8% and then risen to 12%, paid out of
 `attributed` both times, so that every trainable scenario keeps at least 12
 pairs in train after the validation split; a test pins that floor at the
-build recipe (seed 17, size 8000). The shared answer stays the minority
+build recipe (seed 17, size 8000). On 2026-09-19 it rose again, to 15%,
+paid out of `attributed` and `none_of_these` together this time, and
+`multi` moved up too, to 13%, so raising the shared-origin halves alone
+could not push the shared answer's share of multi-workload rows onto the
+cap below. The shared answer stays the minority
 answer to a multi-workload question: in the pile the model reads it is
 about 38 of every 100 of the `multi`, `shared_origin` and
-`shared_origin_decoy` rows together, and a test fails above 40 of every
+`shared_origin_decoy` rows together (re-measured at the 15% mix: still
+about 38 of every 100), and a test fails above 40 of every
 100.
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
