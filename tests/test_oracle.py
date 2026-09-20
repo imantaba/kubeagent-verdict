@@ -114,63 +114,86 @@ def _job2_keyword_only(examples: list) -> dict:
 
 def test_oracle_job1_is_perfect_on_train():
     board = score.scoreboard(list(_train_results()))
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 2570}
+    # Re-measured 2026-09-19 (Task 9: pool merge + mix change, spec section
+    # 6) -- 2570 to 3056. Rate unchanged at 1.0.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3056}
 
 
 def test_oracle_job1_is_perfect_on_val():
     board = score.scoreboard(list(_val_results()))
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 289}
+    # Re-measured 2026-09-19, same reason. 289 to 355. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 355}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3121}
+    # Re-measured 2026-09-19, same reason. 3121 to 2975. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2975}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 352}
+    # Re-measured 2026-09-19, same reason. 352 to 304. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 304}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     """Before this fix the spec measures 0.9149 (1990 of 2175) here.
-    After it, this narrower slice is also perfect."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2175}
+    After it, this narrower slice is also perfect.
+
+    Re-measured 2026-09-19 (Task 9: pool merge + mix change, spec section
+    6) -- 2175 to 2286. Rate still 1.0."""
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2286}
 
 
 def test_oracle_job3_is_perfect_on_train():
     """Task 5's label-driven summary: every gold summary in the built
-    dataset matches its own row's label, train side. `shared` never
-    appears here -- no trainable scenario decides today (see
-    `test_shared_origin_training.py`'s docstring on the same point) -- and
-    `separate` is `multi`'s own bucket, not a shared-origin one; the
+    dataset matches its own row's label, train side. `separate` is
+    `multi`'s own bucket, not a shared-origin one; the
     `_render_shared_origin` `ValueError` guards a label `rules.label` can
-    never actually return, not this one."""
+    never actually return, not this one.
+
+    `shared` used to read 0 here: no trainable scenario decided, so a
+    trained row was never labeled `shared` (see
+    `test_shared_origin_training.py`'s docstring on the same point, before
+    Task 9). Task 9 (2026-09-19) merged the six ruled stories into
+    `trainable_scenarios()` (spec section 6); their broken-origin twins DO
+    decide, and every one of those trained rows carries the `shared` label.
+    This test now covers those ruled rows too: the gold summary for each
+    of them still matches its own label, so `shared`'s rate stays a
+    perfect 1.0 here -- spec section 10 gate 1, job 1 and job 3 still 1.0
+    after the pool merge."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2263,
-        "by_label": {"shared": {"rate": None, "n": 0},
+        "rate": 1.0, "n": 2790,
+        "by_label": {"shared": {"rate": 1.0, "n": 192},
                      "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2262}}}
+                     "none": {"rate": 1.0, "n": 2597}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
+    """Val side of the same extension: 22 of the split's rows are a ruled
+    story's broken twin, labeled `shared`, and the gold summary matches on
+    every one -- re-measured 2026-09-19, Task 9."""
     board = score.scoreboard(list(_val_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 265,
-        "by_label": {"shared": {"rate": None, "n": 0},
+        "rate": 1.0, "n": 336,
+        "by_label": {"shared": {"rate": 1.0, "n": 22},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 265}}}
+                     "none": {"rate": 1.0, "n": 314}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
     """The exact number spec section 1 cites for the `multi` fix alone:
-    every decided `multi` workload passes job1, 996 of 996 in train and
-    121 of 121 in val."""
+    every decided `multi` workload passes job1.
+
+    Re-measured 2026-09-19 (Task 9: the `multi` share of the mix rose from
+    11% to 13%, spec section 6) -- 996 of 996 to 1209 of 1209 in train, 121
+    of 121 to 145 of 145 in val. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (996.0, 996)
-    assert multi_job1(_val_results()) == (121.0, 121)
+    assert multi_job1(_train_results()) == (1209.0, 1209)
+    assert multi_job1(_val_results()) == (145.0, 145)
 
 
 def test_exam_oracle_job1_misses_only_contradiction_probe():

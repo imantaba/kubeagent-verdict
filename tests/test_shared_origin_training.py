@@ -487,14 +487,16 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     counterweight and counts on the same side as `multi`. The proxy went red
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
-    the claim it stood for did not. The claim is stated directly now: the
-    shared answer is 0.368 of the multi-workload rows at 12/12 (0.384 at the
-    build size), and the cap of 0.40 leaves no room for another raise: the
-    next one must move `multi` up with it.
+    the claim it stood for did not. The claim was stated directly then: the
+    shared answer was 0.368 of the multi-workload rows at 12/12 (0.384 at the
+    build size).
 
-    Measured on the kept pile, not the generator's output: `drop_held_out`
-    takes `multi` rows and no `shared_origin` rows, so a mix that looks safe
-    as emitted is not necessarily safe by the time it reaches the optimizer.
+    Re-measured 2026-09-19 (Task 9: the pool merge and the mix move to 15%
+    on both shared-origin halves plus a 2-point `multi` raise, spec section
+    6) -- 0.3822 at this module's size, 0.3839 at the build size (8000).
+    This IS the raise spec section 7's decision check anticipated: moving
+    `multi` up alongside the shared-origin halves is what keeps the share
+    under the 0.40 cap here rather than moving it once more.
     """
     shared = len(_by_case(kept, "shared_origin"))
     separate = (len(_by_case(kept, "multi"))
@@ -604,14 +606,17 @@ def _independent_share(rows):
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.568.
+    """What the EMITTER controls, and it is no longer a coin flip: 0.568,
+    re-measured 2026-09-19 (Task 9: pool merge + mix move, spec section 6)
+    at 0.5636.
 
     Two sources feed the independent side now. The paired half is exact by
     construction -- every `shared_origin` row is emitted with a
     `shared_origin_decoy` twin from the same salt, so those two contribute
-    96/96 at this module's SIZE and cannot drift. On top of that sit the surviving
-    every-third-`multi` negatives, which have no positive counterpart, and
-    they are the whole of the lean.
+    120/120 at this module's SIZE (was 96/96 before Task 9's mix move to 15%
+    on both shared-origin halves) and cannot drift. On top of that sit the
+    surviving every-third-`multi` negatives, which have no positive
+    counterpart, and they are the whole of the lean.
 
     Kept deliberately rather than balanced away: they are a DIFFERENT
     counter-example -- a healthy origin read over arbitrary victims, where
@@ -652,6 +657,12 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     The floor moved from 0.55 to 0.52 on 2026-09-08 when the halves went to
     12%: the kept pile then read 0.556 at this size and 0.546 at the build
     size, and 0.52 keeps three points of room below both.
+
+    Re-measured 2026-09-19 (Task 9: pool merge + mix move to 15% on both
+    shared-origin halves, spec section 6) -- 0.5455 at this size, 0.5430 at
+    the build size. Both readings moved down slightly toward the floor
+    because the shared-origin pair grew faster than the surviving `multi`
+    negatives; 0.52 still keeps room below both.
     """
     share = _independent_share(kept)
     assert 0.52 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
@@ -695,21 +706,37 @@ def test_a_shared_origin_training_row_never_says_separate_reasons(rows):
         assert propagation.SEPARATE_REASONS not in e.assistant
 
 
+_PVC_SCOPED_ORIGINS = frozenset({
+    "storage-provisioner-down",       # eval-only (propagation.py:425)
+    "pvc-provisioner-not-responding", # ruled, trainable (propagation.py:6932)
+    "pvc-storageclass-missing",       # ruled, trainable (propagation.py:7060)
+})
+
+
 def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
     """Label-aware (spec section 3, ruling C): a `shared`-labeled row is
     decided end to end, one cause per victim, except a PVC-scoped origin
     (`rules.py`'s group-key storage-class fallback) can decide several
-    victims to several PVC causes and still be one `shared` group. No
-    trainable scenario decides today (the trainable pool's own oracle tests
-    hold job 3 at 1.0 without ever reaching a decided victim), so this is
-    future-proofing rather than a live path today.
+    victims to several PVC causes and still be one `shared` group.
+
+    Re-measured 2026-09-19 (Task 9, spec section 6): before Task 9 no
+    trainable scenario decided, so this exemption covered only the
+    eval-only `storage-provisioner-down` origin and was future-proofing
+    rather than a live path. Task 9 merged the two ruled PVC stories,
+    `pvc-provisioner-not-responding` and `pvc-storageclass-missing`, into
+    `trainable_scenarios()`; both are PVC-scoped by the same storage-class
+    group-key fallback and both now decide multiple victims to multiple PVC
+    causes under one `shared` group, confirmed by direct measurement
+    (distinct-cause counts of 1, 2 and 3 across their `shared`-labeled
+    rows). The exemption set below is closed and named, not inferred from
+    `rules.py` at test time, so widening it is a deliberate edit here.
     """
     for e in _by_case(rows, "shared_origin"):
         if e.meta["label"] != "shared":
             continue
         causes = set(e.meta["expected"].values())
         assert all(w["decided"] for w in e.meta["workloads"].values())
-        if e.meta["origin"] != "storage-provisioner-down":
+        if e.meta["origin"] not in _PVC_SCOPED_ORIGINS:
             assert len(causes) == 1, e.meta["origin"]
 
 
@@ -851,18 +878,26 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-DRAWS = 33  # shared_origin rows per scenario at BIG; see the note below.
-BIG = 275 * len(propagation.trainable_scenarios())
-# Each shared_origin half is BIG * 12 // 100 rows, and the generator deals
-# them round-robin over the pool, so every scenario gets exactly DRAWS rows
-# per half (275 * 12 // 100 == 33). The pool grows in this slice, and the
-# constant grows with it: 6600 rows at twenty-four scenarios, 13200 at
-# forty-eight. Why 33 and not 11: the variant-rendering check below is a
-# sampling check. With 4 variants drawn uniformly, P(fewer than 3 distinct
-# in n draws) = (6 * 2**n - 8) / 4**n, and a fifth variant only lowers
-# it. At n=11 that is 0.3% per scenario and 7% across twenty-four -- a
-# deterministic failure with correct data. At n=33 it is 7.0e-10 per
-# scenario, 3.4e-8 across forty-eight.
+DRAWS = 33  # plain-story shared_origin rows per scenario at BIG; see below.
+RULED_DRAWS = 66  # ruled-story shared_origin rows per scenario at BIG.
+# Re-measured 2026-09-19 (Task 9, spec section 7 ruling A): `BIG` is now a
+# FIXED literal, not `275 * len(propagation.trainable_scenarios())`. Scaling
+# by pool size stopped being safe once the pool split into two differently
+# weighted sub-pools (spec section 6's selection loop gives ruled stories
+# roughly twice the plain per-story share, by design -- a fifth of pairs
+# spread over six ruled stories versus four fifths over forty-eight plain
+# ones): a pool-scaled BIG would silently drift the exact 33/66 draw counts
+# the sampling argument below depends on, on every future pool change. BIG =
+# 13200 deals shared_origin 1980 rows total: 1584 over the 48 plain stories
+# (33 each) and 396 over the 6 ruled stories (66 each) -- confirmed by
+# direct measurement against this build. Why 33 (and 66) and not 11: the
+# variant-rendering check below is a sampling check. With 4 variants drawn
+# uniformly, P(fewer than 3 distinct in n draws) = (6 * 2**n - 8) / 4**n,
+# and a fifth variant only lowers it. At n=11 that is 0.3% per scenario and
+# 7% across twenty-four -- a deterministic failure with correct data. At
+# n=33 it is 7.0e-10 per scenario, 3.4e-8 across forty-eight; n=66 is
+# smaller still.
+BIG = 13200
 
 
 @pytest.fixture(scope="module")
@@ -871,9 +906,14 @@ def big_rows():
 
 
 def test_big_deals_exactly_draws_rows_per_scenario():
-    """`BIG` promises DRAWS shared_origin rows per scenario. Check it."""
-    pool = len(propagation.trainable_scenarios())
-    assert generate.counts_for(BIG)["shared_origin"] == DRAWS * pool
+    """`BIG` promises DRAWS plain-story rows and RULED_DRAWS ruled-story
+    rows per scenario, not one uniform rate over the whole pool (spec
+    section 7 ruling A: "within each pool every story gets an equal share",
+    checked per pool, not across them). Re-measured 2026-09-19, Task 9."""
+    pool = propagation.trainable_scenarios()
+    plain = sum(1 for p in pool if p.origin_object is None)
+    ruled = sum(1 for p in pool if p.origin_object is not None)
+    assert generate.counts_for(BIG)["shared_origin"] == DRAWS * plain + RULED_DRAWS * ruled
 
 
 def test_the_trainable_pool_exercises_every_issue_kind():
@@ -885,9 +925,11 @@ def test_the_trainable_pool_exercises_every_issue_kind():
     assert not missing, f"no trainable scenario exercises: {missing}"
 
 
-# The pool grows by group across Tasks 5–9. Twenty-four is what it held when
-# the 0907 run failed deciders 1 and 5; forty-eight is the planned end.
-EXPECTED_POOL = 48
+# The pool grew by group across Tasks 5–9 of the 2026-09-08 coverage plan.
+# Twenty-four is what it held when the 0907 run failed deciders 1 and 5;
+# forty-eight was that plan's end. On 2026-09-19 the training-targets fix
+# merged six ruled stories on top (section 6 of its design): 48 to 54.
+EXPECTED_POOL = 54
 
 
 def test_the_trainable_pool_holds_the_planned_count():
@@ -900,9 +942,19 @@ def test_the_trainable_pool_holds_the_planned_count():
 # One marker per exam read layout, and the fewest trainable scenarios that
 # must teach it. A scenario counts once per layout when its read label
 # starts the way the exam's does and any half of any of its origin
-# variants carries the marker text. The floors are the spec's; the
-# measured counts after the coverage branch are node 13, deployment 7,
-# events 4, storageclass 6, networkpolicy 6.
+# variants carries the marker text. The floors are the spec's, and are
+# minimums the measured count only needs to clear, not match; the measured
+# counts after the coverage branch were node 13, deployment 7, events 4,
+# storageclass 6, networkpolicy 6.
+#
+# Re-measured 2026-09-19 (Task 9, spec section 6): node 15, deployment 7,
+# events 4, storageclass 6, networkpolicy 6. Ruled stories add node,
+# storage-class and events layouts per spec section 7 rulings E/F; only
+# "node" moved here because the two ruled node stories
+# (`node-kubelet-halted`, `node-kubelet-unresponsive`) both teach that
+# layout, while the ruled PVC and registry stories' layouts (storageclass,
+# events) were already above their floor from the plain pool. All five
+# floors below are unchanged and all five measured counts still clear them.
 EXAM_LAYOUT_FLOORS = {
     "node": 13,
     "deployment": 4,
@@ -985,12 +1037,28 @@ def test_every_trainable_scenario_is_taught_equally(big_rows):
     """Equal shares are what make a constant answer chance-level: a scenario
     the curriculum shows twice as often is one the model can afford to answer
     by name.
+
+    Re-measured 2026-09-19 (Task 9, spec section 6): checked WITHIN each
+    pool separately now, not across the whole 54-scenario pool at once. The
+    selection loop gives ruled stories roughly twice the plain per-story
+    rate by design -- a fifth of pairs spread over six ruled stories versus
+    four fifths over forty-eight plain ones (DRAWS=33 plain, RULED_DRAWS=66
+    ruled at `BIG`, above) -- so a single across-pool equality check would
+    fail on the intended shape, not a bug. Equal shares still hold inside
+    each pool: every plain story gets the same count and every ruled story
+    gets the same count.
     """
-    keys = {p.key for p in propagation.trainable_scenarios()}
+    pool = propagation.trainable_scenarios()
+    plain_keys = {p.key for p in pool if p.origin_object is None}
+    ruled_keys = {p.key for p in pool if p.origin_object is not None}
     for case in ("shared_origin", "shared_origin_decoy"):
         counts = Counter(e.meta["origin"] for e in big_rows if e.case == case)
-        assert set(counts) == keys, f"{case}: {sorted(keys ^ set(counts))}"
-        assert len(set(counts.values())) == 1, f"{case}: uneven shares {dict(counts)}"
+        assert set(counts) == plain_keys | ruled_keys, (
+            f"{case}: {sorted((plain_keys | ruled_keys) ^ set(counts))}")
+        plain_shares = {v for k, v in counts.items() if k in plain_keys}
+        ruled_shares = {v for k, v in counts.items() if k in ruled_keys}
+        assert len(plain_shares) == 1, f"{case}: uneven plain shares {dict(counts)}"
+        assert len(ruled_shares) == 1, f"{case}: uneven ruled shares {dict(counts)}"
 
 
 def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_rows):
@@ -1032,6 +1100,14 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     The size is named because top three moves with it: 0.633 at 5500, 0.618 at
     8000, 0.609 at 11000, 0.602 at 20000, as the tail keeps gaining distinct
     causes. Top one is stable at 0.263 across all four.
+
+    Re-measured 2026-09-19 (Task 9: pool merge to 54 scenarios and `BIG`
+    fixed at 13200, spec section 6/7 ruling A) -- 185 distinct causes, top
+    one 0.0249, top three 0.0698. Both PVC-scoped ruled stories widen the
+    tail further: their per-victim causes name the victim's own PVC
+    (`f"PVC {pvc} (...)"`), so each ruled PVC draw can add several new
+    distinct causes at once. The bar stays 0.12 and 0.30; the new pool
+    clears both with more room than the old one did.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"

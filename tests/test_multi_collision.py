@@ -9,11 +9,9 @@ build-level test spies on the real per-story decision functions during a
 real `generate.generate(seed=17, size=8000)` run, so it exercises the
 exact rotation and RNG stream `kv-dataset` runs, not a hand-picked replay.
 
-No story in today's trainable pool declares a registry `origin_object`
-(the two ruled registry stories are a later task), so the registry rule
-is unit-tested against a synthetic story only; the build-level test
-confirms that absence directly against `propagation.trainable_scenarios`
-rather than assuming it.
+Two ruled registry stories are in the trainable pool now (spec section 6's
+pool merge), so the registry-drop branch is exercised for real during a
+build, not only against the synthetic story the unit tests still use.
 """
 
 from __future__ import annotations
@@ -181,14 +179,40 @@ def test_resolve_keeps_a_registry_story_read_with_no_registry_object_in_the_row(
 # --------------------------------------------------------- build-level tests
 
 
-def test_no_trainable_story_declares_a_registry_origin_yet():
-    """The registry rule is exercised only synthetically today: no story in
-    the trainable pool sets a registry `origin_object` (that is a later
-    task's addition), so a build never reaches the registry-drop branch.
-    This pins that absence directly rather than assuming it."""
-    assert not any(
-        s.origin_object is not None and s.origin_object.kind == "registry"
-        for s in prop.trainable_scenarios())
+def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidate(monkeypatch):
+    """The registry branch of `_resolve_multi_healthy_origin` (spec section 2)
+    used to be exercised only synthetically: no story in the trainable pool
+    set a registry `origin_object`, so a build never reached the
+    registry-drop branch. `trainable_scenarios()` now includes the two ruled
+    registry stories (spec section 6's pool merge), so it does. This spies
+    on the real per-row decision during the exact `kv-dataset --seed 17
+    --size 8000` build: a registry-story healthy origin is kept only when no
+    victim in that row carries a registry candidate of its own, and dropped
+    (the function returns `None`) whenever one does -- against the real
+    rotation and RNG stream, not a hand-picked replay.
+    """
+    calls: list[tuple[bool, bool]] = []  # (row has a registry candidate, kept)
+    original = cases._resolve_multi_healthy_origin
+
+    def spy(healthy_origin, h, all_objects):
+        result = original(healthy_origin, h, all_objects)
+        if (healthy_origin.origin_object is not None
+                and healthy_origin.origin_object.kind == "registry"):
+            has_candidate = any(obj.kind == "registry" for obj in all_objects)
+            calls.append((has_candidate, result is not None))
+        return result
+
+    monkeypatch.setattr(cases, "_resolve_multi_healthy_origin", spy)
+    generate.generate(seed=17, size=8000)
+
+    assert calls, "the rotation must reach at least one registry story"
+    for has_candidate, kept in calls:
+        assert kept != has_candidate, (has_candidate, kept)
+
+    dropped = sum(1 for _, kept in calls if not kept)
+    # Measured over this exact build (seed 17, size 8000): 12 multi rows draw
+    # a registry-story healthy origin; the rule drops 2 of them and keeps 10.
+    assert (len(calls), dropped) == (12, 2)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
@@ -226,7 +250,7 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
         else:
             renamed += 1
 
-    # Measured over this exact build (seed 17, size 8000): 79 multi rows
-    # draw a node-story healthy origin; the rule keeps 41, renames 37 and
-    # drops 1.
-    assert (len(calls), kept, renamed, dropped) == (79, 41, 37, 1)
+    # Re-measured 2026-09-19 over this exact build (seed 17, size 8000)
+    # after the mix and pool changes in spec section 6: 96 multi rows draw a
+    # node-story healthy origin; the rule keeps 59, renames 35 and drops 2.
+    assert (len(calls), kept, renamed, dropped) == (96, 59, 35, 2)

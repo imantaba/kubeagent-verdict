@@ -1,10 +1,14 @@
 """The six ruled stories (spec section 4): origins where the DETERMINISTIC
 rules pass itself decides the shared cause, not just a scenario author's
-say-so. `propagation.ruled_scenarios()` is a pool separate from
-`trainable_scenarios()` -- merging the two is a later task -- but it has to
-clear the same authoring floor and the same eval-disjointness rules that
-pool already clears, which is why several checks below mirror a named test
-in `test_shared_origin_training.py` rather than inventing a new shape.
+say-so. `propagation.trainable_scenarios()` now returns the 48 plain
+stories plus these six (spec section 6's pool merge), so every check below
+that means "disjoint from the plain pool" filters `trainable_scenarios()`
+down to `PLAIN` first rather than comparing against the merged pool --
+comparing the six ruled stories against a pool that now contains them
+would always pass, vacuously. It still has to clear the same authoring
+floor and the same eval-disjointness rules the plain pool already clears,
+which is why several checks below mirror a named test in
+`test_shared_origin_training.py` rather than inventing a new shape.
 
 Mechanically, a ruled story's BROKEN twin puts every victim on the SAME
 origin object, so the rules pass confirms each one against the same group
@@ -25,7 +29,7 @@ from kubeagent_verdict.dataset import cases, propagation
 from kubeagent_verdict.evals import score
 
 RULED = propagation.ruled_scenarios()
-TRAINABLE = propagation.trainable_scenarios()
+PLAIN = tuple(p for p in propagation.trainable_scenarios() if p.origin_object is None)
 EVAL = propagation.all_scenarios()
 
 NODE_KEYS = {"node-kubelet-halted", "node-kubelet-unresponsive"}
@@ -87,7 +91,7 @@ def test_ruled_scenario_keys_are_disjoint_from_eval_and_trainable():
     ruled_keys = {p.key for p in RULED}
     assert len(ruled_keys) == len(RULED), "a ruled key repeats within the pool"
     assert not ruled_keys & {p.key for p in EVAL}
-    assert not ruled_keys & {p.key for p in TRAINABLE}
+    assert not ruled_keys & {p.key for p in PLAIN}
 
 
 def test_no_ruled_scenario_reuses_an_eval_or_trainable_answer_string():
@@ -105,7 +109,7 @@ def test_no_ruled_scenario_reuses_an_eval_or_trainable_answer_string():
     ruled_answers = answers(RULED)
     assert len(ruled_answers) == 2 * len(RULED), "a ruled answer repeats within the pool"
     assert not ruled_answers & answers(EVAL)
-    assert not ruled_answers & answers(TRAINABLE)
+    assert not ruled_answers & answers(PLAIN)
 
 
 def test_no_ruled_scenario_shares_a_local_cause_with_trainable():
@@ -115,7 +119,7 @@ def test_no_ruled_scenario_shares_a_local_cause_with_trainable():
 
     ruled_causes = local_causes(RULED)
     assert len(ruled_causes) == len(set(ruled_causes)), "a ruled local_cause repeats"
-    assert not set(ruled_causes) & set(local_causes(TRAINABLE))
+    assert not set(ruled_causes) & set(local_causes(PLAIN))
 
 
 @pytest.mark.parametrize("p", RULED, ids=[p.key for p in RULED])
@@ -218,7 +222,7 @@ def test_no_ruled_scenario_phrase_leaks_a_shared_or_independence_claim():
 def test_ruled_origin_read_label_is_never_an_exam_only_label():
     """Spec section 4: the pinned exam-only label set. A trainable OR ruled
     story's origin_read label must never be one of the four."""
-    for p in list(RULED) + list(TRAINABLE):
+    for p in list(RULED) + list(PLAIN):
         assert p.origin_read[0] not in _EXAM_ONLY_LABELS, p.key
 
 
@@ -385,7 +389,7 @@ def test_unverified_true_raises_for_a_ruled_pvc_or_registry_story(key):
 
 
 def test_unverified_true_raises_for_a_plain_trainable_story():
-    plain = next(s for s in TRAINABLE if s.origin_object is None)
+    plain = PLAIN[0]  # every PLAIN entry has origin_object is None, by definition
     with pytest.raises(ValueError, match="unverified"):
         cases._render_shared_origin(plain, random.Random(1), 2, unverified=True)
 

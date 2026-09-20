@@ -17,6 +17,16 @@ the pool to forty-eight scenarios. That is 960 rows per half, 20 pairs per
 scenario before the split. The smallest scenario keeps 13 pairs in train
 and the largest 20. The floor stays at 12: the extra room is the point,
 because the split still takes groups by hash, not by count.
+
+Re-measured 2026-09-19 (Task 9: pool merge to fifty-four scenarios and both
+halves to 15 percent, spec section 6). That is 1200 rows per half before
+the split, 20 pairs per plain scenario and 40 per ruled scenario -- the
+selection loop gives ruled stories roughly twice the plain per-story rate
+by design (spec section 7 ruling A), not evenly across all fifty-four. The
+smallest scenario keeps 15 pairs in train (a plain story) and the largest
+39 (a ruled story). The floor stays at 12: it was set once, against the
+smallest surviving count, and every scenario -- plain or ruled -- still
+clears it with room to spare.
 """
 from collections import Counter
 

@@ -6680,8 +6680,10 @@ _TRAINING_SCENARIOS = (_T_CA, _T_KUBE_PROXY, _T_CONFIGMAP, _T_SCALED_TO_ZERO,
 
 
 def trainable_scenarios() -> tuple[Propagation, ...]:
-    """The origins training may see. Disjoint from `all_scenarios()` by test."""
-    return _TRAINING_SCENARIOS
+    """The origins training may see: the 48 plain stories plus the six ruled
+    stories (spec section 4), whose origin object lets the rules pass itself
+    confirm the shared cause. Disjoint from `all_scenarios()` by test."""
+    return _TRAINING_SCENARIOS + _RULED_SCENARIOS
 
 
 _RULED_NODE_1 = Propagation(

@@ -76,8 +76,18 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # pool doubles to 48 scenarios in this slice; at 12% and size 8000 each half
 # is 960 rows, 20 pairs per scenario, about 18 in train after the split.
 # tests/test_shared_origin_floor.py still pins the floor at 12.
-CASE_MIX = (("attributed", 10), ("none_of_these", 15), ("own_cause", 10),
-            ("multi", 11), ("shared_origin", 12), ("shared_origin_decoy", 12),
+# 2026-09-19 (spec section 6): both halves move again, 12% -> 15%, so a
+# shared_origin/shared_origin_decoy pair can be spent on the six ruled
+# stories one pair in five (the rest still walk the 48 plain stories,
+# spec section 6's loop). `attributed` and `none_of_these` each give up
+# four points; two of the eight go to `multi` (11% -> 13%) rather than to
+# the shared-origin halves alone, because raising only the shared side
+# would put the shared answer's share of multi-workload rows exactly on
+# the 0.40 cap (test_the_shared_answer_stays_the_minority_among_multi_workload_rows)
+# -- Task 9 of the 2026-09-19 training-targets plan measures the mixes
+# this was chosen over.
+CASE_MIX = (("attributed", 6), ("none_of_these", 11), ("own_cause", 10),
+            ("multi", 13), ("shared_origin", 15), ("shared_origin_decoy", 15),
             ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
             ("wrong_attribution", 10))
 
@@ -146,9 +156,12 @@ def generate(seed: int, size: int) -> list[Example]:
         # of the same one.
         #
         # They also have no positive twin, so they are the whole of the
-        # residual lean: the paired core is exactly even (960/960 at the
-        # build size) and the kept pile reads ~0.55 toward the INDEPENDENT
-        # answer. That is the opposite
+        # residual lean: the paired core is exactly even (1200/1200 at the
+        # build size, re-measured 2026-09-19 after Task 9's mix move to 15%
+        # on both shared-origin halves -- was 960/960) and the kept pile
+        # reads ~0.543 toward the INDEPENDENT answer (was ~0.55; still
+        # tests/test_shared_origin_training.py's own re-measurement, not
+        # re-derived here). That is the opposite
         # direction from the ~62/38 toward SHARED this comment used to
         # record, and it is un-confounded now, which is the part that
         # mattered. `drop_held_out` still takes about a third of these (a
@@ -173,11 +186,35 @@ def generate(seed: int, size: int) -> list[Example]:
     out.append(cases.multi(
         [(worker_containerd_stop, names_a), (worker_containerd_stop, names_b)],
         rng, healthy_origin=None))
+    # 2026-09-19 (spec section 6): one pair in five now comes from the six
+    # ruled stories instead of the 48 plain ones, so the rules pass gets a
+    # shared origin it can confirm itself and training finally carries
+    # `shared`-labelled rows. The two pools are walked with their own
+    # indices (`k` skips the one ruled slot out of every five `i`s, `j`/`t`
+    # count ruled draws and full trips around the ruled pool) so each pool
+    # still cycles through its own stories and widths evenly on its own
+    # schedule, the same way the single `i % len(train_scen)` walk did
+    # before the ruled stories existed. One node ruled pair in three (every
+    # third trip around the six-story ruled pool) renders the unverified
+    # twin instead of the confirmed one (spec section 5); the label comes
+    # out "none" either way, which is what lets a plain `shared_origin` row
+    # and an unverified one share one case name and one budget.
+    plain = tuple(p for p in train_scen if p.origin_object is None)
+    ruled = tuple(p for p in train_scen if p.origin_object is not None)
     for i in range(counts["shared_origin"]):
-        p = train_scen[i % len(train_scen)]
-        # Vary the width the way `probe_sets` does: a row that always renders
-        # every victim teaches the count, not the reasoning.
-        victims = 2 + (i // len(train_scen)) % (len(p.victims) - 1)
+        if i % 5 == 4:
+            j = i // 5
+            p = ruled[j % len(ruled)]
+            t = j // len(ruled)
+            # Vary the width the way `probe_sets` does: a row that always
+            # renders every victim teaches the count, not the reasoning.
+            victims = 2 + (t // 3) % (len(p.victims) - 1)
+            unverified = p.origin_object.kind == "node" and t % 3 == 2
+        else:
+            k = i - (i + 1) // 5
+            p = plain[k % len(plain)]
+            victims = 2 + (k // len(plain)) % (len(p.victims) - 1)
+            unverified = False
         # ONE salt, drawn once and spent twice. Two `random.Random` objects
         # built from the same seed replay the same stream, so the twins draw
         # the same names and render the same inventory, the same candidate
@@ -186,12 +223,17 @@ def generate(seed: int, size: int) -> list[Example]:
         # flips with them -- which is the whole point: the pair is a minimal
         # contrast in the curriculum, the same instrument the exam uses.
         #
+        # `unverified` never applies to the decoy twin: the healthy read it
+        # draws already refutes every victim outright, so there is no second,
+        # "could not check" world for it to render (Task 8's docstring).
+        #
         # This loop emits both halves, so it runs `counts["shared_origin"]`
         # times and not once per row. `counts["shared_origin_decoy"]` is spent
         # here too, by the twin; the two entries hold equal shares, so the
         # budget still sums to `size`.
         salt = rng.getrandbits(64)
-        out.append(cases.shared_origin(p, random.Random(salt), victims=victims))
+        out.append(cases.shared_origin(p, random.Random(salt), victims=victims,
+                                       unverified=unverified))
         out.append(cases.shared_origin_decoy(
             p, random.Random(salt), victims=victims))
     for i in range(counts["truncated"]):
