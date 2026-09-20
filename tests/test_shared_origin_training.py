@@ -472,7 +472,7 @@ def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
         assert e.meta["origin"] in train, e.meta["origin"]
 
 
-def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
+def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows(kept):
     """job 3 grades two mirror failures, and this change can only push
     the model toward one of them.
 
@@ -481,6 +481,11 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     the model can swing to claiming a shared origin everywhere, trading one
     failure for its mirror.
 
+    This test counts rows by case family -- how many were drawn from
+    `shared_origin`, against `multi` plus `shared_origin_decoy` -- not by
+    what the graded answer actually says. The 0.40 cap below guards that
+    case-family share.
+
     This used to demand that `multi` alone outnumber `shared_origin`. That
     was a proxy from before the decoy twin existed: the twin answers
     "separate reasons" over the same workloads, so it is the direct
@@ -488,15 +493,21 @@ def test_the_shared_answer_stays_the_minority_among_multi_workload_rows(kept):
     when the shared-origin share rose from 4 to 8 so that every scenario
     keeps at least 12 pairs in train (tests/test_shared_origin_floor.py);
     the claim it stood for did not. The claim was stated directly then: the
-    shared answer was 0.368 of the multi-workload rows at 12/12 (0.384 at the
-    build size).
+    case-family share was 0.368 of the multi-workload rows at 12/12 (0.384 at
+    the build size).
 
     Re-measured 2026-09-19 (Task 9: the pool merge and the mix move to 15%
     on both shared-origin halves plus a 2-point `multi` raise, spec section
     6) -- 0.3822 at this module's size, 0.3839 at the build size (8000).
     This IS the raise spec section 7's decision check anticipated: moving
-    `multi` up alongside the shared-origin halves is what keeps the share
-    under the 0.40 cap here rather than moving it once more.
+    `multi` up alongside the shared-origin halves is what keeps the
+    case-family share under the 0.40 cap here rather than moving it once
+    more.
+
+    That case-family share is not the share of multi-workload rows whose
+    graded answer actually claims a shared origin. That answer-level share
+    is about 7 of every 100 -- 192 of 2,790 at build size 8000 -- and this
+    test does not measure it and does not guard it.
     """
     shared = len(_by_case(kept, "shared_origin"))
     separate = (len(_by_case(kept, "multi"))

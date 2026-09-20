@@ -185,7 +185,7 @@ def test_a_shared_label_only_comes_from_an_origin_object():
             assert p.origin_object is None, p.key
 
 
-def test_exactly_two_of_ten_shared_origin_probe_rows_families_are_shared():
+def test_exactly_three_of_six_shared_origin_probe_stories_are_shared():
     """The three origin-object eval stories (node-not-ready,
     storage-provisioner-down, registry-unreachable) label `shared`; the
     other three (coredns-down, node-disk-pressure, networkpolicy-deny-all)

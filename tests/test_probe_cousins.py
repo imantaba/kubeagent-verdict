@@ -55,6 +55,7 @@ def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
     """
     rows = generate.shared_origin_cousin_probes()
     seen: set[str] = set()
+    saw_shared = False
     assert len(rows) % 2 == 0
     for probe, decoy in zip(rows[0::2], rows[1::2]):
         assert probe.case == "shared_origin_probe"
@@ -72,9 +73,14 @@ def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
         # a decided victim's cause does not depend on `healthy`, so it can
         # repeat across the pair.
         if probe.meta["label"] == "shared":
+            saw_shared = True
             shared = set(probe.meta["expected"].values())
             assert all(w["decided"] for w in probe.meta["workloads"].values())
             assert shared.isdisjoint(set(decoy.meta["expected"].values()))
+    # The branch above went live only when the ruled stories joined the
+    # pool (Task 9). This assertion is what keeps that comment true if the
+    # ruled stories ever fell back out of `trainable_scenarios()`.
+    assert saw_shared, "no cousin pair was `shared`-labelled"
 
 
 def test_every_cousin_decoy_carries_three_or_more_verdicts():

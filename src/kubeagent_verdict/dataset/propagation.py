@@ -7492,6 +7492,6 @@ _RULED_SCENARIOS = (_RULED_NODE_1, _RULED_NODE_2, _RULED_PVC_1, _RULED_PVC_2,
 
 def ruled_scenarios() -> tuple[Propagation, ...]:
     """The six stories whose origin the rules pass itself decides (spec
-    section 4). Not part of `trainable_scenarios()` -- the pool merge is a
-    later task."""
+    section 4). Included in `trainable_scenarios()`; this function returns
+    just those six for callers that need them on their own."""
     return _RULED_SCENARIOS

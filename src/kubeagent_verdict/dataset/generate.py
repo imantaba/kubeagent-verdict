@@ -83,7 +83,7 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # four points; two of the eight go to `multi` (11% -> 13%) rather than to
 # the shared-origin halves alone, because raising only the shared side
 # would put the shared answer's share of multi-workload rows exactly on
-# the 0.40 cap (test_the_shared_answer_stays_the_minority_among_multi_workload_rows)
+# the 0.40 cap (test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows)
 # -- Task 9 of the 2026-09-19 training-targets plan measures the mixes
 # this was chosen over.
 CASE_MIX = (("attributed", 6), ("none_of_these", 11), ("own_cause", 10),
@@ -197,8 +197,8 @@ def generate(seed: int, size: int) -> list[Example]:
     # `i % len(train_scen)` walk did before the ruled stories existed.
     # Widths are near-even, not even: each ruled story's 40 draws split 21
     # at width 2 against 19 at width 3 at size 8000, since 40 does not
-    # divide evenly across the two widths. One node ruled
-    # pair in three (every
+    # divide evenly across the two widths. About one node ruled
+    # pair in three, 26 of 80 at size 8000 (every
     # third trip around the six-story ruled pool) renders the unverified
     # twin instead of the confirmed one (spec section 5); the label comes
     # out "none" either way, which is what lets a plain `shared_origin` row
