@@ -53,6 +53,13 @@ that a perfect model scores perfectly. It pins that ceiling for job 1
 and job 3. **There is no `test_exam_oracle_job2`.** The one job with a
 broken ceiling is the one job whose ceiling nobody pinned.
 
+There is a second blind spot, and it is wider. The oracle answers from
+the gold, never from the prompt. So it cannot see a question the prompt
+does not contain enough information to answer. It would score such a row
+perfectly and report a clean ceiling. This spec fixes the defect the
+oracle *could* have caught. A separate one, named below, fixes a defect
+it structurally cannot.
+
 ## Design
 
 ### 1. Refuse in the grader, not in the renderer
@@ -190,13 +197,43 @@ flatters nobody — it narrows the model's lead slightly.
 
 ## What this does not fix
 
-- **Job 2 still misses.** About 104 of 153 = 0.68 against a 0.70 bar.
-  The bar needs 108, so it is about 4 workloads short.
-- **Job 3 still misses.** 35 of 39 rows; the bar needs 36.
-- **The real weakness is untouched.** The model scores 2 of 42 on
-  workloads where it must override a wrong tag, against 90.8% and 94.7%
-  on workloads where the tag is honest. That is one defect worth 42
-  workloads, and no grader fix moves it.
+- **Job 2 still misses.** 104 of 153 = 0.680 against a 0.70 bar. The bar
+  needs 108, so it is 4 workloads short.
+- **Job 3 still misses.** 35 of 39 rows; the bar needs 36. All four
+  misses are one shape: the model claims the workloads share an upstream
+  cause on rows whose gold label says they do not. Two of the four have
+  every per-workload verdict correct, and only the summary sentence wrong.
+- **The real weakness is untouched, and it is not the one an earlier
+  reading of this spec named.** That reading said the model scores 2 of
+  42 where it must override a wrong tag. Measured per workload, the
+  model does not take the wrong tag on this exam. It **abstains**: 38 of
+  the 49 job-2 misses remaining after this fix answer `none_of_these`,
+  every one of them carrying the gold rationale of the `none_of_these`
+  case word for word.
+
+  It abstains because on 19 of those rows it is not being asked an
+  answerable question. Given one catalogue entry and one set of names,
+  `none_of_these_case` (`cases.py:301`) and `wrong_attribution`
+  (`cases.py:401`) build **byte-identical prompts for 27 of the 28
+  catalogue entries**; the 28th differs only in the order of two lines of
+  a menu whose every entry is refuted. Their gold answers are opposite —
+  `none_of_these` against the workload's own cause. In the training set
+  that pair is 1,315 of 6,377 rows, 20.6%, split 689 to 626. The model
+  resolved the coin flip toward the more frequent label and applies it
+  everywhere: `none_of_these` scores 18 of 19, `wrong_attribution` 0 of
+  19. Eighteen of those 38 workloads is close to the most any model can
+  score.
+
+  `wrong_attribution`'s own docstring describes a different construction
+  than its code performs — "the evidence is untouched and still supports
+  the catalog winner, but the trace hands `attributed` to the decoy",
+  where the code refutes every candidate. That is the promise rule: a
+  comment promising what the code does not keep is a defect.
+
+  The spillover is visible too. `misattribution_probe` is a genuinely
+  distinct case — its candidates are ruled out, not refuted — and the
+  model answers `none_of_these` on 17 of its 19 rows anyway. Having been
+  taught that an exhausted menu means abstain, it over-applies the rule.
 
 ## Out of scope
 
@@ -206,8 +243,15 @@ disagrees with it. That is the same class of defect and arguably worse.
 The current build passes job 1 at 0.9554, so it blocks nothing today. It
 gets its own spec.
 
-**The training fix.** Separate spec, designed against the corrected
-numbers this one produces.
+**The generator fix.** Separate spec. It is a removal, not an addition:
+make `wrong_attribution` build the case its docstring describes, so its
+prompts stop colliding with `none_of_these`. This is what "fix the
+training data" now means — not more override examples, which is the one
+intervention with a history of backfiring here. It changes the training
+set and the exam together, so it needs a retrain and a fresh eval, and
+every score it produces is a new baseline rather than a comparable one.
+It must be specified from that docstring, which predates any score
+pressure, and not tuned until the number clears. Same rule as section 4.
 
 ## Testing
 
