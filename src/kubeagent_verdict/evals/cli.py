@@ -188,10 +188,12 @@ def replay_chat_fn(run_dir: Path, rows: list[dict]):
     a check that the two runs share the same rows. `case` is a coarse label
     ("attributed", "own_cause", ...) shared by many rows, not a row
     identity, and `results.jsonl` stores nothing finer -- no prompt digest,
-    no row id. A dataset generator run at the same (seed, size) produces the
-    same case order every time it is regenerated, so two different
-    regenerations -- with different prompts, different expected causes --
-    pass both guards silently: same count, same case at every index. These
+    no row id. The exam's rows come from `generate.test_set()`, which takes no
+    seed or size, so its row count and case order do not depend on `--seed` or
+    `--size` at all. Two exams whose prompts or expected causes differ but
+    whose case order does not -- as any generator change that keeps the case
+    order produces -- pass both guards silently: same count, same case at every
+    index. These
     guards cannot tell that pair apart. Confirming the prompts themselves
     match -- `messages` equal, row by row -- is the caller's job before
     trusting a replay; the 0920 re-score did this, diffing all 263 rows'
