@@ -182,11 +182,21 @@ def replay_chat_fn(run_dir: Path, rows: list[dict]):
     `evaluate` calls `chat_fn` once per row, in order, so the stored
     `output` strings line up by position with no row identity lookup --
     the same alignment `tests/test_oracle.py`'s `_gold_results` relies on.
-    Two guards keep that from being a hope: the counts must match, and each
-    stored result's `case` must match its row's own `meta.case`. Neither is
-    a full identity check and neither pretends to be; together they refuse
-    the mistake that actually happens, which is replaying one run's replies
-    over another run's rows.
+    Two guards catch exactly two shapes of drift: a different number of
+    stored replies than rows, and a stored reply whose `case` differs from
+    its row's `meta.case` at the same position. Neither is, or claims to be,
+    a check that the two runs share the same rows. `case` is a coarse label
+    ("attributed", "own_cause", ...) shared by many rows, not a row
+    identity, and `results.jsonl` stores nothing finer -- no prompt digest,
+    no row id. A dataset generator run at the same (seed, size) produces the
+    same case order every time it is regenerated, so two different
+    regenerations -- with different prompts, different expected causes --
+    pass both guards silently: same count, same case at every index. These
+    guards cannot tell that pair apart. Confirming the prompts themselves
+    match -- `messages` equal, row by row -- is the caller's job before
+    trusting a replay; the 0920 re-score did this, diffing all 263 rows'
+    `messages` between the original and regenerated datasets before running
+    `--replay`.
 
     Returns `(chat_fn, prior_board)`. The board is the replayed run's own
     `scoreboard.json` -- its `run.model` and `run.endpoint` are carried into
@@ -204,12 +214,12 @@ def replay_chat_fn(run_dir: Path, rows: list[dict]):
         lines = [line for line in
                  results_path.read_text(encoding="utf-8").splitlines() if line]
     except OSError:
-        raise ValueError(f"--replay {run_dir}: no {results_path} to replay")
+        raise ValueError(f"--replay {run_dir}: no {results_path} to replay") from None
     try:
         board_raw = board_path.read_text(encoding="utf-8")
     except OSError:
         raise ValueError(
-            f"--replay {run_dir}: no {board_path} to carry provenance from")
+            f"--replay {run_dir}: no {board_path} to carry provenance from") from None
 
     stored = [json.loads(line) for line in lines]
     if len(stored) != len(rows):
@@ -236,7 +246,9 @@ def replay_chat_fn(run_dir: Path, rows: list[dict]):
 def main() -> None:
     p = argparse.ArgumentParser(prog="kv-eval")
     p.add_argument("--test", type=Path, required=True)
-    p.add_argument("--endpoint", default=client.DEFAULT_ENDPOINT)
+    p.add_argument("--endpoint", default=None,
+                   help=f"defaults to {client.DEFAULT_ENDPOINT!r}; refused "
+                        "with --replay, which calls no endpoint")
     p.add_argument("--model")
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--limit", type=int)
@@ -249,6 +261,9 @@ def main() -> None:
         if args.model:
             p.error("--replay re-scores stored replies and calls no model; "
                     "--model would name a model that produced none of them")
+        if args.endpoint:
+            p.error("--replay re-scores stored replies and calls no endpoint; "
+                    "--endpoint would name a server that served none of them")
         if args.limit:
             p.error("--replay lines its stored replies up with the test rows "
                     "by position; --limit drops rows and breaks that")
@@ -274,8 +289,9 @@ def main() -> None:
             p.error(str(exc))
         model, endpoint = prior["run"]["model"], prior["run"]["endpoint"]
     else:
-        chat_fn = lambda messages: client.chat(args.endpoint, args.model, messages)
-        model, endpoint = args.model, args.endpoint
+        endpoint = args.endpoint or client.DEFAULT_ENDPOINT
+        chat_fn = lambda messages: client.chat(endpoint, args.model, messages)
+        model = args.model
 
     results = score.evaluate(rows, chat_fn)
     board = score.scoreboard(results)

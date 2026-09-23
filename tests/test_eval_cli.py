@@ -168,7 +168,7 @@ def _prior_run(tmp_path: Path, rows: list[dict], *, name: str = "eval-0920-fixtu
     return run_dir
 
 
-def test_replay_refuses_a_model(tmp_path, capsys):
+def test_replay_refuses_a_model(tmp_path):
     """A replay calls nothing. Accepting --model would write a scoreboard
     naming a model that produced none of its replies.
     """
@@ -179,6 +179,19 @@ def test_replay_refuses_a_model(tmp_path, capsys):
     with pytest.raises(SystemExit):
         _run_cli(["--test", str(test_file), "--replay", str(prior),
                   "--out", str(out), "--model", "some.gguf"])
+
+
+def test_replay_refuses_an_endpoint(tmp_path):
+    """A replay calls no server either. Accepting --endpoint would write a
+    scoreboard naming a server that served none of its replies.
+    """
+    rows = _replay_rows()
+    test_file = _write_test_file(tmp_path, rows)
+    prior = _prior_run(tmp_path, rows)
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit):
+        _run_cli(["--test", str(test_file), "--replay", str(prior),
+                  "--out", str(out), "--endpoint", "http://127.0.0.1:9/v1"])
 
 
 def test_replay_refuses_a_limit(tmp_path):
@@ -215,9 +228,11 @@ def test_replay_refuses_a_prior_run_of_a_different_length(tmp_path):
 
 
 def test_replay_refuses_a_case_mismatch(tmp_path):
-    """A stored reply's `case` must match its row's -- catching the mistake
-    that actually motivates this guard, replaying one run's replies over a
-    different run's rows, even when the two happen to share a row count.
+    """A stored reply's `case` must match its row's at the same position --
+    the second of the two shapes of drift this guard catches, distinct from
+    a row-count mismatch. It is a positional check, not a row-identity
+    check: two runs with the same row count and the same case at every
+    index still pass, whatever their prompts actually were.
     """
     rows = _replay_rows()
     test_file = _write_test_file(tmp_path, rows)
