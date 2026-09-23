@@ -216,6 +216,14 @@ class Victim:
     # every victim decoy already declares "NotReady", which is what `refute`
     # writes.
     objects: tuple[Object, ...] = ()
+    # The two words that tell THIS victim's own cause apart from the other
+    # causes on its menu -- job 2's grading list when a shared-origin row
+    # renders the HEALTHY world, where the local cause is the answer.
+    # Chosen by reading the cause strings, never by checking what they do
+    # to a score (2026-09-23 exam-grader-fix design, section 4).
+    # Empty on every training victim: nothing grades the training pool by
+    # keyword, so curating 163 more pairs would buy no measurement.
+    own_cause_keywords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -284,6 +292,12 @@ class Propagation:
     # shared_origin_decoy_probe reads instead of the broken state. None
     # wherever origin_object is None.
     healthy_origin_fresh: Fresh | None = None
+    # The two words that tell the SHARED cause apart from the other causes
+    # on every victim's menu -- job 2's grading list when a shared-origin
+    # row renders the BROKEN world, where the shared cause is the answer.
+    # Same curation rule, and empty on every training scenario for the same
+    # reason as Victim's.
+    own_cause_keywords: tuple[str, ...] = ()
 
 
 _COREDNS = Propagation(
@@ -291,6 +305,7 @@ _COREDNS = Propagation(
     blast_radius="cluster",
     scope_field=None,
     origin="CoreDNS has no ready replicas",
+    own_cause_keywords=("coredns", "resolve"),
     shared_cause="CoreDNS is down cluster-wide, so no pod can resolve service names",
     shared_reason="kube-system/coredns reports 0 of 2 replicas ready",
     distractor_cause="the cluster network plugin is dropping pod-to-pod traffic",
@@ -319,6 +334,7 @@ _COREDNS = Propagation(
             evidence="last state terminated with exit code 1",
             log_cause="dial tcp: lookup postgres.data.svc.cluster.local: no such host",
             local_cause="the database service name is misspelled in the workload's configuration",
+            own_cause_keywords=("database", "misspelled"),
             local_reason="the container exits immediately after a failed lookup",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: name resolution failed for "
@@ -334,6 +350,7 @@ _COREDNS = Propagation(
             reason="readiness probe failed 12 times in the last five minutes",
             evidence="Unhealthy: readiness probe failed for container {container}",
             local_cause="the readiness probe timeout is too short for this workload",
+            own_cause_keywords=("readiness", "timeout"),
             local_reason="every probe attempt ends at its deadline",
             read=("get_events {ns}/{name}",
                   ("Warning  Unhealthy  12x  kubelet  Readiness probe failed: "
@@ -357,6 +374,7 @@ _COREDNS = Propagation(
             evidence="last state terminated with exit code 2",
             log_cause="cannot join cluster peer {name}-0.{name}.{ns}.svc.cluster.local",
             local_cause="the headless Service for the StatefulSet was deleted",
+            own_cause_keywords=("headless", "statefulset"),
             local_reason="peer discovery by name is failing for every replica",
             read=("get_related service {ns}/{name}",
                   ("type: ClusterIP (headless)\nselector: app={name}\n"
@@ -380,6 +398,7 @@ _NODE_LOST = Propagation(
     blast_radius="node",
     scope_field="node",
     origin="the kubelet on one node stopped posting status",
+    own_cause_keywords=("notready", "replacements"),
     shared_cause="node {node} is NotReady, so the pods it held are gone and their "
                  "replacements have nowhere to run",
     shared_reason="{node} has been Ready=Unknown for six minutes and carries the "
@@ -416,6 +435,7 @@ _NODE_LOST = Propagation(
             evidence=("RunContainerError: failed to create containerd task: context deadline "
                       "exceeded"),
             local_cause="the pod requests more CPU than any remaining node has free",
+            own_cause_keywords=("cpu", "remaining"),
             local_reason="the scheduler reports Insufficient cpu on both healthy nodes",
             read=("get_events {ns}/{name}",
                   ("Warning  Failed  kubelet  Error: RunContainerError: failed to create "
@@ -432,6 +452,7 @@ _NODE_LOST = Propagation(
             reason="volume {pvc} could not be attached",
             evidence="Multi-Attach error: volume is already exclusively attached to one node",
             local_cause="a second pod already holds the ReadWriteOnce claim {pvc}",
+            own_cause_keywords=("readwriteonce", "claim"),
             local_reason="the volume reports an exclusive attachment elsewhere",
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
                   ("Status: Bound\nAccess Modes: RWO\n"
@@ -450,6 +471,7 @@ _STORAGE = Propagation(
     blast_radius="cluster",
     scope_field=None,
     origin="the dynamic volume provisioner has no ready replica",
+    own_cause_keywords=("provisioner", "bind"),
     shared_cause="the storage provisioner is down, so no new PersistentVolumeClaim "
                  "can bind",
     shared_reason="no PersistentVolume has been provisioned cluster-wide for twenty "
@@ -483,6 +505,7 @@ _STORAGE = Propagation(
             evidence="0/3 nodes are available: 3 pod has unbound immediate "
                      "PersistentVolumeClaims",
             local_cause="the StatefulSet asks for a storage class that does not exist",
+            own_cause_keywords=("statefulset", "class"),
             local_reason="the claim never leaves Pending",
             read=("describe {ns}/{pvc} (PersistentVolumeClaim)",
                   ("Status: Pending\nStorageClass: standard\n"
@@ -503,6 +526,7 @@ _STORAGE = Propagation(
             evidence="0/3 nodes are available: 3 pod has unbound immediate "
                      "PersistentVolumeClaims",
             local_cause="the Job requests a volume larger than the cluster can provide",
+            own_cause_keywords=("larger", "provide"),
             local_reason="no node advertises enough free storage for the claim",
             read=("get_events {ns}/{name}",
                   ("Normal  WaitForFirstConsumer  persistentvolume-controller  "
@@ -523,6 +547,7 @@ _STORAGE = Propagation(
             reason="volume {pvc} could not be mounted",
             evidence="MountVolume.SetUp failed: timed out waiting for the condition",
             local_cause="the filesystem on {pvc} is corrupt and will not mount",
+            own_cause_keywords=("filesystem", "corrupt"),
             local_reason="the mount times out rather than failing outright",
             read=("describe {ns}/{pod} (Pod)",
                   ("Events: Warning  FailedMount  kubelet  Unable to attach or mount "
@@ -539,6 +564,7 @@ _REGISTRY = Propagation(
     blast_radius="cluster",
     scope_field=None,
     origin="the image registry stopped answering from inside the cluster",
+    own_cause_keywords=("unreachable", "workload"),
     shared_cause="the image registry is unreachable, so no workload can pull an image",
     shared_reason="every pull in the cluster fails at the same registry host, before "
                   "any manifest is requested",
@@ -570,6 +596,7 @@ _REGISTRY = Propagation(
             reason="container {container} cannot pull {image}",
             evidence="Back-off pulling image {image}",
             local_cause="the image tag {image} does not exist in the registry",
+            own_cause_keywords=("tag", "exist"),
             local_reason="the pull is retried and backed off repeatedly",
             read=("describe {ns}/{pod} (Pod)",
                   ("Events: Warning  Failed  kubelet  Failed to pull image {image}: "
@@ -588,6 +615,7 @@ _REGISTRY = Propagation(
             reason="container {container} cannot pull {image}",
             evidence="failed to resolve reference for {image}",
             local_cause="the image pull secret in this namespace is missing or wrong",
+            own_cause_keywords=("secret", "namespace"),
             local_reason="the pull fails before the image layers are fetched",
             read=("get_events {ns}/{name}",
                   ("Warning  Failed  kubelet  Error: ErrImagePull\n"
@@ -605,6 +633,7 @@ _REGISTRY = Propagation(
             reason="init container {init_container} cannot pull its image",
             evidence="Back-off pulling image for init container {init_container}",
             local_cause="the init container image name has a typo",
+            own_cause_keywords=("init", "typo"),
             local_reason="the init container never starts",
             read=("describe {ns}/{pod} (Pod)",
                   ("Init Containers:\n  {init_container}:\n    State: Waiting\n"
@@ -625,6 +654,7 @@ _DISK_PRESSURE = Propagation(
     blast_radius="node",
     scope_field="node",
     origin="one node filled its disk and started refusing and evicting pods",
+    own_cause_keywords=("pressure", "evicting"),
     shared_cause="node {node} is under disk pressure, so it is evicting pods and "
                  "refusing new ones",
     shared_reason="{node} reports DiskPressure=True and carries the disk-pressure taint",
@@ -658,6 +688,7 @@ _DISK_PRESSURE = Propagation(
             evidence="1 node(s) had untolerated taint node.kubernetes.io/disk-pressure",
             healthy_evidence="1 node(s) had untolerated taint dedicated=gpu",
             local_cause="the pod is missing a toleration for a tainted node",
+            own_cause_keywords=("toleration", "tainted"),
             local_reason="the scheduler names an untolerated taint",
             read=("get_events {ns}/{name}",
                   ("Warning  FailedScheduling  default-scheduler  0/3 nodes are "
@@ -681,6 +712,7 @@ _DISK_PRESSURE = Propagation(
             reason="container {container} could not be started",
             evidence="failed to create containerd task: no space left on device",
             local_cause="the workload's emptyDir volume has no size limit and filled up",
+            own_cause_keywords=("emptydir", "filled"),
             local_reason="the container cannot write its writable layer",
             read=("describe {ns}/{pod} (Pod)",
                   ("Node: {node}\nEvents: Warning  Failed  kubelet  Error: failed to "
@@ -705,6 +737,7 @@ _DISK_PRESSURE = Propagation(
             log_cause="cannot write checkpoint: no space left on device",
             local_cause="the agent's checkpoint volume is too small for its retention "
                         "setting",
+            own_cause_keywords=("checkpoint", "retention"),
             local_reason="the agent dies while writing its checkpoint",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: write failed, device full (3 of 3 sampled "
@@ -723,6 +756,7 @@ _NETPOL = Propagation(
     blast_radius="namespace",
     scope_field="ns",
     origin="a default-deny NetworkPolicy was applied to a whole namespace",
+    own_cause_keywords=("networkpolicy", "egress"),
     shared_cause="a default-deny NetworkPolicy in {ns} blocks all egress from its pods",
     shared_reason="every pod in {ns} is selected by a policy that declares no egress rule",
     distractor_cause="the workloads' service accounts lost permission to read Secrets",
@@ -751,6 +785,7 @@ _NETPOL = Propagation(
             evidence="last state terminated with exit code 1",
             log_cause="connection timed out reaching payments-api.payments.svc.cluster.local",
             local_cause="the payments API the workload depends on is down",
+            own_cause_keywords=("payments", "depends"),
             local_reason="every outbound connection ends in a timeout",
             read=("get_log_causes {ns}/{pod}",
                   ("classified cause: outbound connection timed out (3 of 3 sampled "
@@ -767,6 +802,7 @@ _NETPOL = Propagation(
             reason="readiness probe failed 9 times in the last five minutes",
             evidence="Unhealthy: readiness probe failed for container {container}",
             local_cause="the readiness endpoint for this workload returns an error",
+            own_cause_keywords=("readiness", "endpoint"),
             local_reason="the probe consistently reports the pod not ready",
             read=("get_events {ns}/{name}",
                   ("Warning  Unhealthy  9x  kubelet  Readiness probe failed: "

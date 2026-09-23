@@ -660,10 +660,11 @@ prompt now, and a bot that copies it scores 1.0 (limit 1 below). 0908 reads
 line that hands it the answer.
 
 Job 2 has a floor under it for the same reason. A bot that pastes the prompt
-back as its cause, reading nothing, scores 0.366 (limit 7 below). 0908 reads
-0.2418. So on the job that carries the diagnosis, 0908 is below what copying
-would have scored — the number is not a weak reading, it is worse than no
-reading at all.
+back as its cause, reading nothing, scored 0.366 under the grader 0908 was
+scored with (limit 7 below). 0908 reads 0.2418. So on the job that carries the
+diagnosis, 0908 is below what copying would have scored — the number is not a
+weak reading, it is worse than no reading at all. Both numbers predate the
+2026-09-23 grader fix; limit 7 says what moved.
 
 Job 3's 39 prompts split 5 `shared`, 0 `separate`, 34 `none`. The `separate`
 label carries no exam row, so there is nothing to score there — its rate reads
@@ -720,17 +721,29 @@ Seven limits on this reading, carried from the design that scored it:
    today — but the next run that does will still have only one row deciding
    the gap.
 7. Job 2 has a measured ceiling too, and it is not zero. Job 2 marks a cause
-   right when every keyword its answer key requires appears in the reply, and
-   for 56 of the 114 keyword-graded workloads those keywords are already
-   printed in the prompt. A bot that hands the prompt back scores 0.366 on
-   that alone. A test pins it, so it is a measurement rather than an estimate.
-   The bar is 0.7, so this exposure cannot pass job 2 by itself — but any job-2
-   score at or under 0.366 is not evidence that a model read anything.
+   right when every keyword its answer key requires appears in the reply.
+   When 0908 was scored, 56 of the 114 keyword-graded workloads had those
+   keywords already printed in the prompt, and a bot that hands the prompt
+   back scored 0.366 on that alone. Since the 2026-09-23 grader fix it is 76
+   of 134, and the bot scores 0.497 (76 of 153). A test pins that, so it is a
+   measurement rather than an estimate. The bar is 0.7, so this exposure
+   cannot pass job 2 by itself — but any job-2 score at or under 0.497 is not
+   evidence that a model read anything, and any proposal to lower the bar
+   has a floor of 0.50.
+
+   The fix changed the count, not the rule. 20 shared-origin job-2 workloads
+   carried no answer keys, so job 2 scored them 0.0 whatever the reply said.
+   They carry curated pairs now, and every one of the 20 has its answer on
+   its own candidate menu. 0908's 0.2418 and the old 0.366 were both measured
+   under the old grader, which zeroed those 20 for every reply. They compare
+   with each other, not with a score from today's grader.
 
    Closing it is a smaller edit and a bigger bill than it looks. The 56
    workloads do not carry 56 separate answer keys. The catalog declares a
    keyword set once per entry, and nine of those entries account for 54 of the
-   56; two more leak on a single row each. But rewriting those eleven keys
+   56; two more leak on a single row each. The other 20 of today's 76 carry
+   pairs declared in `propagation.py`, not the catalog, so rewriting the
+   eleven catalog keys closes 56 of the 76. But rewriting those eleven keys
    retires three banked numbers, not just job 2's. Job 2 goes, because it
    grades by keyword. Cause accuracy goes, because the `own_cause` and
    `empty_candidates` rows are graded by keyword too. Overconfidence goes,
@@ -742,8 +755,9 @@ Seven limits on this reading, carried from the design that scored it:
    The trigger for paying it is already written down, in the comment above
    `_is_keyword_graded`: the rewrite waits for evidence that a model is
    clearing this slice while failing elsewhere. 0908 is not that evidence. It
-   scored 0.2418, below the 0.366 a copier gets, so it did not exploit the
-   exposure — its job-2 number simply cannot prove it read anything.
+   scored 0.2418, below the 0.366 a copier got under the same grader, so it
+   did not exploit the exposure — its job-2 number simply cannot prove it
+   read anything.
 
 ## Known limits of the training data and the exam
 

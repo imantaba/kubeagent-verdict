@@ -27,6 +27,16 @@ touches shared-origin rows, and this view keeps none of the fields it
 changes there -- their gold cause lives in the `meta["expected"]` dict.
 The 14-row exam move in a later task must leave this hash unchanged --
 that is the whole point of pinning it here first.
+
+Re-pinned on 2026-09-23 for the exam-grader fix
+(2026-09-23-exam-grader-fix-design.md). Unlike the training-targets fix
+above, this one moves a field the view DOES keep: `own_cause_keywords`
+is a per-workload meta field, not `expected_cause`, so `view()`'s
+"everything except `expected_cause`" rule carries it through untouched.
+Twenty shared-origin workloads' `own_cause_keywords` move from `[]` to a
+curated pair (see `tests/test_shared_origin_training.py`'s matching
+2026-09-23 entries), and the digest moves with them -- on the same 11
+rows, nothing else.
 """
 
 from __future__ import annotations
@@ -53,7 +63,7 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "cac6361b0bab69956d386a9d77193b82c14957014430f95bfbbd45008ae309d2"
+GRADED_VIEW_SHA256 = "b82b87977414e01e5d58eeb64defc5dec350bab6f567006d02ea96932700b03e"
 
 
 def _digest(views) -> str:

@@ -176,14 +176,116 @@ def _format_smoke_line(pair: str, job1_scored: int, total: int) -> str:
     return f"  {pair}: job 1 scored {job1_scored} of {total} rule rows"
 
 
+def replay_chat_fn(run_dir: Path, rows: list[dict]):
+    """Stored replies from a prior run, as a `chat_fn`.
+
+    `evaluate` calls `chat_fn` once per row, in order, so the stored `output`
+    strings line up by position with no row identity lookup -- the same
+    alignment `tests/test_oracle.py`'s `_gold_results` relies on. Two guards
+    catch exactly two shapes of drift: a different number of stored replies
+    than rows, and a stored reply whose `case` differs from its row's
+    `meta.case` at the same position. Neither is, or claims to be, a check that
+    the two runs share the same rows. `case` is a coarse label ("attributed",
+    "own_cause", ...) shared by many rows, not a row identity, and
+    `results.jsonl` stores nothing finer -- no prompt digest, no row id. The
+    exam's rows come from `generate.test_set()`, which takes no seed or size,
+    so its row count and case order do not depend on `--seed` or `--size` at
+    all. Two exams whose prompts or expected causes differ but whose case order
+    does not -- as any generator change that keeps the case order produces --
+    pass both guards silently: same count, same case at every index. These
+    guards cannot tell that pair apart. Confirming the prompts themselves match
+    -- `messages` equal, row by row -- is the caller's job before trusting a
+    replay; the 0920 re-score did this, diffing all 263 rows' `messages`
+    between the original and regenerated datasets before running `--replay`.
+
+    Returns `(chat_fn, prior_board)`. The board is the replayed run's own
+    `scoreboard.json` -- its `run.model` and `run.endpoint` are carried into
+    the new board, because that is who produced these replies.
+
+    Raises `ValueError`, which `main` converts to `SystemExit` via
+    `p.error`, naming the file when `results.jsonl` or `scoreboard.json` is
+    missing, when the counts differ, or when a `case` mismatches at index
+    *i*. A replay with no scoreboard beside it has no provenance, and
+    inventing one is worse than refusing.
+    """
+    results_path = run_dir / "results.jsonl"
+    board_path = run_dir / "scoreboard.json"
+    try:
+        lines = [line for line in
+                 results_path.read_text(encoding="utf-8").splitlines() if line]
+    except OSError:
+        raise ValueError(f"--replay {run_dir}: no {results_path} to replay") from None
+    try:
+        board_raw = board_path.read_text(encoding="utf-8")
+    except OSError:
+        raise ValueError(
+            f"--replay {run_dir}: no {board_path} to carry provenance from") from None
+
+    stored = [json.loads(line) for line in lines]
+    if len(stored) != len(rows):
+        raise ValueError(
+            f"--replay {run_dir}: {len(stored)} stored replies but "
+            f"{len(rows)} test rows -- a replay lines up by position and "
+            f"cannot re-score a different row count")
+    for i, (result, row) in enumerate(zip(stored, rows)):
+        stored_case, row_case = result.get("case"), _case(row)
+        if stored_case != row_case:
+            raise ValueError(
+                f"--replay {run_dir}: row {i} case mismatch -- stored reply "
+                f"is {stored_case!r}, test row is {row_case!r}")
+
+    prior_board = json.loads(board_raw)
+    run_block = prior_board.get("run")
+    if run_block is None:
+        raise ValueError(
+            f"--replay {run_dir}: {board_path} has no run block to carry "
+            "provenance from")
+    for key in ("model", "endpoint"):
+        if key not in run_block:
+            raise ValueError(
+                f"--replay {run_dir}: {board_path}'s run block has no "
+                f"{key!r} to carry provenance from")
+    outputs = iter(r["output"] for r in stored)
+
+    def chat_fn(_messages: list[dict]) -> str:
+        return next(outputs)
+
+    return chat_fn, prior_board
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="kv-eval")
     p.add_argument("--test", type=Path, required=True)
-    p.add_argument("--endpoint", default=client.DEFAULT_ENDPOINT)
-    p.add_argument("--model", required=True)
+    p.add_argument("--endpoint", default=None,
+                   help=f"defaults to {client.DEFAULT_ENDPOINT!r}; refused "
+                        "with --replay, which calls no endpoint")
+    p.add_argument("--model")
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--limit", type=int)
+    p.add_argument("--replay", type=Path,
+                   help="a prior run's output directory. Re-score the replies "
+                        "it stored instead of calling a model.")
+    p.add_argument("--no-job2", action="store_true",
+                   help="skip job-2 grading, for probe sets built from "
+                        "training scenarios, which carry no job-2 answer "
+                        "keys; job 2 reads n/a")
     args = p.parse_args()
+
+    if args.replay:
+        if args.model:
+            p.error("--replay re-scores stored replies and calls no model; "
+                    "--model would name a model that produced none of them")
+        if args.endpoint:
+            p.error("--replay re-scores stored replies and calls no endpoint; "
+                    "--endpoint would name a server that served none of them")
+        if args.limit:
+            p.error("--replay lines its stored replies up with the test rows "
+                    "by position; --limit drops rows and breaks that")
+        if args.out.resolve() == args.replay.resolve():
+            p.error("--out must differ from --replay; a re-score must not "
+                    "overwrite the run it re-scores")
+    elif not args.model:
+        p.error("--model is required")
 
     rows = [json.loads(line) for line in
             args.test.read_text(encoding="utf-8").splitlines() if line]
@@ -197,18 +299,38 @@ def main() -> None:
                   f"{', '.join(dropped)}")
         rows = kept
 
-    results = score.evaluate(
-        rows, lambda messages: client.chat(args.endpoint, args.model, messages))
+    if args.replay:
+        try:
+            chat_fn, prior = replay_chat_fn(args.replay, rows)
+        except ValueError as exc:
+            p.error(str(exc))
+        model, endpoint = prior["run"]["model"], prior["run"]["endpoint"]
+    else:
+        endpoint = args.endpoint or client.DEFAULT_ENDPOINT
+        chat_fn = lambda messages: client.chat(endpoint, args.model, messages)
+        model = args.model
+
+    try:
+        results = score.evaluate(rows, chat_fn, grade_job2=not args.no_job2)
+    except score.UngradableWorkload as exc:
+        p.error(f"{exc} Regenerate the rows with kv-dataset, or pass "
+                "--no-job2 for a probe set built from training scenarios.")
     board = score.scoreboard(results)
-    board["run"] = provenance(args.model, args.endpoint, args.test,
+    board["run"] = provenance(model, endpoint, args.test,
                               len(rows), available,
                               dataset=dataset_provenance(args.test))
+    if args.replay:
+        board["run"]["rescored_from"] = Path(args.replay).resolve().name
     args.out.mkdir(parents=True, exist_ok=True)
     with open(args.out / "results.jsonl", "w", encoding="utf-8") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in results)
     (args.out / "scoreboard.json").write_text(
         json.dumps(board, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     md = score.render_markdown(board)
+    if args.replay:
+        md = (f"Re-scored from the stored replies of "
+              f"`{board['run']['rescored_from']}`; no model was called.\n\n"
+              f"{md}")
     (args.out / "scoreboard.md").write_text(md, encoding="utf-8")
     print(md)
 
