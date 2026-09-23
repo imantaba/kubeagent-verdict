@@ -319,7 +319,7 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
 
     Pinned per case as well as in total: a corpus edit that raised the
     exposure of one slice while lowering another's would slide past a
-    total-only assertion. `56 of 114` is what the implementation measures
+    total-only assertion. `76 of 134` is what the implementation measures
     today. It is a measurement, not a target -- a change here is a real
     change in how much the slice gives away, and the number is updated
     deliberately with the reason, never tuned back to a stale value.
@@ -330,6 +330,17 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     job 2 instead, which is one entry per undecided workload that carries
     keywords, and adds three more cases: `wrong_attribution`,
     `misattribution_probe` and `multi_misattribution_probe`.
+
+    Re-pinned on 2026-09-23 for the exam-grader fix
+    (2026-09-23-exam-grader-fix-design.md). Before this fix, every
+    `shared_origin_probe` and `shared_origin_decoy_probe` workload carried
+    `own_cause_keywords=[]`, so `_keyword_exposure` never counted either
+    case as measured. The 22 curated pairs give both cases a non-empty
+    list on every undecided workload, adding two new case entries: 4 of 4
+    `shared_origin_probe` workloads and 16 of 16 `shared_origin_decoy_probe`
+    workloads, all fully derivable -- the victim's own local cause or the
+    scenario's shared cause is always printed on that workload's own
+    candidate menu. 114 + 20 = 134 graded, 56 + 20 = 76 derivable.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -344,12 +355,16 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
 
     assert dict(graded) == {"own_cause": 19, "empty_candidates": 19,
                             "wrong_attribution": 19, "misattribution_probe": 19,
-                            "multi_misattribution_probe": 38}
+                            "multi_misattribution_probe": 38,
+                            "shared_origin_probe": 4,
+                            "shared_origin_decoy_probe": 16}
     assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10,
                              "wrong_attribution": 9, "misattribution_probe": 9,
-                             "multi_misattribution_probe": 19}
-    assert sum(graded.values()) == 114
-    assert sum(by_case.values()) == 56
+                             "multi_misattribution_probe": 19,
+                             "shared_origin_probe": 4,
+                             "shared_origin_decoy_probe": 16}
+    assert sum(graded.values()) == 134
+    assert sum(by_case.values()) == 76
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():

@@ -8,6 +8,16 @@ delegates to: `_shared_origin_row` (per-victim cause/rationale) and
 then confirm the wiring against the real eval scenarios, where the
 decided/undecided split actually occurs today (see the trainable pool's
 own oracle tests for the training side, which never decides).
+
+Re-pinned on 2026-09-23 for the exam-grader fix
+(2026-09-23-exam-grader-fix-design.md): `_shared_origin_row` grew a third
+return value, the job-2 keyword list, plus two new keyword-only keyword
+arguments (`decoy_keywords`, `shared_keywords`) that feed it. The four
+`_shared_origin_row` unit tests below now unpack `cause, rationale,
+keywords` and pass both new keywords, and each asserts the keyword list
+the brief's design says that branch owns: `[]` on a decided row (job 1,
+graded by echo, never by keyword), the shared pair on an undecided broken
+row, the decoy's own pair on an undecided healthy row.
 """
 
 from __future__ import annotations
@@ -46,38 +56,50 @@ def _undecided_result() -> rules.Result:
 
 def test_decided_confirmed_row_gets_the_rules_cause_and_rationale():
     result = _confirmed_result()
-    cause, rationale = cases._shared_origin_row(
+    cause, rationale, keywords = cases._shared_origin_row(
         result, healthy=False, decoy="the wrong decoy cause",
-        shared_cause="the story's shared cause")
+        shared_cause="the story's shared cause",
+        decoy_keywords=("wrong", "decoy"),
+        shared_keywords=("shared", "cause"))
     assert cause == result.cause
     assert rationale == cases._rule_rationale(result)
+    assert keywords == []  # decided is job 1, graded by echo, never keywords
 
 
 def test_decided_unverified_row_also_gets_the_rules_cause_and_rationale():
     result = _unverified_result()
-    cause, rationale = cases._shared_origin_row(
+    cause, rationale, keywords = cases._shared_origin_row(
         result, healthy=True, decoy="the decoy cause",
-        shared_cause="the story's shared cause")
+        shared_cause="the story's shared cause",
+        decoy_keywords=("decoy", "cause"),
+        shared_keywords=("shared", "cause"))
     assert cause == result.cause
     assert rationale == cases._rule_rationale(result)
+    assert keywords == []
 
 
 def test_undecided_broken_row_keeps_the_shared_cause():
     result = _undecided_result()
-    cause, rationale = cases._shared_origin_row(
+    cause, rationale, keywords = cases._shared_origin_row(
         result, healthy=False, decoy="the decoy cause",
-        shared_cause="the story's shared cause")
+        shared_cause="the story's shared cause",
+        decoy_keywords=("decoy", "cause"),
+        shared_keywords=("shared", "cause"))
     assert cause == "the story's shared cause"
     assert rationale is None  # caller keeps today's rationale template
+    assert keywords == ["shared", "cause"]
 
 
 def test_undecided_healthy_row_keeps_the_decoy_cause():
     result = _undecided_result()
-    cause, rationale = cases._shared_origin_row(
+    cause, rationale, keywords = cases._shared_origin_row(
         result, healthy=True, decoy="the decoy cause",
-        shared_cause="the story's shared cause")
+        shared_cause="the story's shared cause",
+        decoy_keywords=("decoy", "cause"),
+        shared_keywords=("shared", "cause"))
     assert cause == "the decoy cause"
     assert rationale is None
+    assert keywords == ["decoy", "cause"]
 
 
 # ------------------------------------------------ _shared_origin_summary

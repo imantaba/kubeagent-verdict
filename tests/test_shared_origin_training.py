@@ -794,7 +794,24 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 # before and after the fix measured the footprint: exactly these 10 rows
 # plus 4 of the 10 `shared_origin_decoy_probe` rows (outside this frozen
 # slice, see `EVAL_SET_SHA256` below) change, and nothing else does.
-FROZEN_253_SHA256 = "b327cc397c0e0550881791be5d7d14c45bce5d9030a11fd5d5f2c5d4d6be6faf"
+#
+# It moved a fourth time, on 2026-09-23, for the exam-grader fix
+# (2026-09-23-exam-grader-fix-design.md, sections 2 and 5). Every
+# UNDECIDED shared-origin workload's `meta.own_cause_keywords` goes from
+# `[]` to a curated two-word pair -- the victim's own in the healthy world,
+# the scenario's shared pair in the broken one. A DECIDED one still carries
+# `[]`, because it is job 1 and graded by echo. Inside this slice that is
+# the four `shared_origin_probe` workloads that scored 0.0 against their own
+# gold answer; the other sixteen live in the ten rows outside it, and
+# `EVAL_SET_SHA256` below moves for them. `_digest` hashes
+# `generate.to_row`, which carries `meta`, so the digest moves although not
+# one RENDERED byte does. That is pinned separately and independently:
+# `tests/test_exam_prompt_stability.py` compares the regenerated exam's
+# `messages` -- system, user and gold answer -- against the banked
+# `out/dataset-0920/test.jsonl` row for row, and a key-by-key diff of the
+# exam before and after this fix reports `meta` as the only top-level key
+# that changed. That is what makes this a meta-only move and not a new exam.
+FROZEN_253_SHA256 = "2532b7908adfc91f22c56710eb5f9e47e500b4060460ae7de373a003afed1bc9"
 
 # The whole exam, 253 plus the ten `shared_origin_decoy_probe` rows. First
 # captured on `main` @ `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were
@@ -847,7 +864,15 @@ FROZEN_253_SHA256 = "b327cc397c0e0550881791be5d7d14c45bce5d9030a11fd5d5f2c5d4d6b
 # (the three origin-object stories, whose healthy world decides nothing)
 # do not move. 14 of the 263 rows change in total, byte for byte, and
 # each only in the assistant message and the meta that mirrors it.
-EVAL_SET_SHA256 = "b962dad6c287f06832058bb4be7e899f3dc0d6a21f1f8cd3881bdc9f626f01e7"
+#
+# Re-pinned a fourth time on 2026-09-23, in the same commit and for the
+# same exam-grader fix that moved `FROZEN_253_SHA256` above (see its
+# 2026-09-23 entry). This digest covers the frozen slice AND the ten
+# `shared_origin_decoy_probe` rows outside it, so it carries that entry's
+# four workloads plus the sixteen in those ten rows -- the twenty that
+# scored 0.0 against their own gold answer before this fix. Same meta-only
+# reason, and no `messages` byte moves in either slice.
+EVAL_SET_SHA256 = "d40dabc9fafec54a46398a13e7e984a965824d550399c09c60c7fc848e9a3288"
 
 
 def _digest(rows) -> str:

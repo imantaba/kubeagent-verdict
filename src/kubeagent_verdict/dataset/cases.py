@@ -756,8 +756,11 @@ def _victim_finding(v: prop.Victim, n: Names, healthy: bool = False) -> c.Findin
 
 
 def _shared_origin_row(result: rules.Result, *, healthy: bool, decoy: str,
-                       shared_cause: str) -> tuple[str, str | None]:
-    """One victim's (cause, rationale) for a shared-origin row.
+                       shared_cause: str,
+                       decoy_keywords: tuple[str, ...],
+                       shared_keywords: tuple[str, ...],
+                       ) -> tuple[str, str | None, list[str]]:
+    """One victim's (cause, rationale, job-2 keywords) for a shared-origin row.
 
     A decided workload -- confirmed or unverified -- gets the rules' own
     cause and rationale, exactly as `multi` already does (spec section 3):
@@ -767,10 +770,20 @@ def _shared_origin_row(result: rules.Result, *, healthy: bool, decoy: str,
     the shared cause in the broken one. The `None` rationale tells the
     caller to keep applying its own per-world template, since there is no
     rules evidence to build one from.
+
+    The keyword list is decided in the SAME branch as the cause, which is
+    the point of returning it from here rather than from a second `if
+    healthy` at the call site: job 2 grades the reply against whichever
+    string this function chose, so a branch that could pick one without the
+    other is a branch that could grade an answer by another answer's words.
+    A decided workload is job 1 and is graded by echo, not by keyword, so
+    its list is empty.
     """
     if result.decided:
-        return result.cause, _rule_rationale(result)
-    return (decoy if healthy else shared_cause), None
+        return result.cause, _rule_rationale(result), []
+    if healthy:
+        return decoy, None, list(decoy_keywords)
+    return shared_cause, None, list(shared_keywords)
 
 
 def _shared_origin_summary(label: str, *, healthy: bool, count: int, origin: str,
@@ -991,8 +1004,10 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
             decided_outcome=result.outcome))
         content = (v.healthy_read_content or v.read[1]) if healthy else v.read[1]
         reads.append(c.EvidenceRead(label=_fmt(v.read[0], n), content=_fmt(content, n)))
-        row_cause, row_rationale = _shared_origin_row(
-            result, healthy=healthy, decoy=decoy, shared_cause=shared_cause)
+        row_cause, row_rationale, row_keywords = _shared_origin_row(
+            result, healthy=healthy, decoy=decoy, shared_cause=shared_cause,
+            decoy_keywords=v.own_cause_keywords,
+            shared_keywords=p.own_cause_keywords)
         if row_rationale is None:
             row_rationale = _fmt(v.local_reason if healthy else p.rationale, n)
         rows.append({"workload": f"{n.ns}/{n.name}",
@@ -1009,11 +1024,13 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         # the empty-objects branch produces no candidates, so its list is empty too.
         decoy_by_workload[key] = ([] if p.origin_object is not None
                                   else [cand.cause for cand in candidates])
-        # No propagation.Victim field carries per-workload own-cause keywords today,
-        # so a shared-origin row's undecided workloads pass none — job 2 grading for
-        # this builder falls back to Task 7's "or []" default, never a placeholder here.
-        workloads_meta[key] = render.workload_meta(result, expected_cause=row_cause,
-                                                    own_cause_keywords=[])
+        # The keywords come from the SAME branch that chose `row_cause`, so
+        # job 2 grades this workload by the distinguishing words of the very
+        # string that is its expected answer -- the victim's own pair in the
+        # healthy world, the scenario's shared pair in the broken one. Empty
+        # only on a decided workload, which is job 1 and graded by echo.
+        workloads_meta[key] = render.workload_meta(
+            result, expected_cause=row_cause, own_cause_keywords=row_keywords)
         results.append(result)
 
     label = rules.label(rules.shared(tuple(results)))

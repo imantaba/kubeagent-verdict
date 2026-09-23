@@ -1260,25 +1260,32 @@ def test_the_keyword_graded_population_is_the_population_job2_grades():
 
 
 def test_the_footnote_counts_the_corpus_job2_keyword_population():
-    """The real corpus, measured: 56 of 114 job-2 workloads have every
+    """The real corpus, measured: 76 of 134 job-2 workloads have every
     expected keyword already printed in the prompt.
 
     Pinned because it is the number `kv-eval` prints and the model card
     quotes. It is a measurement, not a target -- a change here is a real
     change in how much job 2 gives away, updated deliberately with the
     reason, never tuned back to a stale value.
+
+    Re-pinned on 2026-09-23 for the exam-grader fix
+    (2026-09-23-exam-grader-fix-design.md): 56 of 114 becomes 76 of 134.
+    The 20 shared-origin workloads that used to carry `own_cause_keywords
+    = []` -- and so were never counted here -- now carry a curated pair
+    and are, and every one of them is fully exposed (see
+    `tests/test_generate.py::test_the_job2_keyword_exposure_is_pinned_per_case`).
     """
     rows = [generate.to_row(ex) for ex in generate.test_set()]
     board = score.scoreboard(score.evaluate(rows, lambda m: ""))
-    assert board["overall"]["keyword_graded_n"] == 114
-    assert board["overall"]["keyword_derivable_n"] == 56
+    assert board["overall"]["keyword_graded_n"] == 134
+    assert board["overall"]["keyword_derivable_n"] == 76
     # Every counted workload is a job-2 workload, which is what design spec
     # line 547's "over all job-2 rows" asks for.
     counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
                   if wm.get("job") == 2
                   and wm.get("expected_cause") != NONE_OF_THESE
                   and wm.get("own_cause_keywords"))
-    assert counted == 114
+    assert counted == 134
 
 
 # --- the length-gap decider -------------------------------------------------
@@ -1909,18 +1916,30 @@ def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
     answer keywords the prompt already prints.
 
     The scoreboard's footnote counts that exposure from the corpus alone:
-    56 of the 114 keyword-graded job-2 workloads have every required
+    76 of the 134 keyword-graded job-2 workloads have every required
     keyword in their own prompt. This bot converts that footnote into a
     score, so the exposure is a measurement rather than an estimate.
+
+    Re-pinned on 2026-09-23 for the exam-grader fix
+    (2026-09-23-exam-grader-fix-design.md). Twenty shared-origin job-2
+    workloads carried no keywords and so scored 0.0 whatever the reply
+    said; they are graded now. 114 + 20 = 134 graded, and every one of the
+    20 has its answer printed in its own candidate menu, so 56 + 20 = 76
+    derivable and the bot rises from 0.366 to 76/153 = 0.4967.
+
+    The last assertion is the one that matters and it is why no bar moves.
+    The bot still scores below JOB2_BAR, but the margin narrows from 0.334
+    to 0.203 -- so any future proposal to lower that bar now has a hard
+    floor of 0.50, not 0.37. Below 0.50, a bot that reads nothing passes.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _paste_the_prompt_bot(rows))
     board = score.scoreboard(results)
 
-    assert board["overall"]["keyword_derivable_n"] == 56
-    assert board["overall"]["keyword_graded_n"] == 114
+    assert board["overall"]["keyword_derivable_n"] == 76
+    assert board["overall"]["keyword_graded_n"] == 134
     assert board["jobs"]["job2"]["n"] == 153
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.366, abs=0.005)
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.497, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -1989,11 +2008,12 @@ def _every_keyword_graded_row_has_no_length_verdict(rows: list[dict]) -> bool:
 def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     """Pins the count the model card's limit 7 quotes as the size of the edit.
 
-    `keyword_derivable_n` says 56 workloads print their own answer keywords in
-    their own prompt, but the edit that would close that is not 56 edits. The
-    catalog declares `own_cause_keywords` once per entry and the row builders
-    copy it, so the edit is one line per entry: nine entries whose every
-    workload is exposed, plus two that leak on a single row each.
+    `keyword_derivable_n` says 56 CATALOG workloads print their own answer
+    keywords in their own prompt, but the edit that would close that is not
+    56 edits. The catalog declares `own_cause_keywords` once per entry and
+    the row builders copy it, so the edit is one line per entry: nine
+    entries whose every workload is exposed, plus two that leak on a single
+    row each.
 
     The count is by catalog entry rather than by distinct keyword set on
     purpose. `job2` matches keywords independently of their order, so
@@ -2001,6 +2021,22 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     counting sets could defensibly call them one or two. Entries are what a
     person editing the catalog actually touches, and that number is the same
     either way.
+
+    Re-pinned on 2026-09-23 for the exam-grader fix
+    (2026-09-23-exam-grader-fix-design.md). `keyword_derivable_n` is now 76,
+    not 56: the 20 shared-origin job-2 workloads that used to carry
+    `own_cause_keywords = []` now carry a curated pair, and every one of
+    them is derivable too (see
+    `tests/test_generate.py::test_the_job2_keyword_exposure_is_pinned_per_case`).
+    Those 20 pairs are declared in `propagation.py`, on the eval-only
+    `Propagation`/`Victim` literals, not in `catalog.py` -- there is no
+    "edit the catalog" fix for them, because there is no catalog entry to
+    edit. This test's claim is specifically about the catalog: it counts
+    only workloads whose keyword pair traces to a `catalog.all_entries()`
+    key, exactly as it always did, and the 20 eval-origin workloads are
+    skipped rather than counted here. The full 76-workload population,
+    catalog and eval-origin together, is
+    `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`'s number.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -2014,8 +2050,8 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
             if not (isinstance(wm, dict) and wm.get("job") == 2):
                 continue
             keywords = tuple(wm.get("own_cause_keywords") or ())
-            if not keywords:
-                continue
+            if not keywords or keywords not in declaring:
+                continue  # not a catalog entry -- an eval-only (propagation.py) pair
             seen = all(k.lower() in prompt for k in keywords)
             (exposed if seen else hidden)[keywords] += 1
 
@@ -2031,9 +2067,11 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     assert (len(fully), n_fully) == (9, 54)
     assert (len(partly), n_partly) == (2, 2)
     assert n_fully + n_partly == 56
-    # The same 56 the scoreboard reports, reached by a different route.
+    # The scoreboard's total is bigger now: the catalog's 56 plus the 20
+    # eval-origin workloads this test deliberately does not count above.
     board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
-    assert board["overall"]["keyword_derivable_n"] == n_fully + n_partly
+    assert board["overall"]["keyword_derivable_n"] == 76
+    assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
 def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_rest():
@@ -2057,11 +2095,12 @@ def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_res
     rewrite cannot reach it.
 
     "Spares the rest" is checked rather than asserted: every per-case block
-    is accounted for, five of which move. `own_cause` and `empty_candidates`
+    is accounted for, seven of which move. `own_cause` and `empty_candidates`
     move because their rows are keyword-graded; `wrong_attribution`,
-    `misattribution_probe` and `multi_misattribution_probe` move because they
-    carry job-2 workloads whose keys the rewrite also touches. The other eight
-    blocks, and every other scoreboard field, are equal before and after.
+    `misattribution_probe`, `multi_misattribution_probe`, `shared_origin_probe`
+    and `shared_origin_decoy_probe` move because they carry job-2 workloads
+    whose keys the rewrite also touches. The other six blocks, and every
+    other scoreboard field, are equal before and after.
 
     Job 2's post-rewrite 0.1242 is the same figure
     `test_always_none_of_these_bot_scores_well_under_the_job2_bar` pins, and
@@ -2070,24 +2109,48 @@ def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_res
     are the 19 whose answer is `none_of_these`, which is the exact set that
     bot wins. 19/153 = 0.1242 either way. If the corpus's `none_of_these`
     count moves, both tests move together.
+
+    Re-pinned on 2026-09-23 for the exam-grader fix
+    (2026-09-23-exam-grader-fix-design.md). `workload_level` moves from 114
+    to 134 -- the rewrite now also touches the 20 shared-origin job-2
+    workloads, which carry a real keyword pair instead of `[]`. `row_level`
+    stays 38: those 20 are graded on `meta["workloads"][name]`, never on
+    `meta["expected_own_keywords"]`, which is what `row_level` counts.
+    `keyword_derivable_n` moves from 56 to 76 before the rewrite for the
+    same reason `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`
+    moved, and stays 0 after (the rewrite closes the exposure for every
+    keyword-graded workload, old and new alike).
+
+    Job 2's BEFORE rate moves from 0.8693 to exactly 1.0, and that is a
+    different kind of change than the others -- not a re-measurement of the
+    same bot against a moved corpus, but the bug this whole fix closes. The
+    bot answers every keyword-graded workload with its own exact keys, and
+    now every one of the 134 is graded on a real pair instead of 20 of them
+    being graded on `[]`; the other 19 job-2 workloads answer
+    `none_of_these`, which the bot also gets right by construction. 134 + 19
+    = 153, so the bot -- which never reads a prompt -- now clears every
+    job-2 workload in the corpus. Before the fix, the 20 shared-origin
+    workloads' real answer was never `none_of_these`, so the bot's
+    `none_of_these` fallback missed all 20 of them: 114 + 19 = 133,
+    133/153 = 0.8693.
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
     rewritten, row_level, workload_level = _rewrite_keyword_answer_keys(
         rows, "nonexistentkeywordtoken")
 
-    assert (row_level, workload_level) == (38, 114)
+    assert (row_level, workload_level) == (38, 134)
 
     before = score.scoreboard(score.evaluate(rows, bot))
     after = score.scoreboard(score.evaluate(rewritten, bot))
 
     # The exposure closes, which is the point of the rewrite.
-    assert before["overall"]["keyword_derivable_n"] == 56
+    assert before["overall"]["keyword_derivable_n"] == 76
     assert after["overall"]["keyword_derivable_n"] == 0
-    assert after["overall"]["keyword_graded_n"] == 114
+    assert after["overall"]["keyword_graded_n"] == 134
 
     # Three numbers retire: the same replies now score differently.
-    assert before["jobs"]["job2"]["rate"] == pytest.approx(0.8693, abs=0.005)
+    assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
     assert after["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
     assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.289, abs=0.005)
     assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1445, abs=0.005)
@@ -2107,10 +2170,14 @@ def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_res
 
     # Every per-case block is accounted for, so "spares the rest" is a
     # measurement rather than a claim about the fields this test happened to
-    # name. The five that move are the two keyword-graded row cases plus the
-    # three probe cases that carry job-2 workloads.
+    # name. The seven that move are the two keyword-graded row cases plus
+    # the five probe cases that carry job-2 workloads -- re-pinned on
+    # 2026-09-23 for the exam-grader fix: `shared_origin_probe` and
+    # `shared_origin_decoy_probe` join the set because their job-2
+    # workloads now carry a real keyword pair the rewrite touches too.
     moved = {case for case in before["by_case"]
              if before["by_case"][case] != after["by_case"][case]}
     assert moved == {"own_cause", "empty_candidates", "wrong_attribution",
-                     "misattribution_probe", "multi_misattribution_probe"}
+                     "misattribution_probe", "multi_misattribution_probe",
+                     "shared_origin_probe", "shared_origin_decoy_probe"}
 

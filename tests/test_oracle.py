@@ -226,3 +226,18 @@ def test_exam_oracle_job3_is_perfect():
         "by_label": {"shared": {"rate": 1.0, "n": 5},
                      "separate": {"rate": None, "n": 0},
                      "none": {"rate": 1.0, "n": 34}}}
+
+
+def test_exam_oracle_job2_is_perfect():
+    """The exam's own job2, oracle-read: a model that answers each row with
+    that row's gold content must score every job-2 workload.
+
+    This is the gate whose absence hid the defect. job1 and job3 have had an
+    exam oracle since the rescope; job 2 -- the one job with a broken ceiling
+    -- was the one nobody pinned, and 20 of its 153 workloads scored 0.0
+    against their own gold answer because their grading keywords were empty.
+    A ceiling below 1.0 here means the corpus, not the model, is at fault.
+    """
+    _, results = _exam()
+    board = score.scoreboard(list(results))
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 153}
