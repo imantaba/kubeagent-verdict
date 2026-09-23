@@ -139,6 +139,42 @@ def job1(meta_workload: dict, reply_row: dict | None) -> float:
 JOB2_BAR = 0.7
 
 
+class UngradableWorkload(ValueError):
+    """A job-2 workload the grader cannot grade, raised instead of scored.
+
+    An undecided workload whose expected cause is a named cause is graded by
+    keyword containment. With an empty keyword list there is no reply that
+    could score 1.0, so a returned 0.0 is not a measurement of the model --
+    it is the corpus saying nothing and the scoreboard printing it as a
+    miss. Twenty of the exam's 153 job-2 workloads were in exactly that
+    state, and job 2 was the one job with no exam oracle to notice.
+    """
+
+
+def _require_job2_gradable(workload: str, meta_workload: dict,
+                           own_cause_keywords: list[str]) -> None:
+    """Raise `UngradableWorkload` for a job-2 workload with a named expected
+    cause and no keywords. Narrow on purpose: job 2 only, named cause only,
+    empty list only.
+
+    A `none_of_these` workload is graded by exact match against that one
+    string and needs no keywords. A job-1 workload is graded by echo. A
+    workload whose meta carries no `job` at all -- a hand-built fixture --
+    is not this function's business.
+    """
+    if meta_workload.get("job") != 2:
+        return
+    expected = meta_workload.get("expected_cause")
+    if expected == NONE_OF_THESE:
+        return
+    if own_cause_keywords:
+        return
+    raise UngradableWorkload(
+        f"workload {workload!r}: job 2 expects the named cause {expected!r} "
+        f"but carries no own_cause_keywords, so no reply could score 1.0. "
+        f"This is a corpus defect, not a model failure.")
+
+
 def _is_job2_keyword_graded(meta_workload: dict,
                             own_cause_keywords: list[str]) -> bool:
     """Whether `job2` grades this workload by keyword containment.
@@ -147,22 +183,28 @@ def _is_job2_keyword_graded(meta_workload: dict,
     grading rule and `_keyword_exposure` calls it to choose whom to measure,
     so the footnote's denominator IS the grader's population rather than a
     second hand-written copy of the same condition. A `none_of_these`
-    workload is graded by exact match against that one string; a workload
-    with no keywords is scored 0.0 whatever the reply says, so no keyword was
-    ever looked for there either.
+    workload is graded by exact match against that one string; a named-cause
+    workload with no keywords is refused by `job2` (`UngradableWorkload`)
+    rather than scored, so it is excluded from this population the same way
+    -- no keyword was ever looked for there either.
     """
     return bool(meta_workload.get("expected_cause") != NONE_OF_THESE
                 and own_cause_keywords)
 
 
 def job2(meta_workload: dict, reply_row: dict | None,
-         own_cause_keywords: list[str]) -> float:
+         own_cause_keywords: list[str], *, workload: str = "") -> float:
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
     story's own cause -- all of `own_cause_keywords` appear in the reply's
     cause, matched as substrings after lowercasing both sides -- or, on a
     `none_of_these` workload, when the reply's cause is exactly that. 0.0
-    otherwise, including a missing row, reply, or keyword set.
+    otherwise, including a missing row or reply.
+
+    Raises `UngradableWorkload` for a named-cause workload with no keywords,
+    BEFORE looking at the reply: that is a statement about the corpus, and a
+    missing reply must not short-circuit past it.
     """
+    _require_job2_gradable(workload, meta_workload, own_cause_keywords)
     if reply_row is None:
         return 0.0
     got_cause = str(reply_row.get("cause", "")).strip().lower()
@@ -435,7 +477,22 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
     return derivable, graded
 
 
-def evaluate(rows: list[dict], chat_fn) -> list[dict]:
+def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict]:
+    """Score every row's model reply against its own meta-carried expectations.
+
+    `grade_job2=False` says this corpus is not being graded on job 2. It
+    suppresses the refusal, the per-workload job-2 scores and the keyword
+    exposure counts -- all three, because they are one diagnostic and a
+    board that printed an exposure beside a job-2 rate of n=0 would read as
+    a measurement it is not.
+
+    The exam path never passes it. Its one caller is the oracle's train/val
+    dataset self-check, where 4,823 train and 589 val job-2 workloads carry
+    a named cause and no keywords: nothing grades the training pool by
+    keyword, and `tests/test_oracle.py`'s `_job2_gate` already scores job 2
+    over its own population. Curating 217 more pairs to satisfy a grader
+    that never reads them is the cost this parameter exists to avoid.
+    """
     # The validation pre-pass. A malformed row is a fixture bug, not a model
     # failure, and it must never spend a chat_fn call finding that out: every
     # row's meta shape is checked FIRST, over every row, before any row is
@@ -443,9 +500,11 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
     for row in rows:
         meta = row["meta"]
         _ = meta["label"]
-        for wm in meta["workloads"].values():
+        for name, wm in meta["workloads"].items():
             _ = wm["job"]
             _ = wm["decided_cause"]
+            if grade_job2:
+                _require_job2_gradable(name, wm, wm.get("own_cause_keywords") or [])
 
     results = []
     for row in rows:
@@ -544,7 +603,8 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         overconfident = (sum(wrong_cause_grades) / len(wrong_cause_grades)
                          if wrong_cause_grades else None)
 
-        keyword_derivable_n, keyword_graded_n = _keyword_exposure(meta, prompt)
+        keyword_derivable_n, keyword_graded_n = (
+            _keyword_exposure(meta, prompt) if grade_job2 else (0, 0))
 
         # The three job scores. job1 and job2 keep ONE score per workload --
         # design spec lines 487 and 530, "one score per decided workload" and
@@ -558,8 +618,10 @@ def evaluate(rows: list[dict], chat_fn) -> list[dict]:
         workloads = meta.get("workloads", {})
         job1_scores = [job1(wm, by_workload.get(w))
                        for w, wm in workloads.items() if wm.get("job") == 1]
-        job2_scores = [job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [])
-                       for w, wm in workloads.items() if wm.get("job") == 2]
+        job2_scores = ([job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [],
+                             workload=w)
+                        for w, wm in workloads.items() if wm.get("job") == 2]
+                       if grade_job2 else [])
         row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))
                     if len(workloads) >= 2 else None)
 

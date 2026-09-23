@@ -36,25 +36,34 @@ def _train_and_val() -> tuple[list, list]:
     return train, val
 
 
-def _gold_results(examples: list) -> list[dict]:
+def _gold_results(examples: list, *, grade_job2: bool = True) -> list[dict]:
     """`score.evaluate`, fed each row's OWN gold assistant content as the
     model's reply -- the oracle read, byte for byte. `evaluate` calls
     `chat_fn` once per row, in order, so a plain iterator over the same
     rows' gold content lines up with no row identity lookup needed.
+
+    `grade_job2=False` for the train and val pools, and only there. Nothing
+    grades the training pool by keyword: 4,823 train and 589 val job-2
+    workloads carry a named expected cause and no keywords, and
+    `score.evaluate` refuses such a corpus rather than scoring it zero.
+    Job 2 on those pools is measured by `_job2_gate` below, over the
+    population spec section 10 gate 1 defines. The exam passes nothing and
+    is graded in full -- see `test_exam_oracle_job2_is_perfect`.
     """
     rows = [generate.to_row(e) for e in examples]
     gold = iter(r["messages"][2]["content"] for r in rows)
-    return score.evaluate(rows, lambda _messages: next(gold))
+    return score.evaluate(rows, lambda _messages: next(gold),
+                          grade_job2=grade_job2)
 
 
 @functools.lru_cache(maxsize=1)
 def _train_results() -> tuple[dict, ...]:
-    return tuple(_gold_results(_train_and_val()[0]))
+    return tuple(_gold_results(_train_and_val()[0], grade_job2=False))
 
 
 @functools.lru_cache(maxsize=1)
 def _val_results() -> tuple[dict, ...]:
-    return tuple(_gold_results(_train_and_val()[1]))
+    return tuple(_gold_results(_train_and_val()[1], grade_job2=False))
 
 
 @functools.lru_cache(maxsize=1)
@@ -69,9 +78,10 @@ def _job2_gate(examples: list) -> dict:
     whose `expected_cause` is `none_of_these` (exact match).
 
     NOT `scoreboard()`'s own job2 rate: `evaluate` puts every job==2
-    workload in `job2_scores`, and `job2` itself scores a keyword-less,
-    non-`none_of_these` workload 0.0 whatever the reply says -- that
-    workload is out of scope for this gate, not a failure of it.
+    workload in `job2_scores`, and `job2` itself now refuses a keyword-less,
+    non-`none_of_these` workload outright. This gate filters such a
+    workload out before calling `job2` at all -- it is out of scope for
+    this gate, which never meets one.
     """
     hits, total = 0.0, 0
     for ex in examples:

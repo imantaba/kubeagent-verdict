@@ -24,7 +24,7 @@ ROW = {
                  "job": 2, "decided": False, "decided_cause": "",
                  "decided_outcome": "", "decided_evidence": "",
                  "expected_cause": "memory limit too low for the workload",
-                 "own_cause_keywords": []}}},
+                 "own_cause_keywords": ["memory", "limit"]}}},
 }
 
 
@@ -271,13 +271,15 @@ def test_job2_missing_row_scores_zero():
     assert score.job2(wm, None, ["memory", "limit"]) == 0.0
 
 
-def test_job2_own_cause_row_with_no_keywords_scores_zero():
+def test_job2_own_cause_row_with_no_keywords_is_refused():
     """A malformed own-cause workload (job 2, a named expected_cause, but an
-    empty own_cause_keywords list) cannot be credited -- there is nothing to
-    check the reply's cause against, so it reads 0.0 rather than a free 1.0."""
+    empty own_cause_keywords list) cannot be graded -- there is nothing to
+    check the reply's cause against, so job2 refuses it rather than reading
+    a free 0.0."""
     wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
     reply = {"cause": "the memory limit is too small", "confidence": "high", "rationale": "r"}
-    assert score.job2(wm, reply, []) == 0.0
+    with pytest.raises(score.UngradableWorkload):
+        score.job2(wm, reply, [])
 
 
 # --------------------------------------------------- job 3: the summary scorer
@@ -429,7 +431,7 @@ def test_own_cause_matches_by_keywords():
                        "job": 2, "decided": False, "decided_cause": "",
                        "decided_outcome": "", "decided_evidence": "",
                        "expected_cause": "container killed at its memory limit",
-                       "own_cause_keywords": []}}}
+                       "own_cause_keywords": ["memory", "limit"]}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api",
                                        "cause": "the memory limit is too small",
                                        "confidence": "high", "rationale": "r"}],
@@ -478,7 +480,7 @@ def _decoy_row(model_cause):
                        "job": 2, "decided": False, "decided_cause": "",
                        "decided_outcome": "", "decided_evidence": "",
                        "expected_cause": "memory limit too low for the workload",
-                       "own_cause_keywords": []}}}
+                       "own_cause_keywords": ["memory", "limit"]}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": model_cause,
                                        "confidence": "high", "rationale": "r"}],
                          "summary": "s"})
@@ -577,7 +579,7 @@ def _refusing_decoy_board(answer):
                        "job": 2, "decided": False, "decided_cause": "",
                        "decided_outcome": "", "decided_evidence": "",
                        "expected_cause": "memory limit too low for the workload",
-                       "own_cause_keywords": []}}}
+                       "own_cause_keywords": ["memory", "limit"]}}}
     return score.scoreboard(score.evaluate([row], lambda messages: answer))
 
 
@@ -602,12 +604,16 @@ def _length_row(case, expected_cause, decoy_cause, model_cause):
     row["messages"][2]["content"] = json.dumps({
         "verdicts": [{"workload": "shop/api", "cause": expected_cause,
                       "confidence": "high", "rationale": "r"}], "summary": "s"})
+    # A keyword drawn from `expected_cause` itself -- the fixture only needs
+    # job2 to be gradable here, not a specific keyword match: none of this
+    # helper's callers assert on job2_scores or keyword exposure.
     row["meta"] = {"case": case, "expected_cause": expected_cause,
                    "expected_confidence": "high", "decoy_cause": decoy_cause,
                    "label": "none", "workloads": {"shop/api": {
                        "job": 2, "decided": False, "decided_cause": "",
                        "decided_outcome": "", "decided_evidence": "",
-                       "expected_cause": expected_cause, "own_cause_keywords": []}}}
+                       "expected_cause": expected_cause,
+                       "own_cause_keywords": [expected_cause.split()[0]]}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api", "cause": model_cause,
                                        "confidence": "high", "rationale": "r"}],
                          "summary": "s"})
@@ -669,10 +675,10 @@ def _multi_decoy_board(model_causes):
                  "workloads": {
                      "shop/api": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
-                                  "expected_cause": "real one", "own_cause_keywords": []},
+                                  "expected_cause": "real one", "own_cause_keywords": ["one"]},
                      "shop/web": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
-                                  "expected_cause": "real two", "own_cause_keywords": []}}}}
+                                  "expected_cause": "real two", "own_cause_keywords": ["two"]}}}}
     answer = json.dumps({"verdicts": [
         {"workload": w, "cause": cse, "confidence": "high", "rationale": "r"}
         for w, cse in zip(["shop/api", "shop/web"], model_causes)], "summary": "s"})
@@ -783,6 +789,97 @@ def test_evaluate_checks_every_row_before_calling_chat_fn_on_any():
     assert calls == []
 
 
+def _row_with_job2_workload(keywords):
+    """One row, one job-2 workload with a named expected cause -- ROW's own
+    shape, varying only `own_cause_keywords`."""
+    return {
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "user shop/api"},
+            {"role": "assistant", "content": json.dumps({
+                "verdicts": [{"workload": "shop/api",
+                             "cause": "memory limit too low for the workload",
+                             "confidence": "high", "rationale": "r"}],
+                "summary": "s"})},
+        ],
+        "meta": {"case": "attributed",
+                 "expected_cause": "memory limit too low for the workload",
+                 "expected_confidence": "high", "label": "none",
+                 "workloads": {"shop/api": {
+                     "job": 2, "decided": False, "decided_cause": "",
+                     "decided_outcome": "", "decided_evidence": "",
+                     "expected_cause": "memory limit too low for the workload",
+                     "own_cause_keywords": keywords}}},
+    }
+
+
+def test_job2_refuses_a_named_cause_workload_with_no_keywords():
+    """Spec section 1: a job-2 workload whose expected cause is a named
+    cause and whose keyword list is empty cannot be graded, and saying so
+    is the point. Returning 0.0 there is a claim the model got it wrong.
+    """
+    wm = {"job": 2, "expected_cause": "the registry is unreachable",
+          "decided_cause": "", "own_cause_keywords": []}
+    with pytest.raises(score.UngradableWorkload) as exc:
+        score.job2(wm, {"cause": "anything"}, [], workload="prod/api")
+    assert "prod/api" in str(exc.value)
+    assert "the registry is unreachable" in str(exc.value)
+
+
+def test_job2_refuses_before_it_looks_at_the_reply():
+    """The refusal is about the CORPUS, not the reply. A missing reply
+    returns 0.0 on every other path, and letting that short-circuit run
+    first would hide the defect on exactly the workloads a model said
+    nothing about.
+    """
+    wm = {"job": 2, "expected_cause": "the registry is unreachable",
+          "decided_cause": "", "own_cause_keywords": []}
+    with pytest.raises(score.UngradableWorkload):
+        score.job2(wm, None, [], workload="prod/api")
+
+
+def test_job2_does_not_refuse_a_none_of_these_workload():
+    """`none_of_these` is graded by exact match against that one string and
+    needs no keywords. The refusal is narrow on purpose.
+    """
+    wm = {"job": 2, "expected_cause": score.NONE_OF_THESE,
+          "decided_cause": "", "own_cause_keywords": []}
+    assert score.job2(wm, {"cause": score.NONE_OF_THESE}, []) == 1.0
+
+
+def test_job2_does_not_refuse_a_job1_workload():
+    wm = {"job": 1, "expected_cause": "the registry is unreachable",
+          "decided_cause": "the registry is unreachable",
+          "own_cause_keywords": []}
+    assert score.job2(wm, {"cause": "whatever"}, []) == 0.0
+
+
+def test_evaluate_refuses_an_ungradable_corpus_before_any_model_call():
+    """The validation pre-pass's own contract: a fixture bug must never
+    spend a chat_fn call finding that out.
+    """
+    row = _row_with_job2_workload(keywords=[])
+    calls = []
+    with pytest.raises(score.UngradableWorkload):
+        score.evaluate([row], lambda messages: calls.append(messages) or "{}")
+    assert calls == []
+
+
+def test_evaluate_scores_no_job2_when_told_it_is_not_grading_job2():
+    """`grade_job2=False` is for a corpus that is not being graded on job 2
+    -- the oracle's train/val dataset self-check. It suppresses the refusal,
+    the job-2 scores AND the keyword exposure counts together, because a
+    board reporting an exposure under a job-2 rate of n=0 reads as a
+    measurement and is not one.
+    """
+    row = _row_with_job2_workload(keywords=[])
+    results = score.evaluate([row], lambda messages: "{}", grade_job2=False)
+    board = score.scoreboard(results)
+    assert board["jobs"]["job2"] == {"rate": None, "n": 0}
+    assert board["overall"]["keyword_graded_n"] == 0
+    assert board["overall"]["keyword_derivable_n"] == 0
+
+
 # --------------------------------------------------- evaluate(): the decoy gate
 
 
@@ -864,7 +961,7 @@ def test_decoy_gate_unions_the_workload_list_with_the_row_level_pair():
                      "job": 2, "decided": False, "decided_cause": "",
                      "decided_outcome": "", "decided_evidence": "",
                      "expected_cause": "memory limit too low for the workload",
-                     "own_cause_keywords": []}}}}
+                     "own_cause_keywords": ["memory", "limit"]}}}}
     answer = json.dumps({"verdicts": [{"workload": "shop/api",
                                        "cause": "CoreDNS is down cluster-wide",
                                        "confidence": "high", "rationale": "r"}],
@@ -894,11 +991,11 @@ def test_decoy_gate_skips_a_workload_whose_combined_decoy_list_is_empty():
                      "shop/api": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
                                   "expected_cause": "memory limit too low for the workload",
-                                  "own_cause_keywords": []},
+                                  "own_cause_keywords": ["memory", "limit"]},
                      "shop/web": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
                                   "expected_cause": "bad image tag",
-                                  "own_cause_keywords": []}}}}
+                                  "own_cause_keywords": ["image"]}}}}
     answer = json.dumps({"verdicts": [
         {"workload": "shop/api", "cause": "the registry is unreachable",
          "confidence": "high", "rationale": "r"},
@@ -1133,10 +1230,14 @@ def test_keyword_matching_is_case_folded_like_the_grader():
 
 
 def test_a_workload_with_no_keyword_set_is_out_of_the_denominator():
-    """`job2` scores a workload with no keywords 0.0 whatever the reply says,
-    so no keyword was ever looked for and there is no exposure to report.
-    Counting it would pad the denominator with a question never asked."""
-    results = score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])
+    """An empty keyword list can only belong to a `none_of_these` workload
+    now -- job2 refuses a named-cause workload with no keywords outright.
+    `none_of_these` is graded by exact match, so no keyword was ever looked
+    for and there is no exposure to report. Counting it would pad the
+    denominator with a question never asked."""
+    row = _keyword_row("the memory limit was exceeded", [])
+    row["meta"]["workloads"]["shop/api"]["expected_cause"] = NONE_OF_THESE
+    results = score.evaluate([row], lambda m: NONE_OF_THESE)
     assert results[0]["keyword_graded_n"] == 0
     board = score.scoreboard(results)
     assert board["overall"]["keyword_derivable_n"] == 0
@@ -1209,8 +1310,10 @@ def test_exposure_is_a_footnote_not_a_column():
 def test_exposure_footnote_prints_even_when_nothing_is_keyword_graded():
     """Zero of zero is a fact about the corpus, not an absence. A footnote that
     disappears reads as "not measured" to whoever is checking the release bar."""
+    row = _keyword_row("the memory limit was exceeded", [])
+    row["meta"]["workloads"]["shop/api"]["expected_cause"] = NONE_OF_THESE
     md = score.render_markdown(score.scoreboard(
-        score.evaluate([ROW], lambda m: ROW["messages"][2]["content"])))
+        score.evaluate([row], lambda m: NONE_OF_THESE)))
     assert ("Job-2 workloads whose keywords all appear in the prompt already: "
             "0 of 0") in md
 
@@ -1222,11 +1325,13 @@ def test_exposure_is_broken_out_per_case_not_just_overall():
     between the two names is invisible from `overall` alone. This is the only
     assertion that can see the difference: a case with no keyword-graded
     workload must read 0 of 0, not the whole run's numbers."""
+    attributed_row = _keyword_row("the memory limit was exceeded", [], case="attributed")
+    attributed_row["meta"]["workloads"]["shop/api"]["expected_cause"] = NONE_OF_THESE
     rows = [_keyword_row("the memory limit was exceeded", ["memory", "limit"],
                          case="own_cause"),
             _keyword_row("the container exited", ["memory", "limit"],
                          case="empty_candidates"),
-            ROW]  # `attributed`, no keywords at all -- measured on neither axis
+            attributed_row]  # `attributed`, none_of_these -- measured on neither axis
     by_case = score.scoreboard(score.evaluate(rows, lambda m: _answer()))["by_case"]
     assert by_case["own_cause"]["keyword_derivable_n"] == 1
     assert by_case["own_cause"]["keyword_graded_n"] == 1
@@ -1246,10 +1351,15 @@ def test_the_keyword_graded_population_is_the_population_job2_grades():
     is never `none_of_these`, so `job2 == 1.0` exactly when the workload was
     graded by keyword containment -- compared, workload by workload, against
     whether it was counted at all.
+
+    A third case used to sit in this same loop: a named-cause workload with
+    no keywords, excluded from the count and scored 0.0. `job2` now refuses
+    that shape outright (`UngradableWorkload`) rather than scoring it, so it
+    no longer fits this loop's `evaluate(...)[0]` shape; it is asserted
+    separately below.
     """
     cases = [("keywords, own cause", ["memory", "limit"],
               "container killed at its memory limit", 1.0, 1),
-             ("no keywords", [], "container killed at its memory limit", 0.0, 0),
              ("none_of_these", ["memory", "limit"], NONE_OF_THESE, 0.0, 0)]
     for name, keywords, expected_cause, want_job2, want_graded in cases:
         row = _keyword_row("the memory limit was exceeded", keywords)
@@ -1257,6 +1367,12 @@ def test_the_keyword_graded_population_is_the_population_job2_grades():
         r = score.evaluate([row], lambda m: _answer())[0]
         assert r["job2_scores"] == [want_job2], name
         assert r["keyword_graded_n"] == want_graded, name
+
+    no_keywords_row = _keyword_row("the memory limit was exceeded", [])
+    no_keywords_row["meta"]["workloads"]["shop/api"]["expected_cause"] = (
+        "container killed at its memory limit")
+    with pytest.raises(score.UngradableWorkload):
+        score.evaluate([no_keywords_row], lambda m: _answer())
 
 
 def test_the_footnote_counts_the_corpus_job2_keyword_population():
@@ -1561,10 +1677,10 @@ def test_scoreboard_job3_by_label_only_counts_rows_of_that_label():
                      "workloads": {
                          "shop/api": {"job": 2, "decided": False, "decided_cause": "",
                                       "decided_outcome": "", "decided_evidence": "",
-                                      "expected_cause": "c1", "own_cause_keywords": []},
+                                      "expected_cause": "c1", "own_cause_keywords": ["c1"]},
                          "shop/web": {"job": 2, "decided": False, "decided_cause": "",
                                       "decided_outcome": "", "decided_evidence": "",
-                                      "expected_cause": "c2", "own_cause_keywords": []}}}}
+                                      "expected_cause": "c2", "own_cause_keywords": ["c2"]}}}}
 
     shared_row = two_workload_row("shared", "both share one common root cause")
     separate_row = two_workload_row("separate", "these are unrelated, independent causes")
