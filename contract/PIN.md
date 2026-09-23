@@ -119,3 +119,24 @@ without someone saying why. This is where the why is recorded.
   `none`-labeled rows), and the graded-view pin (`tests/
   test_exam_graded_view.py`) passes unchanged, so this re-pin is the two
   hashes only — no other frozen artifact moved.
+
+- **2026-09-23 — answer keys for the shared-origin job-2 workloads.** Both
+  hashes moved, and so did the graded-view pin (`tests/
+  test_exam_graded_view.py`). Every undecided workload in the two
+  shared-origin slices carried `own_cause_keywords: []`, so job 2 scored it
+  0.0 whatever the model replied — 20 of the exam's 153 job-2 workloads.
+  Each now carries a curated two-word pair: the victim's own pair in the
+  healthy world, the scenario's shared pair in the broken one. The 22 pairs
+  (16 victims, 6 shared causes) live in `dataset/propagation.py`. A decided
+  workload still carries `[]`, because job 1 grades it by echo. The
+  footprint was measured by diffing the exam before and after: 11 of the
+  263 rows change, and in each only `meta` does — rows 248, 249 and 253
+  inside the frozen slice (4 workloads, which is why `FROZEN_253_SHA256`
+  moved) and rows 255-259 and 261-263 outside it (16 workloads). Not one
+  `messages` byte moved; `tests/test_exam_prompt_stability.py` pins that
+  against the banked exam. The grader now refuses a job-2 workload that
+  names a cause but carries no keywords, instead of scoring it zero. The
+  paste-the-prompt bot rises from 0.366 to 0.497, because all 20 print
+  their answer on their own menu. A job-2 number measured before this was
+  scored by a grader that zeroed those 20 workloads for every reply, so it
+  does not compare with one measured after.

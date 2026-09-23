@@ -1165,7 +1165,7 @@ def test_a_prompt_with_no_suggestion_line_is_not_measured():
 # `keyword_derivable_n` "keeps printing, now over all job-2 rows". Before the
 # rescope fix it counted the retired `cause_acc` slice instead -- the two case
 # names in `KEYWORD_CASES`, at the row level -- and printed 19 of 38 where the
-# spec's population is 56 of 114.
+# spec's population was 56 of 114 (76 of 134 since the 2026-09-23 grader fix).
 #
 # It measures the corpus, not the model. Every test below therefore holds the
 # row fixed and varies nothing about the answer, except the one that varies

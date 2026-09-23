@@ -452,7 +452,8 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
     all job-2 rows", and job 2 scores one workload at a time. Before the
     v1.24.0 rescope fix this counted the retired `cause_acc` slice instead --
     the two case names in `KEYWORD_CASES`, once per row -- and printed 19 of
-    38 where job 2's own population is 56 of 114.
+    38 where job 2's own population was 56 of 114 (76 of 134 since the
+    2026-09-23 grader fix).
 
     Whom to measure comes from `_is_job2_keyword_graded` -- the same predicate
     `job2` grades by, handed the same keyword list `evaluate` hands `job2` --

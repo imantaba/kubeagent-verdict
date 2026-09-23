@@ -41,6 +41,11 @@ confirms it when the run ends.
    examples dropped for colliding with a corpus-test fixture's group),
    test > 0, every case present in `case_counts`.
 
+   A probe set built with `kv-dataset --probe-cousins` (see
+   `docs/how-training-works.md`) carries no job-2 answer keys; score it
+   with `kv-eval --no-job2`, or job 2 refuses the run instead of reading
+   `n/a`.
+
 2. **Negative control** — only when the dataset or the eval changed, and
    then it is not optional. An eval change that could not fail the model it
    replaced is not a fix. Serve the *previous* model, still on disk, and run
@@ -77,6 +82,11 @@ confirms it when the run ends.
    precisely so a run can be re-scored without re-running inference, and it
    takes a `chat_fn` — so a previous run replays through the *current* scoring
    code by handing it the banked outputs in file order:
+
+   `kv-eval --test <rows> --replay out/eval-<prev> --out <dir>` does this
+   with both alignment guards and carries the prior run's model and
+   endpoint; it still cannot prove the prompts match, so compare `messages`
+   first.
 
        rows = [...]                      # the test rows, same order as results
        banked = [json.loads(l) for l in open('out/eval-<prev>/results.jsonl')]
