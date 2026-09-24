@@ -13,8 +13,6 @@ import re
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.evals.contract_check import contract_check
 
-KEYWORD_CASES = {"own_cause", "empty_candidates"}
-
 # The top of the three-grade vocabulary the catalog emits (high/medium/low).
 HIGHEST_CONFIDENCE = "high"
 
@@ -180,9 +178,10 @@ def _is_job2_keyword_graded(meta_workload: dict,
     """Whether `job2` grades this workload by keyword containment.
 
     The ONE definition of that population. `job2` calls it to choose the
-    grading rule and `_keyword_exposure` calls it to choose whom to measure,
-    so the footnote's denominator IS the grader's population rather than a
-    second hand-written copy of the same condition. A `none_of_these`
+    grading rule, `evaluate` calls it to grade the row-level cause
+    diagnostics the same way, and `_keyword_exposure` calls it to choose whom
+    to measure, so the footnote's denominator IS the grader's population
+    rather than a second hand-written copy of the same condition. A `none_of_these`
     workload is graded by exact match against that one string; a named-cause
     workload with no keywords is refused by `job2` (`UngradableWorkload`)
     rather than scored, so it is excluded from this population the same way
@@ -411,13 +410,13 @@ def _norm_cause(s: str) -> str:
     return " ".join(str(s).lower().strip().rstrip(".").split())
 
 
-# The `own_cause` and `empty_candidates` slices are graded by keyword
-# containment rather than exact match, which is the right rule for slices whose
-# answer is not a menu selection and also the loosest rule on the board. This
-# measures how much of that looseness the CORPUS hands over for free: on a row
-# where every expected keyword is already printed in the prompt, a cause string
-# assembled from words on screen grades as correct, so the slice cannot separate
-# "read the evidence and concluded" from "restated the evidence".
+# Job 2 grades most of its workloads by keyword containment rather than exact
+# match -- the right rule for an answer that is not a menu selection, and also
+# the loosest rule on the board. `_keyword_exposure` measures how much of that
+# looseness the CORPUS hands over for free: on a workload where every expected
+# keyword is already printed in the prompt, a cause string assembled from words
+# on screen grades as correct, so the grader cannot separate "read the evidence
+# and concluded" from "restated the evidence".
 #
 # It is a diagnostic, not a score, and the distinction is load-bearing. It
 # measures the corpus rather than the model — the model's output is not an input
@@ -426,23 +425,11 @@ def _norm_cause(s: str) -> str:
 # model exploited the looseness; it is a claim that the looseness is there to
 # exploit, printed where whoever reads the release bar will see it.
 #
-# The real fix is a keyword the prompt does not contain, on every keyword row.
-# That rewrites 38 answer keys and makes every historical score on those two
-# slices incomparable, so it waits for evidence a model is actually clearing the
-# slice while failing elsewhere. This number is what would supply that evidence.
-def _is_keyword_graded(meta: dict) -> bool:
-    """Whether this row is graded by keyword containment rather than exact match.
-
-    The ONE definition of that population. `evaluate` calls it to choose the
-    grading rule and `_keyword_derivable` calls it to choose whom to measure,
-    so the diagnostic's denominator IS the grader's population rather than a
-    second hand-written copy of the same condition -- which is what a claim
-    that the two cannot drift has to rest on. A shared predicate makes it true
-    structurally; `test_the_keyword_graded_population_is_the_measured_population`
-    keeps it true when a call site is edited instead of the predicate.
-    """
-    return bool(meta.get("case") in KEYWORD_CASES
-                and meta.get("expected_own_keywords"))
+# The real fix is a keyword the prompt does not contain, on every keyword-graded
+# workload. That rewrites the catalog's answer keys and makes every historical
+# job-2 score incomparable, so it waits for evidence a model is actually
+# clearing job 2 while failing elsewhere. This number is what would supply that
+# evidence.
 
 
 def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
@@ -450,10 +437,9 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
 
     Counted per WORKLOAD, not per row: design spec line 547 prints this "over
     all job-2 rows", and job 2 scores one workload at a time. Before the
-    v1.24.0 rescope fix this counted the retired `cause_acc` slice instead --
-    the two case names in `KEYWORD_CASES`, once per row -- and printed 19 of
-    38 where job 2's own population was 56 of 114 (76 of 134 since the
-    2026-09-23 grader fix).
+    v1.24.0 rescope fix this counted two case names, `own_cause` and
+    `empty_candidates`, once per row -- and printed 19 of 38 where job 2's own
+    population was 56 of 114 (76 of 134 since the 2026-09-23 grader fix).
 
     Whom to measure comes from `_is_job2_keyword_graded` -- the same predicate
     `job2` grades by, handed the same keyword list `evaluate` hands `job2` --
@@ -528,9 +514,14 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             got = by_workload.get(exp["workload"])
             if not got:
                 continue
-            if _is_keyword_graded(meta):
-                kws = [k.lower() for k in meta["expected_own_keywords"]]
-                matched = all(k in str(got.get("cause", "")).lower() for k in kws)
+            # The same per-workload population `job2` grades by keyword, so a
+            # right own-cause answer counts here on every case that carries
+            # one, not only on the two cases that used to be named.
+            wm = (meta.get("workloads") or {}).get(exp["workload"]) or {}
+            keywords = wm.get("own_cause_keywords") or []
+            if wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
+                matched = all(str(k).lower() in str(got.get("cause", "")).lower()
+                              for k in keywords)
             else:
                 matched = got.get("cause") == exp["cause"]
             if matched:

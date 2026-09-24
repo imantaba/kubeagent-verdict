@@ -1166,6 +1166,8 @@ def test_a_prompt_with_no_suggestion_line_is_not_measured():
 # rescope fix it counted the retired `cause_acc` slice instead -- the two case
 # names in `KEYWORD_CASES`, at the row level -- and printed 19 of 38 where the
 # spec's population was 56 of 114 (76 of 134 since the 2026-09-23 grader fix).
+# Since the 2026-09-24 generator fix `KEYWORD_CASES` is gone: the row-level
+# cause diagnostics grade by the same per-workload rule as job 2.
 #
 # It measures the corpus, not the model. Every test below therefore holds the
 # row fixed and varies nothing about the answer, except the one that varies
@@ -1270,15 +1272,53 @@ def test_a_decided_workload_is_out_of_the_denominator():
 def test_the_population_does_not_depend_on_the_case_name():
     """The retired `cause_acc` slice gated on `KEYWORD_CASES`, two case names.
     job 2 does not: it grades by keyword wherever a workload carries keywords
-    and does not expect `none_of_these`. A case outside `KEYWORD_CASES` --
+    and does not expect `none_of_these`. A case outside those two names --
     `wrong_attribution` and `multi_misattribution_probe` are two real ones --
-    is measured here, which is where the extra 76 workloads come from."""
+    is measured here, which is where the extra 76 workloads come from.
+
+    Since the 2026-09-24 generator fix the case-name list itself is gone, so
+    nothing in the grader can pick the population by case name again."""
     row = _keyword_row("the memory limit was exceeded", ["memory", "limit"],
                        case="wrong_attribution")
-    assert "wrong_attribution" not in score.KEYWORD_CASES
+    assert not hasattr(score, "KEYWORD_CASES")
+    assert not hasattr(score, "_is_keyword_graded")
     board = score.scoreboard(score.evaluate([row], lambda m: _answer()))
     assert board["overall"]["keyword_graded_n"] == 1
     assert board["overall"]["keyword_derivable_n"] == 1
+
+
+def test_cause_accuracy_grades_a_job2_workload_by_its_keywords_on_any_case():
+    """The row-level cause diagnostic grades a job-2 workload the way `job2`
+    does: by its own keywords, whatever the row's case is called.
+
+    Before the 2026-09-24 generator fix only `own_cause` and
+    `empty_candidates` rows were keyword-graded here, so a right own-cause
+    answer on `wrong_attribution` -- the answer `job2` scores 1.0 -- counted
+    as wrong in `cause_acc`."""
+    row = _keyword_row("the container exited", ["memory", "limit"],
+                       case="wrong_attribution")
+    results = score.evaluate([row], lambda m: _answer())
+    assert results[0]["job2_scores"] == [1.0]
+    assert results[0]["cause_acc"] == 1.0
+
+
+def test_cause_accuracy_exact_matches_a_none_of_these_workload():
+    """A `none_of_these` workload is exact-matched, here and in `job2`, even
+    when its meta carries keywords: a reply that holds every keyword but
+    names a cause scores 0 on both, and `none_of_these` itself scores 1."""
+    row = _keyword_row("the container exited", ["memory", "limit"],
+                       case="none_of_these")
+    row["meta"]["workloads"]["shop/api"]["expected_cause"] = NONE_OF_THESE
+    row["messages"][2]["content"] = json.dumps({
+        "verdicts": [{"workload": "shop/api", "cause": NONE_OF_THESE,
+                      "confidence": "low", "rationale": "r"}],
+        "summary": "s"})
+    named = score.evaluate([row], lambda m: _answer())
+    assert named[0]["job2_scores"] == [0.0]
+    assert named[0]["cause_acc"] == 0.0
+    abstained = score.evaluate([row], lambda m: _answer(NONE_OF_THESE))
+    assert abstained[0]["job2_scores"] == [1.0]
+    assert abstained[0]["cause_acc"] == 1.0
 
 
 def test_exposure_does_not_move_with_the_model_answer():
@@ -2085,40 +2125,49 @@ def _own_keyword_bot(rows: list[dict]):
     return chat_fn
 
 
-def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int, int]:
+def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
+    """The row-level cause diagnostic grades exactly job 2's keyword-graded
+    population, checked over the whole exam rather than one fixture.
+
+    On a row whose every workload is job 2, `cause_acc` and the mean of the
+    row's `job2_scores` grade the same workloads by the same rule, so they
+    must agree for any reply. The own-keyword bot is a reply that tells them
+    apart when they do not: before the 2026-09-24 generator fix it disagreed
+    on 64 of these 121 rows, every `wrong_attribution`,
+    `misattribution_probe`, `multi_misattribution_probe` and shared-origin
+    probe row among them."""
+    rows = _corpus_rows()
+    results = score.evaluate(rows, _own_keyword_bot(rows))
+    checked = 0
+    for row, res in zip(rows, results):
+        workloads = list(row["meta"]["workloads"].values())
+        if not workloads or any(wm.get("job") != 2 for wm in workloads):
+            continue
+        checked += 1
+        assert res["cause_acc"] == pytest.approx(
+            sum(res["job2_scores"]) / len(res["job2_scores"])), row["meta"]["case"]
+    assert checked == 121
+
+
+def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int]:
     """Rewrites every job-2 keyword answer key to a word no prompt contains.
 
     The catalog stores each entry's `own_cause_keywords` once and the row
-    builders copy it into two places: `meta["expected_own_keywords"]` on the
-    `own_cause` and `empty_candidates` rows, which is what `evaluate` grades
-    `cause_acc` by, and `meta["workloads"][name]["own_cause_keywords"]` on
-    every keyword-graded job-2 workload, which is what `job2` grades by. A
-    real rewrite edits the catalog and moves both, so this moves both.
+    builders copy it onto every keyword-graded job-2 workload,
+    `meta["workloads"][name]["own_cause_keywords"]`. Since the 2026-09-24
+    generator fix that one key is what both `job2` and `evaluate`'s cause
+    diagnostics grade by. The row-level `meta["expected_own_keywords"]` copy
+    on `own_cause` and `empty_candidates` rows is no longer read by the
+    grader, so this leaves it alone.
     """
     rewritten = copy.deepcopy(rows)
-    row_level = workload_level = 0
+    workload_level = 0
     for row in rewritten:
-        if score._is_keyword_graded(row["meta"]):
-            row["meta"]["expected_own_keywords"] = [token]
-            row_level += 1
         for wm in row["meta"]["workloads"].values():
             if isinstance(wm, dict) and wm.get("job") == 2 and wm.get("own_cause_keywords"):
                 wm["own_cause_keywords"] = [token]
                 workload_level += 1
-    return rewritten, row_level, workload_level
-
-
-def _every_keyword_graded_row_has_no_length_verdict(rows: list[dict]) -> bool:
-    """Whether no keyword-graded row carries a `length_helps` verdict.
-
-    This is why a keyword rewrite cannot move `length_gap`. `evaluate` sets
-    `length_helps` only on a row that has a decoy cause to compare against,
-    and neither `own_cause` nor `empty_candidates` has one.
-    """
-    results = score.evaluate(rows, lambda messages: "")
-    return all(res["length_helps"] is None
-               for row, res in zip(rows, results)
-               if score._is_keyword_graded(row["meta"]))
+    return rewritten, workload_level
 
 
 def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
@@ -2190,14 +2239,23 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
-def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_rest():
-    """Closing job 2's keyword exposure costs three banked numbers, not one.
+def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest():
+    """Closing job 2's keyword exposure costs four banked numbers, not one.
 
     `docs/model-card.md` limit 7 names rewriting the answer keys as the way
     to close the exposure, so the price of that rewrite belongs next to it
-    as a measurement. `score.py`'s own comment above `_is_keyword_graded`
-    states the coupling -- a rewrite "makes every historical score on those
-    two slices incomparable" -- and this pins which numbers that is.
+    as a measurement. `score.py`'s comment above `_keyword_exposure` states
+    the coupling -- a rewrite "makes every historical job-2 score
+    incomparable" -- and this pins which numbers that is.
+
+    Re-pinned on 2026-09-24 for the job-2 generator fix
+    (2026-09-24-job2-generator-fix-design.md). The cause diagnostics now
+    grade by job 2's own per-workload rule instead of two case names, and
+    that adds a fourth number: the length decider. `wrong_attribution` and
+    `misattribution_probe` rows carry a decoy, so they carry a length
+    verdict, and their cause is now keyword-graded -- 38 of the 56
+    `length helps` rows. The paragraphs below are the 2026-09-23 account;
+    where they say `length_gap` does not move, that held until this fix.
 
     Three move: job 2, because it grades by keyword containment; cause
     accuracy, because the `own_cause` and `empty_candidates` rows are graded
@@ -2252,10 +2310,10 @@ def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_res
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
-    rewritten, row_level, workload_level = _rewrite_keyword_answer_keys(
+    rewritten, workload_level = _rewrite_keyword_answer_keys(
         rows, "nonexistentkeywordtoken")
 
-    assert (row_level, workload_level) == (38, 134)
+    assert workload_level == 134
 
     before = score.scoreboard(score.evaluate(rows, bot))
     after = score.scoreboard(score.evaluate(rewritten, bot))
@@ -2265,24 +2323,25 @@ def test_rewriting_the_job2_answer_keys_retires_three_numbers_and_spares_the_res
     assert after["overall"]["keyword_derivable_n"] == 0
     assert after["overall"]["keyword_graded_n"] == 134
 
-    # Three numbers retire: the same replies now score differently.
+    # Four numbers retire: the same replies now score differently.
     assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
     assert after["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
-    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.289, abs=0.005)
+    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5387, abs=0.005)
     assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1445, abs=0.005)
-    assert before["overall"]["overconfidence_rate"]["n"] == 187
+    assert before["overall"]["overconfidence_rate"]["n"] == 123
     assert after["overall"]["overconfidence_rate"]["n"] == 225
+    assert before["overall"]["cause_when_length_helps"] == {"rate": 0.6786, "n": 56}
+    assert after["overall"]["cause_when_length_helps"] == {"rate": 0.0, "n": 56}
+    assert before["overall"]["length_gap"] == pytest.approx(0.6786, abs=0.005)
+    assert after["overall"]["length_gap"] == pytest.approx(0.0, abs=0.005)
 
-    # Everything else is untouched, including length_gap.
-    assert _every_keyword_graded_row_has_no_length_verdict(rows)
-    for field in ("length_gap", "cause_when_length_helps", "cause_when_length_misleads",
-                  "contract_rate", "decoy_rate", "suggestion_echo_rate",
-                  "injection_echo_rate", "confidence_carried"):
+    # Everything else is untouched.
+    for field in ("cause_when_length_misleads", "contract_rate", "decoy_rate",
+                  "suggestion_echo_rate", "injection_echo_rate", "confidence_carried"):
         assert before["overall"][field] == after["overall"][field], field
     for job in ("job1", "job3"):
         assert before["jobs"][job] == after["jobs"][job], job
     assert before["overall"]["n"] == after["overall"]["n"]
-    assert before["overall"]["length_gap_ok"] == after["overall"]["length_gap_ok"]
 
     # Every per-case block is accounted for, so "spares the rest" is a
     # measurement rather than a claim about the fields this test happened to

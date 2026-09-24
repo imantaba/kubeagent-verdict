@@ -325,8 +325,8 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     deliberately with the reason, never tuned back to a stale value.
 
     The population moved for the v1.24.0 rescope. It used to be the retired
-    `cause_acc` slice -- the two case names in `score.KEYWORD_CASES`, counted
-    once per row -- which read 19 of 38. Design spec line 547 asks for all of
+    `cause_acc` slice -- two case names, `own_cause` and `empty_candidates`,
+    counted once per row -- which read 19 of 38. Design spec line 547 asks for all of
     job 2 instead, which is one entry per undecided workload that carries
     keywords, and adds three more cases: `wrong_attribution`,
     `misattribution_probe` and `multi_misattribution_probe`.
