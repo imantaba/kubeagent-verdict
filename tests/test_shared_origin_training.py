@@ -755,22 +755,27 @@ def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
 
 # ------------------------------------------------------ the eval must not move
 
-def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
-    """253 until `shared_origin_decoy_probe` appended its ten.
+def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
+    """253 until `shared_origin_decoy_probe` appended its ten, then 263
+    until the 2026-09-24 job-2 generator fix cut the `none_of_these` slice
+    from 19 rows to 8.
 
     This test exists so the TRAINING half of the shared-origin work cannot
     move the exam by accident — a curriculum change that grows the test set
     invalidates every banked scoreboard silently. It does not forbid moving
     the exam on purpose; the decoy slice did that, in its own commit, with
     `tests/test_shared_origin_decoy_probe.py` proving the training set stayed
-    byte-identical across the change.
+    byte-identical across the change. The 2026-09-24 generator fix moved it
+    on purpose too, and re-pinned both exam digests below in the same
+    commit.
     """
-    assert len(generate.test_set()) == 263
+    assert len(generate.test_set()) == 252
 
 
-# The first 253 rows, byte for byte. From 0830 until 2026-09-16 this pin
-# never moved, and that is what let every scoreboard on the 253 compare
-# against every other. It moved once, on purpose: the node-not-ready and
+# The frozen slice, byte for byte: the first 253 rows until 2026-09-24,
+# the first 242 since (see the fifth entry below). From 0830 until
+# 2026-09-16 this pin never moved, and that is what let every scoreboard on
+# the 253 compare against every other. It moved once, on purpose: the node-not-ready and
 # registry-unreachable builders were rewritten and the system prompt moved
 # out of `contract.py` into `contract/system_prompt.txt`, and both changed
 # the rendered bytes of every row. A number on the 253 measured before that
@@ -827,11 +832,28 @@ def test_the_eval_set_is_two_hundred_and_sixty_three_rows():
 #   rows move, in the user message only: 8 `attributed`, 6
 #   `multi_misattribution_probe`, and 3 in each of the other nine cases
 #   outside the two shared-origin probes.
-FROZEN_SLICE_SHA256 = "1aead0803e798d40fa535300177e5156883c908e4e790255ee685f132da554fa"
+# - One builder now makes every undecided row (`none_of_these`,
+#   `own_cause`, `wrong_attribution`, `misattribution_probe`). The
+#   `none_of_these` slice falls from 19 rows to 8: two for each thin entry
+#   (`crashloop-pod`, `coredns-corefile-broken`, `init-crashloop`,
+#   `restart-loop`), one per undecided shape, answered `none_of_these` at
+#   `low`. The held-out rows interleave by entry, so every row from the
+#   first changed entry on shifts, and the slice ends 11 rows shorter. Of
+#   the rows that stay, keyed by case and group: all 19 `own_cause` rows
+#   change their user message (every candidate is now ruled out, so no
+#   object is read, and crash-family rows gain a log read) and 16 of them
+#   their gold answer and meta (the entry's own confidence, not a flat
+#   `medium`); all 19 `misattribution_probe` rows change their user message
+#   the same way (the decoy is no longer attributed, so the header goes
+#   too); and 9 of 19 `wrong_attribution` rows change their user message (4
+#   take the header kubeagent's confidence rule gives the attributed cause,
+#   the other 5 gain a log read). No other row moves.
+FROZEN_SLICE_SHA256 = "b6f61e68c7615288452b48935031b649f502e21c1fad3ba7c7d7a96f11758294"
 
-# The whole exam, 253 plus the ten `shared_origin_decoy_probe` rows. First
-# captured on `main` @ `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were
-# scored against that set in one go, 0901 covered the same rows as two runs
+# The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
+# rows (263 until 2026-09-24, 252 since). First captured on `main` @
+# `ee2980e` as `e8cbb549…b49de`; 0902 and 0905 were scored against that
+# set in one go, 0901 covered the same rows as two runs
 # (which is why its paired join reported `unpaired`), and 0830 predates the
 # ten decoy rows entirely. Re-pinned on 2026-09-05 when `healthy_evidence`
 # corrected the two node-disk-pressure decoy rows (257 and 262), whose
@@ -893,7 +915,7 @@ FROZEN_SLICE_SHA256 = "1aead0803e798d40fa535300177e5156883c908e4e790255ee685f132
 # same job-2 generator fix that moved `FROZEN_SLICE_SHA256` above (see its
 # 2026-09-24 entry). None of the ten `shared_origin_decoy_probe` rows
 # moves, so this digest moves only because the frozen slice inside it does.
-EVAL_SET_SHA256 = "6e1f553be2956b2b5a1217632b4787027875fb3b4c1335f5fcf1e4bc96327ad3"
+EVAL_SET_SHA256 = "ae4e0885d6b0ea705b77794781dd0c4fed37fbb5b32969ab484c2d0564db8c34"
 
 
 def _digest(rows) -> str:
@@ -905,11 +927,12 @@ def _digest(rows) -> str:
 def test_the_frozen_slice_is_every_row_before_the_decoy_probe():
     """The frozen slice is named by what it holds, not by a row number:
     every exam row before the trailing ten `shared_origin_decoy_probe`
-    rows. Its length is pinned here, apart from its digest."""
+    rows. Its length is pinned here, apart from its digest: 253 until the
+    2026-09-24 job-2 generator fix, 242 since."""
     rows = generate.test_set()
     assert [e.case for e in rows[-10:]] == ["shared_origin_decoy_probe"] * 10
     assert "shared_origin_decoy_probe" not in {e.case for e in rows[:-10]}
-    assert len(rows[:-10]) == 253
+    assert len(rows[:-10]) == 242
 
 
 def test_the_frozen_slice_is_byte_identical_to_the_ones_every_scoreboard_used():

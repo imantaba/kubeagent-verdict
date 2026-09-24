@@ -57,19 +57,19 @@ def test_attributed_menu_comes_from_declared_objects_not_losers():
     assert ex_full.user.count("considered") > ex_stripped.user.count("considered")
 
 
-def test_none_of_these_contradicts_and_answers_none():
+def test_none_of_these_names_no_cause_and_answers_none_at_low():
     n = names_mod.draw(random.Random(21))
-    ex = cases.none_of_these_case(_entry("memory-limit-oomkill"), n, random.Random(21))
+    ex = cases.none_of_these_case(_entry("crashloop-pod"), n, shape="refuted")
     (row,) = json.loads(ex.assistant)["verdicts"]
     assert row["cause"] == c.NONE_OF_THESE
-    assert row["confidence"] == "medium"
-    assert "exit code 1" in ex.user  # the contradiction evidence is in the prompt
-    assert "OOMKilled, exit code 137" not in ex.user.split("== BEGIN evidence ==")[1]
+    assert row["confidence"] == "low"
+    # Thin evidence: the finding's log-cause line and the classified read are gone.
+    assert "log cause:" not in ex.user
 
 
 def test_own_cause_omits_winner_from_candidates():
     n = names_mod.draw(random.Random(22))
-    ex = cases.own_cause_case(_entry("memory-limit-oomkill"), n, random.Random(22))
+    ex = cases.own_cause_case(_entry("memory-limit-oomkill"), n)
     cand_section = ex.user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
     assert "memory limit too low for the workload" not in cand_section
     (row,) = json.loads(ex.assistant)["verdicts"]
@@ -163,7 +163,7 @@ def test_truncated_expected_cause_matches_attributed_for_the_same_seed():
     assert ex_trunc.meta["expected_cause"] == ex_attr.meta["expected_cause"]
 
 
-def test_none_of_these_refutes_every_declared_object():
+def test_refuted_menu_refutes_every_declared_object():
     e = _entry("worker-containerd-stop")
     n = names_mod.draw(random.Random(5))
     menu = cases._refuted_menu(n, e.objects)
@@ -172,26 +172,26 @@ def test_none_of_these_refutes_every_declared_object():
     assert len(reads) == 2
 
 
-def test_none_of_these_answer_is_still_none_of_these():
+def test_none_of_these_refuses_an_entry_without_thin_evidence():
     e = _entry("worker-containerd-stop")
     n = names_mod.draw(random.Random(5))
-    ex = cases.none_of_these_case(e, n, random.Random(5))
-    answer = json.loads(ex.assistant)
-    assert answer["verdicts"][0]["cause"] == c.NONE_OF_THESE
-    assert answer["verdicts"][0]["confidence"] == "medium"
+    with pytest.raises(ValueError, match="worker-containerd-stop is not a thin entry"):
+        cases.none_of_these_case(e, n, shape="refuted")
 
 
-def test_own_cause_menu_is_refuted_not_hand_written():
+def test_own_cause_is_the_ruled_out_shape():
     e = _entry("worker-containerd-stop")
     n = names_mod.draw(random.Random(9))
-    ex = cases.own_cause_case(e, n, random.Random(9))
+    ex = cases.own_cause_case(e, n)
     answer = json.loads(ex.assistant)
     assert answer["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
+    assert answer["verdicts"][0]["confidence"] == cases._confidence(e)
     assert ex.meta["expected_own_keywords"] == list(e.own_cause_keywords)
     assert answer["verdicts"][0]["rationale"].endswith(
         "The candidate list shown did not include this cause.")
-    menu = cases._refuted_menu(n, e.objects)
-    assert len(object_reads(menu, ns=n.ns, pod=n.pod)) == len(e.objects)
+    assert ": attributed" not in _cand_section(ex.user)
+    assert "fresh read:" not in ex.user
+    assert "== describe " not in ex.user
 
 
 def test_wrong_attribution_names_its_decoy_cause_and_expects_the_own_cause():
@@ -201,7 +201,7 @@ def test_wrong_attribution_names_its_decoy_cause_and_expects_the_own_cause():
     key and has no population without it."""
     e = _entry("worker-containerd-stop")
     n = names_mod.draw(random.Random(21))
-    ex = cases.wrong_attribution(e, n, random.Random(5))
+    ex = cases.wrong_attribution(e, n)
     answer = json.loads(ex.assistant)
     key = f"{n.ns}/{n.name}"
     assert ex.meta["decoy_cause"] == ex.meta["decoy_by_workload"][key][0]
@@ -320,7 +320,7 @@ def test_candidate_order_is_shuffled_not_winner_first():
 def test_shuffle_covers_every_case_that_renders_a_menu():
     entry = _entry("memory-limit-oomkill")
     winner = "memory limit too low for the workload"
-    for builder in (cases.attributed, cases.none_of_these_case, cases.truncated):
+    for builder in (cases.attributed, cases.truncated):
         firsts = [_winner_is_first(
             builder(entry, names_mod.draw(random.Random(s)), random.Random(s)).user, winner)
             for s in range(60)]
@@ -666,3 +666,238 @@ def test_crashloop_pods_clear_log_read_names_its_findings_cause():
     e = _entry("crashloop-pod")
     n = names_mod.draw(random.Random(5))
     assert cases._log_read(e, n, "clear").content == "log cause: " + e.log_cause
+
+
+# One builder for every undecided job-2 row. kubeagent leaves a workload
+# undecided in two shapes. Refuted: one candidate is attributed and a fresh
+# read refutes it. Ruled out: every candidate is ruled out. The evidence is
+# clear (the prompt names the cause) or thin (it does not). The prompt is a
+# function of (entry, names, shape, evidence) and never of the case, so one
+# prompt never carries two expected answers.
+SHAPES = ("refuted", "ruled_out")
+CLEAR_CASES = ("wrong_attribution", "own_cause", "misattribution_probe")
+
+
+def _evidence_section(user):
+    return user.split("== BEGIN evidence ==\n")[1].split("\n== END evidence ==")[0]
+
+
+def _undecided(key, *, case, shape, evidence, seed=5):
+    n = names_mod.draw(random.Random(seed))
+    return cases._undecided_example(_entry(key), n, case=case, shape=shape,
+                                    evidence=evidence), n
+
+
+def test_the_refuted_shape_has_a_header_a_fresh_read_and_the_describe_read():
+    ex, n = _undecided("memory-limit-oomkill", case="wrong_attribution",
+                       shape="refuted", evidence="clear")
+    section = _cand_section(ex.user)
+    assert "[confidence: high]" in section
+    assert ": attributed — " in section
+    assert "fresh read: refuted — " in section
+    evidence = _evidence_section(ex.user)
+    # Object reads first, then the log read: kubeagent's own order.
+    assert evidence.index("== describe node /") < evidence.index(
+        f"== log causes {n.ns}/{n.pod} container {n.container} ==")
+
+
+def test_the_ruled_out_shape_has_no_header_no_fresh_read_and_no_object_read():
+    ex, n = _undecided("crashloop-pod", case="own_cause", shape="ruled_out",
+                       evidence="clear")
+    assert "[confidence:" not in ex.user
+    assert ": attributed" not in _cand_section(ex.user)
+    assert "fresh read:" not in ex.user
+    assert _evidence_section(ex.user) == (
+        f"== log causes {n.ns}/{n.pod} container {n.container} ==\n"
+        "log cause: bad command or entrypoint")
+
+
+def test_a_ruled_out_row_outside_the_crash_family_has_an_empty_evidence_section():
+    """kubeagent would still show the per-workload events read here. Every
+    job-2 builder lacks that read; adding it is Spec 3."""
+    ex, _ = _undecided("probe-failure", case="own_cause", shape="ruled_out",
+                       evidence="clear")
+    assert _evidence_section(ex.user) == "(none)"
+
+
+@pytest.mark.parametrize(("key", "header"), [
+    ("deployment-bad-image-tag", "medium"),  # a registry cause; the entry says high
+    ("networkpolicy-deny-all", "high"),      # a node cause; the entry says medium
+    ("probe-failure", "high"),               # a node cause; the entry says medium
+    ("restart-loop", "high"),                # a node cause; the entry says medium
+    ("memory-limit-oomkill", "high"),        # the rule and the entry agree
+])
+def test_the_refuted_header_follows_kubeagents_rule_not_the_entry(key, header):
+    ex, _ = _undecided(key, case="wrong_attribution", shape="refuted", evidence="clear")
+    assert f"[confidence: {header}]" in _cand_section(ex.user)
+
+
+@pytest.mark.parametrize("key", cases.THIN_ENTRIES)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_thin_row_names_no_cause_and_answers_none_of_these_at_low(key, shape):
+    ex, _ = _undecided(key, case="none_of_these", shape=shape, evidence="thin")
+    assert "log cause:" not in ex.user
+    (row,) = json.loads(ex.assistant)["verdicts"]
+    assert (row["cause"], row["confidence"]) == (c.NONE_OF_THESE, "low")
+    assert row["rationale"] == {
+        "refuted": "A fresh read refutes the attributed cause, and no read names another.",
+        "ruled_out": "Every candidate was ruled out, and no read names a cause.",
+    }[shape]
+    assert (ex.meta["expected_cause"], ex.meta["expected_confidence"]) == (
+        c.NONE_OF_THESE, "low")
+
+
+@pytest.mark.parametrize("key", cases.THIN_ENTRIES)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_thin_entrys_clear_row_names_the_cause_its_thin_row_drops(key, shape):
+    clear, _ = _undecided(key, case="wrong_attribution" if shape == "refuted" else "own_cause",
+                          shape=shape, evidence="clear")
+    thin, _ = _undecided(key, case="none_of_these", shape=shape, evidence="thin")
+    assert "log cause:" in clear.user
+    assert clear.user != thin.user
+
+
+def test_thin_evidence_raises_for_every_entry_outside_the_thin_set():
+    n = names_mod.draw(random.Random(5))
+    outside = [e for e in catalog.trainable() if e.key not in cases.THIN_ENTRIES]
+    assert len(outside) == 15
+    for e in outside:
+        for shape in SHAPES:
+            with pytest.raises(ValueError, match=f"{e.key} is not a thin entry"):
+                cases._undecided_example(e, n, case="none_of_these", shape=shape,
+                                         evidence="thin")
+
+
+@pytest.mark.parametrize(("case", "evidence"), [
+    ("none_of_these", "clear"), ("own_cause", "thin"), ("wrong_attribution", "thin"),
+    ("misattribution_probe", "thin"), ("own_cause", "vague"),
+])
+def test_thin_evidence_is_the_none_of_these_case_and_only_it(case, evidence):
+    n = names_mod.draw(random.Random(5))
+    with pytest.raises(ValueError, match=f"{case} takes .* evidence, not '{evidence}'"):
+        cases._undecided_example(_entry("crashloop-pod"), n, case=case, shape="refuted",
+                                 evidence=evidence)
+
+
+def test_undecided_example_refuses_an_unknown_shape_or_case():
+    n = names_mod.draw(random.Random(5))
+    with pytest.raises(ValueError, match="shape must be 'refuted' or 'ruled_out'"):
+        cases._undecided_example(_entry("crashloop-pod"), n, case="own_cause",
+                                 shape="decided", evidence="clear")
+    with pytest.raises(ValueError, match="not an undecided case: 'attributed'"):
+        cases._undecided_example(_entry("crashloop-pod"), n, case="attributed",
+                                 shape="refuted", evidence="clear")
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_the_prompt_never_depends_on_the_case(shape):
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(5))
+        users = {cases._undecided_example(e, n, case=case, shape=shape, evidence="clear").user
+                 for case in CLEAR_CASES}
+        assert len(users) == 1, e.key
+
+
+def test_the_public_builders_give_one_prompt_one_answer():
+    """Build every undecided row for one entry and one set of names, the
+    way generate.py calls them. Until 2026-09-24, none_of_these_case and
+    wrong_attribution built the same prompt with different answers for
+    every trainable entry. A random draw of names rarely makes two
+    dataset rows collide, so this test builds the collision on purpose."""
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(5))
+        rows = [cases.wrong_attribution(e, n), cases.own_cause_case(e, n),
+                cases.misattribution_probe(e, n)]
+        if e.key in cases.THIN_ENTRIES:
+            rows += [cases.none_of_these_case(e, n, shape=shape) for shape in SHAPES]
+        answers: dict[str, set] = {}
+        for ex in rows:
+            gold = json.loads(ex.assistant)["verdicts"]
+            answers.setdefault(ex.user, set()).add(tuple(sorted(
+                (v["workload"], v["cause"], v["confidence"]) for v in gold)))
+        assert all(len(a) == 1 for a in answers.values()), e.key
+
+
+@pytest.mark.parametrize("case", CLEAR_CASES)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_clear_row_answers_the_own_cause_at_the_entrys_confidence(case, shape):
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(5))
+        ex = cases._undecided_example(e, n, case=case, shape=shape, evidence="clear")
+        (row,) = json.loads(ex.assistant)["verdicts"]
+        assert row["cause"] == cases._fmt(e.own_cause, n) == ex.meta["expected_cause"]
+        assert row["confidence"] == ("high" if e.direct else "medium") \
+            == ex.meta["expected_confidence"], e.key
+
+
+@pytest.mark.parametrize(("case", "suffix", "last_line"), [
+    ("wrong_attribution",
+     " The deterministic pass attributed a different cause, but the evidence supports this one.",
+     "The deterministic pass attributed a different cause."),
+    ("own_cause", " The candidate list shown did not include this cause.",
+     "The deterministic pass did not consider this cause."),
+    ("misattribution_probe", "", None),
+])
+def test_each_clear_case_keeps_its_own_wording(case, suffix, last_line):
+    e = _entry("crashloop-pod")
+    n = names_mod.draw(random.Random(5))
+    ex = cases._undecided_example(e, n, case=case, shape="ruled_out", evidence="clear")
+    doc = json.loads(ex.assistant)
+    assert doc["verdicts"][0]["rationale"] == cases._fmt(e.rationale, n) + suffix
+    want = last_line or cases._fmt(e.recommendation, n).capitalize() + "."
+    assert doc["summary"] == f"{n.ns}/{n.name} is failing: {cases._fmt(e.own_cause, n)}.\n{want}"
+
+
+def test_each_case_keeps_its_own_meta_keys():
+    """Only `own_cause` carries `expected_own_keywords`; only
+    `wrong_attribution` and `misattribution_probe` carry `decoy_cause`, the
+    length-gap decider's population. Kept as they were."""
+    n = names_mod.draw(random.Random(5))
+    e = _entry("crashloop-pod")
+    keys = {case: set(cases._undecided_example(e, n, case=case, shape="refuted",
+                                               evidence="clear").meta)
+            for case in CLEAR_CASES}
+    keys["none_of_these"] = set(cases.none_of_these_case(e, n, shape="refuted").meta)
+    assert {case: ("expected_own_keywords" in k, "decoy_cause" in k)
+            for case, k in keys.items()} == {
+        "wrong_attribution": (False, True), "own_cause": (True, False),
+        "misattribution_probe": (False, True), "none_of_these": (False, False)}
+
+
+def test_the_menu_keeps_trace_order():
+    """No shuffle: kubeagent prints candidates in trace order, and the answer
+    is on no candidate line, so position gives nothing away. The order is the
+    entry's declared order, node then PVC, on every draw."""
+    e = _entry("worker-containerd-stop")
+    for build in (cases.wrong_attribution, cases.own_cause_case):
+        orders = {tuple(ln.split()[1] for ln in _cand_lines(
+            build(e, names_mod.draw(random.Random(s))).user)) for s in range(20)}
+        assert orders == {("node", "PVC")}, build.__name__
+
+
+@pytest.mark.parametrize(("key", "content"), [
+    ("memory-limit-oomkill", _NO_CLASSIFIABLE),
+    ("container-start-error", _NO_PREVIOUS),
+    ("worker-containerd-stop", _NO_PREVIOUS),
+])
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_neutral_log_line_appears_in_clear_rows_too(key, content, shape):
+    """So a neutral line is not, by itself, a sign to abstain."""
+    ex, n = _undecided(key, case="own_cause", shape=shape, evidence="clear")
+    assert content.format(ns=n.ns, pod=n.pod, container=n.container) in \
+        _evidence_section(ex.user)
+
+
+def test_each_wrapper_is_its_shape_and_evidence():
+    e = _entry("crashloop-pod")
+    n = names_mod.draw(random.Random(5))
+
+    def built(case, shape, evidence):
+        return cases._undecided_example(e, n, case=case, shape=shape, evidence=evidence)
+
+    assert cases.wrong_attribution(e, n) == built("wrong_attribution", "refuted", "clear")
+    assert cases.own_cause_case(e, n) == built("own_cause", "ruled_out", "clear")
+    assert cases.misattribution_probe(e, n) == built("misattribution_probe", "ruled_out", "clear")
+    for shape in SHAPES:
+        assert cases.none_of_these_case(e, n, shape=shape) == \
+            built("none_of_these", shape, "thin")

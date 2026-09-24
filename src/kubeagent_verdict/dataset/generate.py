@@ -130,10 +130,14 @@ def generate(seed: int, size: int) -> list[Example]:
 
     for i in range(counts["attributed"]):
         out.append(cases.attributed(rotate(i), names.draw(rng), rng))
+    # Thin evidence exists for four entries only. Rotate through them, and
+    # alternate the two undecided shapes once per full pass.
+    thin = [next(e for e in entries if e.key == key) for key in cases.THIN_ENTRIES]
     for i in range(counts["none_of_these"]):
-        out.append(cases.none_of_these_case(rotate(i), names.draw(rng), rng))
+        shape = ("refuted", "ruled_out")[(i // len(thin)) % 2]
+        out.append(cases.none_of_these_case(thin[i % len(thin)], names.draw(rng), shape=shape))
     for i in range(counts["own_cause"]):
-        out.append(cases.own_cause_case(rotate(i), names.draw(rng), rng))
+        out.append(cases.own_cause_case(rotate(i), names.draw(rng)))
     for i in range(counts["multi"]):
         k = rng.randint(2, 4)
         pairs, seen = [], set()
@@ -251,7 +255,7 @@ def generate(seed: int, size: int) -> list[Example]:
     for i in range(counts["empty_candidates"]):
         out.append(cases.empty_candidates(rotate(i), names.draw(rng)))
     for i in range(counts["wrong_attribution"]):
-        out.append(cases.wrong_attribution(rotate(i), names.draw(rng), rng))
+        out.append(cases.wrong_attribution(rotate(i), names.draw(rng)))
     return out
 
 
@@ -327,19 +331,28 @@ def held_out_case_set() -> list[Example]:
     happen to take — so roughly half the curriculum trains and is never
     scored, and a metric computed over it describes one case while being
     reported as an overall rate.
+
+    `none_of_these` is the exception to one row per entry: thin evidence
+    exists only for `cases.THIN_ENTRIES`, so that case gives one row per thin
+    entry per undecided shape, 8 rows in all.
     """
     from kubeagent_verdict.dataset import cases, catalog, names
 
     builders = {
-        "none_of_these": cases.none_of_these_case,
-        "own_cause": cases.own_cause_case,
+        "own_cause": lambda e, n, rng: cases.own_cause_case(e, n),
         "truncated": cases.truncated,
         "empty_candidates": lambda e, n, rng: cases.empty_candidates(e, n),
-        "wrong_attribution": cases.wrong_attribution,
+        "wrong_attribution": lambda e, n, rng: cases.wrong_attribution(e, n),
     }
     out: list[Example] = []
     for entry in catalog.trainable():
         for case in HELD_OUT_CASES:
+            if case == "none_of_these":
+                if entry.key in cases.THIN_ENTRIES:
+                    for shape in ("refuted", "ruled_out"):
+                        n = names.draw(_entry_rng("held-out", case, entry.key, shape))
+                        out.append(cases.none_of_these_case(entry, n, shape=shape))
+                continue
             rng = _entry_rng("held-out", case, entry.key)
             n = names.draw(rng)
             if case == "injection":
@@ -355,18 +368,20 @@ def probe_sets() -> list[Example]:
     """The four adversarial eval-only slices, one row per trainable entry.
 
     `positional_probe` puts the correct answer last with an honest tag;
-    `misattribution_probe` puts it last AND hands `attributed` to the decoy;
-    `multi_misattribution_probe` does the same in the multi-workload shape the
-    single-workload probes cannot reach; `contradiction_probe` adds a read that
+    `misattribution_probe` rules every candidate out, so the answer is on no
+    candidate line (since 2026-09-24; it used to hand `attributed` to the
+    decoy); `multi_misattribution_probe` hands `attributed` to the decoy in the
+    multi-workload shape the single-workload probes cannot reach;
+    `contradiction_probe` adds a read that
     rules the winner out, so the answer is on no candidate line at all. None is
     ever generated into train or val — they exist to make a shortcut visible,
     and a shortcut the training data rewards is not a shortcut the eval can
     detect.
 
     That last sentence is the limit of all four, and `contradiction_probe`
-    found it the hard way: the training data rewards answering `none of these`
-    to the very contradiction sentence that slice reuses, so a memorising
-    model passes it. Every catalog entry appears in train, val and test, so no
+    found it the hard way: the training data rewarded answering `none of these`
+    to the very contradiction sentence that slice reused, so a memorising
+    model passed it. Every catalog entry appears in train, val and test, so no
     slice here can separate a model that reads from one that recites per-entry
     answers. Ruling that out needs held-out entries and a retrain.
     """
@@ -411,10 +426,12 @@ def probe_sets() -> list[Example]:
     # It was built to also catch a model reciting a memorised entry-to-winner
     # lookup table, and it DOES NOT — negative control v4 measured the
     # known-broken first tune at 1.0 cause / 0.0 decoy here. The read text it
-    # reuses is `none_of_these_case`'s verbatim, which makes the contradiction
-    # sentence a trained trigger rather than something to reason about. See
-    # `cases.contradiction_probe`'s docstring for the full retraction; the
-    # slice is kept for the three shortcuts it does defeat.
+    # reused was `none_of_these_case`'s verbatim, which made the contradiction
+    # sentence a trained trigger rather than something to reason about (since
+    # 2026-09-24 `none_of_these` rows use thin evidence and share no read text
+    # with this slice). See `cases.contradiction_probe`'s docstring for the
+    # full retraction; the slice is kept for the three shortcuts it does
+    # defeat.
     for entry in catalog.trainable():
         if not entry.objects or not entry.contradiction:
             continue

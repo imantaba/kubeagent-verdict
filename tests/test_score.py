@@ -1848,8 +1848,11 @@ def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     assert board["jobs"]["job3"]["n"] == expected_job3_n
     # The two numbers the spec and the model card name. A corpus change that
     # moves them fails here instead of quietly restating a bar.
+    # Re-pinned 2026-09-24 for the job-2 generator fix: the exam's
+    # `none_of_these` slice is 8 thin-evidence rows, not 19, so job 2 falls
+    # from 153 to 142. Job 1 is untouched.
     assert expected_job1_n == 157
-    assert expected_job2_n == 153
+    assert expected_job2_n == 142
 
 
 def _echo_the_decided_cause_bot(rows: list[dict]):
@@ -1990,7 +1993,9 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     board = score.scoreboard(results)
 
     assert board["jobs"]["job1"] == {"rate": 1.0, "n": 157}
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 153}
+    # 153 to 142 on 2026-09-24: the job-2 generator fix left 8
+    # `none_of_these` rows in the exam, not 19.
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
 
 
 def _always_none_of_these_bot(rows: list[dict]):
@@ -2033,13 +2038,20 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     bot that always says "none of these" scores far below the job2 bar --
     is asserted on its own so it never depends on getting the exact figure
     right.
+
+    Re-pinned on 2026-09-24 for the job-2 generator fix
+    (2026-09-24-job2-generator-fix-design.md). `none_of_these` is now built
+    only from the four entries with thin evidence, once per undecided shape,
+    so the exam holds 8 such rows, not 19. 8 of the 142 undecided workloads
+    expect `none_of_these`, and this bot scores 8/142 = 0.0563. The
+    paragraphs above are the older account.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _always_none_of_these_bot(rows))
     board = score.scoreboard(results)
 
     assert board["jobs"]["job2"]["n"] > 0
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0563, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -2087,6 +2099,13 @@ def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
     The bot still scores below JOB2_BAR, but the margin narrows from 0.334
     to 0.203 -- so any future proposal to lower that bar now has a hard
     floor of 0.50, not 0.37. Below 0.50, a bot that reads nothing passes.
+
+    Re-pinned on 2026-09-24 for the job-2 generator fix
+    (2026-09-24-job2-generator-fix-design.md). The exam loses 11
+    `none_of_these` workloads, none of them keyword-graded, so the 76 and
+    the 134 stay and the denominator falls from 153 to 142: 76/142 =
+    0.5352. The margin under JOB2_BAR narrows again, from 0.203 to 0.165,
+    and the floor for any proposal to lower the bar rises to 0.54.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _paste_the_prompt_bot(rows))
@@ -2094,8 +2113,8 @@ def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
 
     assert board["overall"]["keyword_derivable_n"] == 76
     assert board["overall"]["keyword_graded_n"] == 134
-    assert board["jobs"]["job2"]["n"] == 153
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.497, abs=0.005)
+    assert board["jobs"]["job2"]["n"] == 142
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.535, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -2133,9 +2152,10 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
     row's `job2_scores` grade the same workloads by the same rule, so they
     must agree for any reply. The own-keyword bot is a reply that tells them
     apart when they do not: before the 2026-09-24 generator fix it disagreed
-    on 64 of these 121 rows, every `wrong_attribution`,
+    on 64 of the 121 rows then checked, every `wrong_attribution`,
     `misattribution_probe`, `multi_misattribution_probe` and shared-origin
-    probe row among them."""
+    probe row among them. The same fix cut the exam's `none_of_these` slice
+    from 19 rows to 8, so 110 rows are checked now."""
     rows = _corpus_rows()
     results = score.evaluate(rows, _own_keyword_bot(rows))
     checked = 0
@@ -2146,7 +2166,7 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
         checked += 1
         assert res["cause_acc"] == pytest.approx(
             sum(res["job2_scores"]) / len(res["job2_scores"])), row["meta"]["case"]
-    assert checked == 121
+    assert checked == 110
 
 
 def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int]:
@@ -2282,7 +2302,11 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     a word the reply does not contain, the only job-2 workloads left to win
     are the 19 whose answer is `none_of_these`, which is the exact set that
     bot wins. 19/153 = 0.1242 either way. If the corpus's `none_of_these`
-    count moves, both tests move together.
+    count moves, both tests move together -- and on 2026-09-24 it did: the
+    job-2 generator fix left 8 such rows, so both read 8/142 = 0.0563.
+    Cause accuracy moves with it, 0.5387 to 0.5185 before the rewrite and
+    0.1445 to 0.1071 after: the 11 removed rows were all right both times,
+    and the population falls from 263 rows to 252.
 
     Re-pinned on 2026-09-23 for the exam-grader fix
     (2026-09-23-exam-grader-fix-design.md). `workload_level` moves from 114
@@ -2306,7 +2330,8 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     job-2 workload in the corpus. Before the fix, the 20 shared-origin
     workloads' real answer was never `none_of_these`, so the bot's
     `none_of_these` fallback missed all 20 of them: 114 + 19 = 133,
-    133/153 = 0.8693.
+    133/153 = 0.8693. (Since the 2026-09-24 generator fix the corpus holds 8
+    `none_of_these` workloads, not 19: 134 + 8 = 142, still every one.)
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
@@ -2325,9 +2350,9 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
 
     # Four numbers retire: the same replies now score differently.
     assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
-    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.1242, abs=0.005)
-    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5387, abs=0.005)
-    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1445, abs=0.005)
+    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0563, abs=0.005)
+    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5185, abs=0.005)
+    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1071, abs=0.005)
     assert before["overall"]["overconfidence_rate"]["n"] == 123
     assert after["overall"]["overconfidence_rate"]["n"] == 225
     assert before["overall"]["cause_when_length_helps"] == {"rate": 0.6786, "n": 56}

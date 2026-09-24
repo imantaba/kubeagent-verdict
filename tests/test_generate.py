@@ -264,15 +264,25 @@ def test_provenance_scan_reaches_every_catalog_entry():
             by_case.setdefault(ex.case, set()).add(entry)
 
     # `own_cause` is the only case that renders an entry's `own_cause` text;
-    # `none_of_these` and `contradiction_probe` are the only ones that render
-    # its `contradiction` text. Full coverage on these three is what carries
-    # every entry's per-entry prose through the scan.
-    for case in ("own_cause", "none_of_these", "contradiction_probe"):
+    # `contradiction_probe` is the only one that renders its `contradiction`
+    # text. Full coverage on these two is what carries every entry's
+    # per-entry prose through the scan.
+    for case in ("own_cause", "contradiction_probe"):
         assert by_case.get(case) == trainable, (
             f"{case} renders {len(by_case.get(case, ()))} of {len(trainable)} "
             f"trainable entries; missing {sorted(trainable - by_case.get(case, set()))}"
         )
     assert set().union(*by_case.values()) == trainable
+
+    # Until 2026-09-24 `none_of_these` rendered the `contradiction` text too,
+    # for every entry. The job-2 generator fix builds it from thin evidence
+    # instead: four entries, one row per undecided shape, and a fixed
+    # rationale that names no entry's prose.
+    thin = collections.Counter(
+        (ex.meta["entry"], "refuted" if "fresh read: refuted" in ex.user else "ruled_out")
+        for ex in generate.test_set() if ex.case == "none_of_these")
+    assert thin == {(key, shape): 1 for key in cases.THIN_ENTRIES
+                    for shape in ("refuted", "ruled_out")}
 
 
 def test_test_set_slice_counts_are_pinned():
@@ -288,6 +298,14 @@ def test_test_set_slice_counts_are_pinned():
     append leaves the earlier rows at their original indices — which is what
     lets a scoreboard banked against the shorter file still line up row for
     row over the slices it shares.
+
+    2026-09-24 broke that rule once, on purpose. The job-2 generator fix
+    rebuilt `none_of_these` from thin evidence on four entries, so the slice
+    fell from 19 rows to 8. Those rows sit inside the held-out block, one
+    entry at a time, so rows moved from the first changed entry onward and
+    the probe slices after the block moved up 11 places. A scoreboard
+    banked before that date does not line up row for row with this exam;
+    the frozen-slice and eval-set hashes moved with it.
     """
     counts = collections.Counter(ex.case for ex in generate.test_set())
     assert dict(counts) == {
@@ -297,7 +315,7 @@ def test_test_set_slice_counts_are_pinned():
         "injection": 19,
         "misattribution_probe": 19,
         "multi_misattribution_probe": 19,
-        "none_of_these": 19,
+        "none_of_these": 8,
         "own_cause": 19,
         "positional_probe": 19,
         "shared_origin_decoy_probe": 10,
@@ -305,7 +323,7 @@ def test_test_set_slice_counts_are_pinned():
         "truncated": 19,
         "wrong_attribution": 19,
     }
-    assert sum(counts.values()) == 263
+    assert sum(counts.values()) == 252
 
 
 def test_the_job2_keyword_exposure_is_pinned_per_case():
@@ -456,9 +474,10 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # job1 and job2 are measured, not derived -- R40 states them as "about 70"
     # and "about 210"; Step 51's actual measurement over the v1.24.0 exam
     # printed 157 and 153, so those are the pinned literals, not R40's
-    # rounded figures.
+    # rounded figures. job2 fell from 153 to 142 on 2026-09-24: the job-2
+    # generator fix cut the `none_of_these` slice from 19 rows to 8.
     assert job1 == 157
-    assert job2 == 153
+    assert job2 == 142
     assert job3_prompts == 39
     assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
 
@@ -677,3 +696,28 @@ def test_the_length_gap_decider_has_rows_in_both_slices():
     assert len(measured) == 57
     assert sum(1 for m in measured if m) > 0
     assert sum(1 for m in measured if not m) > 0
+
+
+def test_one_prompt_has_one_answer():
+    """No two rows share a user prompt but differ in what they expect.
+
+    Before the 2026-09-24 generator fix, `wrong_attribution` and
+    `none_of_these` could print the same prompt and expect opposite answers:
+    the entry's own cause at one confidence, or `none_of_these` at another.
+    Gradient descent cannot fit both, and the model learned a coin flip for
+    exactly the rows the exam's job 2 grades hardest. The prompt now depends
+    only on (entry, names, shape, evidence), never on the case, so this
+    holds by construction; this test is what keeps it holding.
+
+    Checked over the full training build and the exam together, because a
+    collision across the two is the same contradiction. Rationales and
+    summaries may differ -- they are not graded.
+    """
+    rows = generate.generate(seed=17, size=8000) + generate.test_set()
+    answers: dict[str, set] = collections.defaultdict(set)
+    for ex in rows:
+        gold = json.loads(ex.assistant)["verdicts"]
+        answers[ex.user].add(tuple(sorted(
+            (v["workload"], v["cause"], v["confidence"]) for v in gold)))
+    clashes = {prompt[:200]: sorted(a) for prompt, a in answers.items() if len(a) > 1}
+    assert not clashes, clashes

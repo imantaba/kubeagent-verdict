@@ -107,7 +107,8 @@ def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Findin
 
 
 def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
-              confidence: str, *, result: rules.Result) -> c.Workload:
+              confidence: str, *, result: rules.Result,
+              with_log_cause: bool = True) -> c.Workload:
     """Build the rendered workload, decided line included.
 
     `result` is the SAME `rules.Result` the row's meta is built from, in
@@ -116,10 +117,14 @@ def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
     `decided_cause`/`decided_outcome` come from one value, so they cannot
     drift. Job 1 grades a byte-for-byte echo of that cause, so a prompt
     that does not carry the line turns job 1 into a recall test.
+
+    `with_log_cause=False` drops the finding's `log cause:` line. Only a
+    thin-evidence row passes it.
     """
     return c.Workload(
         namespace=n.ns, name=n.name, kind=e.workload_kind, ready=0, desired=2,
-        status=e.status, restarts=n.restarts, findings=(_finding(e, n),),
+        status=e.status, restarts=n.restarts,
+        findings=(_finding(e, n, with_log_cause),),
         candidates=candidates, confidence=confidence,
         network_policies=tuple(_fmt(p, n) for p in e.network_policies),
         decided=result.decided, decided_cause=result.cause,
@@ -345,55 +350,147 @@ def _refuted_menu(n: Names, objects: tuple) -> tuple:
     return tuple(refute(bind(obj, names)) for obj in objects)
 
 
-def none_of_these_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    menu = _refuted_menu(n, e.objects)
-    raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)  # always undecided: refuted alone never wins
-    candidates = _to_contract_candidates(raw, result)
-    w = _workload(e, n, candidates, confidence=_confidence(e), result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
-             "confidence": "medium",
-             "rationale": "The evidence contradicts every listed candidate rather than "
-                          "supporting one."}]
-    summary = (f"{n.ns}/{n.name} is failing, but the evidence rules out the listed causes.\n"
-               "A closer look at the workload is needed.")
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=c.NONE_OF_THESE, own_cause_keywords=[])
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "none_of_these", "entry": e.key,
-            "expected_cause": c.NONE_OF_THESE, "expected_confidence": "medium"}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    return Example(case="none_of_these", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
+def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
+    """Bind every declared object, then force each one into a ruled-out
+    ending below rules.decide()'s threshold: node placement="off", pvc
+    placement="unmounted", registry scan_reason below REGISTRY_THRESHOLD.
+    No Option-A draw, so the menu never wins outright.
+    """
+    names = dataclasses.asdict(n)
+    out = []
+    for obj in objects:
+        bound = bind(obj, names)
+        if bound.kind == "node":
+            bound = dataclasses.replace(bound, placement="off")
+        elif bound.kind == "pvc":
+            bound = dataclasses.replace(bound, placement="unmounted")
+        elif bound.kind == "registry":
+            bound = dataclasses.replace(bound, scan_reason="1")
+        out.append(bound)
+    return tuple(out)
 
 
-def own_cause_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    menu = _refuted_menu(n, e.objects)
+# One builder for every undecided job-2 row. kubeagent leaves a workload
+# undecided in two shapes: "refuted" (one candidate attributed, a fresh read
+# refutes it) and "ruled_out" (every candidate ruled out). The evidence is
+# "clear" (a read names the cause) or "thin" (nothing does). The prompt is a
+# function of (entry, names, shape, evidence) alone, never of the case, so a
+# prompt cannot carry two expected answers. Thin evidence exists only for the
+# four entries whose one cause-naming line can be dropped.
+THIN_ENTRIES = ("crashloop-pod", "coredns-corefile-broken", "init-crashloop", "restart-loop")
+_THIN_RATIONALE = {
+    "refuted": "A fresh read refutes the attributed cause, and no read names another.",
+    "ruled_out": "Every candidate was ruled out, and no read names a cause.",
+}
+# Per clear case: (rationale suffix, summary second line). A None second line
+# means the entry's own recommendation.
+_CLEAR_WORDING = {
+    "wrong_attribution": ((" The deterministic pass attributed a different cause, but the"
+                           " evidence supports this one."),
+                          "The deterministic pass attributed a different cause."),
+    "own_cause": (" The candidate list shown did not include this cause.",
+                  "The deterministic pass did not consider this cause."),
+    "misattribution_probe": ("", None),
+}
+_MENUS = {"refuted": _refuted_menu, "ruled_out": _ruled_out_menu}
+
+
+def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
+                       evidence: str) -> Example:
+    """Build one undecided row: `shape` is "refuted" or "ruled_out",
+    `evidence` is "clear" or "thin". Thin evidence is the `none_of_these`
+    case and only it; clear evidence answers the entry's own cause at its
+    own confidence.
+
+    No rng: nothing here is drawn. kubeagent prints candidates in trace
+    order, and the answer is on no candidate line, so order gives nothing
+    away. No read budget either: every entry declares at most two objects,
+    already in gather order.
+    """
+    if not e.objects:
+        raise ValueError(f"{case} needs at least one object: {e.key}")
+    if shape not in _MENUS:
+        raise ValueError(f"shape must be 'refuted' or 'ruled_out', not {shape!r}")
+    if case != "none_of_these" and case not in _CLEAR_WORDING:
+        raise ValueError(f"not an undecided case: {case!r}")
+    want = "thin" if case == "none_of_these" else "clear"
+    if evidence != want:
+        raise ValueError(f"{case} takes {want} evidence, not {evidence!r}")
+    thin = evidence == "thin"
+    if thin and e.key not in THIN_ENTRIES:
+        raise ValueError(f"{e.key} is not a thin entry")
+    menu = _MENUS[shape](n, e.objects)
     raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)
+    result = rules.decide(raw)  # never decided: refuted and ruled out alone never win
     candidates = _to_contract_candidates(raw, result)
-    w = _workload(e, n, candidates, confidence="", result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
+    w = _workload(e, n, candidates, render.header_for(candidates), result=result,
+                  with_log_cause=not thin)
+    reads = tuple(object_reads(menu, ns=n.ns, pod=n.pod)) if shape == "refuted" else ()
+    log = _log_read(e, n, evidence)
+    reads += (log,) if log else ()
     user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
-             "rationale": _fmt(e.rationale, n)
-                          + " The candidate list shown did not include this cause."}]
-    summary = f"{n.ns}/{n.name} is failing: {cause}.\nThe deterministic pass did not consider this cause."
     key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
+    if thin:
+        cause, conf, keywords = c.NONE_OF_THESE, "low", []
+        rationale = _THIN_RATIONALE[shape]
+        summary = (f"{key} is failing, but the evidence rules out the listed causes.\n"
+                   "A closer look at the workload is needed.")
+    else:
+        cause, conf, keywords = _fmt(e.own_cause, n), _confidence(e), list(e.own_cause_keywords)
+        suffix, last = _CLEAR_WORDING[case]
+        rationale = _fmt(e.rationale, n) + suffix
+        last = last or f"{_fmt(e.recommendation, n).capitalize()}."
+        summary = f"{key} is failing: {cause}.\n{last}"
+    rows = [{"workload": key, "cause": cause, "confidence": conf, "rationale": rationale}]
+    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords)
     decoys = [cand.cause for cand in candidates]
-    meta = {"case": "own_cause", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": "medium",
-            "expected_own_keywords": list(e.own_cause_keywords)}
+    meta = {"case": case, "entry": e.key, "expected_cause": cause,
+            "expected_confidence": conf}
+    if case == "own_cause":
+        meta["expected_own_keywords"] = keywords
     meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    return Example(case="own_cause", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
+    if case in ("wrong_attribution", "misattribution_probe"):
+        meta.update(_row_decoy(decoys))
+    return Example(case=case, group=f"{e.key}:{key}", system=c.SYSTEM_PROMPT,
+                   user=user, assistant=_answer(rows, summary), meta=meta)
+
+
+def wrong_attribution(e: CatalogEntry, n: Names) -> Example:
+    """TRAINING case: kubeagent attributed a cause and a fresh read refuted
+    it, while a read names the real one. The answer is the entry's own
+    cause, which is on no candidate line.
+    """
+    return _undecided_example(e, n, case="wrong_attribution", shape="refuted",
+                              evidence="clear")
+
+
+def own_cause_case(e: CatalogEntry, n: Names) -> Example:
+    """TRAINING case: kubeagent ruled out every candidate, while a read names
+    the real cause. The answer is the entry's own cause.
+    """
+    return _undecided_example(e, n, case="own_cause", shape="ruled_out", evidence="clear")
+
+
+def none_of_these_case(e: CatalogEntry, n: Names, *, shape: str) -> Example:
+    """TRAINING case: kubeagent left the workload undecided and no read names
+    a cause. The answer is "none of these" at low confidence. Only the
+    entries in THIN_ENTRIES can be built this way.
+    """
+    return _undecided_example(e, n, case="none_of_these", shape=shape, evidence="thin")
+
+
+def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
+    """EVAL-ONLY: every candidate ruled out, and a read may name the cause.
+
+    It builds the same prompt as `own_cause_case`; only the case name, the
+    wording of the gold answer and one meta key differ: this row carries
+    `decoy_cause` where `own_cause_case` carries `expected_own_keywords`.
+    The name predates that: a ruled-out menu has no `attributed`
+    candidate, so nothing here is misattributed. It keeps its name so the
+    exam's slice names stay put.
+    """
+    return _undecided_example(e, n, case="misattribution_probe", shape="ruled_out",
+                              evidence="clear")
 
 
 def truncated(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
@@ -445,47 +542,6 @@ def injection(e: CatalogEntry, n: Names, payload: str, rng: random.Random) -> Ex
                            {"injection_payload": payload})
 
 
-def wrong_attribution(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    """TRAINING case: the deterministic pass tagged the wrong candidate.
-
-    The evidence is untouched and still supports the catalog winner, but the
-    trace hands `attributed` to the decoy. Shuffling alone would not reach
-    this: it defeats position while leaving the tag a perfectly reliable
-    signal, so a shuffle-only retrain buys a tag-copier instead of a
-    position-copier. This case is what makes the tag merely *usually* right,
-    which is what it is in the field.
-    """
-    names = dataclasses.asdict(n)
-    declared = tuple(bind(obj, names) for obj in e.objects)
-    refuted = tuple(refute(obj) for obj in declared)
-    raw = rules.attribute(refuted, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)
-    candidates = _to_contract_candidates(raw, result)
-    cands = list(candidates)
-    rng.shuffle(cands)
-    w = _workload(e, n, tuple(cands), confidence=_confidence(e), result=result)
-    reads = object_reads(refuted, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
-             "rationale": _fmt(e.rationale, n)
-                          + " The deterministic pass attributed a different cause, but the"
-                            " evidence supports this one."}]
-    summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
-               "The deterministic pass attributed a different cause.")
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "wrong_attribution", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": _confidence(e)}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    meta.update(_row_decoy(decoys))
-    return Example(case="wrong_attribution", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
-
-
 def positional_probe(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     """EVAL-ONLY: the honest `attributed` tag, but the winner placed LAST.
 
@@ -502,58 +558,6 @@ def positional_probe(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     reads = object_reads(menu, ns=n.ns, pod=n.pod)
     return _winner_example(e, n, tuple(candidates) + (winner,), reads, "positional_probe",
                            _row_decoy([cand.cause for cand in candidates]))
-
-
-def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
-    """Bind every declared object, then force each one into a ruled-out
-    ending below rules.decide()'s threshold: node placement="off", pvc
-    placement="unmounted", registry scan_reason below REGISTRY_THRESHOLD.
-    Used by `misattribution_probe`, whose menu must stay honest (no Option-A
-    randomness) while still never winning outright.
-    """
-    names = dataclasses.asdict(n)
-    out = []
-    for obj in objects:
-        bound = bind(obj, names)
-        if bound.kind == "node":
-            bound = dataclasses.replace(bound, placement="off")
-        elif bound.kind == "pvc":
-            bound = dataclasses.replace(bound, placement="unmounted")
-        elif bound.kind == "registry":
-            bound = dataclasses.replace(bound, scan_reason="1")
-        out.append(bound)
-    return tuple(out)
-
-
-def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
-    """EVAL-ONLY: tag and position BOTH point away from the evidence.
-
-    The adversarial slice. Deterministic ordering, decoy first, decoy tagged
-    `attributed`, evidence unchanged and still supporting the winner. See
-    _ruled_out_menu for why this is a lower bound on tag-following.
-    """
-    if not e.objects:
-        raise ValueError(f"misattribution_probe needs at least one object: {e.key}")
-    menu = _ruled_out_menu(n, e.objects)
-    candidates, result = _decoy_result(e, n, menu)
-    w = _workload(e, n, candidates, confidence=_confidence(e), result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
-             "rationale": _fmt(e.rationale, n)}]
-    summary = f"{n.ns}/{n.name} is failing: {cause}.\n{_fmt(e.recommendation, n).capitalize()}."
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "misattribution_probe", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": _confidence(e)}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    meta.update(_row_decoy(decoys))
-    return Example(case="misattribution_probe", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
 
 
 def _contradiction_menu(n: Names, objects: tuple) -> tuple[tuple, tuple]:
@@ -592,10 +596,13 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     v4 scored the known-broken first tune on this slice: 1.0 cause, 0.0 decoy
     — a clean pass by a model proven elsewhere to follow the `attributed` tag
     79% of the time, emitting the expected rationale and summary VERBATIM. The
-    confound is that this builder reuses `none_of_these_case`'s read
+    confound was that this builder reused `none_of_these_case`'s read
     construction exactly — same label, same `e.contradiction` content — and
-    `none_of_these` is 15% of the curriculum, so the contradiction sentence is
-    itself a memorised trigger for a memorised answer template. Holding the
+    `none_of_these` was 15% of the curriculum, so the contradiction sentence
+    was itself a memorised trigger for a memorised answer template. (Since
+    2026-09-24 `none_of_these` rows are built from thin evidence on four
+    entries, at low confidence, and share neither this row's reads nor its
+    rationale.) Holding the
     adversarial menu roughly fixed and changing only the read text moves cause
     accuracy from 0.1579 (`misattribution_probe`) and 0.4737
     (`wrong_attribution`) to 1.0 here. The menu is what this row perturbs, and

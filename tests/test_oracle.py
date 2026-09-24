@@ -126,23 +126,30 @@ def test_oracle_job1_is_perfect_on_train():
     board = score.scoreboard(list(_train_results()))
     # Re-measured 2026-09-19 (Task 9: pool merge + mix change, spec section
     # 6) -- 2570 to 3056. Rate unchanged at 1.0.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3056}
+    # Re-measured 2026-09-24 (job-2 generator fix: the undecided builders no
+    # longer draw from the rng, which moves every later draw, and the
+    # held-out `none_of_these` slice is 8 groups, not 19) -- 3056 to 3081.
+    # Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3081}
 
 
 def test_oracle_job1_is_perfect_on_val():
     board = score.scoreboard(list(_val_results()))
     # Re-measured 2026-09-19, same reason. 289 to 355. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 355}
+    # Re-measured 2026-09-24, job-2 generator fix. 355 to 357. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 357}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
     # Re-measured 2026-09-19, same reason. 3121 to 2975. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2975}
+    # Re-measured 2026-09-24, job-2 generator fix. 2975 to 3000. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3000}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 352 to 304. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 304}
+    # Re-measured 2026-09-24, job-2 generator fix. 304 to 321. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 321}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -150,8 +157,11 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     After it, this narrower slice is also perfect.
 
     Re-measured 2026-09-19 (Task 9: pool merge + mix change, spec section
-    6) -- 2175 to 2286. Rate still 1.0."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2286}
+    6) -- 2175 to 2286. Rate still 1.0.
+
+    Re-measured 2026-09-24 (job-2 generator fix, same reason as job 1
+    above) -- 2286 to 2324. Rate still 1.0."""
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2324}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -170,13 +180,17 @@ def test_oracle_job3_is_perfect_on_train():
     This test now covers those ruled rows too: the gold summary for each
     of them still matches its own label, so `shared`'s rate stays a
     perfect 1.0 here -- spec section 10 gate 1, job 1 and job 3 still 1.0
-    after the pool merge."""
+    after the pool merge.
+
+    Re-measured 2026-09-24 (job-2 generator fix, same reason as job 1
+    above) -- 2790 to 2803; all 13 new rows are `none`-labeled. Rate still
+    1.0."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2790,
+        "rate": 1.0, "n": 2803,
         "by_label": {"shared": {"rate": 1.0, "n": 192},
                      "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2597}}}
+                     "none": {"rate": 1.0, "n": 2610}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -197,12 +211,17 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
 
     Re-measured 2026-09-19 (Task 9: the `multi` share of the mix rose from
     11% to 13%, spec section 6) -- 996 of 996 to 1209 of 1209 in train, 121
-    of 121 to 145 of 145 in val. Still perfect."""
+    of 121 to 145 of 145 in val. Still perfect.
+
+    Re-measured 2026-09-24 (job-2 generator fix: the undecided builders no
+    longer draw from the rng, so every `multi` row draws new names, and the
+    held-out `none_of_these` slice is 8 groups, not 19) -- 1209 to 1227 in
+    train; val unchanged at 145. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (1209.0, 1209)
+    assert multi_job1(_train_results()) == (1227.0, 1227)
     assert multi_job1(_val_results()) == (145.0, 145)
 
 
@@ -247,7 +266,10 @@ def test_exam_oracle_job2_is_perfect():
     -- was the one nobody pinned, and 20 of its 153 workloads scored 0.0
     against their own gold answer because their grading keywords were empty.
     A ceiling below 1.0 here means the corpus, not the model, is at fault.
+
+    Re-measured 2026-09-24 (job-2 generator fix: the exam's `none_of_these`
+    slice is 8 thin-evidence rows, not 19) -- 153 to 142. Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 153}
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 142}

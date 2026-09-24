@@ -11,8 +11,10 @@ about `expected_cause` job 2 switches on (exact match vs. keyword
 match).
 
 Two gold fields do survive, at the top of `meta`, where a
-single-workload row mirrors them: `expected_cause` on 224 of the 263
-rows and `expected_confidence` on 234. This view keeps both. That makes
+single-workload row mirrors them: `expected_cause` on 213 of the 252
+rows and `expected_confidence` on 223 (224 and 234 of 263 before the
+2026-09-24 generator fix removed 11 `none_of_these` rows). This view
+keeps both. That makes
 the pin stricter than the gated numbers need, never looser: a gold
 cause or confidence that moved on one of those rows fails this test
 instead of slipping past it. So the ungated extras -- cause accuracy,
@@ -21,7 +23,7 @@ partly free to move. They read those two fields, and a row that carries
 one of them is pinned on it.
 
 `GRADED_VIEW_SHA256` pins the sha256 of that view over the whole exam
-(`generate.test_set()`, 263 rows). This is not a TDD red test: it
+(`generate.test_set()`, 252 rows since 2026-09-24; 263 before). This is not a TDD red test: it
 passes today, before the training-targets fix, because the fix only
 touches shared-origin rows, and this view keeps none of the fields it
 changes there -- their gold cause lives in the `meta["expected"]` dict.
@@ -43,6 +45,9 @@ Re-pinned on 2026-09-24 for the job-2 generator fix
 moves, and this view keeps it whole, so the digest follows every rendered
 change `FROZEN_SLICE_SHA256`'s 2026-09-24 entry lists in
 `tests/test_shared_origin_training.py`. The new exam is a new baseline.
+It moved twice on that branch: once for the catalogue's log-cause text,
+once for the single undecided builder, which also cut the exam from 263
+rows to 252.
 """
 
 from __future__ import annotations
@@ -69,7 +74,7 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "100ec57cebcc2d8c25c62466116e7886a2689faea071f25d6e47acecbf76412d"
+GRADED_VIEW_SHA256 = "046bf2b87b20aa20ebb79ca6ee199a47d9f8f54e25f42df76894033df09063a5"
 
 
 def _digest(views) -> str:
