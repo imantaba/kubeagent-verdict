@@ -504,11 +504,16 @@ def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_r
     case-family share under the 0.40 cap here rather than moving it once
     more.
 
+    Re-measured 2026-09-24, after the case mix moved 7 points from
+    `none_of_these` to `own_cause` and `wrong_attribution` -- 0.3810 at this
+    module's size, 0.3836 at the build size.
+
     That case-family share is not the share of multi-workload rows whose
     graded answer actually claims a shared origin. That answer-level share
-    is about 7 of every 100 -- 214 of 3,126 at build size 8000, counted on
-    the same kept pile the numbers above come from -- and this test does
-    not measure it and does not guard it.
+    is about 7 of every 100 -- 214 of 3,128 at build size 8000 (214 of
+    3,126 before the 2026-09-24 case-mix change), counted on the same kept
+    pile the numbers above come from -- and this test does not measure it
+    and does not guard it.
     """
     shared = len(_by_case(kept, "shared_origin"))
     separate = (len(_by_case(kept, "multi"))

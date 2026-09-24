@@ -263,15 +263,15 @@ The case mix is what adjudication means, in approximate proportions:
 | Case | Share | Teaches |
 |---|---|---|
 | Candidate attributed, evidence supports it | ~6% | Pick the candidate **verbatim**; calibrate confidence |
-| `none_of_these` — evidence rules all candidates out | ~11% | Refusing the offered menu |
-| Own evidence-grounded cause (unlisted) | ~10% | Naming what the deterministic pass missed |
+| `none_of_these` — thin evidence: every candidate is ruled out or refuted, and no read names a cause | ~4% | Abstaining: saying no cause is shown when the reads name none |
+| Own evidence-grounded cause (unlisted) | ~13% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~13% | One verdict row per listed workload, no extras |
 | `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on every row the rules do not decide and the rules' own cause on every row they do; calling it shared only when the rules confirm it |
 | `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~15% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
-| `wrong_attribution` — the `attributed` tag is on a candidate the evidence contradicts | ~10% | The tag is a hint, not an answer: evidence overrides it |
+| `wrong_attribution` — the `attributed` tag is on a candidate the evidence contradicts | ~14% | The tag is a hint, not an answer: evidence overrides it |
 
 That table is `CASE_MIX` in `src/kubeagent_verdict/dataset/generate.py`, and
 it is meant to be read against it rather than trusted on its own. An earlier
@@ -280,6 +280,22 @@ version of this table said `attributed` was ~40% and omitted
 tag-copying, which is the shortcut this whole section is about. It was
 wrong from the commit that introduced the case until a pre-publication
 audit recomputed it.
+
+On 2026-09-24 three rows of the table moved together. `none_of_these`
+went from ~11% to ~4%, and its points went to own cause (~10% to ~13%)
+and `wrong_attribution` (~10% to ~14%). The three still add up to 31%.
+Before that, `none_of_these` and `wrong_attribution` built the same
+prompt for 27 of 28 catalogue entries and gave it two different answers,
+so the model could not learn to override a wrong tag. Now one builder
+makes all three cases, and the reads decide the answer. A clear row's
+reads name the entry's own cause, and the row answers it. A thin row's
+reads rule out or refute every candidate and name no cause, and the row
+answers `none_of_these` at `low`. Thin evidence exists for four entries
+only: `crashloop-pod`, `coredns-corefile-broken`, `init-crashloop` and
+`restart-loop`. For each of them, and for each shape (ruled out or
+refuted), clear rows outnumber thin ones: 54 to 59 clear rows against 40
+thin at build size 8000, before the exam's groups are dropped. A test
+pins that, so "none of these" never becomes the easy answer for an entry.
 
 `shared_origin` took its four points from `multi` rather than from the mix
 growing, and that is a deliberate cost. Job 3 now grades both failure modes
@@ -298,7 +314,8 @@ rows onto the cap below. That case family stays the minority of the
 100), and a test fails above 40 of every 100. The cap guards that
 case-family share, not the answer itself: of the rows the model actually
 reads, about 7 of every 100 multi-workload rows carry a gold answer that
-claims a shared origin (214 of 3,126 at build size 8000).
+claims a shared origin (214 of 3,128 at build size 8000, re-measured
+on 2026-09-24; it was 214 of 3,126 before that day's case-mix change).
 
 Its scenarios come from `propagation.trainable_scenarios()`, a pool disjoint
 from the six the `shared_origin_probe` eval slice draws from — disjoint in key
@@ -414,8 +431,9 @@ truncated or thin → low), so calibration is trained, not guessed.
   so the model has never seen that (entry, workload) pair.
 - The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
-  swaps a tag — so across all 2,127 constituent workloads it contributes to
-  train and val at `--seed 17 --size 8000` (3,160 before `drop_held_out`),
+  swaps a tag — so across all 2,140 constituent workloads it contributes to
+  train and val at `--seed 17 --size 8000` (3,157 before `drop_held_out`;
+  2,127 and 3,160 before the 2026-09-24 case-mix change),
   "trust the `attributed` tag" is a strategy the training data never once
   contradicts in that shape. Both single-workload probes render one
   workload, so neither can reach it. `multi_misattribution_probe` renders
@@ -620,10 +638,12 @@ touched.
 A fourth slice, `contradiction_probe`, was then built specifically to be
 one, and negative control v4 scored the same broken model on it: **1.0
 cause, 0.0 decoy**, with the expected rationale and summary reproduced
-verbatim. It reuses `none_of_these_case`'s read text, and `none_of_these`
-is 15% of the curriculum, so the contradiction sentence is a trained
+verbatim. It reused `none_of_these_case`'s read text, and `none_of_these`
+was 15% of the curriculum, so the contradiction sentence was a trained
 trigger for a trained answer template rather than something to reason
-about. Holding the adversarial menu roughly fixed and changing only the
+about. (Since 2026-09-24 `none_of_these` rows are built from thin evidence
+on four entries, at `low` confidence, and share neither this slice's reads
+nor its rationale.) Holding the adversarial menu roughly fixed and changing only the
 read text moves cause accuracy from 0.1579 (`misattribution_probe`) and
 0.4737 (`wrong_attribution`) to 1.0. The slice is kept — it does defeat an
 index-copier, a tag-copier and a word counter — but not as a memorisation

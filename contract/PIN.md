@@ -65,7 +65,9 @@ contract version.
 ## Dataset pin moves
 
 The exam's two hashes live in `tests/test_shared_origin_training.py`:
-`FROZEN_253_SHA256` over the first 253 rows and `EVAL_SET_SHA256` over all
+`FROZEN_SLICE_SHA256` over every row before the ten
+`shared_origin_decoy_probe` rows (242 rows) and `EVAL_SET_SHA256` over all
+252. Until 2026-09-24 the first was `FROZEN_253_SHA256`, over 253 rows of
 263. They are pinned so a change to the generators cannot move the exam
 without someone saying why. This is where the why is recorded.
 
@@ -140,3 +142,41 @@ without someone saying why. This is where the why is recorded.
   their answer on their own menu. A job-2 number measured before this was
   scored by a grader that zeroed those 20 workloads for every reply, so it
   does not compare with one measured after.
+
+- **2026-09-24 — the job-2 generator fix.** Both hashes moved, and so did
+  the graded-view pin (`tests/test_exam_graded_view.py`). Before the fix,
+  `none_of_these` and `wrong_attribution` built the same prompt for 27 of
+  28 catalogue entries and gave it two different answers, so the model
+  could not learn to override a wrong tag. Now one builder makes every
+  undecided row, and the reads decide the answer. `FROZEN_253_SHA256` is
+  renamed `FROZEN_SLICE_SHA256`: the `none_of_these` slice falls from 19
+  rows to 8, so the exam falls from 263 rows to 252 and the frozen slice
+  from 253 to 242. The frozen slice still means every row before the ten
+  `shared_origin_decoy_probe` rows, and a test pins its length. This time
+  rendered bytes move, not only `meta`, so the new exam is a new baseline:
+  no number on it compares with one from before. The banked exam the
+  prompt-stability test reads is now `out/dataset-0924/test.jsonl`. The
+  footprint, in commit order, measured by diffing the exam before and
+  after each change:
+  - The catalogue stopped doubling the `log cause: ` prefix and quotes the
+    container in `restart-loop`'s evidence. 41 rows change, in the user
+    message only.
+  - One builder makes every undecided row. All 19 `own_cause` rows change
+    their user message, and 16 of them their gold answer and meta. All 19
+    `misattribution_probe` rows change their user message. 9 of 19
+    `wrong_attribution` rows change their user message. The held-out rows
+    interleave by entry, so every row after the first changed entry
+    shifts.
+  - A multi-workload row keeps its crash-family log reads, and
+    `multi_misattribution_probe` prints the header kubeagent's confidence
+    rule gives. 13 of its 19 rows change their user message only.
+  - `empty_candidates` answers at the entry's own confidence and keeps its
+    log read. 16 of its 19 rows change their gold answer and meta, and 5
+    of those 16 also change their user message.
+
+  No other row moves. The paste-the-prompt bot scores 76/142 = 0.5352 on
+  job 2, up from 76/153 = 0.4967: the exam lost 11 `none_of_these`
+  workloads, none of them keyword-graded. It still scores below
+  `JOB2_BAR` (0.7), which does not move. The full per-change footprint is
+  in the comment above `FROZEN_SLICE_SHA256` in
+  `tests/test_shared_origin_training.py`.
