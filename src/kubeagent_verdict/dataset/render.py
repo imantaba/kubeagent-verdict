@@ -21,7 +21,7 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # render.py's public surface. Each step that adds a new function or a new
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
-__all__ = ["apply_budget", "bind", "check_prompt_size", "draw_ending", "drop",
+__all__ = ["apply_budget", "bind", "check_prompt_size", "draw_ending", "drop", "header_for",
            "object_reads", "prompt_meta", "refute", "registry_events_read",
            "render_workload", "unverify", "workload_meta"]
 
@@ -183,6 +183,31 @@ def object_reads(
     return tuple(reads)
 
 
+# kubeagent's `confidence.ForRootCause` (internal/confidence/confidence.go:36-47
+# at v1.24.0), keyed by the attributed cause's prefix, in the Go switch's order.
+_HEADER_BY_PREFIX = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
+
+
+def header_for(candidates: tuple[c.Candidate, ...]) -> str:
+    """The `[confidence: ...]` header kubeagent prints over a trace.
+
+    A port of `ForRootCause`, applied to the one attributed candidate's
+    cause. No attributed candidate gives "" -- kubeagent prints no header.
+    Two or more raise ValueError: kubeagent's trace has at most one winner,
+    so two is a generator bug, not a prompt to render.
+    """
+    attributed = [cand for cand in candidates if cand.verdict == "attributed"]
+    if len(attributed) > 1:
+        raise ValueError(
+            f"{len(attributed)} attributed candidates; kubeagent attributes at most one")
+    if not attributed:
+        return ""
+    for prefix, level in _HEADER_BY_PREFIX:
+        if attributed[0].cause.startswith(prefix):
+            return level
+    return ""
+
+
 def render_workload(
     objects: tuple[o.Object, ...],
     *,
@@ -205,9 +230,10 @@ def render_workload(
 
     The returned Workload fills only the fields this module owns —
     namespace, name, kind, status, candidates, decided, decided_cause,
-    decided_outcome. findings, confidence, network_policies, rollout,
-    ready, and desired stay at their dataclass defaults; a caller building
-    a full prompt-ready Workload merges those in separately.
+    decided_outcome, and confidence (the trace header, via `header_for`).
+    findings, network_policies, rollout, ready, and desired stay at their
+    dataclass defaults; a caller building a full prompt-ready Workload
+    merges those in separately.
     """
     candidates = rules.attribute(objects, ns=ns, pod=pod, issue=issue)
     result = rules.decide(candidates)
@@ -232,6 +258,7 @@ def render_workload(
         restarts=0, findings=(), candidates=contract_candidates,
         decided=result.decided, decided_cause=result.cause,
         decided_outcome=result.outcome,
+        confidence=header_for(contract_candidates),
     )
     return workload, reads, result
 

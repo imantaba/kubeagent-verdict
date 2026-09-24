@@ -8,6 +8,9 @@ frozen hash.
 
 import random
 
+import pytest
+
+from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset import render, rules
 
@@ -235,6 +238,62 @@ def test_render_workload_builds_candidates_reads_and_result():
     assert len(reads) == 1
     assert reads[0].label == "describe node /worker-1"
     assert result.cause == "node worker-1 (NotReady)"
+    assert workload.confidence == "high"
+
+
+def test_render_workload_prints_no_header_when_every_candidate_is_ruled_out():
+    node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
+                     placement="off", fresh=o.Fresh(how="read", ready="False"),
+                     intent="decoy")
+    workload, _reads, _result = render.render_workload(
+        (node,), ns="shop", name="api", pod="api-0",
+        image="registry.example.com/api:1", issue="CrashLoopBackOff",
+        kind="Deployment", status="degraded",
+    )
+    assert workload.candidates[0].verdict == "ruled_out"
+    assert workload.confidence == ""
+
+
+# ------------------------------------------------------------- header_for
+#
+# A port of kubeagent v1.24.0's `confidence.ForRootCause`
+# (internal/confidence/confidence.go:36-47), applied to the one attributed
+# candidate's cause. `internal/investigate/prime.go:58-64` prints the header
+# for any non-empty value, `high` included.
+
+
+def _cand(cause: str, verdict: str) -> c.Candidate:
+    return c.Candidate(cause=cause, verdict=verdict, reason="r")
+
+
+@pytest.mark.parametrize("cause, level", [
+    ("node worker-1 (NotReady)", "high"),
+    ("PVC data-0 (FailedBinding)", "high"),
+    ("registry registry.invalid (3 workloads failing to pull)", "medium"),
+    ("image tag v9 does not exist", ""),
+    ("pvc data-0 (FailedBinding)", ""),   # the Go prefix match is case-sensitive
+])
+def test_header_for_ports_for_root_cause(cause, level):
+    assert render.header_for((_cand(cause, "attributed"),)) == level
+
+
+def test_header_for_reads_only_the_attributed_candidate():
+    cands = (_cand("node worker-1 (NotReady)", "ruled_out"),
+             _cand("registry registry.invalid (2 workloads failing to pull)", "attributed"))
+    assert render.header_for(cands) == "medium"
+
+
+def test_header_for_is_empty_with_no_attributed_candidate():
+    assert render.header_for((_cand("node worker-1 (NotReady)", "ruled_out"),
+                              _cand("PVC data-0 (FailedBinding)", "outranked"))) == ""
+    assert render.header_for(()) == ""
+
+
+def test_header_for_refuses_two_attributed_candidates():
+    """kubeagent's trace has at most one winner, so two is a generator bug."""
+    with pytest.raises(ValueError, match="2 attributed"):
+        render.header_for((_cand("node worker-1 (NotReady)", "attributed"),
+                           _cand("PVC data-0 (FailedBinding)", "attributed")))
 
 
 def test_workload_meta_has_exactly_seven_keys():
