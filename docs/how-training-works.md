@@ -205,7 +205,7 @@ built specifically to catch a model that is cheating rather than reasoning:
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
 | `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
 | `contradiction_probe` | 19 | Evidence that contradicts itself. | 1, always decided |
-| the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 156 | Ordinary competence across the nine question types | 1 or 2 |
+| the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 156 | Ordinary competence on the seven single-workload question types (all but `multi` and the `shared_origin` pair) | 1 or 2 |
 
 The job column says which pass bar reads a slice's rows, now that
 kubeagent v1.24.0 decides some of them before the model ever answers.

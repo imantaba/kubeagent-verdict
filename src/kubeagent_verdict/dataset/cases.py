@@ -521,10 +521,13 @@ def none_of_these_case(e: CatalogEntry, n: Names, *, shape: str) -> Example:
 
 
 def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
-    """EVAL-ONLY: every candidate ruled out; the prompt sometimes names the
-    cause anyway, in the workload's own finding lines or, less often, in a
-    read (measured over the 19 test rows: 2 in a read, 3 in a finding line,
-    14 in neither).
+    """EVAL-ONLY: every candidate ruled out. Where the prompt names the cause,
+    it is most often in the workload's own finding lines (for example
+    "OOMKilled ... exit code 137"), not in a read. Over the 19 test rows:
+    3 carry a `log cause:` finding line. 5 carry a log read; 2 of those
+    name the cause (crashloop-pod, which also has the finding line, and
+    coredns-corefile-broken, where the read is the only place) and 3 name
+    none. 14 carry no read at all.
 
     It builds the same prompt as `own_cause_case`; only the case name, the
     wording of the gold answer and one meta key differ: this row carries
@@ -645,20 +648,20 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     `none_of_these` was 15% of the curriculum, so the contradiction sentence
     was itself a memorised trigger for a memorised answer template.
     `none_of_these` rows stopped carrying the contradiction sentence on
-    2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from
-    thin evidence on four entries, answer at low confidence, and no longer
-    share the rationale — but they still share this row's gold summary
-    sentence (no other training case carries it), and 14 of the 19 rows
-    here carry a generic describe-node or PVC-phase read that a
-    `none_of_these` training row also renders (the other five carry none):
-    13 of contradiction_probe's 38 reads under the overlap guard's name
-    mask (14 byte for byte; `networkpolicy-deny-all`'s own workload is
-    named `worker`, so the guard's mask also rewrites its node read's
-    `worker-3`, dropping it from the masked count). Holding the
-    adversarial menu roughly fixed and changing only the read text moves cause
-    accuracy from 0.1579 (`misattribution_probe`) and 0.4737
-    (`wrong_attribution`) to 1.0 here. The menu is what this row perturbs, and
-    the menu is what such a model never reads.
+    2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from thin
+    evidence on four entries, answer at low confidence, and no longer share
+    the rationale — but they still share this row's gold summary sentence (no
+    other training case carries it), and 14 of the 19 rows here carry a
+    generic describe-node read that a `none_of_these` training row also
+    renders (the other five carry a PVC read, which no `none_of_these` row
+    has): 13 of contradiction_probe's 38 reads under the overlap guard's name
+    mask (14 byte for byte; `networkpolicy-deny-all`'s own workload is named
+    `worker`, so the guard's mask also rewrites its node read's `worker-3`,
+    dropping it from the masked count). Holding the adversarial menu roughly
+    fixed and changing only the read text moves cause accuracy from 0.1579
+    (`misattribution_probe`) and 0.4737 (`wrong_attribution`) to 1.0 here. The
+    menu is what this row perturbs, and the menu is what such a model never
+    reads.
 
     So: an index-copier, a tag-copier and a word counter do score zero here,
     and that much the slice is kept for. An entry-lookup table does not. No

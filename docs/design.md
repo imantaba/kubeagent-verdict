@@ -476,11 +476,14 @@ truncated or thin → low), so calibration is trained, not guessed.
   ending (`objects.refute`) is the fixed literal "manifest unknown", so
   every one of its job-2 blocks carries an events read that names the
   image with that text, and its gold rationale cites it. The remaining 618
-  carry no read that names a cause at all. On that same kind of
-  evidence — a refuted node or PVC read that names no cause — a thin
-  `none_of_these` row instead answers "none of these" at `low`: 245 train
-  rows do that. So about 618 `multi` labels, against 245 thin
-  `none_of_these` labels, teach naming a cause the prompt does not show.
+  carry no read that names a cause at all. In each of them the one
+  attributed candidate is a decoy that a fresh read refutes: a node in
+  410, a PVC in 208. A thin `none_of_these` train row answers "none of
+  these" at `low`, and 245 train rows do that. 128 of them sit on the same
+  shape as the 410: an attributed node that a fresh read refutes. The
+  other 117 have every candidate ruled out. No thin row has a PVC decoy.
+  So about 618 `multi` labels, against 245 thin labels (128 of them on the
+  same refuted-node shape), teach naming a cause the prompt does not show.
   The spec keeps the 618 on purpose — Spec 3's finding line is what closes
   the gap — but decide before the retrain whether to wait for Spec 3.
 
@@ -688,16 +691,16 @@ about. `none_of_these` rows stopped carrying the contradiction sentence on
 evidence on four entries, at `low` confidence, and no longer share the
 rationale — but they still share this slice's gold summary sentence (no
 other training case carries it), and 14 of its 19 rows carry a generic
-describe-node or PVC-phase read a `none_of_these` training row also
-renders (the other five carry none): 13 of its 38 reads under the overlap
-guard's name mask (14 byte for byte; the difference is
-`networkpolicy-deny-all`'s own workload is named `worker`, so the guard's
-mask also rewrites its node read's `worker-3`, dropping it from the masked
-count). Holding the adversarial menu roughly fixed and changing only the
-read text moves cause accuracy from 0.1579 (`misattribution_probe`) and
-0.4737 (`wrong_attribution`) to 1.0. The slice is kept — it does defeat an
-index-copier, a tag-copier and a word counter — but not as a memorisation
-test.
+describe-node read a `none_of_these` training row also renders (the other
+five carry a PVC read, which no `none_of_these` row has): 13 of its 38
+reads under the overlap guard's name mask (14 byte for byte; the
+difference is `networkpolicy-deny-all`'s own workload is named `worker`,
+so the guard's mask also rewrites its node read's `worker-3`, dropping it
+from the masked count). Holding the adversarial menu roughly fixed and
+changing only the read text moves cause accuracy from 0.1579
+(`misattribution_probe`) and 0.4737 (`wrong_attribution`) to 1.0. The
+slice is kept — it does defeat an index-copier, a tag-copier and a word
+counter — but not as a memorisation test.
 
 The honest position for v0.1.0: **no slice built from this catalog can
 separate a model that reads from one that recites per-entry answers, while

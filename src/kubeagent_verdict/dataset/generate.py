@@ -441,11 +441,12 @@ def probe_sets() -> list[Example]:
     # (e2eb459); since 2026-09-24 (5a58915) they use thin evidence and share
     # neither it nor the rationale — but they still share this slice's gold
     # summary sentence, and 14 of its 19 rows carry a generic describe-node
-    # or PVC-phase read a `none_of_these` training row also renders (the
-    # other five carry none): 13 of its 38 reads under the overlap guard's
-    # name mask (14 byte for byte). See `cases.contradiction_probe`'s
-    # docstring for the full retraction and the byte-for-byte discrepancy;
-    # the slice is kept for the three shortcuts it does defeat.
+    # read a `none_of_these` training row also renders (the other five carry a
+    # PVC read, which no `none_of_these` row has): 13 of its 38 reads under
+    # the overlap guard's name mask (14 byte for byte). See
+    # `cases.contradiction_probe`'s docstring for the full retraction and the
+    # byte-for-byte discrepancy; the slice is kept for the three shortcuts it
+    # does defeat.
     for entry in catalog.trainable():
         if not entry.objects or not entry.contradiction:
             continue
