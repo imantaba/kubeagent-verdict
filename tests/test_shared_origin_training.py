@@ -855,7 +855,13 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 #   `multi_misattribution_probe` rows change their user message: 4 take
 #   only a new header, 5 only gain a log read, and 4 get both. Their gold
 #   answer and meta do not move, and no other row does.
-FROZEN_SLICE_SHA256 = "b3c5c98a8084183e3c141647c757d294b6776895efd721c35f4e45116060e5f2"
+# - `empty_candidates` answers at the entry's own confidence instead of a
+#   flat `medium`, and a crash-family entry keeps its log read. 16 of its
+#   19 rows change their gold answer and meta (`medium` to `high`, one per
+#   direct entry), and 5 of those 16 also change their user message (one
+#   per crash-family entry). The other 3 are the indirect entries, whose
+#   own confidence is `medium`. No other row moves.
+FROZEN_SLICE_SHA256 = "aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -922,7 +928,7 @@ FROZEN_SLICE_SHA256 = "b3c5c98a8084183e3c141647c757d294b6776895efd721c35f4e45116
 # same job-2 generator fix that moved `FROZEN_SLICE_SHA256` above (see its
 # 2026-09-24 entry). None of the ten `shared_origin_decoy_probe` rows
 # moves, so this digest moves only because the frozen slice inside it does.
-EVAL_SET_SHA256 = "a8ecb21ddbc2f3fc2fde7620c7a8df9fd0213be9a6747a6b7966c1fcea87e2ac"
+EVAL_SET_SHA256 = "97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81"
 
 
 def _digest(rows) -> str:

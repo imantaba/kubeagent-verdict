@@ -25,7 +25,6 @@ from kubeagent_verdict.dataset.render import (
     apply_budget,
     bind,
     draw_ending,
-    drop,
     object_reads,
     prompt_meta,
     refute,
@@ -689,18 +688,24 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 
 
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
-    names = dataclasses.asdict(n)
-    bound = tuple(bind(obj, names) for obj in e.objects)
-    remaining = bound
-    for obj in bound:
-        remaining = drop(remaining, obj)
+    """No candidates at all: the reads alone name the cause.
+
+    The row answers the entry's own cause at `_confidence(e)`, as every
+    clear undecided row does; until 2026-09-24 it answered a flat `medium`.
+    It reads the entry's first read and, for a crash-family entry, the clear
+    log read kubeagent makes for it. No candidates means no header.
+    """
     result = rules.Result(decided=False, cause="", outcome="", evidence="",
                           group_key="", group_text="", decisions=())
     w = _workload(e, n, (), confidence="", result=result)
     reads = (c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=_fmt(e.reads[0][1], n)),)
+    log = _log_read(e, n, "clear")
+    if log is not None:
+        reads += (log,)
     user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
+    conf = _confidence(e)
+    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": _fmt(e.rationale, n)
                           + " The candidate list shown did not include this cause."}]
     summary = f"{n.ns}/{n.name} is failing: {cause}.\nNo deterministic candidates were available."
@@ -708,7 +713,7 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     wm = workload_meta(result, expected_cause=cause,
                        own_cause_keywords=list(e.own_cause_keywords))
     meta = {"case": "empty_candidates", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": "medium",
+            "expected_confidence": conf,
             "expected_own_keywords": list(e.own_cause_keywords)}
     meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: []}))
     return Example(case="empty_candidates", group=f"{e.key}:{n.ns}/{n.name}",

@@ -116,7 +116,7 @@ def test_empty_candidates_renders_none_section():
     assert "== BEGIN candidates ==\n(none)\n== END candidates ==" in ex.user
     (row,) = json.loads(ex.assistant)["verdicts"]
     assert row["cause"] == "container killed at its memory limit"  # own phrasing
-    assert row["confidence"] == "medium"
+    assert row["confidence"] == "high"  # a direct entry; was a flat "medium"
 
 
 def test_empty_candidates_has_no_candidates_and_the_fixed_sentence():
@@ -128,6 +128,22 @@ def test_empty_candidates_has_no_candidates_and_the_fixed_sentence():
     assert answer["verdicts"][0]["rationale"].endswith(
         "The candidate list shown did not include this cause.")
     assert ex.user.count("considered") == 0
+
+
+def test_empty_candidates_answers_at_the_entrys_confidence_and_keeps_the_log_read():
+    """An empty candidate list does not make the reads say less. The row
+    answers the entry's own cause at the entry's own confidence, like every
+    clear undecided row, and a crash-family entry keeps the log read
+    kubeagent makes for it."""
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(25))
+        ex = cases.empty_candidates(e, n)
+        (row,) = json.loads(ex.assistant)["verdicts"]
+        assert row["confidence"] == cases._confidence(e), e.key
+        assert ex.meta["expected_confidence"] == cases._confidence(e), e.key
+        log = cases._log_read(e, n, "clear")
+        if log is not None:
+            assert f"== {log.label} ==\n{log.content}" in ex.user, e.key
 
 
 def test_multi_has_one_row_per_workload():

@@ -45,10 +45,10 @@ Re-pinned on 2026-09-24 for the job-2 generator fix
 moves, and this view keeps it whole, so the digest follows every rendered
 change `FROZEN_SLICE_SHA256`'s 2026-09-24 entry lists in
 `tests/test_shared_origin_training.py`. The new exam is a new baseline.
-It moved three times on that branch: once for the catalogue's log-cause
+It moved four times on that branch: once for the catalogue's log-cause
 text, once for the single undecided builder, which also cut the exam from
-263 rows to 252, and once for the multi-workload rows' log reads and
-headers.
+263 rows to 252, once for the multi-workload rows' log reads and headers,
+and once for `empty_candidates`' confidence and log read.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "74f55a1d64eaeb5fec11d5b871ac69b93dfc4d60700936843477a6e7063a4a81"
+GRADED_VIEW_SHA256 = "250f2bc2bc6860ec5e04e9574e36b8cf23cea2625961b735bb1a0888914d5b18"
 
 
 def _digest(views) -> str:
