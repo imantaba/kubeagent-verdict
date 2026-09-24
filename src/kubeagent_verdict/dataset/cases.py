@@ -181,7 +181,7 @@ def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None
 def _multi_reads(e: CatalogEntry, n: Names,
                  object_reads: tuple[c.EvidenceRead, ...]) -> list[tuple[c.EvidenceRead, bool]]:
     """One workload's reads in a multi-workload row, at most two, each paired
-    with whether the row's cap may drop it. A crash-family workload keeps
+    with whether the row's cap must keep it. A crash-family workload keeps
     its first object read, then its clear log read, which the cap never
     drops. Any other workload keeps its first two object reads.
 
@@ -201,6 +201,8 @@ def _cap_reads(reads: list[tuple[c.EvidenceRead, bool]]) -> tuple[c.EvidenceRead
     at seed 17, size 8000.
     """
     out = list(reads)
+    # Walk from the end: deleting index i never shifts an index still to
+    # visit (every remaining index is < i).
     for i in range(len(out) - 1, -1, -1):
         if len(out) <= c.MAX_TOOL_CALLS:
             break
@@ -406,7 +408,7 @@ def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
 # One builder for every undecided job-2 row. kubeagent leaves a workload
 # undecided in two shapes: "refuted" (one candidate attributed, a fresh read
 # refutes it) and "ruled_out" (every candidate ruled out). The evidence is
-# "clear" (a read names the cause) or "thin" (nothing does). The prompt is a
+# "clear" (the prompt names the cause) or "thin" (nothing does). The prompt is a
 # function of (entry, names, shape, evidence) alone, never of the case, so a
 # prompt cannot carry two expected answers. Thin evidence exists only for the
 # four entries whose one cause-naming line can be dropped.
@@ -490,7 +492,7 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
 
 def wrong_attribution(e: CatalogEntry, n: Names) -> Example:
     """TRAINING case: kubeagent attributed a cause and a fresh read refuted
-    it, while a read names the real one. The answer is the entry's own
+    it, while the prompt names the real one. The answer is the entry's own
     cause, which is on no candidate line.
     """
     return _undecided_example(e, n, case="wrong_attribution", shape="refuted",
@@ -498,8 +500,8 @@ def wrong_attribution(e: CatalogEntry, n: Names) -> Example:
 
 
 def own_cause_case(e: CatalogEntry, n: Names) -> Example:
-    """TRAINING case: kubeagent ruled out every candidate, while a read names
-    the real cause. The answer is the entry's own cause.
+    """TRAINING case: kubeagent ruled out every candidate, while the prompt
+    names the real cause. The answer is the entry's own cause.
     """
     return _undecided_example(e, n, case="own_cause", shape="ruled_out", evidence="clear")
 
@@ -620,9 +622,9 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 
     This row was built to be the one that cannot be answered that way: the
     reads contradict the catalog winner (as in `none_of_these`), the decoy
-    leads and carries `attributed` (as in `misattribution_probe`), and the
-    correct answer — "none of these" — is on no candidate line, so it can be
-    neither copied nor pointed at.
+    leads and carries `attributed` (as in `multi_misattribution_probe`), and
+    the correct answer — "none of these" — is on no candidate line, so it can
+    be neither copied nor pointed at.
 
     IT DOES NOT DO THAT. The claim is retracted here rather than deleted,
     because the measurement is worth more than the intention. Negative control
@@ -634,8 +636,9 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     `none_of_these` was 15% of the curriculum, so the contradiction sentence
     was itself a memorised trigger for a memorised answer template. (Since
     2026-09-24 `none_of_these` rows are built from thin evidence on four
-    entries, at low confidence, and share neither this row's reads nor its
-    rationale.) Holding the
+    entries, at low confidence, and share neither the contradiction sentence
+    nor the rationale — they still share this row's generic describe-node
+    read, 13 of its 38 reads.) Holding the
     adversarial menu roughly fixed and changing only the read text moves cause
     accuracy from 0.1579 (`misattribution_probe`) and 0.4737
     (`wrong_attribution`) to 1.0 here. The menu is what this row perturbs, and
@@ -688,7 +691,7 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 
 
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
-    """No candidates at all: the reads alone name the cause.
+    """No candidates at all: the prompt names the cause.
 
     The row answers the entry's own cause at `_confidence(e)`, as every
     clear undecided row does; until 2026-09-24 it answered a flat `medium`.
@@ -1234,7 +1237,7 @@ def shared_origin_probe(p: prop.Propagation, rng: random.Random,
     the slice without reading the evidence:
 
     * the tag — the local decoy carries `attributed`, the shared cause carries
-      `outranked`, as in `misattribution_probe`;
+      `outranked`, as in `multi_misattribution_probe`;
     * the position — the menu is deterministic and never shuffled, decoy
       first, shared cause last;
     * "name the string common to every menu" — a second common cause, the

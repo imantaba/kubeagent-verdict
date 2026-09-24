@@ -148,7 +148,7 @@ without someone saying why. This is where the why is recorded.
   `none_of_these` and `wrong_attribution` built the same prompt for 27 of
   28 catalogue entries and gave it two different answers, so the model
   could not learn to override a wrong tag. Now one builder makes every
-  undecided row, and the reads decide the answer. `FROZEN_253_SHA256` is
+  undecided row, and the prompt decides the answer. `FROZEN_253_SHA256` is
   renamed `FROZEN_SLICE_SHA256`: the `none_of_these` slice falls from 19
   rows to 8, so the exam falls from 263 rows to 252 and the frozen slice
   from 253 to 242. The frozen slice still means every row before the ten

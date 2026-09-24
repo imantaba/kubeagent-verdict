@@ -849,8 +849,10 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 #   object is read, and crash-family rows gain a log read) and 16 of them
 #   their gold answer and meta (the entry's own confidence, not a flat
 #   `medium`); all 19 `misattribution_probe` rows change their user message
-#   the same way (the decoy is no longer attributed, so the header goes
-#   too); and 9 of 19 `wrong_attribution` rows change their user message (4
+#   the same way (its menu was already fully ruled out before this fix; the
+#   header goes because the builder now computes it with `header_for`
+#   instead of forcing the entry's flat confidence); and 9 of 19
+#   `wrong_attribution` rows change their user message (4
 #   take the header kubeagent's confidence rule gives the attributed cause,
 #   the other 5 gain a log read). No other row moves.
 # - A multi-workload row keeps the log read kubeagent makes for every

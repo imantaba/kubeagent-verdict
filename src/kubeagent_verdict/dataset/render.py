@@ -192,7 +192,7 @@ def header_for(candidates: tuple[c.Candidate, ...]) -> str:
     """The `[confidence: ...]` header kubeagent prints over a trace.
 
     A port of `ForRootCause`, applied to the one attributed candidate's
-    cause. No attributed candidate gives "" -- kubeagent prints no header.
+    cause. No attributed candidate gives "" — kubeagent prints no header.
     Two or more raise ValueError: kubeagent's trace has at most one winner,
     so two is a generator bug, not a prompt to render.
     """

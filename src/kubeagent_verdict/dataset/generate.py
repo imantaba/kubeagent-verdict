@@ -377,9 +377,10 @@ def probe_sets() -> list[Example]:
 
     `positional_probe` puts the correct answer last with an honest tag;
     `misattribution_probe` rules every candidate out, so the answer is on no
-    candidate line (since 2026-09-24; it used to hand `attributed` to the
-    decoy); `multi_misattribution_probe` hands `attributed` to the decoy in the
-    multi-workload shape the single-workload probes cannot reach;
+    candidate line (no attributed candidate since 2026-09-16; since
+    2026-09-24 also no header and no object reads); `multi_misattribution_probe`
+    hands `attributed` to the decoy in the multi-workload shape the
+    single-workload probes cannot reach;
     `contradiction_probe` adds a read that
     rules the winner out, so the answer is on no candidate line at all. None is
     ever generated into train or val — they exist to make a shortcut visible,
@@ -436,10 +437,11 @@ def probe_sets() -> list[Example]:
     # known-broken first tune at 1.0 cause / 0.0 decoy here. The read text it
     # reused was `none_of_these_case`'s verbatim, which made the contradiction
     # sentence a trained trigger rather than something to reason about (since
-    # 2026-09-24 `none_of_these` rows use thin evidence and share no read text
-    # with this slice). See `cases.contradiction_probe`'s docstring for the
-    # full retraction; the slice is kept for the three shortcuts it does
-    # defeat.
+    # 2026-09-24 `none_of_these` rows use thin evidence and share neither the
+    # contradiction sentence nor the rationale — they still share this
+    # slice's generic describe-node read, 13 of its 38 reads). See
+    # `cases.contradiction_probe`'s docstring for the full retraction; the
+    # slice is kept for the three shortcuts it does defeat.
     for entry in catalog.trainable():
         if not entry.objects or not entry.contradiction:
             continue

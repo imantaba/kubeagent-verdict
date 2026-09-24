@@ -685,7 +685,7 @@ def test_every_decoy_probe_row_names_its_decoy_cause():
 
 
 def test_the_length_gap_decider_has_rows_in_both_slices():
-    """57 of the 263 exam rows carry both a decoy cause and an expected cause
+    """57 of the 252 exam rows carry both a decoy cause and an expected cause
     that is not `none_of_these`, which is what the length gap is measured
     over. Both slices have to be non-empty: a decider with one empty slice
     reads `not measured` and tells a release reviewer nothing.

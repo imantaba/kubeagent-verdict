@@ -263,7 +263,7 @@ The case mix is what adjudication means, in approximate proportions:
 | Case | Share | Teaches |
 |---|---|---|
 | Candidate attributed, evidence supports it | ~6% | Pick the candidate **verbatim**; calibrate confidence |
-| `none_of_these` — thin evidence: every candidate is ruled out or refuted, and no read names a cause | ~4% | Abstaining: saying no cause is shown when the reads name none |
+| `none_of_these` — thin evidence: every candidate is ruled out or refuted, and the prompt names no cause | ~4% | Abstaining: saying no cause is shown when the prompt names none |
 | Own evidence-grounded cause (unlisted) | ~13% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~13% | One verdict row per listed workload, no extras |
 | `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on every row the rules do not decide and the rules' own cause on every row they do; calling it shared only when the rules confirm it |
@@ -287,15 +287,22 @@ and `wrong_attribution` (~10% to ~14%). The three still add up to 31%.
 Before that, `none_of_these` and `wrong_attribution` built the same
 prompt for 27 of 28 catalogue entries and gave it two different answers,
 so the model could not learn to override a wrong tag. Now one builder
-makes all three cases, and the reads decide the answer. A clear row's
-reads name the entry's own cause, and the row answers it. A thin row's
-reads rule out or refute every candidate and name no cause, and the row
+makes all three cases, and the prompt decides the answer. A clear row's
+prompt names the entry's own cause, and the row answers it. A thin row's
+prompt rules out or refutes every candidate and names no cause, and the row
 answers `none_of_these` at `low`. Thin evidence exists for four entries
 only: `crashloop-pod`, `coredns-corefile-broken`, `init-crashloop` and
 `restart-loop`. For each of them, and for each shape (ruled out or
 refuted), clear rows outnumber thin ones: 54 to 59 clear rows against 40
 thin at build size 8000, before the exam's groups are dropped. A test
 pins that, so "none of these" never becomes the easy answer for an entry.
+For `init-crashloop` and `restart-loop`, a clear row and its thin twin
+share one evidence section; only the finding's `log cause:` line differs,
+because neither entry has a separate log-causes read at all. For
+`crashloop-pod` and `coredns-corefile-broken`, the same cause-naming text
+is also its own read: their thin twin drops the finding's line, and the
+read stays but its content swaps too, to kubeagent's own "no classifiable
+output" message, which names no cause.
 
 `shared_origin` took its four points from `multi` rather than from the mix
 growing, and that is a deliberate cost. Job 3 now grades both failure modes
@@ -424,11 +431,19 @@ truncated or thin → low), so calibration is trained, not guessed.
   imitate — three at first, and a fourth, `contradiction_probe`, added
   later and then withdrawn from the release bar for the reason recorded
   below. `positional_probe` places the correct candidate LAST with an
-  honest `attributed` tag. `misattribution_probe` places it last AND hands
-  `attributed` to a decoy the evidence contradicts. All are deterministic
-  — never shuffled — because their purpose is to hold the shortcut fixed
-  against the correct answer. Their groups are held out of train and val,
-  so the model has never seen that (entry, workload) pair.
+  honest `attributed` tag. Since 2026-09-24 `misattribution_probe` no
+  longer hands `attributed` to anything: it builds `own_cause`'s
+  ruled-out prompt instead, so every candidate is ruled out, there is no
+  tag and no header, and the correct cause is on no candidate line. It is
+  an own-cause slice on held-out groups now, not a tag trap, and its
+  "no training example can imitate" claim no longer holds for it —
+  `own_cause` and `wrong_attribution` train rows build the same prompt for
+  the same entries. `multi_misattribution_probe` and `contradiction_probe`
+  still hand `attributed` to a decoy the evidence contradicts. All four
+  are deterministic — never shuffled — because their purpose is to hold
+  the shortcut fixed against the correct answer. Their groups are held
+  out of train and val, so the model has never seen that (entry,
+  workload) pair.
 - The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
   swaps a tag — so across all 2,140 constituent workloads it contributes to
@@ -441,6 +456,18 @@ truncated or thin → low), so calibration is trained, not guessed.
   decoy counts as tag-following. Its rows are **appended** to the test
   file, never interleaved, so a scoreboard banked against the previous
   file still lines up row-for-row.
+- On 2026-09-24 a review counted `multi`'s job-2 workloads directly, using
+  the grader's own idea of one (`_is_job2_keyword_graded` in
+  `evals/score.py`). In `out/dataset-0924/train.jsonl`, `multi` rows carry
+  718 job-2 workloads, and every one answers its own cause: 606 at `high`,
+  112 at `medium`. A `multi` block renders with no finding line
+  (`render.render_workload`'s `findings=()`), so most of those 718 show
+  nothing in the prompt that names the cause. 65 of them are the two
+  crash-family entries whose log read still spells it out
+  (`crashloop-pod`'s "bad command or entrypoint",
+  `coredns-corefile-broken`'s "configuration parse/validation error"); the
+  rest carry no read that names a cause either. The spec keeps these
+  answers on purpose — Spec 3's finding line is what closes the gap.
 
 ## Training (kv-train)
 
@@ -642,8 +669,9 @@ verbatim. It reused `none_of_these_case`'s read text, and `none_of_these`
 was 15% of the curriculum, so the contradiction sentence was a trained
 trigger for a trained answer template rather than something to reason
 about. (Since 2026-09-24 `none_of_these` rows are built from thin evidence
-on four entries, at `low` confidence, and share neither this slice's reads
-nor its rationale.) Holding the adversarial menu roughly fixed and changing only the
+on four entries, at `low` confidence, and share neither the contradiction
+sentence nor the rationale — they still share this slice's generic
+describe-node read, 13 of its 38 reads.) Holding the adversarial menu roughly fixed and changing only the
 read text moves cause accuracy from 0.1579 (`misattribution_probe`) and
 0.4737 (`wrong_attribution`) to 1.0. The slice is kept — it does defeat an
 index-copier, a tag-copier and a word counter — but not as a memorisation

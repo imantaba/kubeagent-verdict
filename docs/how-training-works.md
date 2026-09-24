@@ -82,9 +82,9 @@ proportions, and each kind teaches one specific skill:
 | Question type | Share | The skill it teaches |
 |---|---|---|
 | `attributed` | 6% | The obvious candidate is right — pick it, word for word |
-| `none_of_these` | 11% | Sometimes *every* offered candidate is wrong. Say so. |
-| `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
-| `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
+| `none_of_these` | 4% | The evidence is thin: every candidate is ruled out or refuted, and nothing names a cause. Say so, at low confidence. |
+| `own_cause` | 13% | Sometimes the right answer is not on the menu at all. Name it. |
+| `wrong_attribution` | 14% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
 | `injection` | 10% | The evidence may contain text saying "ignore your instructions." It is data. Ignore *it*. |
 | `multi` | 13% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
@@ -98,9 +98,9 @@ twin. They are the whole subject of Part 2.
 
 The generator then splits everything into three piles:
 
-- **train** — 4,292 questions. The model studies these.
-- **validation** — 426 questions. Held back during development.
-- **test** — 263 questions. **The exam.** The model must never see these.
+- **train** — 6,496 questions. The model studies these.
+- **validation** — 655 questions. Held back during development.
+- **test** — 252 questions. **The exam.** The model must never see these.
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -187,21 +187,21 @@ check fails, nothing produced is trusted.
 
 ### Step 4: the exam (`kv-eval`)
 
-We serve the finished model locally and ask it all 263 test questions, then
+We serve the finished model locally and ask it all 252 test questions, then
 score every answer automatically.
 
-The 263 questions are not one exam — they are thirteen, and several are traps
+The 252 questions are not one exam — they are thirteen, and several are traps
 built specifically to catch a model that is cheating rather than reasoning:
 
 | Slice | Rows | What it catches | Job |
 |---|---|---|---|
 | `positional_probe` | 19 | A model that always picks the **first** candidate. The right answer is placed last. | 1 or 2 |
-| `misattribution_probe` | 19 | A model that always trusts the `attributed` **tag**. The tag is deliberately on a wrong candidate. | 2 |
+| `misattribution_probe` | 19 | A model that leans on the candidate menu instead of naming its own cause. Every candidate is ruled out, so there is no tag to trust. | 2 |
 | `multi_misattribution_probe` | 19 | The same trap, but with two workloads at once. | 1 or 2, plus 3 |
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
 | `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
 | `contradiction_probe` | 19 | Evidence that contradicts itself. | 1, always decided |
-| the other 7 slices | 167 | Ordinary competence across the nine question types | 1 or 2 |
+| the other 7 slices | 156 | Ordinary competence across the nine question types | 1 or 2 |
 
 The job column says which pass bar reads a slice's rows, now that
 kubeagent v1.24.0 decides some of them before the model ever answers.
@@ -562,6 +562,12 @@ One later correction (2026-09-05) changed two of the ten new rows by one line
 each: their inventory named the disk-pressure taint in a world whose node read
 showed none, so the prompt argued against its own label. The 253 did not move,
 and the test file pins both facts by hash.
+
+On 2026-09-24 the exam changed differently: it was **rebuilt, not appended
+to**. Rendered bytes moved on rows that already existed, `misattribution_probe`
+among them, and the exam fell from 263 rows to 252. A score from before that
+day and a score from after it are not the same measurement and do not compare
+row for row.
 
 ---
 
