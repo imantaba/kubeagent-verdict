@@ -225,7 +225,7 @@ def test_exam_oracle_job3_is_perfect():
     """spec section 10 gate 2's other half, and a stop condition: if the
     exam's own job3, oracle-read, were not 1.0 after the label-driven
     summary, the gold summaries would be wrong and re-pinning
-    `FROZEN_253_SHA256` / `EVAL_SET_SHA256` over them would bank the error.
+    `FROZEN_SLICE_SHA256` / `EVAL_SET_SHA256` over them would bank the error.
     It reads 1.0 -- 5 of 5 `shared`-labeled rows (the three origin-object
     stories' `shared_origin_probe` halves) and 34 of 34 `none`-labeled
     rows."""

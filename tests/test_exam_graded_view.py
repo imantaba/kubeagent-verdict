@@ -37,6 +37,12 @@ Twenty shared-origin workloads' `own_cause_keywords` move from `[]` to a
 curated pair (see `tests/test_shared_origin_training.py`'s matching
 2026-09-23 entries), and the digest moves with them -- on the same 11
 rows, nothing else.
+
+Re-pinned on 2026-09-24 for the job-2 generator fix
+(2026-09-24-job2-generator-fix-design.md). This time the user message
+moves, and this view keeps it whole, so the digest follows every rendered
+change `FROZEN_SLICE_SHA256`'s 2026-09-24 entry lists in
+`tests/test_shared_origin_training.py`. The new exam is a new baseline.
 """
 
 from __future__ import annotations
@@ -63,7 +69,7 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "b82b87977414e01e5d58eeb64defc5dec350bab6f567006d02ea96932700b03e"
+GRADED_VIEW_SHA256 = "100ec57cebcc2d8c25c62466116e7886a2689faea071f25d6e47acecbf76412d"
 
 
 def _digest(views) -> str:
