@@ -739,3 +739,75 @@ def test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape():
     for key in cases.THIN_ENTRIES:
         for shape, clear in clear_case.items():
             assert n[(key, shape, clear)] > n[(key, shape, "none_of_these")] > 0, (key, shape)
+
+
+def _evidence_labels(user: str) -> list[str]:
+    section = user.split("== BEGIN evidence ==\n")[1].split("== END evidence ==")[0]
+    return re.findall(r"^== (.+) ==$", section, flags=re.MULTILINE)
+
+
+def test_every_crash_family_workload_in_a_multi_row_keeps_its_log_read():
+    """kubeagent reads the previous log of every crash-family workload.
+    A multi-workload row gives each workload at most two reads and the row
+    at most 8, so a log read appended after two object reads, or a plain
+    `[:8]`, would silently lose it. Checked on every `multi` training row
+    and every `multi_misattribution_probe` exam row."""
+    rows = [ex for ex in generate.generate(seed=17, size=8000) if ex.case == "multi"]
+    rows += [ex for ex in generate.test_set() if ex.case == "multi_misattribution_probe"]
+    checked = 0
+    for ex in rows:
+        labels = _evidence_labels(ex.user)
+        assert len(labels) <= c.MAX_TOOL_CALLS, ex.group
+        for part in ex.group.split("+"):
+            key, workload = part.split(":")
+            if key not in cases.LOG_READS:
+                continue
+            ns, name = workload.split("/")
+            pattern = re.compile(rf"log causes {re.escape(ns)}/{re.escape(name)}-[^-]+-[^-]+ container \S+")
+            assert any(pattern.fullmatch(label) for label in labels), (ex.group, part)
+            checked += 1
+    assert checked > 0
+
+
+_CANDIDATE_HEAD = re.compile(r"^- (\S+) \(\w+\)(?: \[confidence: (\w+)\])?:$")
+_ATTRIBUTED = re.compile(r"^    considered (.+): attributed — ")
+# kubeagent's `ForRootCause` (internal/confidence/confidence.go:36-47 at v1.24.0).
+_RULE = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
+# The shared-origin builders still hand-pass their header. This branch leaves
+# them alone (spec: "Not touched here: the shared-origin builders").
+_HEADER_EXEMPT = {"shared_origin", "shared_origin_decoy", "shared_origin_probe",
+                  "shared_origin_decoy_probe"}
+
+
+def _headers(user: str) -> dict[str, tuple[str, list[str]]]:
+    section = user.split("== BEGIN candidates ==\n")[1].split("== END candidates ==")[0]
+    out: dict[str, tuple[str, list[str]]] = {}
+    for line in section.splitlines():
+        if m := _CANDIDATE_HEAD.match(line):
+            workload = m.group(1)
+            out[workload] = (m.group(2) or "", [])
+        elif m := _ATTRIBUTED.match(line):
+            out[workload][1].append(m.group(1))
+    return out
+
+
+def test_every_job2_header_follows_kubeagents_rule():
+    """The `[confidence: ...]` header over a job-2 workload is what
+    kubeagent would print for its one attributed candidate: node or PVC
+    gives high, registry gives medium, anything else or no attributed
+    candidate gives no header."""
+    checked = collections.Counter()
+    for ex in generate.generate(seed=17, size=8000) + generate.test_set():
+        if ex.case in _HEADER_EXEMPT or "== BEGIN candidates ==" not in ex.user:
+            continue
+        headers = _headers(ex.user)
+        for workload, wm in ex.meta["workloads"].items():
+            if wm["job"] != 2 or workload not in headers:
+                continue
+            header, attributed = headers[workload]
+            assert len(attributed) <= 1, (ex.group, workload)
+            want = next((level for prefix, level in _RULE
+                         if attributed and attributed[0].startswith(prefix)), "")
+            assert header == want, (ex.case, ex.group, workload)
+            checked[ex.case] += 1
+    assert {"multi", "multi_misattribution_probe", "wrong_attribution"} <= set(checked)

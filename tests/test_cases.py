@@ -901,3 +901,17 @@ def test_each_wrapper_is_its_shape_and_evidence():
     for shape in SHAPES:
         assert cases.none_of_these_case(e, n, shape=shape) == \
             built("none_of_these", shape, "thin")
+
+
+def test_cap_reads_drops_droppable_reads_from_the_end_and_never_a_kept_one():
+    """A multi-workload row can pass 8 reads only with a healthy origin read
+    and 4 workloads. The cap cuts droppable object reads from the end and
+    keeps the origin read and every log read. A row with more than 8 reads
+    it may not drop is a generator bug, so it raises."""
+    r = [c.EvidenceRead(label=f"r{i}", content="x") for i in range(10)]
+    reads = [(r[0], True)] + [(x, False) for x in r[1:8]] + [(r[8], True), (r[9], False)]
+    assert [x.label for x in cases._cap_reads(reads)] == [
+        "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r8"]
+    assert cases._cap_reads([(x, False) for x in r[:3]]) == tuple(r[:3])
+    with pytest.raises(ValueError, match="budget"):
+        cases._cap_reads([(x, True) for x in r[:9]])

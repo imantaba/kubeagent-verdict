@@ -66,8 +66,15 @@ DECLARED = {
     # train. The other fourteen rows render no reads. It read (14, 20) when
     # its menu still carried describe reads.
     "misattribution_probe": (5, 5),
-    # Same, in the multi shape: _reads(e, n)[:2] per constituent.
-    "multi_misattribution_probe": (39, 40),
+    # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
+    # reads its first object read and then its clear log read, the read
+    # kubeagent makes for every crash-family workload; any other constituent
+    # reads its first two object reads, as before. That adds 10 log reads and
+    # drops 2 second object reads. All 10 log reads are reused: the clear log
+    # read is one template per entry, and crash-family training rows render
+    # it too. The one miss is the same events read as before. It read
+    # (39, 40) when every constituent took its first two object reads.
+    "multi_misattribution_probe": (47, 48),
     # THIS ROW WAS THE POINT OF THE INSTRUMENT. It was written to catch this
     # slice reusing none_of_these_case's read text, which is why the slice
     # cannot catch a model reciting an entry-lookup table. Negative control v4

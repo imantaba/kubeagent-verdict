@@ -179,6 +179,40 @@ def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None
         content=content.format(ns=n.ns, pod=n.pod, container=container))
 
 
+def _multi_reads(e: CatalogEntry, n: Names,
+                 object_reads: tuple[c.EvidenceRead, ...]) -> list[tuple[c.EvidenceRead, bool]]:
+    """One workload's reads in a multi-workload row, at most two, each paired
+    with whether the row's cap may drop it. A crash-family workload keeps
+    its first object read, then its clear log read, which the cap never
+    drops. Any other workload keeps its first two object reads.
+
+    Two object reads and then the log read would lose the log read in most
+    crash-family blocks: measured at seed 17, size 8000, 784 of 847.
+    """
+    log = _log_read(e, n, "clear")
+    if log is None:
+        return [(read, False) for read in object_reads[:2]]
+    return [(read, False) for read in object_reads[:1]] + [(log, True)]
+
+
+def _cap_reads(reads: list[tuple[c.EvidenceRead, bool]]) -> tuple[c.EvidenceRead, ...]:
+    """Cut a multi-workload row's reads to kubeagent's budget. Droppable
+    reads go from the end; a read marked keep (the origin read, a log
+    read) never goes. A plain `[:8]` would have cut a log read in 34 rows
+    at seed 17, size 8000.
+    """
+    out = list(reads)
+    for i in range(len(out) - 1, -1, -1):
+        if len(out) <= c.MAX_TOOL_CALLS:
+            break
+        if not out[i][1]:
+            del out[i]
+    if len(out) > c.MAX_TOOL_CALLS:
+        raise ValueError(f"{len(out)} reads the cap may not drop; the budget is "
+                         f"{c.MAX_TOOL_CALLS}")
+    return tuple(read for read, _keep in out)
+
+
 def _row_decoy(decoys: list[str]) -> dict:
     """The row-level `decoy_cause` key, from the row's own decoy list.
 
@@ -700,6 +734,12 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     the trace hands `attributed` to a candidate the evidence does not
     support, while the evidence itself stays untouched and still points at
     each constituent's own cause.
+
+    Each constituent's header is the one kubeagent's confidence rule gives
+    that attributed cause, and each reads what it would read in `multi`:
+    its first two object reads, or for a crash-family entry its first
+    object read and then its log read. The answer keeps the entry's own
+    confidence.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi_misattribution_probe takes 2-4 workloads")
@@ -725,8 +765,9 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         raw = rules.attribute(refuted, ns=n.ns, pod=n.pod, issue=e.issue)
         result = rules.decide(raw)
         candidates = _to_contract_candidates(raw, result)
-        workloads.append(_workload(e, n, candidates, confidence=conf, result=result))
-        all_reads.extend(object_reads(refuted, ns=n.ns, pod=n.pod)[:2])
+        workloads.append(_workload(e, n, candidates, render.header_for(candidates),
+                                   result=result))
+        all_reads.extend(_multi_reads(e, n, tuple(object_reads(refuted, ns=n.ns, pod=n.pod))))
         cause = _fmt(e.own_cause, n)
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": cause,
                      "confidence": conf, "rationale": _fmt(e.rationale, n)})
@@ -736,8 +777,9 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         decoy_by_workload[key] = [cand.cause for cand in candidates]
         results.append(result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    # No origin read and at most 4 workloads of 2 reads each: never over 8.
     user = _user_message(None, None, "", (), tuple(workloads),
-                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
+                         _cap_reads(all_reads), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     label = rules.label(rules.shared(tuple(results)))
@@ -1401,6 +1443,11 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     Passing a trainable scenario here prepends the SAME origin read with the
     content showing that component healthy, and "separate reasons" stays the
     right answer. Only the read's content separates the two classes.
+
+    Each workload gives at most two reads (`_multi_reads`), and a
+    crash-family workload always keeps its log read. `_cap_reads` holds the
+    row to kubeagent's budget of 8 without dropping a log read or the
+    origin read.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
@@ -1421,7 +1468,8 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         all_objects = tuple(obj for objs in combined_objects for obj in objs)
         healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
         if healthy_read is not None:
-            all_reads.append(c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]))
+            all_reads.append((c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]),
+                              True))
     for i, (e, n) in enumerate(pairs):
         objects = combined_objects[i]
         conf = _confidence(e)
@@ -1436,7 +1484,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         else:
             expected_cause = _fmt(e.own_cause, n)
             rationale = _fmt(e.rationale, n)
-        all_reads.extend(reads[:2])  # stay under the 8-read budget at 4 workloads
+        all_reads.extend(_multi_reads(e, n, reads))
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
                      "confidence": conf, "rationale": rationale})
         key = f"{n.ns}/{n.name}"
@@ -1461,8 +1509,8 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    user = _user_message(None, None, "", (), tuple(workloads),
-                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
+    user = _user_message(None, None, "", (), tuple(workloads), _cap_reads(all_reads),
+                         key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,

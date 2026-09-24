@@ -848,7 +848,14 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 #   too); and 9 of 19 `wrong_attribution` rows change their user message (4
 #   take the header kubeagent's confidence rule gives the attributed cause,
 #   the other 5 gain a log read). No other row moves.
-FROZEN_SLICE_SHA256 = "b6f61e68c7615288452b48935031b649f502e21c1fad3ba7c7d7a96f11758294"
+# - A multi-workload row keeps the log read kubeagent makes for every
+#   crash-family workload, and `multi_misattribution_probe` prints the
+#   header kubeagent's confidence rule gives each constituent's attributed
+#   cause instead of the entry's own confidence. 13 of the 19
+#   `multi_misattribution_probe` rows change their user message: 4 take
+#   only a new header, 5 only gain a log read, and 4 get both. Their gold
+#   answer and meta do not move, and no other row does.
+FROZEN_SLICE_SHA256 = "b3c5c98a8084183e3c141647c757d294b6776895efd721c35f4e45116060e5f2"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -915,7 +922,7 @@ FROZEN_SLICE_SHA256 = "b6f61e68c7615288452b48935031b649f502e21c1fad3ba7c7d7a96f1
 # same job-2 generator fix that moved `FROZEN_SLICE_SHA256` above (see its
 # 2026-09-24 entry). None of the ten `shared_origin_decoy_probe` rows
 # moves, so this digest moves only because the frozen slice inside it does.
-EVAL_SET_SHA256 = "ae4e0885d6b0ea705b77794781dd0c4fed37fbb5b32969ab484c2d0564db8c34"
+EVAL_SET_SHA256 = "a8ecb21ddbc2f3fc2fde7620c7a8df9fd0213be9a6747a6b7966c1fcea87e2ac"
 
 
 def _digest(rows) -> str:
