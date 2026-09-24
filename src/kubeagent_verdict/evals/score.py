@@ -473,14 +473,16 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
     board that printed an exposure beside a job-2 rate of n=0 would read as
     a measurement it is not.
 
-    The exam path never passes it. Its one caller is the oracle's train/val
-    dataset self-check, where 4,880 train and 532 val job-2 workloads carry
-    a named cause and no keywords (measured 2026-09-24 against
-    `out/dataset-0924`; the job-2 generator fix moved this count from the
-    0923 bank's 4,823/589): nothing grades the training pool by keyword, and
-    `tests/test_oracle.py`'s `_job2_gate` already scores job 2 over its own
-    population. Curating 217 more pairs to satisfy a grader that never reads
-    them is the cost this parameter exists to avoid.
+    `kv-eval --no-job2` is one caller: it passes `grade_job2=False` for a
+    probe set built from training scenarios, which carries no job-2 answer
+    keys (see `cli.py`). The oracle's train/val dataset self-check is the
+    other, where 4,880 train and 532 val job-2 workloads carry a named cause
+    and no keywords (measured 2026-09-24 against `out/dataset-0924`; the
+    job-2 generator fix moved this count from the 0923 bank's 4,823/589):
+    nothing grades the training pool by keyword, and `tests/test_oracle.py`'s
+    `_job2_gate` already scores job 2 over its own population. Curating 217
+    more pairs to satisfy a grader that never reads them is the cost this
+    parameter exists to avoid.
     """
     # The validation pre-pass. A malformed row is a fixture bug, not a model
     # failure, and it must never spend a chat_fn call finding that out: every

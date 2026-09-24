@@ -78,9 +78,10 @@ def test_every_victim_verdict_label_is_a_real_verdict():
 def test_no_scenario_hands_the_shared_cause_the_attributed_tag():
     """Tag and position must both point AWAY from the answer.
 
-    Same rule as `misattribution_probe`: the local decoy leads and carries
-    `attributed`, the shared cause trails. A slice where the tag happened to
-    be right would measure nothing a passing `attributed` row does not.
+    Same rule as `multi_misattribution_probe`: the local decoy leads and
+    carries `attributed`, the shared cause trails. A slice where the tag
+    happened to be right would measure nothing a passing `attributed` row
+    does not.
     """
     for p in propagation.all_scenarios():
         assert p.shared_verdict != "attributed", p.key

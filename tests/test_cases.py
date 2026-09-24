@@ -63,7 +63,8 @@ def test_none_of_these_names_no_cause_and_answers_none_at_low():
     (row,) = json.loads(ex.assistant)["verdicts"]
     assert row["cause"] == c.NONE_OF_THESE
     assert row["confidence"] == "low"
-    # Thin evidence: the finding's log-cause line and the classified read are gone.
+    # Thin evidence: the finding's log-cause line is gone; the log read
+    # stays but its content no longer names a cause.
     assert "log cause:" not in ex.user
 
 

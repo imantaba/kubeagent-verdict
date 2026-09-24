@@ -299,10 +299,13 @@ pins that, so "none of these" never becomes the easy answer for an entry.
 For `init-crashloop` and `restart-loop`, a clear row and its thin twin
 share one evidence section; only the finding's `log cause:` line differs,
 because neither entry has a separate log-causes read at all. For
-`crashloop-pod` and `coredns-corefile-broken`, the same cause-naming text
-is also its own read: their thin twin drops the finding's line, and the
-read stays but its content swaps too, to kubeagent's own "no classifiable
-output" message, which names no cause.
+`crashloop-pod`, the cause-naming text appears twice: as the finding's
+`log cause:` line and as the log read. Its thin twin drops the line and
+swaps the read's content to kubeagent's own "no classifiable output"
+message, which names no cause. `coredns-corefile-broken`'s finding has no
+`log cause:` line at all — its catalog `log_cause` is empty — so the log
+read is the only text that names the cause, and its thin twin differs
+only in that read's content.
 
 `shared_origin` took its four points from `multi` rather than from the mix
 growing, and that is a deliberate cost. Job 3 now grades both failure modes
@@ -431,19 +434,22 @@ truncated or thin → low), so calibration is trained, not guessed.
   imitate — three at first, and a fourth, `contradiction_probe`, added
   later and then withdrawn from the release bar for the reason recorded
   below. `positional_probe` places the correct candidate LAST with an
-  honest `attributed` tag. Since 2026-09-24 `misattribution_probe` no
-  longer hands `attributed` to anything: it builds `own_cause`'s
-  ruled-out prompt instead, so every candidate is ruled out, there is no
-  tag and no header, and the correct cause is on no candidate line. It is
-  an own-cause slice on held-out groups now, not a tag trap, and its
-  "no training example can imitate" claim no longer holds for it —
-  `own_cause` and `wrong_attribution` train rows build the same prompt for
-  the same entries. `multi_misattribution_probe` and `contradiction_probe`
-  still hand `attributed` to a decoy the evidence contradicts. All four
-  are deterministic — never shuffled — because their purpose is to hold
-  the shortcut fixed against the correct answer. Their groups are held
-  out of train and val, so the model has never seen that (entry,
-  workload) pair.
+  honest `attributed` tag. `misattribution_probe` lost the `attributed`
+  tag on 2026-09-16 (e2eb459); since 2026-09-24 (5a58915) it has also lost
+  the header and the object read, which made its prompt the same as
+  `own_cause`'s. It builds `own_cause`'s ruled-out prompt now, so every
+  candidate is ruled out, there is no tag and no header, and the correct
+  cause is on no candidate line. It is an own-cause slice on held-out
+  groups now, not a tag trap, and its "no training example can imitate"
+  claim no longer holds for it — only `own_cause` builds the probe's
+  prompt (`wrong_attribution` uses the refuted shape, with a tag and a
+  header): all 19 `misattribution_probe` rows have a name-masked
+  `own_cause` twin in train. `multi_misattribution_probe` and
+  `contradiction_probe` still hand `attributed` to a decoy the evidence
+  contradicts. All four are deterministic — never shuffled; for the three
+  tag and position probes this holds the shortcut fixed against the
+  correct answer. Their groups are held out of train and val, so the
+  model has never seen that (entry, workload) pair.
 - The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
   swaps a tag — so across all 2,140 constituent workloads it contributes to
@@ -462,12 +468,21 @@ truncated or thin → low), so calibration is trained, not guessed.
   718 job-2 workloads, and every one answers its own cause: 606 at `high`,
   112 at `medium`. A `multi` block renders with no finding line
   (`render.render_workload`'s `findings=()`), so most of those 718 show
-  nothing in the prompt that names the cause. 65 of them are the two
-  crash-family entries whose log read still spells it out
-  (`crashloop-pod`'s "bad command or entrypoint",
-  `coredns-corefile-broken`'s "configuration parse/validation error"); the
-  rest carry no read that names a cause either. The spec keeps these
-  answers on purpose — Spec 3's finding line is what closes the gap.
+  nothing in the prompt that names the cause — but not all of them. 65 of
+  them are the two crash-family entries, whose log read — new on this
+  branch, `a1a1c2d` — spells it out (`crashloop-pod`'s "bad command or
+  entrypoint", `coredns-corefile-broken`'s "configuration parse/validation
+  error"). 35 are `deployment-bad-image-tag`: its registry decoy's healthy
+  ending (`objects.refute`) is the fixed literal "manifest unknown", so
+  every one of its job-2 blocks carries an events read that names the
+  image with that text, and its gold rationale cites it. The remaining 618
+  carry no read that names a cause at all. On that same kind of
+  evidence — a refuted node or PVC read that names no cause — a thin
+  `none_of_these` row instead answers "none of these" at `low`: 245 train
+  rows do that. So about 618 `multi` labels, against 245 thin
+  `none_of_these` labels, teach naming a cause the prompt does not show.
+  The spec keeps the 618 on purpose — Spec 3's finding line is what closes
+  the gap — but decide before the retrain whether to wait for Spec 3.
 
 ## Training (kv-train)
 
@@ -668,10 +683,17 @@ cause, 0.0 decoy**, with the expected rationale and summary reproduced
 verbatim. It reused `none_of_these_case`'s read text, and `none_of_these`
 was 15% of the curriculum, so the contradiction sentence was a trained
 trigger for a trained answer template rather than something to reason
-about. (Since 2026-09-24 `none_of_these` rows are built from thin evidence
-on four entries, at `low` confidence, and share neither the contradiction
-sentence nor the rationale — they still share this slice's generic
-describe-node read, 13 of its 38 reads.) Holding the adversarial menu roughly fixed and changing only the
+about. `none_of_these` rows stopped carrying the contradiction sentence on
+2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from thin
+evidence on four entries, at `low` confidence, and no longer share the
+rationale — but they still share this slice's gold summary sentence (no
+other training case carries it), and 14 of its 19 rows carry a generic
+describe-node or PVC-phase read a `none_of_these` training row also
+renders (the other five carry none): 13 of its 38 reads under the overlap
+guard's name mask (14 byte for byte; the difference is
+`networkpolicy-deny-all`'s own workload is named `worker`, so the guard's
+mask also rewrites its node read's `worker-3`, dropping it from the masked
+count). Holding the adversarial menu roughly fixed and changing only the
 read text moves cause accuracy from 0.1579 (`misattribution_probe`) and
 0.4737 (`wrong_attribution`) to 1.0. The slice is kept — it does defeat an
 index-copier, a tag-copier and a word counter — but not as a memorisation

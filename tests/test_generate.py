@@ -724,10 +724,12 @@ def test_one_prompt_has_one_answer():
 
 
 def test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape():
-    """A thin row and a clear row of the same entry and shape differ in one
-    read. If thin rows outnumber clear ones, "none of these" becomes the
-    likelier answer for that entry whatever the reads say. Counted in
-    train, the way `kv-dataset` builds it: split, then drop held-out groups.
+    """A thin row and a clear row of the same entry and shape differ only in
+    what names the cause: the finding's `log cause:` line, the log read's
+    content, or both. If thin rows outnumber clear ones, "none of these"
+    becomes the likelier answer for that entry whatever the prompt says.
+    Counted in train, the way `kv-dataset` builds it: split, then drop
+    held-out groups.
     """
     train, _val = generate.split(generate.generate(seed=17, size=8000), seed=17)
     train = generate.drop_held_out(train, generate.test_set())

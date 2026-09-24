@@ -43,9 +43,11 @@ def _gold_results(examples: list, *, grade_job2: bool = True) -> list[dict]:
     rows' gold content lines up with no row identity lookup needed.
 
     `grade_job2=False` for the train and val pools, and only there. Nothing
-    grades the training pool by keyword: 4,823 train and 589 val job-2
-    workloads carry a named expected cause and no keywords, and
-    `score.evaluate` refuses such a corpus rather than scoring it zero.
+    grades the training pool by keyword: 4,880 train and 532 val job-2
+    workloads carry a named expected cause and no keywords (measured
+    2026-09-24 against `out/dataset-0924`; the job-2 generator fix moved
+    this count from the 0923 bank's 4,823/589), and `score.evaluate`
+    refuses such a corpus rather than scoring it zero.
     Job 2 on those pools is measured by `_job2_gate` below, over the
     population spec section 10 gate 1 defines. The exam passes nothing and
     is graded in full -- see `test_exam_oracle_job2_is_perfect`.

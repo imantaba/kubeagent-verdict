@@ -436,12 +436,16 @@ def probe_sets() -> list[Example]:
     # lookup table, and it DOES NOT — negative control v4 measured the
     # known-broken first tune at 1.0 cause / 0.0 decoy here. The read text it
     # reused was `none_of_these_case`'s verbatim, which made the contradiction
-    # sentence a trained trigger rather than something to reason about (since
-    # 2026-09-24 `none_of_these` rows use thin evidence and share neither the
-    # contradiction sentence nor the rationale — they still share this
-    # slice's generic describe-node read, 13 of its 38 reads). See
-    # `cases.contradiction_probe`'s docstring for the full retraction; the
-    # slice is kept for the three shortcuts it does defeat.
+    # sentence a trained trigger rather than something to reason about.
+    # `none_of_these` rows stopped carrying that sentence on 2026-09-16
+    # (e2eb459); since 2026-09-24 (5a58915) they use thin evidence and share
+    # neither it nor the rationale — but they still share this slice's gold
+    # summary sentence, and 14 of its 19 rows carry a generic describe-node
+    # or PVC-phase read a `none_of_these` training row also renders (the
+    # other five carry none): 13 of its 38 reads under the overlap guard's
+    # name mask (14 byte for byte). See `cases.contradiction_probe`'s
+    # docstring for the full retraction and the byte-for-byte discrepancy;
+    # the slice is kept for the three shortcuts it does defeat.
     for entry in catalog.trainable():
         if not entry.objects or not entry.contradiction:
             continue

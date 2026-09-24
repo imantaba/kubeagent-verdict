@@ -2151,8 +2151,9 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
     On a row whose every workload is job 2, `cause_acc` and the mean of the
     row's `job2_scores` grade the same workloads by the same rule, so they
     must agree for any reply that spells `none_of_these` exactly (`job2`
-    lowercases the reply's cause before that comparison; `cause_acc` does
-    not, so the two can disagree on a mixed-case spelling). The own-keyword
+    strips and lowercases the reply's cause before that comparison;
+    `cause_acc` does neither, so the two can disagree on a mixed-case
+    spelling or on stray whitespace). The own-keyword
     bot is a reply that tells them
     apart when they do not: before the 2026-09-24 generator fix it disagreed
     on 64 of the 121 rows then checked, every `wrong_attribution`,
@@ -2319,7 +2320,8 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     `meta["expected_own_keywords"]`, which is what `row_level` counted
     (`row_level` retired 2026-09-24, commit 8e5fc4a: `evaluate` grades job 2
     on its own per-workload population now, so `_rewrite_keyword_answer_keys`
-    only returns `workload_level`).
+    still returns `(rewritten, workload_level)`, but `workload_level` is its
+    only counter).
     `keyword_derivable_n` moves from 56 to 76 before the rewrite for the
     same reason `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`
     moved, and stays 0 after (the rewrite closes the exposure for every
