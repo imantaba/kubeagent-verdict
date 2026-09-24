@@ -598,3 +598,71 @@ def test_every_build_user_message_call_goes_through_the_checked_funnel():
         f"src/kubeagent_verdict/dataset/ to route through cases._user_message "
         f"(the shared funnel); found call(s) outside it: {findings}"
     )
+
+
+# kubeagent's previous-log read, pinned to its source at v1.24.0. The label
+# is internal/investigate/gather.go:153, `log causes %s/%s container %s`,
+# the container not quoted. The content is one arm of `logCauseResult`,
+# internal/investigate/reader.go:473-487, where `%q` quotes the container.
+# The two cause strings are internal/logscan/logscan.go:32 (entrypoint) and
+# :62 (config).
+_NO_CLASSIFIABLE = 'the previous log of {ns}/{pod} container "{container}" has no classifiable output'
+_NO_PREVIOUS = ('no previous-instance log for {ns}/{pod} container "{container}" '
+                "(nothing was refused; the container may not have restarted)")
+
+
+def test_log_reads_cover_exactly_the_crash_family():
+    """kubeagent reads the previous log only for three issues (`crashFamily`,
+    internal/investigate/gather.go:195-197). A new trainable entry with one
+    of them fails here until it gets a row."""
+    crash = {"CrashLoopBackOff", "ContainerStartError", "OOMKilled"}
+    assert set(cases.LOG_READS) == {e.key for e in catalog.trainable() if e.issue in crash}
+
+
+@pytest.mark.parametrize(("key", "evidence", "content"), [
+    ("crashloop-pod", "clear", "log cause: bad command or entrypoint"),
+    ("crashloop-pod", "thin", _NO_CLASSIFIABLE),
+    ("coredns-corefile-broken", "clear", "log cause: configuration parse/validation error"),
+    ("coredns-corefile-broken", "thin", _NO_CLASSIFIABLE),
+    ("memory-limit-oomkill", "clear", _NO_CLASSIFIABLE),
+    ("container-start-error", "clear", _NO_PREVIOUS),
+    ("worker-containerd-stop", "clear", _NO_PREVIOUS),
+])
+def test_log_read_is_the_read_kubeagent_makes(key, evidence, content):
+    n = names_mod.draw(random.Random(5))
+    # The finding's container: coredns-corefile-broken's finding pins
+    # `coredns`; every other entry's is the drawn one.
+    container = "coredns" if key == "coredns-corefile-broken" else n.container
+    assert cases._log_read(_entry(key), n, evidence) == c.EvidenceRead(
+        label=f"log causes {n.ns}/{n.pod} container {container}",
+        content=content.format(ns=n.ns, pod=n.pod, container=container))
+
+
+@pytest.mark.parametrize("key", ["init-crashloop", "restart-loop", "deployment-bad-image-tag"])
+@pytest.mark.parametrize("evidence", ["clear", "thin"])
+def test_log_read_is_none_outside_the_crash_family(key, evidence):
+    """Init:CrashLoopBackOff and RestartLoop are not crash family in
+    kubeagent, so neither version of the row carries a log read."""
+    n = names_mod.draw(random.Random(5))
+    assert cases._log_read(_entry(key), n, evidence) is None
+
+
+@pytest.mark.parametrize("key", ["memory-limit-oomkill", "container-start-error",
+                                 "worker-containerd-stop"])
+def test_log_read_has_no_thin_arm_for_a_neutral_clear_read(key):
+    n = names_mod.draw(random.Random(5))
+    with pytest.raises(ValueError, match="no thin log read"):
+        cases._log_read(_entry(key), n, "thin")
+
+
+def test_log_read_refuses_an_unknown_evidence():
+    n = names_mod.draw(random.Random(5))
+    with pytest.raises(ValueError, match="evidence"):
+        cases._log_read(_entry("crashloop-pod"), n, "vague")
+
+
+def test_crashloop_pods_clear_log_read_names_its_findings_cause():
+    """The finding's `log cause:` line and the clear log read agree."""
+    e = _entry("crashloop-pod")
+    n = names_mod.draw(random.Random(5))
+    assert cases._log_read(e, n, "clear").content == "log cause: " + e.log_cause

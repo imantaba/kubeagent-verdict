@@ -127,6 +127,53 @@ def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
     )
 
 
+# kubeagent's previous-log read, one per crash-family finding: CrashLoopBackOff,
+# ContainerStartError, OOMKilled (`crashFamily`,
+# internal/investigate/gather.go:195-197 at v1.24.0). Its content is one arm of
+# `logCauseResult` (internal/investigate/reader.go:473-487), where `%q` quotes
+# the container. Keyed by entry, not guessed from the issue text: each value is
+# (clear, thin), thin None where no thin row exists.
+_NO_CLASSIFIABLE = 'the previous log of {ns}/{pod} container "{container}" has no classifiable output'
+_NO_PREVIOUS = ('no previous-instance log for {ns}/{pod} container "{container}" '
+                "(nothing was refused; the container may not have restarted)")
+LOG_READS: dict[str, tuple[str, str | None]] = {
+    # internal/logscan/logscan.go:32
+    "crashloop-pod": ("log cause: bad command or entrypoint", _NO_CLASSIFIABLE),
+    # internal/logscan/logscan.go:62
+    "coredns-corefile-broken": ("log cause: configuration parse/validation error",
+                                _NO_CLASSIFIABLE),
+    "memory-limit-oomkill": (_NO_CLASSIFIABLE, None),
+    "container-start-error": (_NO_PREVIOUS, None),
+    "worker-containerd-stop": (_NO_PREVIOUS, None),
+}
+
+# The container kubeagent reads is the finding's own. coredns-corefile-broken's
+# finding pins `coredns`; every other entry's is the drawn `n.container`.
+_LOG_CONTAINER = {"coredns-corefile-broken": "coredns"}
+
+
+def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None:
+    """The previous-log read kubeagent makes for this entry, or None.
+
+    `evidence` is "clear" or "thin". The label is
+    internal/investigate/gather.go:153, container not quoted. An entry outside
+    the crash family gets no read in either version; asking a crash-family
+    entry with no thin arm for a thin read raises.
+    """
+    if evidence not in ("clear", "thin"):
+        raise ValueError(f"evidence must be 'clear' or 'thin', not {evidence!r}")
+    if e.key not in LOG_READS:
+        return None
+    clear, thin = LOG_READS[e.key]
+    if evidence == "thin" and thin is None:
+        raise ValueError(f"{e.key} has no thin log read")
+    container = _LOG_CONTAINER.get(e.key, n.container)
+    content = clear if evidence == "clear" else thin
+    return c.EvidenceRead(
+        label=f"log causes {n.ns}/{n.pod} container {container}",
+        content=content.format(ns=n.ns, pod=n.pod, container=container))
+
+
 def _row_decoy(decoys: list[str]) -> dict:
     """The row-level `decoy_cause` key, from the row's own decoy list.
 
