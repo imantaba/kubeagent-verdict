@@ -89,10 +89,18 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # (test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows)
 # -- Task 9 of the 2026-09-19 training-targets plan measures the mixes
 # this was chosen over.
-CASE_MIX = (("attributed", 6), ("none_of_these", 11), ("own_cause", 10),
+# 2026-09-24: `none_of_these` drops 11% -> 4%, and its 7 points go to
+# `own_cause` (10% -> 13%) and `wrong_attribution` (10% -> 14%); the three
+# keep their combined 31%. Thin evidence exists for the four
+# `cases.THIN_ENTRIES` only, so at 11% each of those entries had about 110
+# thin rows per shape against 42 clear ones, and "none of these" was the
+# likelier answer on the very prompts that name a cause. At 4% each thin
+# entry has 40 thin rows per shape, and clear rows outnumber them in every
+# cell (test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape).
+CASE_MIX = (("attributed", 6), ("none_of_these", 4), ("own_cause", 13),
             ("multi", 13), ("shared_origin", 15), ("shared_origin_decoy", 15),
             ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
-            ("wrong_attribution", 10))
+            ("wrong_attribution", 14))
 
 # The held-out test set draws one example per (trainable entry, case) for each
 # of these. `multi` is excluded deliberately: its group is a "+"-join of two to

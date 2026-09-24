@@ -191,7 +191,7 @@ def _fake(user: str) -> generate.Example:
 #
 # An EMPTY block is reachable, and has been since 2026-09-24: a ruled-out
 # row outside the crash family has no object read and no log read, so it
-# renders "(none)". Measured at SEED/SIZE: 725 of 7135 kept rows and 30 of
+# renders "(none)". Measured at SEED/SIZE: 746 of 7151 kept rows and 30 of
 # 252 test rows, 14 of them in the DECLARED `misattribution_probe` slice.
 # (kubeagent would still show its per-workload events read there; adding
 # that read to the generator is later work.) Such a row has no reads, so it

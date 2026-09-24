@@ -56,11 +56,11 @@ def test_to_row_schema():
 
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
-    assert counts == {"attributed": 60, "none_of_these": 110, "own_cause": 100,
+    assert counts == {"attributed": 60, "none_of_these": 40, "own_cause": 130,
                       "multi": 130, "shared_origin": 150,
                       "shared_origin_decoy": 150, "truncated": 50,
                       "injection": 100, "empty_candidates": 50,
-                      "wrong_attribution": 100}
+                      "wrong_attribution": 140}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
     # 997 is the awkward size: it is prime, so every share truncates.
     for size in (10, 100, 997, 1000, 4232):
@@ -721,3 +721,21 @@ def test_one_prompt_has_one_answer():
             (v["workload"], v["cause"], v["confidence"]) for v in gold)))
     clashes = {prompt[:200]: sorted(a) for prompt, a in answers.items() if len(a) > 1}
     assert not clashes, clashes
+
+
+def test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape():
+    """A thin row and a clear row of the same entry and shape differ in one
+    read. If thin rows outnumber clear ones, "none of these" becomes the
+    likelier answer for that entry whatever the reads say. Counted in
+    train, the way `kv-dataset` builds it: split, then drop held-out groups.
+    """
+    train, _val = generate.split(generate.generate(seed=17, size=8000), seed=17)
+    train = generate.drop_held_out(train, generate.test_set())
+    clear_case = {"refuted": "wrong_attribution", "ruled_out": "own_cause"}
+    n = collections.Counter(
+        (ex.meta["entry"], "refuted" if "fresh read: refuted" in ex.user else "ruled_out",
+         ex.case)
+        for ex in train if ex.case in ("none_of_these", *clear_case.values()))
+    for key in cases.THIN_ENTRIES:
+        for shape, clear in clear_case.items():
+            assert n[(key, shape, clear)] > n[(key, shape, "none_of_these")] > 0, (key, shape)

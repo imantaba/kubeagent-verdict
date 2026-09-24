@@ -212,7 +212,10 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     dropped = sum(1 for _, kept in calls if not kept)
     # Measured over this exact build (seed 17, size 8000): 12 multi rows draw
     # a registry-story healthy origin; the rule drops 2 of them and keeps 10.
-    assert (len(calls), dropped) == (12, 2)
+    # Re-measured 2026-09-24 (job-2 generator fix: the case mix moved, so
+    # every `multi` row draws new names): still 12 rows, the rule drops 1
+    # and keeps 11. The drop branch is still reached.
+    assert (len(calls), dropped) == (12, 1)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
@@ -253,4 +256,7 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     # Re-measured 2026-09-19 over this exact build (seed 17, size 8000)
     # after the mix and pool changes in spec section 6: 96 multi rows draw a
     # node-story healthy origin; the rule keeps 59, renames 35 and drops 2.
-    assert (len(calls), kept, renamed, dropped) == (96, 59, 35, 2)
+    # Re-measured 2026-09-24 (job-2 generator fix: the case mix moved, so
+    # every `multi` row draws new names): still 96 rows; the rule keeps 54,
+    # renames 41 and drops 1. The drop branch is still reached.
+    assert (len(calls), kept, renamed, dropped) == (96, 54, 41, 1)

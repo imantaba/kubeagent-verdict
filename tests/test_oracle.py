@@ -130,26 +130,33 @@ def test_oracle_job1_is_perfect_on_train():
     # longer draw from the rng, which moves every later draw, and the
     # held-out `none_of_these` slice is 8 groups, not 19) -- 3056 to 3081.
     # Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3081}
+    # Re-measured 2026-09-24 again (case mix: `none_of_these` 11% -> 4%,
+    # `own_cause` 10% -> 13%, `wrong_attribution` 10% -> 14%; the row
+    # counts change, and so does every later rng draw) -- 3081 to 3120.
+    # Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3120}
 
 
 def test_oracle_job1_is_perfect_on_val():
     board = score.scoreboard(list(_val_results()))
     # Re-measured 2026-09-19, same reason. 289 to 355. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 355 to 357. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 357}
+    # Re-measured 2026-09-24 again, case mix. 357 to 309. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 309}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
     # Re-measured 2026-09-19, same reason. 3121 to 2975. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 2975 to 3000. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3000}
+    # Re-measured 2026-09-24 again, case mix. 3000 to 3030. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3030}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 352 to 304. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 304 to 321. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 321}
+    # Re-measured 2026-09-24 again, case mix. 321 to 298. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 298}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -160,8 +167,12 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     6) -- 2175 to 2286. Rate still 1.0.
 
     Re-measured 2026-09-24 (job-2 generator fix, same reason as job 1
-    above) -- 2286 to 2324. Rate still 1.0."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2324}
+    above) -- 2286 to 2324. Rate still 1.0.
+
+    Re-measured 2026-09-24 again (case mix, same reason as job 1 above)
+    -- 2324 to 2785. Most of the rise is the extra `own_cause` and
+    `wrong_attribution` rows, which are keyword-graded. Rate still 1.0."""
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2785}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -184,25 +195,32 @@ def test_oracle_job3_is_perfect_on_train():
 
     Re-measured 2026-09-24 (job-2 generator fix, same reason as job 1
     above) -- 2790 to 2803; all 13 new rows are `none`-labeled. Rate still
+    1.0.
+
+    Re-measured 2026-09-24 again (case mix, same reason as job 1 above) --
+    2803 to 2832: `shared` 192 to 195, `none` 2610 to 2636. Rate still
     1.0."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2803,
-        "by_label": {"shared": {"rate": 1.0, "n": 192},
+        "rate": 1.0, "n": 2832,
+        "by_label": {"shared": {"rate": 1.0, "n": 195},
                      "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2610}}}
+                     "none": {"rate": 1.0, "n": 2636}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
-    """Val side of the same extension: 22 of the split's rows are a ruled
+    """Val side of the same extension: 19 of the split's rows are a ruled
     story's broken twin, labeled `shared`, and the gold summary matches on
-    every one -- re-measured 2026-09-19, Task 9."""
+    every one -- re-measured 2026-09-19, Task 9 (22 rows then).
+
+    Re-measured 2026-09-24 (case mix, same reason as job 1 above) -- 336 to
+    296: `shared` 22 to 19, `none` 314 to 277. Rate still 1.0."""
     board = score.scoreboard(list(_val_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 336,
-        "by_label": {"shared": {"rate": 1.0, "n": 22},
+        "rate": 1.0, "n": 296,
+        "by_label": {"shared": {"rate": 1.0, "n": 19},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 314}}}
+                     "none": {"rate": 1.0, "n": 277}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -216,13 +234,17 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     Re-measured 2026-09-24 (job-2 generator fix: the undecided builders no
     longer draw from the rng, so every `multi` row draws new names, and the
     held-out `none_of_these` slice is 8 groups, not 19) -- 1209 to 1227 in
-    train; val unchanged at 145. Still perfect."""
+    train; val unchanged at 145. Still perfect.
+
+    Re-measured 2026-09-24 again (case mix: the `multi` share is unchanged,
+    but every `multi` row draws new names, so the split moves) -- 1227 to
+    1226 in train, 145 to 132 in val. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (1227.0, 1227)
-    assert multi_job1(_val_results()) == (145.0, 145)
+    assert multi_job1(_train_results()) == (1226.0, 1226)
+    assert multi_job1(_val_results()) == (132.0, 132)
 
 
 def test_exam_oracle_job1_misses_only_contradiction_probe():
