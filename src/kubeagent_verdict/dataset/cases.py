@@ -25,7 +25,6 @@ from kubeagent_verdict.dataset.render import (
     apply_budget,
     bind,
     draw_ending,
-    drop,
     object_reads,
     prompt_meta,
     refute,
@@ -107,7 +106,8 @@ def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Findin
 
 
 def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
-              confidence: str, *, result: rules.Result) -> c.Workload:
+              confidence: str, *, result: rules.Result,
+              with_log_cause: bool = True) -> c.Workload:
     """Build the rendered workload, decided line included.
 
     `result` is the SAME `rules.Result` the row's meta is built from, in
@@ -116,15 +116,102 @@ def _workload(e: CatalogEntry, n: Names, candidates: tuple[c.Candidate, ...],
     `decided_cause`/`decided_outcome` come from one value, so they cannot
     drift. Job 1 grades a byte-for-byte echo of that cause, so a prompt
     that does not carry the line turns job 1 into a recall test.
+
+    `with_log_cause=False` drops the finding's `log cause:` line. Only a
+    thin-evidence row passes it.
     """
     return c.Workload(
         namespace=n.ns, name=n.name, kind=e.workload_kind, ready=0, desired=2,
-        status=e.status, restarts=n.restarts, findings=(_finding(e, n),),
+        status=e.status, restarts=n.restarts,
+        findings=(_finding(e, n, with_log_cause),),
         candidates=candidates, confidence=confidence,
         network_policies=tuple(_fmt(p, n) for p in e.network_policies),
         decided=result.decided, decided_cause=result.cause,
         decided_outcome=result.outcome,
     )
+
+
+# kubeagent's previous-log read, one per crash-family finding: CrashLoopBackOff,
+# ContainerStartError, OOMKilled (`crashFamily`,
+# internal/investigate/gather.go:195-197 at v1.24.0). Its content is one arm of
+# `logCauseResult` (internal/investigate/reader.go:473-487), where `%q` quotes
+# the container. Keyed by entry, not guessed from the issue text: each value is
+# (clear, thin), thin None where no thin row exists.
+_NO_CLASSIFIABLE = 'the previous log of {ns}/{pod} container "{container}" has no classifiable output'
+_NO_PREVIOUS = ('no previous-instance log for {ns}/{pod} container "{container}" '
+                "(nothing was refused; the container may not have restarted)")
+LOG_READS: dict[str, tuple[str, str | None]] = {
+    # internal/logscan/logscan.go:32
+    "crashloop-pod": ("log cause: bad command or entrypoint", _NO_CLASSIFIABLE),
+    # internal/logscan/logscan.go:62
+    "coredns-corefile-broken": ("log cause: configuration parse/validation error",
+                                _NO_CLASSIFIABLE),
+    "memory-limit-oomkill": (_NO_CLASSIFIABLE, None),
+    "container-start-error": (_NO_PREVIOUS, None),
+    "worker-containerd-stop": (_NO_PREVIOUS, None),
+}
+
+# The container kubeagent reads is the finding's own. coredns-corefile-broken's
+# finding pins `coredns`; every other entry's is the drawn `n.container`.
+_LOG_CONTAINER = {"coredns-corefile-broken": "coredns"}
+
+
+def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None:
+    """The previous-log read kubeagent makes for this entry, or None.
+
+    `evidence` is "clear" or "thin". The label is
+    internal/investigate/gather.go:153, container not quoted. An entry outside
+    the crash family gets no read in either version; asking a crash-family
+    entry with no thin arm for a thin read raises.
+    """
+    if evidence not in ("clear", "thin"):
+        raise ValueError(f"evidence must be 'clear' or 'thin', not {evidence!r}")
+    if e.key not in LOG_READS:
+        return None
+    clear, thin = LOG_READS[e.key]
+    if evidence == "thin" and thin is None:
+        raise ValueError(f"{e.key} has no thin log read")
+    container = _LOG_CONTAINER.get(e.key, n.container)
+    content = clear if evidence == "clear" else thin
+    return c.EvidenceRead(
+        label=f"log causes {n.ns}/{n.pod} container {container}",
+        content=content.format(ns=n.ns, pod=n.pod, container=container))
+
+
+def _multi_reads(e: CatalogEntry, n: Names,
+                 object_reads: tuple[c.EvidenceRead, ...]) -> list[tuple[c.EvidenceRead, bool]]:
+    """One workload's reads in a multi-workload row, at most two, each paired
+    with whether the row's cap must keep it. A crash-family workload keeps
+    its first object read, then its clear log read, which the cap never
+    drops. Any other workload keeps its first two object reads.
+
+    Two object reads and then the log read would lose the log read in most
+    crash-family blocks: measured at seed 17, size 8000, 784 of 847.
+    """
+    log = _log_read(e, n, "clear")
+    if log is None:
+        return [(read, False) for read in object_reads[:2]]
+    return [(read, False) for read in object_reads[:1]] + [(log, True)]
+
+
+def _cap_reads(reads: list[tuple[c.EvidenceRead, bool]]) -> tuple[c.EvidenceRead, ...]:
+    """Cut a multi-workload row's reads to kubeagent's budget. Droppable
+    reads go from the end; a read marked keep (the origin read, a log
+    read) never goes. A plain `[:8]` would have cut a log read in 34 rows
+    at seed 17, size 8000.
+    """
+    out = list(reads)
+    # Walk from the end: deleting index i never shifts an index still to
+    # visit (every remaining index is < i).
+    for i in range(len(out) - 1, -1, -1):
+        if len(out) <= c.MAX_TOOL_CALLS:
+            break
+        if not out[i][1]:
+            del out[i]
+    if len(out) > c.MAX_TOOL_CALLS:
+        raise ValueError(f"{len(out)} reads the cap may not drop; the budget is "
+                         f"{c.MAX_TOOL_CALLS}")
+    return tuple(read for read, _keep in out)
 
 
 def _row_decoy(decoys: list[str]) -> dict:
@@ -298,55 +385,159 @@ def _refuted_menu(n: Names, objects: tuple) -> tuple:
     return tuple(refute(bind(obj, names)) for obj in objects)
 
 
-def none_of_these_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    menu = _refuted_menu(n, e.objects)
-    raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)  # always undecided: refuted alone never wins
-    candidates = _to_contract_candidates(raw, result)
-    w = _workload(e, n, candidates, confidence=_confidence(e), result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
-             "confidence": "medium",
-             "rationale": "The evidence contradicts every listed candidate rather than "
-                          "supporting one."}]
-    summary = (f"{n.ns}/{n.name} is failing, but the evidence rules out the listed causes.\n"
-               "A closer look at the workload is needed.")
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=c.NONE_OF_THESE, own_cause_keywords=[])
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "none_of_these", "entry": e.key,
-            "expected_cause": c.NONE_OF_THESE, "expected_confidence": "medium"}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    return Example(case="none_of_these", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
+def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
+    """Bind every declared object, then force each one into a ruled-out
+    ending below rules.decide()'s threshold: node placement="off", pvc
+    placement="unmounted", registry scan_reason below REGISTRY_THRESHOLD.
+    No Option-A draw, so the menu never wins outright.
+    """
+    names = dataclasses.asdict(n)
+    out = []
+    for obj in objects:
+        bound = bind(obj, names)
+        if bound.kind == "node":
+            bound = dataclasses.replace(bound, placement="off")
+        elif bound.kind == "pvc":
+            bound = dataclasses.replace(bound, placement="unmounted")
+        elif bound.kind == "registry":
+            bound = dataclasses.replace(bound, scan_reason="1")
+        out.append(bound)
+    return tuple(out)
 
 
-def own_cause_case(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    menu = _refuted_menu(n, e.objects)
+# One builder for every undecided job-2 row. kubeagent leaves a workload
+# undecided in two shapes: "refuted" (one candidate attributed, a fresh read
+# refutes it) and "ruled_out" (every candidate ruled out). The evidence is
+# "clear" (the prompt names the cause) or "thin" (nothing does). The prompt is a
+# function of (entry, names, shape, evidence) alone, never of the case, so a
+# prompt cannot carry two expected answers. Thin evidence exists only for
+# these four entries, and not the same way for each: init-crashloop and
+# restart-loop each name the cause once, in the finding's `log cause:` line,
+# which thin drops; crashloop-pod names it twice, in that line and in the
+# log read, and thin drops the line and swaps the read too;
+# coredns-corefile-broken's finding has no `log cause:` line at all, so the
+# log read is the only place that names it, and thin changes just that
+# read's content.
+THIN_ENTRIES = ("crashloop-pod", "coredns-corefile-broken", "init-crashloop", "restart-loop")
+_THIN_RATIONALE = {
+    "refuted": "A fresh read refutes the attributed cause, and no read names another.",
+    "ruled_out": "Every candidate was ruled out, and no read names a cause.",
+}
+# Per clear case: (rationale suffix, summary second line). A None second line
+# means the entry's own recommendation.
+_CLEAR_WORDING = {
+    "wrong_attribution": ((" The deterministic pass attributed a different cause, but the"
+                           " evidence supports this one."),
+                          "The deterministic pass attributed a different cause."),
+    "own_cause": (" The candidate list shown did not include this cause.",
+                  "The deterministic pass did not consider this cause."),
+    "misattribution_probe": ("", None),
+}
+_MENUS = {"refuted": _refuted_menu, "ruled_out": _ruled_out_menu}
+
+
+def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
+                       evidence: str) -> Example:
+    """Build one undecided row: `shape` is "refuted" or "ruled_out",
+    `evidence` is "clear" or "thin". Thin evidence is the `none_of_these`
+    case and only it; clear evidence answers the entry's own cause at its
+    own confidence.
+
+    No rng: nothing here is drawn. kubeagent prints candidates in trace
+    order, and the answer is on no candidate line, so order gives nothing
+    away. No read budget either: every entry declares at most two objects,
+    already in gather order.
+    """
+    if not e.objects:
+        raise ValueError(f"{case} needs at least one object: {e.key}")
+    if shape not in _MENUS:
+        raise ValueError(f"shape must be 'refuted' or 'ruled_out', not {shape!r}")
+    if case != "none_of_these" and case not in _CLEAR_WORDING:
+        raise ValueError(f"not an undecided case: {case!r}")
+    want = "thin" if case == "none_of_these" else "clear"
+    if evidence != want:
+        raise ValueError(f"{case} takes {want} evidence, not {evidence!r}")
+    thin = evidence == "thin"
+    if thin and e.key not in THIN_ENTRIES:
+        raise ValueError(f"{e.key} is not a thin entry")
+    menu = _MENUS[shape](n, e.objects)
     raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)
+    result = rules.decide(raw)  # never decided: refuted and ruled out alone never win
     candidates = _to_contract_candidates(raw, result)
-    w = _workload(e, n, candidates, confidence="", result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
+    w = _workload(e, n, candidates, render.header_for(candidates), result=result,
+                  with_log_cause=not thin)
+    reads = tuple(object_reads(menu, ns=n.ns, pod=n.pod)) if shape == "refuted" else ()
+    log = _log_read(e, n, evidence)
+    reads += (log,) if log else ()
     user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
-             "rationale": _fmt(e.rationale, n)
-                          + " The candidate list shown did not include this cause."}]
-    summary = f"{n.ns}/{n.name} is failing: {cause}.\nThe deterministic pass did not consider this cause."
     key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
+    if thin:
+        cause, conf, keywords = c.NONE_OF_THESE, "low", []
+        rationale = _THIN_RATIONALE[shape]
+        summary = (f"{key} is failing, but the evidence rules out the listed causes.\n"
+                   "A closer look at the workload is needed.")
+    else:
+        cause, conf, keywords = _fmt(e.own_cause, n), _confidence(e), list(e.own_cause_keywords)
+        suffix, last = _CLEAR_WORDING[case]
+        rationale = _fmt(e.rationale, n) + suffix
+        last = last or f"{_fmt(e.recommendation, n).capitalize()}."
+        summary = f"{key} is failing: {cause}.\n{last}"
+    rows = [{"workload": key, "cause": cause, "confidence": conf, "rationale": rationale}]
+    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords)
     decoys = [cand.cause for cand in candidates]
-    meta = {"case": "own_cause", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": "medium",
-            "expected_own_keywords": list(e.own_cause_keywords)}
+    meta = {"case": case, "entry": e.key, "expected_cause": cause,
+            "expected_confidence": conf}
+    if case == "own_cause":
+        meta["expected_own_keywords"] = keywords
     meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    return Example(case="own_cause", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
+    if case in ("wrong_attribution", "misattribution_probe"):
+        meta.update(_row_decoy(decoys))
+    return Example(case=case, group=f"{e.key}:{key}", system=c.SYSTEM_PROMPT,
+                   user=user, assistant=_answer(rows, summary), meta=meta)
+
+
+def wrong_attribution(e: CatalogEntry, n: Names) -> Example:
+    """TRAINING case: kubeagent attributed a cause and a fresh read refuted
+    it, while the prompt names the real one. The answer is the entry's own
+    cause, which is on no candidate line.
+    """
+    return _undecided_example(e, n, case="wrong_attribution", shape="refuted",
+                              evidence="clear")
+
+
+def own_cause_case(e: CatalogEntry, n: Names) -> Example:
+    """TRAINING case: kubeagent ruled out every candidate, while the prompt
+    names the real cause. The answer is the entry's own cause.
+    """
+    return _undecided_example(e, n, case="own_cause", shape="ruled_out", evidence="clear")
+
+
+def none_of_these_case(e: CatalogEntry, n: Names, *, shape: str) -> Example:
+    """TRAINING case: kubeagent left the workload undecided and no read names
+    a cause. The answer is "none of these" at low confidence. Only the
+    entries in THIN_ENTRIES can be built this way.
+    """
+    return _undecided_example(e, n, case="none_of_these", shape=shape, evidence="thin")
+
+
+def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
+    """EVAL-ONLY: every candidate ruled out. Where the prompt names the cause,
+    it is most often in the workload's own finding lines (for example
+    "OOMKilled ... exit code 137"), not in a read. Over the 19 test rows:
+    3 carry a `log cause:` finding line. 5 carry a log read; 2 of those
+    name the cause (crashloop-pod, which also has the finding line, and
+    coredns-corefile-broken, where the read is the only place) and 3 name
+    none. 14 carry no read at all.
+
+    It builds the same prompt as `own_cause_case`; only the case name, the
+    wording of the gold answer and one meta key differ: this row carries
+    `decoy_cause` where `own_cause_case` carries `expected_own_keywords`.
+    The name predates that: a ruled-out menu has no `attributed`
+    candidate, so nothing here is misattributed. It keeps its name so the
+    exam's slice names stay put.
+    """
+    return _undecided_example(e, n, case="misattribution_probe", shape="ruled_out",
+                              evidence="clear")
 
 
 def truncated(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
@@ -398,47 +589,6 @@ def injection(e: CatalogEntry, n: Names, payload: str, rng: random.Random) -> Ex
                            {"injection_payload": payload})
 
 
-def wrong_attribution(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
-    """TRAINING case: the deterministic pass tagged the wrong candidate.
-
-    The evidence is untouched and still supports the catalog winner, but the
-    trace hands `attributed` to the decoy. Shuffling alone would not reach
-    this: it defeats position while leaving the tag a perfectly reliable
-    signal, so a shuffle-only retrain buys a tag-copier instead of a
-    position-copier. This case is what makes the tag merely *usually* right,
-    which is what it is in the field.
-    """
-    names = dataclasses.asdict(n)
-    declared = tuple(bind(obj, names) for obj in e.objects)
-    refuted = tuple(refute(obj) for obj in declared)
-    raw = rules.attribute(refuted, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)
-    candidates = _to_contract_candidates(raw, result)
-    cands = list(candidates)
-    rng.shuffle(cands)
-    w = _workload(e, n, tuple(cands), confidence=_confidence(e), result=result)
-    reads = object_reads(refuted, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
-             "rationale": _fmt(e.rationale, n)
-                          + " The deterministic pass attributed a different cause, but the"
-                            " evidence supports this one."}]
-    summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
-               "The deterministic pass attributed a different cause.")
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "wrong_attribution", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": _confidence(e)}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    meta.update(_row_decoy(decoys))
-    return Example(case="wrong_attribution", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
-
-
 def positional_probe(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     """EVAL-ONLY: the honest `attributed` tag, but the winner placed LAST.
 
@@ -455,58 +605,6 @@ def positional_probe(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     reads = object_reads(menu, ns=n.ns, pod=n.pod)
     return _winner_example(e, n, tuple(candidates) + (winner,), reads, "positional_probe",
                            _row_decoy([cand.cause for cand in candidates]))
-
-
-def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
-    """Bind every declared object, then force each one into a ruled-out
-    ending below rules.decide()'s threshold: node placement="off", pvc
-    placement="unmounted", registry scan_reason below REGISTRY_THRESHOLD.
-    Used by `misattribution_probe`, whose menu must stay honest (no Option-A
-    randomness) while still never winning outright.
-    """
-    names = dataclasses.asdict(n)
-    out = []
-    for obj in objects:
-        bound = bind(obj, names)
-        if bound.kind == "node":
-            bound = dataclasses.replace(bound, placement="off")
-        elif bound.kind == "pvc":
-            bound = dataclasses.replace(bound, placement="unmounted")
-        elif bound.kind == "registry":
-            bound = dataclasses.replace(bound, scan_reason="1")
-        out.append(bound)
-    return tuple(out)
-
-
-def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
-    """EVAL-ONLY: tag and position BOTH point away from the evidence.
-
-    The adversarial slice. Deterministic ordering, decoy first, decoy tagged
-    `attributed`, evidence unchanged and still supporting the winner. See
-    _ruled_out_menu for why this is a lower bound on tag-following.
-    """
-    if not e.objects:
-        raise ValueError(f"misattribution_probe needs at least one object: {e.key}")
-    menu = _ruled_out_menu(n, e.objects)
-    candidates, result = _decoy_result(e, n, menu)
-    w = _workload(e, n, candidates, confidence=_confidence(e), result=result)
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": _confidence(e),
-             "rationale": _fmt(e.rationale, n)}]
-    summary = f"{n.ns}/{n.name} is failing: {cause}.\n{_fmt(e.recommendation, n).capitalize()}."
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "misattribution_probe", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": _confidence(e)}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    meta.update(_row_decoy(decoys))
-    return Example(case="misattribution_probe", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
 
 
 def _contradiction_menu(n: Names, objects: tuple) -> tuple[tuple, tuple]:
@@ -536,23 +634,34 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 
     This row was built to be the one that cannot be answered that way: the
     reads contradict the catalog winner (as in `none_of_these`), the decoy
-    leads and carries `attributed` (as in `misattribution_probe`), and the
-    correct answer — "none of these" — is on no candidate line, so it can be
-    neither copied nor pointed at.
+    leads and carries `attributed` (as in `multi_misattribution_probe`), and
+    the correct answer — "none of these" — is on no candidate line, so it can
+    be neither copied nor pointed at.
 
     IT DOES NOT DO THAT. The claim is retracted here rather than deleted,
     because the measurement is worth more than the intention. Negative control
     v4 scored the known-broken first tune on this slice: 1.0 cause, 0.0 decoy
     — a clean pass by a model proven elsewhere to follow the `attributed` tag
     79% of the time, emitting the expected rationale and summary VERBATIM. The
-    confound is that this builder reuses `none_of_these_case`'s read
+    confound was that this builder reused `none_of_these_case`'s read
     construction exactly — same label, same `e.contradiction` content — and
-    `none_of_these` is 15% of the curriculum, so the contradiction sentence is
-    itself a memorised trigger for a memorised answer template. Holding the
-    adversarial menu roughly fixed and changing only the read text moves cause
-    accuracy from 0.1579 (`misattribution_probe`) and 0.4737
-    (`wrong_attribution`) to 1.0 here. The menu is what this row perturbs, and
-    the menu is what such a model never reads.
+    `none_of_these` was 15% of the curriculum, so the contradiction sentence
+    was itself a memorised trigger for a memorised answer template.
+    `none_of_these` rows stopped carrying the contradiction sentence on
+    2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from thin
+    evidence on four entries, answer at low confidence, and no longer share
+    the rationale — but they still share this row's gold summary sentence (no
+    other training case carries it), and 14 of the 19 rows here carry a
+    generic describe-node read that a `none_of_these` training row also
+    renders (the other five carry a PVC read, which no `none_of_these` row
+    has): 13 of contradiction_probe's 38 reads under the overlap guard's name
+    mask (14 byte for byte; `networkpolicy-deny-all`'s own workload is named
+    `worker`, so the guard's mask also rewrites its node read's `worker-3`,
+    dropping it from the masked count). Holding the adversarial menu roughly
+    fixed and changing only the read text moves cause accuracy from 0.1579
+    (`misattribution_probe`) and 0.4737 (`wrong_attribution`) to 1.0 here. The
+    menu is what this row perturbs, and the menu is what such a model never
+    reads.
 
     So: an index-copier, a tag-copier and a word counter do score zero here,
     and that much the slice is kept for. An entry-lookup table does not. No
@@ -601,18 +710,24 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 
 
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
-    names = dataclasses.asdict(n)
-    bound = tuple(bind(obj, names) for obj in e.objects)
-    remaining = bound
-    for obj in bound:
-        remaining = drop(remaining, obj)
+    """No candidates at all: the prompt names the cause.
+
+    The row answers the entry's own cause at `_confidence(e)`, as every
+    clear undecided row does; until 2026-09-24 it answered a flat `medium`.
+    It reads the entry's first read and, for a crash-family entry, the clear
+    log read kubeagent makes for it. No candidates means no header.
+    """
     result = rules.Result(decided=False, cause="", outcome="", evidence="",
                           group_key="", group_text="", decisions=())
     w = _workload(e, n, (), confidence="", result=result)
     reads = (c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=_fmt(e.reads[0][1], n)),)
+    log = _log_read(e, n, "clear")
+    if log is not None:
+        reads += (log,)
     user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "medium",
+    conf = _confidence(e)
+    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": _fmt(e.rationale, n)
                           + " The candidate list shown did not include this cause."}]
     summary = f"{n.ns}/{n.name} is failing: {cause}.\nNo deterministic candidates were available."
@@ -620,7 +735,7 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     wm = workload_meta(result, expected_cause=cause,
                        own_cause_keywords=list(e.own_cause_keywords))
     meta = {"case": "empty_candidates", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": "medium",
+            "expected_confidence": conf,
             "expected_own_keywords": list(e.own_cause_keywords)}
     meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: []}))
     return Example(case="empty_candidates", group=f"{e.key}:{n.ns}/{n.name}",
@@ -646,6 +761,12 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     the trace hands `attributed` to a candidate the evidence does not
     support, while the evidence itself stays untouched and still points at
     each constituent's own cause.
+
+    Each constituent's header is the one kubeagent's confidence rule gives
+    that attributed cause, and each reads what it would read in `multi`:
+    its first two object reads, or for a crash-family entry its first
+    object read and then its log read. The answer keeps the entry's own
+    confidence.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi_misattribution_probe takes 2-4 workloads")
@@ -671,8 +792,9 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         raw = rules.attribute(refuted, ns=n.ns, pod=n.pod, issue=e.issue)
         result = rules.decide(raw)
         candidates = _to_contract_candidates(raw, result)
-        workloads.append(_workload(e, n, candidates, confidence=conf, result=result))
-        all_reads.extend(object_reads(refuted, ns=n.ns, pod=n.pod)[:2])
+        workloads.append(_workload(e, n, candidates, render.header_for(candidates),
+                                   result=result))
+        all_reads.extend(_multi_reads(e, n, tuple(object_reads(refuted, ns=n.ns, pod=n.pod))))
         cause = _fmt(e.own_cause, n)
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": cause,
                      "confidence": conf, "rationale": _fmt(e.rationale, n)})
@@ -682,8 +804,9 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         decoy_by_workload[key] = [cand.cause for cand in candidates]
         results.append(result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    # No origin read and at most 4 workloads of 2 reads each: never over 8.
     user = _user_message(None, None, "", (), tuple(workloads),
-                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
+                         _cap_reads(all_reads), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     label = rules.label(rules.shared(tuple(results)))
@@ -1133,7 +1256,9 @@ def shared_origin_probe(p: prop.Propagation, rng: random.Random,
     the slice without reading the evidence:
 
     * the tag — the local decoy carries `attributed`, the shared cause carries
-      `outranked`, as in `misattribution_probe`;
+      `outranked`. `multi_misattribution_probe` uses the same `attributed`
+      decoy trick, but the correct cause is never on a candidate line there,
+      so it is never `outranked` in that row;
     * the position — the menu is deterministic and never shuffled, decoy
       first, shared cause last;
     * "name the string common to every menu" — a second common cause, the
@@ -1347,6 +1472,11 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     Passing a trainable scenario here prepends the SAME origin read with the
     content showing that component healthy, and "separate reasons" stays the
     right answer. Only the read's content separates the two classes.
+
+    Each workload gives at most two reads (`_multi_reads`), and a
+    crash-family workload always keeps its log read. `_cap_reads` holds the
+    row to kubeagent's budget of 8 without dropping a log read or the
+    origin read.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
@@ -1367,7 +1497,8 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         all_objects = tuple(obj for objs in combined_objects for obj in objs)
         healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
         if healthy_read is not None:
-            all_reads.append(c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]))
+            all_reads.append((c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]),
+                              True))
     for i, (e, n) in enumerate(pairs):
         objects = combined_objects[i]
         conf = _confidence(e)
@@ -1382,7 +1513,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         else:
             expected_cause = _fmt(e.own_cause, n)
             rationale = _fmt(e.rationale, n)
-        all_reads.extend(reads[:2])  # stay under the 8-read budget at 4 workloads
+        all_reads.extend(_multi_reads(e, n, reads))
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
                      "confidence": conf, "rationale": rationale})
         key = f"{n.ns}/{n.name}"
@@ -1407,8 +1538,8 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    user = _user_message(None, None, "", (), tuple(workloads),
-                         tuple(all_reads[:c.MAX_TOOL_CALLS]), key=group)
+    user = _user_message(None, None, "", (), tuple(workloads), _cap_reads(all_reads),
+                         key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,

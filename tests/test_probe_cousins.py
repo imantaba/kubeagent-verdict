@@ -101,8 +101,10 @@ def test_cousin_probe_is_deterministic():
 def test_cousin_probe_is_not_in_the_exam():
     # Its own file, never the frozen exam: no cousin row shares an origin
     # with any exam row, and the exam's row count does not move.
+    # 263 to 252 on 2026-09-24: the job-2 generator fix cut the exam's
+    # `none_of_these` slice from 19 rows to 8. The cousin probe added none.
     exam = generate.test_set()
-    assert len(exam) == 263
+    assert len(exam) == 252
     exam_origins = {ex.meta.get("origin") for ex in exam
                     if ex.case in ("shared_origin_probe",
                                    "shared_origin_decoy_probe")}

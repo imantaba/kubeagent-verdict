@@ -56,11 +56,11 @@ def test_to_row_schema():
 
 def test_counts_for_follows_the_mix():
     counts = generate.counts_for(1000)
-    assert counts == {"attributed": 60, "none_of_these": 110, "own_cause": 100,
+    assert counts == {"attributed": 60, "none_of_these": 40, "own_cause": 130,
                       "multi": 130, "shared_origin": 150,
                       "shared_origin_decoy": 150, "truncated": 50,
                       "injection": 100, "empty_candidates": 50,
-                      "wrong_attribution": 100}
+                      "wrong_attribution": 140}
     assert sum(generate.counts_for(997).values()) == 997  # remainder lands on attributed
     # 997 is the awkward size: it is prime, so every share truncates.
     for size in (10, 100, 997, 1000, 4232):
@@ -264,15 +264,25 @@ def test_provenance_scan_reaches_every_catalog_entry():
             by_case.setdefault(ex.case, set()).add(entry)
 
     # `own_cause` is the only case that renders an entry's `own_cause` text;
-    # `none_of_these` and `contradiction_probe` are the only ones that render
-    # its `contradiction` text. Full coverage on these three is what carries
-    # every entry's per-entry prose through the scan.
-    for case in ("own_cause", "none_of_these", "contradiction_probe"):
+    # `contradiction_probe` is the only one that renders its `contradiction`
+    # text. Full coverage on these two is what carries every entry's
+    # per-entry prose through the scan.
+    for case in ("own_cause", "contradiction_probe"):
         assert by_case.get(case) == trainable, (
             f"{case} renders {len(by_case.get(case, ()))} of {len(trainable)} "
             f"trainable entries; missing {sorted(trainable - by_case.get(case, set()))}"
         )
     assert set().union(*by_case.values()) == trainable
+
+    # Until 2026-09-24 `none_of_these` rendered the `contradiction` text too,
+    # for every entry. The job-2 generator fix builds it from thin evidence
+    # instead: four entries, one row per undecided shape, and a fixed
+    # rationale that names no entry's prose.
+    thin = collections.Counter(
+        (ex.meta["entry"], "refuted" if "fresh read: refuted" in ex.user else "ruled_out")
+        for ex in generate.test_set() if ex.case == "none_of_these")
+    assert thin == {(key, shape): 1 for key in cases.THIN_ENTRIES
+                    for shape in ("refuted", "ruled_out")}
 
 
 def test_test_set_slice_counts_are_pinned():
@@ -288,6 +298,14 @@ def test_test_set_slice_counts_are_pinned():
     append leaves the earlier rows at their original indices — which is what
     lets a scoreboard banked against the shorter file still line up row for
     row over the slices it shares.
+
+    2026-09-24 broke that rule once, on purpose. The job-2 generator fix
+    rebuilt `none_of_these` from thin evidence on four entries, so the slice
+    fell from 19 rows to 8. Those rows sit inside the held-out block, one
+    entry at a time, so rows moved from the first changed entry onward and
+    the probe slices after the block moved up 11 places. A scoreboard
+    banked before that date does not line up row for row with this exam;
+    the frozen-slice and eval-set hashes moved with it.
     """
     counts = collections.Counter(ex.case for ex in generate.test_set())
     assert dict(counts) == {
@@ -297,7 +315,7 @@ def test_test_set_slice_counts_are_pinned():
         "injection": 19,
         "misattribution_probe": 19,
         "multi_misattribution_probe": 19,
-        "none_of_these": 19,
+        "none_of_these": 8,
         "own_cause": 19,
         "positional_probe": 19,
         "shared_origin_decoy_probe": 10,
@@ -305,7 +323,7 @@ def test_test_set_slice_counts_are_pinned():
         "truncated": 19,
         "wrong_attribution": 19,
     }
-    assert sum(counts.values()) == 263
+    assert sum(counts.values()) == 252
 
 
 def test_the_job2_keyword_exposure_is_pinned_per_case():
@@ -325,8 +343,8 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     deliberately with the reason, never tuned back to a stale value.
 
     The population moved for the v1.24.0 rescope. It used to be the retired
-    `cause_acc` slice -- the two case names in `score.KEYWORD_CASES`, counted
-    once per row -- which read 19 of 38. Design spec line 547 asks for all of
+    `cause_acc` slice -- two case names, `own_cause` and `empty_candidates`,
+    counted once per row -- which read 19 of 38. Design spec line 547 asks for all of
     job 2 instead, which is one entry per undecided workload that carries
     keywords, and adds three more cases: `wrong_attribution`,
     `misattribution_probe` and `multi_misattribution_probe`.
@@ -456,9 +474,10 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # job1 and job2 are measured, not derived -- R40 states them as "about 70"
     # and "about 210"; Step 51's actual measurement over the v1.24.0 exam
     # printed 157 and 153, so those are the pinned literals, not R40's
-    # rounded figures.
+    # rounded figures. job2 fell from 153 to 142 on 2026-09-24: the job-2
+    # generator fix cut the `none_of_these` slice from 19 rows to 8.
     assert job1 == 157
-    assert job2 == 153
+    assert job2 == 142
     assert job3_prompts == 39
     assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
 
@@ -666,7 +685,7 @@ def test_every_decoy_probe_row_names_its_decoy_cause():
 
 
 def test_the_length_gap_decider_has_rows_in_both_slices():
-    """57 of the 263 exam rows carry both a decoy cause and an expected cause
+    """57 of the 252 exam rows carry both a decoy cause and an expected cause
     that is not `none_of_these`, which is what the length gap is measured
     over. Both slices have to be non-empty: a decider with one empty slice
     reads `not measured` and tells a release reviewer nothing.
@@ -677,3 +696,120 @@ def test_the_length_gap_decider_has_rows_in_both_slices():
     assert len(measured) == 57
     assert sum(1 for m in measured if m) > 0
     assert sum(1 for m in measured if not m) > 0
+
+
+def test_one_prompt_has_one_answer():
+    """No two rows share a user prompt but differ in what they expect.
+
+    Before the 2026-09-24 generator fix, `wrong_attribution` and
+    `none_of_these` could print the same prompt and expect opposite answers:
+    the entry's own cause at one confidence, or `none_of_these` at another.
+    Gradient descent cannot fit both, and the model learned a coin flip for
+    exactly the rows the exam's job 2 grades hardest. The prompt now depends
+    only on (entry, names, shape, evidence), never on the case, so this
+    holds by construction; this test is what keeps it holding.
+
+    Checked over the full training build and the exam together, because a
+    collision across the two is the same contradiction. Rationales and
+    summaries may differ -- they are not graded.
+    """
+    rows = generate.generate(seed=17, size=8000) + generate.test_set()
+    answers: dict[str, set] = collections.defaultdict(set)
+    for ex in rows:
+        gold = json.loads(ex.assistant)["verdicts"]
+        answers[ex.user].add(tuple(sorted(
+            (v["workload"], v["cause"], v["confidence"]) for v in gold)))
+    clashes = {prompt[:200]: sorted(a) for prompt, a in answers.items() if len(a) > 1}
+    assert not clashes, clashes
+
+
+def test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape():
+    """A thin row and a clear row of the same entry and shape differ only in
+    what names the cause: the finding's `log cause:` line, the log read's
+    content, or both. If thin rows outnumber clear ones, "none of these"
+    becomes the likelier answer for that entry whatever the prompt says.
+    Counted in train, the way `kv-dataset` builds it: split, then drop
+    held-out groups.
+    """
+    train, _val = generate.split(generate.generate(seed=17, size=8000), seed=17)
+    train = generate.drop_held_out(train, generate.test_set())
+    clear_case = {"refuted": "wrong_attribution", "ruled_out": "own_cause"}
+    n = collections.Counter(
+        (ex.meta["entry"], "refuted" if "fresh read: refuted" in ex.user else "ruled_out",
+         ex.case)
+        for ex in train if ex.case in ("none_of_these", *clear_case.values()))
+    for key in cases.THIN_ENTRIES:
+        for shape, clear in clear_case.items():
+            assert n[(key, shape, clear)] > n[(key, shape, "none_of_these")] > 0, (key, shape)
+
+
+def _evidence_labels(user: str) -> list[str]:
+    section = user.split("== BEGIN evidence ==\n")[1].split("== END evidence ==")[0]
+    return re.findall(r"^== (.+) ==$", section, flags=re.MULTILINE)
+
+
+def test_every_crash_family_workload_in_a_multi_row_keeps_its_log_read():
+    """kubeagent reads the previous log of every crash-family workload.
+    A multi-workload row gives each workload at most two reads and the row
+    at most 8, so a log read appended after two object reads, or a plain
+    `[:8]`, would silently lose it. Checked on every `multi` training row
+    and every `multi_misattribution_probe` exam row."""
+    rows = [ex for ex in generate.generate(seed=17, size=8000) if ex.case == "multi"]
+    rows += [ex for ex in generate.test_set() if ex.case == "multi_misattribution_probe"]
+    checked = 0
+    for ex in rows:
+        labels = _evidence_labels(ex.user)
+        assert len(labels) <= c.MAX_TOOL_CALLS, ex.group
+        for part in ex.group.split("+"):
+            key, workload = part.split(":")
+            if key not in cases.LOG_READS:
+                continue
+            ns, name = workload.split("/")
+            pattern = re.compile(rf"log causes {re.escape(ns)}/{re.escape(name)}-[^-]+-[^-]+ container \S+")
+            assert any(pattern.fullmatch(label) for label in labels), (ex.group, part)
+            checked += 1
+    assert checked > 0
+
+
+_CANDIDATE_HEAD = re.compile(r"^- (\S+) \(\w+\)(?: \[confidence: (\w+)\])?:$")
+_ATTRIBUTED = re.compile(r"^    considered (.+): attributed — ")
+# kubeagent's `ForRootCause` (internal/confidence/confidence.go:36-47 at v1.24.0).
+_RULE = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
+# The shared-origin builders still hand-pass their header. This branch leaves
+# them alone (spec: "Not touched here: the shared-origin builders").
+_HEADER_EXEMPT = {"shared_origin", "shared_origin_decoy", "shared_origin_probe",
+                  "shared_origin_decoy_probe"}
+
+
+def _headers(user: str) -> dict[str, tuple[str, list[str]]]:
+    section = user.split("== BEGIN candidates ==\n")[1].split("== END candidates ==")[0]
+    out: dict[str, tuple[str, list[str]]] = {}
+    for line in section.splitlines():
+        if m := _CANDIDATE_HEAD.match(line):
+            workload = m.group(1)
+            out[workload] = (m.group(2) or "", [])
+        elif m := _ATTRIBUTED.match(line):
+            out[workload][1].append(m.group(1))
+    return out
+
+
+def test_every_job2_header_follows_kubeagents_rule():
+    """The `[confidence: ...]` header over a job-2 workload is what
+    kubeagent would print for its one attributed candidate: node or PVC
+    gives high, registry gives medium, anything else or no attributed
+    candidate gives no header."""
+    checked = collections.Counter()
+    for ex in generate.generate(seed=17, size=8000) + generate.test_set():
+        if ex.case in _HEADER_EXEMPT or "== BEGIN candidates ==" not in ex.user:
+            continue
+        headers = _headers(ex.user)
+        for workload, wm in ex.meta["workloads"].items():
+            if wm["job"] != 2 or workload not in headers:
+                continue
+            header, attributed = headers[workload]
+            assert len(attributed) <= 1, (ex.group, workload)
+            want = next((level for prefix, level in _RULE
+                         if attributed and attributed[0].startswith(prefix)), "")
+            assert header == want, (ex.case, ex.group, workload)
+            checked[ex.case] += 1
+    assert {"multi", "multi_misattribution_probe", "wrong_attribution"} <= set(checked)

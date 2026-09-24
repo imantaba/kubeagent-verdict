@@ -364,7 +364,7 @@ ENTRIES = [
         issue="CrashLoopBackOff",
         reason="Container repeatedly crashes after starting",
         evidence='container "{container}", restartCount={restarts}',
-        log_cause="log cause: bad command or entrypoint",
+        log_cause="bad command or entrypoint",
         recommendation="check the container's command and args against what the image expects to run",
         winner_cause="the container exits immediately on startup",
         winner_reason="the previous-instance log shows an entrypoint failure, and the image "

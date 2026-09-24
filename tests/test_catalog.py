@@ -224,3 +224,17 @@ def test_grounding_substrings_appear_in_corpus():
             joined = "\n".join(a for r in rows for a in r.assertions)
             for g in e.grounding:
                 assert g in joined, f"{e.key}: grounding {g!r} not in corpus assertions for {slug}"
+
+
+def test_log_cause_carries_no_prefix():
+    """The renderer adds `log cause: ` once (`contract._finding_block`), so a
+    value that already starts with it prints `log cause: log cause: …`."""
+    for e in catalog.all_entries():
+        assert not e.log_cause.startswith("log cause"), e.key
+
+
+def test_restart_loop_evidence_quotes_the_container():
+    """kubeagent prints `container %q, %d restarts, …`
+    (internal/diagnose/restartloop.go:47 at v1.24.0)."""
+    e = next(e for e in catalog.all_entries() if e.key == "restart-loop")
+    assert e.evidence.format(**SAMPLE).startswith('container "app", 14 restarts, ')

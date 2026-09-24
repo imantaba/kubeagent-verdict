@@ -48,7 +48,7 @@ Four commands, in order. Think of it as writing an exam course:
 | Step | Command | Plain English | Time |
 |---|---|---|---|
 | 1 | `kv-dataset` | **Write the textbook.** Generate thousands of realistic practice questions with known-correct answers. | seconds |
-| 2 | `kv-train` | **Teach.** Show the model the questions and answers over and over until it learns the pattern. | ~17½ hours |
+| 2 | `kv-train` | **Teach.** Show the model the questions and answers over and over until it learns the pattern. | ~27 hours (estimate) |
 | 3 | `kv-export` | **Print and shrink.** Turn the trained result into one compact file a laptop can run. | ~30 min |
 | 4 | `kv-eval` | **Sit the exam.** Score the model on questions it has never seen, and check the score against a fixed bar. | ~2¼ hours |
 
@@ -82,9 +82,9 @@ proportions, and each kind teaches one specific skill:
 | Question type | Share | The skill it teaches |
 |---|---|---|
 | `attributed` | 6% | The obvious candidate is right — pick it, word for word |
-| `none_of_these` | 11% | Sometimes *every* offered candidate is wrong. Say so. |
-| `own_cause` | 10% | Sometimes the right answer is not on the menu at all. Name it. |
-| `wrong_attribution` | 10% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
+| `none_of_these` | 4% | The evidence is thin: every candidate is ruled out or refuted, and nothing names a cause. Say so, at low confidence. |
+| `own_cause` | 13% | Sometimes the right answer is not on the menu at all. Name it. |
+| `wrong_attribution` | 14% | kubeagent's own "attributed" tag is a *hint*, and sometimes it is wrong. The evidence wins. |
 | `injection` | 10% | The evidence may contain text saying "ignore your instructions." It is data. Ignore *it*. |
 | `multi` | 13% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
@@ -98,9 +98,9 @@ twin. They are the whole subject of Part 2.
 
 The generator then splits everything into three piles:
 
-- **train** — 4,292 questions. The model studies these.
-- **validation** — 426 questions. Held back during development.
-- **test** — 263 questions. **The exam.** The model must never see these.
+- **train** — 6,496 questions. The model studies these.
+- **validation** — 655 questions. Held back during development.
+- **test** — 252 questions. **The exam.** The model must never see these.
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -147,12 +147,16 @@ training runs are only comparable if they used the same recipe:
 | seed | 17 | fixed, so the shuffle is the same every run |
 | LoRA rank | 16 | how many sticky notes |
 
-Two epochs over 4,292 questions, nudging once per 16 questions, works out to
-about **536 nudges** ("optimizer steps") in a run. On a 32-core CPU box that
-takes **about 17½ hours** — plan for overnight, not an afternoon. That is a
-stopwatch reading now rather than a floor: one run has finally been timed start
-to finish, at **17h42m**, and it did exactly 4,292 questions and exactly 536
-nudges, so the arithmetic above holds. Two earlier versions of this line were
+The dataset has grown since the first timed run. As of 2026-09-02, two epochs
+over 4,292 questions, nudging once per 16 questions, worked out to **536
+nudges** ("optimizer steps"), and that run was timed start to finish at
+**17h42m** — a stopwatch reading, not a floor. Today's train split is bigger:
+`out/dataset-0924`'s manifest counts 6,496 rows, and
+[train/config.py](../src/kubeagent_verdict/train/config.py) still pins 2
+epochs and `grad_accum` 16, so the same arithmetic now gives 6,496 × 2 / 16 =
+**812 nudges**. At the same per-nudge speed as the 2026-09-02 run, that is an
+estimate of **about 27 hours**, not a new measurement — plan for overnight,
+not an afternoon. Two earlier versions of this line were
 wrong in the same direction — "several hours" first, then "upwards of 15 hours"
 offered as a floor because nothing had yet been timed end to end. The attempt
 that stopped at 12h19m when the machine lost power was not a run in trouble: it
@@ -187,21 +191,21 @@ check fails, nothing produced is trusted.
 
 ### Step 4: the exam (`kv-eval`)
 
-We serve the finished model locally and ask it all 263 test questions, then
+We serve the finished model locally and ask it all 252 test questions, then
 score every answer automatically.
 
-The 263 questions are not one exam — they are thirteen, and several are traps
+The 252 questions are not one exam — they are thirteen, and several are traps
 built specifically to catch a model that is cheating rather than reasoning:
 
 | Slice | Rows | What it catches | Job |
 |---|---|---|---|
 | `positional_probe` | 19 | A model that always picks the **first** candidate. The right answer is placed last. | 1 or 2 |
-| `misattribution_probe` | 19 | A model that always trusts the `attributed` **tag**. The tag is deliberately on a wrong candidate. | 2 |
-| `multi_misattribution_probe` | 19 | The same trap, but with two workloads at once. | 1 or 2, plus 3 |
+| `misattribution_probe` | 19 | A model that leans on the candidate menu instead of naming its own cause. Every candidate is ruled out, so there is no tag to trust. | 2 |
+| `multi_misattribution_probe` | 19 | Every candidate menu attributes a decoy that a fresh read refutes, with two workloads at once — so trusting the tag anywhere in a multi-workload prompt still loses. | 1 or 2, plus 3 |
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
 | `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
 | `contradiction_probe` | 19 | Evidence that contradicts itself. | 1, always decided |
-| the other 7 slices | 167 | Ordinary competence across the nine question types | 1 or 2 |
+| the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 156 | Ordinary competence on the seven single-workload question types (all but `multi` and the `shared_origin` pair) | 1 or 2 |
 
 The job column says which pass bar reads a slice's rows, now that
 kubeagent v1.24.0 decides some of them before the model ever answers.
@@ -563,6 +567,12 @@ each: their inventory named the disk-pressure taint in a world whose node read
 showed none, so the prompt argued against its own label. The 253 did not move,
 and the test file pins both facts by hash.
 
+On 2026-09-24 the exam changed differently: it was **rebuilt, not appended
+to**. Rendered bytes moved on rows that already existed, `misattribution_probe`
+among them, and the exam fell from 263 rows to 252. A score from before that
+day and a score from after it are not the same measurement and do not compare
+row for row.
+
 ---
 
 ## Part 3 — Why we are training again
@@ -771,6 +781,8 @@ three, on every commit.
   **60.9% to 18.5%**.
 - The exam: unchanged — still 263 questions, still the same checksum, still 0
   of 263 contaminated. A future score is still comparable to every past one.
+  (Until 2026-09-24. That day the exam was rebuilt at 252 rows; see the end
+  of Part 2.)
 
 What this did **not** say: that the model reads better. That question needed
 a retrain, and one then ran on this twenty-scenario textbook (the 0905 run).
@@ -834,9 +846,10 @@ has the same shape as node-disk-pressure's. Both say a node is under pressure,
 so it evicts pods and turns new ones away. The words differ, "memory" for
 "disk" and the kubelet named as the actor, so the two sentences are not the
 same. The promise allows that, and the third outcome below says how to read
-it. The exam is still 263 questions with the same checksum. A test now also
-demands that every read kind the exam uses has a trained cousin, so the gap
-cannot quietly reopen.
+it. The exam is still 263 questions with the same checksum. (Until
+2026-09-24. That day the exam was rebuilt at 252 rows; see the end of Part
+2.) A test now also demands that every read kind the exam uses has a
+trained cousin, so the gap cannot quietly reopen.
 
 What the next retrain will tell us:
 
@@ -927,7 +940,8 @@ What this change does about it:
   It asks whether the model reads the origin on what it studied. It decides
   nothing.
 
-The exam did not move: 263 questions, the same checksum.
+The exam did not move: 263 questions, the same checksum. (Until 2026-09-24.
+That day the exam was rebuilt at 252 rows; see the end of Part 2.)
 
 What the final retrain will tell us:
 

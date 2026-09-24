@@ -40,7 +40,7 @@ class CatalogEntry:
     reads: tuple[tuple[str, str], ...] = ()  # (label template, content template)
     rationale: str = ""
     direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
-    contradiction: str = ""  # read content that rules the winner out (none_of_these case)
+    contradiction: str = ""  # read content that rules the winner out (contradiction_probe)
     own_cause: str = ""  # the cause phrase when the winner is omitted from candidates
     own_cause_keywords: tuple[str, ...] = ()
     grounding: tuple[str, ...] = ()  # substrings that must appear in this slug's corpus assertions

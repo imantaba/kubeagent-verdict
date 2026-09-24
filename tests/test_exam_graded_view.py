@@ -11,8 +11,10 @@ about `expected_cause` job 2 switches on (exact match vs. keyword
 match).
 
 Two gold fields do survive, at the top of `meta`, where a
-single-workload row mirrors them: `expected_cause` on 224 of the 263
-rows and `expected_confidence` on 234. This view keeps both. That makes
+single-workload row mirrors them: `expected_cause` on 213 of the 252
+rows and `expected_confidence` on 223 (224 and 234 of 263 before the
+2026-09-24 generator fix removed 11 `none_of_these` rows). This view
+keeps both. That makes
 the pin stricter than the gated numbers need, never looser: a gold
 cause or confidence that moved on one of those rows fails this test
 instead of slipping past it. So the ungated extras -- cause accuracy,
@@ -21,7 +23,7 @@ partly free to move. They read those two fields, and a row that carries
 one of them is pinned on it.
 
 `GRADED_VIEW_SHA256` pins the sha256 of that view over the whole exam
-(`generate.test_set()`, 263 rows). This is not a TDD red test: it
+(`generate.test_set()`, 252 rows since 2026-09-24; 263 before). This is not a TDD red test: it
 passes today, before the training-targets fix, because the fix only
 touches shared-origin rows, and this view keeps none of the fields it
 changes there -- their gold cause lives in the `meta["expected"]` dict.
@@ -37,6 +39,16 @@ Twenty shared-origin workloads' `own_cause_keywords` move from `[]` to a
 curated pair (see `tests/test_shared_origin_training.py`'s matching
 2026-09-23 entries), and the digest moves with them -- on the same 11
 rows, nothing else.
+
+Re-pinned on 2026-09-24 for the job-2 generator fix
+(2026-09-24-job2-generator-fix-design.md). This time the user message
+moves, and this view keeps it whole, so the digest follows every rendered
+change `FROZEN_SLICE_SHA256`'s 2026-09-24 entry lists in
+`tests/test_shared_origin_training.py`. The new exam is a new baseline.
+It moved four times on that branch: once for the catalogue's log-cause
+text, once for the single undecided builder, which also cut the exam from
+263 rows to 252, once for the multi-workload rows' log reads and headers,
+and once for `empty_candidates`' confidence and log read.
 """
 
 from __future__ import annotations
@@ -63,7 +75,7 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "b82b87977414e01e5d58eeb64defc5dec350bab6f567006d02ea96932700b03e"
+GRADED_VIEW_SHA256 = "250f2bc2bc6860ec5e04e9574e36b8cf23cea2625961b735bb1a0888914d5b18"
 
 
 def _digest(views) -> str:
