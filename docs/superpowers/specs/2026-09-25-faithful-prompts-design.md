@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Branch:** `spec-faithful-prompts` (cut off `main` @ `6e7f0ce`)
-**Status:** approved in six sections; written up for review
+**Status:** approved (2026-09-26)
 
 ## What this is
 
@@ -761,8 +761,8 @@ with `-update`. A value marked "measured" comes from the regenerated data.
 - **Tests.** Port tests, the byte-equal gather test, the checker's own
   tests, and the rewrites the field deletion forces (Testing). The checker
   adds about 2 seconds to each full run.
-- **The golden re-capture.** One run on the training host, which has Go.
-  This workstation does not.
+- **The golden re-capture.** One Go run on the training host. Development
+  now runs there too, so nothing is copied between machines.
 - **Regeneration.** Almost every row's text changes, so every count and
   hash in the pins table is re-measured.
 - **Live runs.** Two live runs of the 0920 checkpoint, about 2 h 20 min
@@ -868,11 +868,10 @@ four things the real pipeline computes. It is fixed first:
 
 **Steps.**
 
-1. On this workstation: `git archive v1.24.0 | gzip` in the kubeagent repo.
-   Check the file count against `git ls-tree -r v1.24.0 --name-only | wc -l`.
-   No worktree, no branch.
-2. Copy the archive, the YAML and the capture file to a scratch folder on
-   the training host.
+1. In the kubeagent repo: `git archive v1.24.0 | gzip` into a scratch
+   folder outside both repos. Check the file count against
+   `git ls-tree -r v1.24.0 --name-only | wc -l`. No worktree, no branch.
+2. Copy the YAML and the capture file into the same scratch folder.
 3. Unpack it. Copy the capture file in as
    `internal/investigate/kv_capture_test.go`.
 4. Run `go test` there, with three stand-ins for a real API server:
@@ -890,7 +889,7 @@ four things the real pipeline computes. It is fixed first:
    `rules_golden.json`: each attribution rule and each Decide outcome
    appears at least once. Keep today's refused reads: node `worker-7`, PVC
    `aux-1`, and the events of `img/seven`.
-7. Remove the scratch folder and the local archive. `git status --short`
+7. Remove the scratch folder, archive included. `git status --short`
    in the kubeagent repo must print nothing.
 
 **Fallback (option 2),** only if the training host cannot build Go: the
