@@ -16,7 +16,9 @@ NAMESPACES = ("shop", "web", "payments", "billing", "search", "auth", "media", "
 NAMES = ("api", "frontend", "worker", "cache", "ingest", "checkout", "gateway", "scheduler", "indexer", "notifier")
 CONTAINERS = ("app", "web", "worker", "main")
 INIT_CONTAINERS = ("init-config", "init-migrate")
-NODES = ("worker-1", "worker-2", "worker-3")
+# Five nodes, so a multi row can put each of its up to four workloads on a
+# node of its own and still find a free node for a healthy node read.
+NODES = ("worker-1", "worker-2", "worker-3", "worker-4", "worker-5")
 PVCS = ("data-0", "cache-0", "media-assets")
 # A fixed decoy-PVC pool, never drawn by the rng. No catalog entry names
 # one, so a pad never collides with a drawn {pvc}, and every pad sorts

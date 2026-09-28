@@ -77,7 +77,13 @@ DECLARED = {
     # reused. The miss is the claim decoy's describe, `pvc <ns>/aux-0:
     # phase=Bound storageClass=standard`: no training row mounts `aux-0`,
     # so none reads it.
-    "positional_probe": (55, 56),
+    # 2026-09-26 (faithful prompts): (55, 56) -> (54, 56). The slice builds
+    # the same reads. The node list grew from three workers to five, which
+    # moved every later training draw, and one events read stopped matching
+    # by chance: an `init-crashloop` row's BackOff line for container
+    # `init-migrate` at (x5). No kept training row draws that container with
+    # that count now. The `aux-0` miss stays. 55 - 1 = 54.
+    "positional_probe": (54, 56),
     # Since 2026-09-24 this probe builds `own_cause`'s ruled-out prompt: no
     # object reads, and one log read on each of the five crash-family
     # entries. All five are reused, from `own_cause` and `wrong_attribution`
@@ -100,7 +106,14 @@ DECLARED = {
     # count, and no kept row does now; `deployment-bad-image-tag`'s pull
     # events, the old miss, now match a training row that drew the same tag.
     # 23 + 1 - 2 + 1 = 23.
-    "misattribution_probe": (23, 25),
+    # 2026-09-26 (faithful prompts): (23, 25) -> (24, 25). The slice builds
+    # the same reads; the five-worker node list moved every training draw,
+    # and three matches moved by chance. The two old misses, an
+    # `init-crashloop` and a `restart-loop` events read, now each match a
+    # kept training row. `deployment-bad-image-tag`'s pull events miss
+    # again: they print the drawn tag (`v2.8.4`), which the mask does not
+    # blank, and no kept row drew it. 23 + 2 - 1 = 24.
+    "misattribution_probe": (24, 25),
     # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
     # reads its first object read and then its clear log read, the read
     # kubeagent makes for every crash-family workload; any other constituent
@@ -120,7 +133,21 @@ DECLARED = {
     # `attributed` and `truncated` training rows rendered it, and the rules
     # do not decide that entry, so neither case trains it now.
     # 47 - 3 - 1 + 4 = 47.
-    "multi_misattribution_probe": (47, 50),
+    # 2026-09-26 (faithful prompts): (47, 50) -> (80, 84). The slice is built
+    # on the gather now: one gather over the whole row, which reads each
+    # workload's pod events (40 reads, not 2), the describes of its refuted
+    # menu (34, not 38), and the log read of each crash-family workload
+    # (10). 80 are reused: the events text is one template per entry, and
+    # the healthy node describe is the one most training rows render. The
+    # 4 misses: `deployment-bad-image-tag`'s pull events print the drawn tag,
+    # which the mask does not blank; a `restart-loop` workload in namespace
+    # `web` whose container is also `web`, so the mask turns the container
+    # into `<NS>` and no kept row matches that line at (x5); and two refuted
+    # `pvc-unbound-unschedulable` claim describes (`pvc <ns>/data-0:
+    # phase=Bound storageClass=fast-ssd`), which no kept row renders under
+    # that row's mask. One of the two sits in namespace `data`, so the mask
+    # also turns its `data-0` into `<NS>-0`. 84 - 4 = 80.
+    "multi_misattribution_probe": (80, 84),
     # THIS ROW WAS THE POINT OF THE INSTRUMENT. It was written to catch this
     # slice reusing none_of_these_case's read text, which is why the slice
     # cannot catch a model reciting an entry-lookup table. Negative control v4
@@ -273,7 +300,9 @@ def _fake(user: str) -> generate.Example:
 # too since later on 2026-09-26, and it still holds: 0 of 7148 kept rows and
 # 0 of 251 test rows. The contradiction rows moved to the gather on
 # 2026-09-26 too, and it still holds: 0 of 7151 kept rows and 0 of 249 test
-# rows. Such a row would have no reads, so
+# rows. The `multi` rows moved to the gather on 2026-09-26 as well, and it
+# still holds: 0 of 7164 kept rows and 0 of 249 test rows. Such a row would
+# have no reads, so
 # it would add nothing to the trained set and nothing to a slice's count.
 # The `assert pairs` in the allowlist test still fails a slice that goes
 # wholly empty.

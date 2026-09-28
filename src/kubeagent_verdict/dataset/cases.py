@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import random
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from kubeagent_verdict import contract as c
@@ -24,7 +25,6 @@ from kubeagent_verdict.dataset.render import (
     POSITIONAL_DECOYS,
     bind,
     deciding_ending,
-    object_reads,
     prompt_meta,
     refute,
     unverify,
@@ -225,42 +225,6 @@ def gather_workload(e: CatalogEntry, n: Names, objects: tuple, *,
         events=_events(e, n), findings=(finding,))
 
 
-def _multi_reads(e: CatalogEntry, n: Names,
-                 object_reads: tuple[c.EvidenceRead, ...]) -> list[tuple[c.EvidenceRead, bool]]:
-    """One workload's reads in a multi-workload row, at most two, each paired
-    with whether the row's cap must keep it. A crash-family workload keeps
-    its first object read, then its clear log read, which the cap never
-    drops. Any other workload keeps its first two object reads.
-
-    Two object reads and then the log read would lose the log read in most
-    crash-family blocks: measured at seed 17, size 8000, 784 of 847.
-    """
-    log = _log_read(e, n, "clear")
-    if log is None:
-        return [(read, False) for read in object_reads[:2]]
-    return [(read, False) for read in object_reads[:1]] + [(log, True)]
-
-
-def _cap_reads(reads: list[tuple[c.EvidenceRead, bool]]) -> tuple[c.EvidenceRead, ...]:
-    """Cut a multi-workload row's reads to kubeagent's budget. Droppable
-    reads go from the end; a read marked keep (the origin read, a log
-    read) never goes. A plain `[:8]` would have cut a log read in 34 rows
-    at seed 17, size 8000.
-    """
-    out = list(reads)
-    # Walk from the end: deleting index i never shifts an index still to
-    # visit (every remaining index is < i).
-    for i in range(len(out) - 1, -1, -1):
-        if len(out) <= c.MAX_TOOL_CALLS:
-            break
-        if not out[i][1]:
-            del out[i]
-    if len(out) > c.MAX_TOOL_CALLS:
-        raise ValueError(f"{len(out)} reads the cap may not drop; the budget is "
-                         f"{c.MAX_TOOL_CALLS}")
-    return tuple(read for read, _keep in out)
-
-
 def _row_decoy(decoys: list[str]) -> dict:
     """The row-level `decoy_cause` key, from the row's own decoy list.
 
@@ -320,26 +284,6 @@ def _user_message(summary: c.ResourceSummary | None,
 
 def _confidence(e: CatalogEntry) -> str:
     return "high" if e.direct else "medium"
-
-
-def _to_contract_candidates(candidates: tuple, result: rules.Result) -> tuple[c.Candidate, ...]:
-    """Convert `rules.Candidate` results into `contract.Candidate`s.
-
-    `rules.Candidate` and `contract.Candidate` are DIFFERENT types: rules'
-    version carries `.obj`/`.ns` for `decide()`'s own bookkeeping, while
-    contract's version carries `.fresh_read_outcome`/`.fresh_read_evidence`
-    for the rendered "fresh read: ..." line. `rules.decide` never re-checks
-    a ruled-out candidate, so one with no matching `Decision` keeps both
-    fresh-read fields at their `""` default.
-    """
-    by_cause = {d.candidate: d for d in result.decisions}
-    out = []
-    for cand in candidates:
-        dec = by_cause.get(cand.cause)
-        out.append(c.Candidate(cause=cand.cause, verdict=cand.verdict, reason=cand.reason,
-                               fresh_read_outcome=dec.outcome if dec else "",
-                               fresh_read_evidence=dec.evidence if dec else ""))
-    return tuple(out)
 
 
 def _rule_summary(n: Names, cause: str) -> str:
@@ -749,11 +693,12 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     support, while the evidence itself stays untouched and still points at
     each constituent's own cause.
 
-    Each constituent's header is the one kubeagent's confidence rule gives
-    that attributed cause, and each reads what it would read in `multi`:
-    its first two object reads, or for a crash-family entry its first
-    object read and then its log read. The answer keeps the entry's own
-    confidence.
+    The row is built like `multi`: the workloads in report order, each with
+    its own finding lines, and one gather that reads for the whole row
+    under the budget of 8 reads. Each header is the one kubeagent's
+    confidence rule gives the attributed cause, and the answer keeps the
+    entry's own confidence. A workload the budget never reached has no
+    reads to judge its cause from, so the row refuses it.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi_misattribution_probe takes 2-4 workloads")
@@ -763,40 +708,32 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     # being a multi-workload probe. The caller used to skip such a pair,
     # which shrank the slice and every rate divided by it. Raising here
     # gives every caller the check, including future ones.
-    seen = [(n.ns, n.name) for _e, n in pairs]
-    if len(set(seen)) != len(seen):
-        raise ValueError(
-            f"multi_misattribution_probe needs distinct workloads: {sorted(seen)}")
-    workloads, all_reads, rows = [], [], []
+    pairs = _report_order(pairs)
+    clash = multi_clash([n for _e, n in pairs])
+    if clash:
+        raise ValueError(f"multi_misattribution_probe needs {clash}")
+    res = gather.gather([gather_workload(e, n, _refuted_menu(n, e.objects))
+                         for e, n in pairs])
+    workloads, rows = [], []
     workloads_meta: dict[str, dict] = {}
     decoy_by_workload: dict[str, list[str]] = {}
-    results: list[rules.Result] = []
-    for e, n in pairs:
-        conf = _confidence(e)
-        names = dataclasses.asdict(n)
-        declared = tuple(bind(obj, names) for obj in e.objects)
-        refuted = tuple(refute(obj) for obj in declared)
-        raw = rules.attribute(refuted, ns=n.ns, pod=n.pod, issue=e.issue)
-        result = rules.decide(raw)
-        candidates = _to_contract_candidates(raw, result)
+    for (e, n), candidates, result in zip(pairs, res.candidates, res.results):
+        key = f"{n.ns}/{n.name}"
+        if _starved(n, res.reads):
+            raise ValueError(f"multi_misattribution_probe: the read budget never reached {key}")
         workloads.append(_workload(e, n, candidates, render.header_for(candidates),
                                    result=result))
-        all_reads.extend(_multi_reads(e, n, tuple(object_reads(refuted, ns=n.ns, pod=n.pod))))
         cause = _fmt(e.own_cause, n)
-        rows.append({"workload": f"{n.ns}/{n.name}", "cause": cause,
-                     "confidence": conf, "rationale": _fmt(e.rationale, n)})
-        key = f"{n.ns}/{n.name}"
+        rows.append({"workload": key, "cause": cause,
+                     "confidence": _confidence(e), "rationale": _fmt(e.rationale, n)})
         workloads_meta[key] = workload_meta(result, expected_cause=cause,
                                             own_cause_keywords=list(e.own_cause_keywords))
         decoy_by_workload[key] = [cand.cause for cand in candidates]
-        results.append(result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    # No origin read and at most 4 workloads of 2 reads each: never over 8.
-    user = _user_message(None, "", (), tuple(workloads),
-                         _cap_reads(all_reads), key=group)
+    user = _user_message(None, "", (), tuple(workloads), res.reads, key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    label = rules.label(rules.shared(tuple(results)))
+    label = rules.label(rules.shared(tuple(res.results)))
     extra_meta = prompt_meta(workloads_meta, label=label, decoy_by_workload=decoy_by_workload)
     meta = {"case": "multi_misattribution_probe",
             "expected": {r["workload"]: r["cause"] for r in rows},
@@ -1364,6 +1301,64 @@ def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
               **r.meta})
 
 
+def _report_order(pairs: list[tuple[CatalogEntry, Names]]) -> list[tuple[CatalogEntry, Names]]:
+    """The pairs in the order kubeagent reports them. Every workload of a
+    multi row is flagged, so all of them get one priority, and kubeagent
+    then sorts by namespace, name and kind (`Prioritize`,
+    internal/inventory/inventory.go:633-645 at v1.24.0). The contract
+    renders workloads in the order it is given, so the two multi builders
+    sort here, first, and every later step keeps this order."""
+    return sorted(pairs, key=lambda p: (p[1].ns, p[1].name, p[0].workload_kind))
+
+
+def multi_clash(names: Sequence[Names]) -> str:
+    """Why these workloads cannot share one multi row, or "" when they can.
+
+    One row is one scan, so each object in it has one state. Two workloads
+    may not be the same workload, may not run on the same node, and may not
+    use the same claim in the same namespace. The answer names the first
+    clash found, in that order.
+    """
+    seen = [(n.ns, n.name) for n in names]
+    if len(set(seen)) != len(seen):
+        return f"distinct workloads: {sorted(seen)}"
+    for i, n in enumerate(names):
+        for m in names[:i]:
+            if m.node == n.node:
+                return f"distinct nodes: {m.ns}/{m.name} and {n.ns}/{n.name} both run on {n.node}"
+    for i, n in enumerate(names):
+        for m in names[:i]:
+            if (m.ns, m.pvc) == (n.ns, n.pvc):
+                return (f"distinct claims: {m.ns}/{m.name} and {n.ns}/{n.name} "
+                        f"both use claim {n.ns}/{n.pvc}")
+    return ""
+
+
+def _starved(n: Names, reads: Sequence[c.EvidenceRead]) -> bool:
+    """True when the budget ran out before the gather reached this
+    workload. The gather reads a workload's events first, so a workload
+    whose events read is missing got no read at all."""
+    return all(read.label != f"events {n.ns}/{n.pod}" for read in reads)
+
+
+def _thin_multi(e: CatalogEntry, n: Names, w: c.Workload, result: rules.Result,
+                reads: Sequence[c.EvidenceRead]) -> bool:
+    """True when a multi row's workload must answer none_of_these.
+
+    Three things must all hold. The rules leave the workload undecided. The
+    budget ran out before the gather reached it, so it has no reads. And
+    its own lines, its inventory entry and its candidate entry, miss at
+    least one keyword of its own cause. Keywords match the way the grader
+    matches them: lowercase, as substrings.
+    """
+    if result.decided or not _starved(n, reads):
+        return False
+    inventory = c.render_inventory(None, None, "", (), (w,))
+    own = (inventory[inventory.index(f"- {n.ns}/{n.name} ("):]
+           + c.render_candidates((w,))).lower()
+    return not all(k.lower() in own for k in e.own_cause_keywords)
+
+
 def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
                    rng: random.Random) -> list[tuple]:
     """Per pair: this pair's own objects (decoys Option-A drawn; the one cause-intent
@@ -1389,9 +1384,6 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return combined
 
 
-_WORKER_NAMES = ("worker-1", "worker-2", "worker-3")
-
-
 def _is_node_story(p: prop.Propagation) -> bool:
     """A node story's healthy origin read names a node: its label or its
     healthy-content template still carries the `{node}` placeholder."""
@@ -1413,10 +1405,10 @@ def _node_clashes(name: str, objects: tuple) -> bool:
 
 def _multi_healthy_origin_node(h_node: str, all_objects: tuple) -> str | None:
     """The node name a node-story healthy-origin read should use: `h_node`
-    itself when it does not clash, else the first of worker-1/2/3 free of
-    a clash, else None when all three clash too (the read is dropped).
-    No RNG draw: a row without a clash never moves the stream."""
-    for candidate in (h_node, *_WORKER_NAMES):
+    itself when it does not clash, else the first node of `names.NODES`
+    free of a clash, else None when every node clashes (the read is
+    dropped). No RNG draw: a row without a clash never moves the stream."""
+    for candidate in (h_node, *names_mod.NODES):
         if not _node_clashes(candidate, all_objects):
             return candidate
     return None
@@ -1450,28 +1442,39 @@ def _resolve_multi_healthy_origin(
 
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
           healthy_origin: prop.Propagation | None = None) -> Example:
-    """Several workloads, several independent causes.
+    """Several workloads, each failing for its own reason.
+
+    The row shows 2 to 4 flagged workloads in report order. Each one prints
+    its own finding lines and its own candidates. One gather reads for the
+    whole row, under the budget of 8 reads, and walks the workloads in
+    report order, so a late workload can get no read at all.
 
     `healthy_origin` is the negative half of the shared-origin curriculum.
-    Before it, `_reads(e, n)[:2]` made every read workload-local, so a
-    cluster-scoped read at the head of the list appeared only in
-    `shared_origin` rows -- the answer was legible from the prompt's SHAPE.
-    Passing a trainable scenario here prepends the SAME origin read with the
-    content showing that component healthy, and "separate reasons" stays the
-    right answer. Only the read's content separates the two classes.
+    When it is given, the row shows that story's origin read first, with
+    content that shows the component healthy, and "separate reasons" stays
+    the right answer. Only the read's content tells this row from a
+    `shared_origin` row. The read counts toward the budget, so the gather
+    then gets 7 reads. The collision rules can move it to another node or
+    drop it.
 
-    Each workload gives at most two reads (`_multi_reads`), and a
-    crash-family workload always keeps its log read. `_cap_reads` holds the
-    row to kubeagent's budget of 8 without dropping a log read or the
-    origin read.
+    The gold, per workload:
+    - The rules decide it: their cause, and a rationale from their evidence.
+    - They do not: the entry's own cause and rationale.
+    - They do not, the gather never reached it, and its own lines miss a
+      keyword of that cause: none_of_these, at low confidence (see
+      `_thin_multi`). Nothing the prompt shows about it names the cause.
+
+    Two workloads may not run on one node, or use one claim in one
+    namespace: one object has one state in one scan. A clash raises
+    ValueError naming it, and the caller draws again.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi takes 2-4 workloads")
+    pairs = _report_order(pairs)
+    clash = multi_clash([n for _e, n in pairs])
+    if clash:
+        raise ValueError(f"multi needs {clash}")
     combined_objects = _multi_objects(pairs, rng)
-    workloads, all_reads, rows = [], [], []
-    workloads_meta: dict[str, dict] = {}
-    decoy_by_workload: dict[str, list[str]] = {}
-    results: list[rules.Result] = []
     healthy_read: tuple[str, str] | None = None
     if healthy_origin is not None:
         # Formatted against the first workload's names, as the positive case
@@ -1483,32 +1486,34 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         h = pairs[0][1]
         all_objects = tuple(obj for objs in combined_objects for obj in objs)
         healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
-        if healthy_read is not None:
-            all_reads.append((c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]),
-                              True))
-    for i, (e, n) in enumerate(pairs):
-        objects = combined_objects[i]
+    res = gather.gather([gather_workload(e, n, objects)
+                         for (e, n), objects in zip(pairs, combined_objects)],
+                        budget=c.MAX_TOOL_CALLS - (healthy_read is not None))
+    workloads, rows = [], []
+    workloads_meta: dict[str, dict] = {}
+    decoy_by_workload: dict[str, list[str]] = {}
+    for (e, n), objects, candidates, result in zip(pairs, combined_objects,
+                                                    res.candidates, res.results):
+        w = _workload(e, n, candidates, render.header_for(candidates), result=result)
+        workloads.append(w)
         conf = _confidence(e)
-        workload, reads, result = render.render_workload(
-            objects, ns=n.ns, name=n.name, pod=n.pod, image=n.image,
-            issue=e.issue, kind=e.workload_kind, status=e.status, rng=rng)
-        workloads.append(workload)
-        results.append(result)
         if result.decided:
             expected_cause = result.cause
             rationale = _rule_rationale(result)
+        elif _thin_multi(e, n, w, result, res.reads):
+            expected_cause, conf = c.NONE_OF_THESE, "low"
+            rationale = _THIN_RATIONALE["ruled_out"]
         else:
             expected_cause = _fmt(e.own_cause, n)
             rationale = _fmt(e.rationale, n)
-        all_reads.extend(_multi_reads(e, n, reads))
         rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
                      "confidence": conf, "rationale": rationale})
         key = f"{n.ns}/{n.name}"
-        candidates = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
-        # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
-        # never the raw kind/name identifier.
-        decoy_by_workload[key] = [cand.cause for cand in candidates
-                                  if cand.obj.intent == "decoy"]
+        trace = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
+        # decoy_by_workload holds the decoy's cause STRING, as the prompt
+        # prints it, never the raw kind/name identifier.
+        decoy_by_workload[key] = [shown.cause for raw, shown in zip(trace, candidates)
+                                  if raw.obj.intent == "decoy"]
         own_cause_keywords = ([] if result.decided or expected_cause == c.NONE_OF_THESE
                               else list(e.own_cause_keywords))
         workloads_meta[key] = render.workload_meta(
@@ -1521,12 +1526,14 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     # two different confirmed causes (this row's "separate" case) must go
     # through rules.shared first or label() never sees the fallback line and
     # falls into its "anything else" -> "shared" branch by mistake.
-    label = rules.label(rules.shared(tuple(results)))
+    label = rules.label(rules.shared(tuple(res.results)))
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    user = _user_message(None, "", (), tuple(workloads), _cap_reads(all_reads),
-                         key=group)
+    reads = res.reads
+    if healthy_read is not None:
+        reads = (c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]), *reads)
+    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,
@@ -1534,6 +1541,6 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
                    meta={"case": "multi",
                          "expected": {r["workload"]: r["cause"] for r in rows},
                          **({} if healthy_read is None else {
-                             "origin_read_label": healthy_origin.origin_read[0],
+                             "origin_read_label": healthy_read[0],
                              "origin_healthy": True}),
                          **extra_meta})

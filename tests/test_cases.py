@@ -11,7 +11,6 @@ from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import cases, catalog, gather, render
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import objects as o
-from kubeagent_verdict.dataset.render import object_reads
 from kubeagent_verdict.evals import score
 
 
@@ -324,12 +323,24 @@ def test_empty_candidates_no_longer_describes_a_node(key):
     assert "== describe " not in cases.empty_candidates(_entry(key), n).user
 
 
+def _names(ns, name, node, *, pvc="data-0", restarts=5):
+    """One workload's names, chosen by hand. A multi row needs distinct
+    workloads, nodes and (namespace, claim) pairs, and random draws from
+    five nodes clash too often to build one on purpose."""
+    return names_mod.Names(
+        ns=ns, name=name, pod=f"{name}-5d8f7c9b4-x2k9p", container="app",
+        init_container="init-config", image=f"registry.example.com/{ns}/{name}:v1.2.3",
+        node=node, pvc=pvc, restarts=restarts)
+
+
 def test_multi_has_one_row_per_workload():
-    rng = random.Random(26)
-    pairs = [(_entry("memory-limit-oomkill"), names_mod.draw(rng)),
-             (_entry("deployment-bad-image-tag"), names_mod.draw(rng)),
-             (_entry("probe-failure"), names_mod.draw(rng))]
-    ex = cases.multi(pairs, rng)
+    # 2026-09-26 (faithful prompts): Random(26) drew all three workloads on
+    # one node once there were five nodes, and a multi row now refuses that,
+    # so the names are chosen by hand.
+    pairs = [(_entry("memory-limit-oomkill"), _names("billing", "cache", "worker-1")),
+             (_entry("deployment-bad-image-tag"), _names("search", "indexer", "worker-2")),
+             (_entry("probe-failure"), _names("shop", "gateway", "worker-3"))]
+    ex = cases.multi(pairs, random.Random(26))
     doc = json.loads(ex.assistant)
     assert len(doc["verdicts"]) == 3
     assert {r["workload"] for r in doc["verdicts"]} == {
@@ -373,12 +384,15 @@ def _two_object_entry():
 
 
 def test_refuted_menu_refutes_every_declared_object():
+    """Both objects stay live, so the gather describes both, and each
+    fresh read refutes its candidate."""
     e = _two_object_entry()
     n = names_mod.draw(random.Random(5))
     menu = cases._refuted_menu(n, e.objects)
     assert len(menu) == len(e.objects) == 2
-    reads = object_reads(menu, ns=n.ns, pod=n.pod)
-    assert len(reads) == 2
+    res = gather.gather([cases.gather_workload(e, n, menu)])
+    assert [r.label.split(" ")[0] for r in res.reads[1:3]] == ["describe", "describe"]
+    assert [cand.fresh_read_outcome for cand in res.candidates[0]] == ["refuted", "refuted"]
 
 
 def test_none_of_these_refuses_an_entry_without_thin_evidence():
@@ -770,7 +784,17 @@ def test_multi_derives_job_and_label_from_the_objects():
 # there, and no single-workload probe can catch a model using it, because the
 # multi prompt is a different shape. This probe is the only row that can.
 def _two_entries():
-    ents = [e for e in catalog.trainable() if e.objects]
+    """The first two entries whose node sits under the pod, so each
+    workload has one attributed candidate.
+
+    2026-09-26 (faithful prompts): this was the first two entries with an
+    object, memory-limit-oomkill and deployment-bad-image-tag. On the gather
+    one workload failing to pull is under kubeagent's registry threshold of
+    2, so bad-image-tag's registry is ruled out and its workload shows no
+    attributed tag at all.
+    """
+    ents = [e for e in catalog.trainable()
+            if any(obj.kind == "node" and obj.placement == "on" for obj in e.objects)]
     return ents[0], ents[1]
 
 
@@ -809,6 +833,194 @@ def test_multi_probe_meta_lists_every_decoy():
     assert len(ex.meta["decoy_by_workload"]) == 2
 
 
+# ------------------------------------------- multi rows on the gather
+
+def _heads(text):
+    return [ln[2:].split(" (")[0] for ln in text.splitlines() if ln.startswith("- ")]
+
+
+def _inventory(user):
+    return user.split("== BEGIN inventory ==")[1].split("== END inventory ==")[0]
+
+
+def _verdict(ex, key):
+    return next(r for r in json.loads(ex.assistant)["verdicts"] if r["workload"] == key)
+
+
+def _three_pairs():
+    """Three workloads on three nodes, already in report order. They want
+    3 + 2 + 2 reads, so nobody is starved."""
+    return [(_entry("memory-limit-oomkill"), _names("billing", "cache", "worker-1")),
+            (_entry("probe-failure"), _names("search", "indexer", "worker-2")),
+            (_entry("deployment-bad-image-tag"), _names("shop", "gateway", "worker-3"))]
+
+
+def _crash_pairs():
+    """Three crash-family workloads, each on its own live node, in report
+    order. Each wants 3 reads: its events, a describe of its node and its
+    previous log. The budget of 8 runs out on the third one's log."""
+    return [(_entry("memory-limit-oomkill"), _names("auth", "cache", "worker-1")),
+            (_entry("crashloop-pod"), _names("batch", "worker", "worker-2")),
+            (_entry("container-start-error"), _names("billing", "api", "worker-3"))]
+
+
+def _starved_row(e):
+    """`_crash_pairs` plus `e` as shop/gateway on worker-4, which sorts last
+    and gets no read at all."""
+    return cases.multi([*_crash_pairs(), (e, _names("shop", "gateway", "worker-4"))],
+                       random.Random(26))
+
+
+def _plain_story():
+    """A trainable story whose origin read names no node and no registry,
+    so the collision rules always keep it."""
+    from kubeagent_verdict.dataset import propagation as prop
+
+    return next(p for p in prop.trainable_scenarios()
+                if p.origin_object is None and not cases._is_node_story(p))
+
+
+@pytest.mark.parametrize("builder", [cases.multi, cases.multi_misattribution_probe])
+def test_a_multi_row_prints_its_workloads_in_report_order(builder):
+    """kubeagent gives every flagged workload one priority and then sorts
+    by namespace and name (Prioritize, internal/inventory/inventory.go:633-645
+    at v1.24.0). Pairs handed over in reverse still print in that order: the
+    inventory, the candidate blocks, the reads and the answer rows."""
+    pairs = _three_pairs()
+    ex = builder(list(reversed(pairs)), random.Random(26))
+    want = ["billing/cache", "search/indexer", "shop/gateway"]
+    assert _heads(_inventory(ex.user)) == want
+    assert _heads(_cand_section(ex.user)) == want
+    events = [label.split(" ")[1] for label in _evidence_labels(ex.user)
+              if label.startswith("events ")]
+    assert [pod.rsplit("-", 2)[0] for pod in events] == want
+    assert [r["workload"] for r in json.loads(ex.assistant)["verdicts"]] == want
+    assert ex.group == "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+
+
+@pytest.mark.parametrize("builder", [cases.multi, cases.multi_misattribution_probe])
+def test_every_workload_of_a_multi_row_prints_its_finding(builder):
+    ex = builder(_three_pairs(), random.Random(26))
+    inv = _inventory(ex.user)
+    for e, n in _three_pairs():
+        block = inv.split(f"- {n.ns}/{n.name} (")[1].split("\n- ")[0]
+        assert f"    issue: {e.issue} — " in block, n.name
+
+
+@pytest.mark.parametrize("builder", [cases.multi, cases.multi_misattribution_probe])
+def test_a_multi_row_refuses_two_workloads_on_one_node(builder):
+    """One node has one state in a row. Two pods on one node would show it
+    attributed to one workload and ruled out, as a foreign node, to the
+    other."""
+    pairs = [(_entry("memory-limit-oomkill"), _names("billing", "cache", "worker-2")),
+             (_entry("probe-failure"), _names("shop", "gateway", "worker-2"))]
+    with pytest.raises(ValueError, match=re.escape(
+            f"{builder.__name__} needs distinct nodes: billing/cache and shop/gateway "
+            "both run on worker-2")):
+        builder(pairs, random.Random(3))
+
+
+@pytest.mark.parametrize("builder", [cases.multi, cases.multi_misattribution_probe])
+def test_a_multi_row_refuses_two_workloads_on_one_claim(builder):
+    pairs = [(_entry("memory-limit-oomkill"), _names("shop", "cache", "worker-1", pvc="data-1")),
+             (_entry("probe-failure"), _names("shop", "gateway", "worker-2", pvc="data-1"))]
+    with pytest.raises(ValueError, match=re.escape(
+            f"{builder.__name__} needs distinct claims: shop/cache and shop/gateway "
+            "both use claim shop/data-1")):
+        builder(pairs, random.Random(3))
+
+
+def test_one_claim_name_in_two_namespaces_is_two_claims():
+    pairs = [(_entry("memory-limit-oomkill"),
+              _names("billing", "cache", "worker-1", pvc="data-1")),
+             (_entry("probe-failure"), _names("shop", "gateway", "worker-2", pvc="data-1"))]
+    assert cases.multi_clash([n for _e, n in pairs]) == ""
+    assert len(json.loads(cases.multi(pairs, random.Random(3)).assistant)["verdicts"]) == 2
+
+
+@pytest.mark.parametrize("with_origin", [False, True])
+def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch, with_origin):
+    """One gather reads for every workload of the row. The healthy-origin
+    read, when there is one, comes first and spends one of the 8 reads, so
+    the gather gets 7. Three crash-family workloads want 9 reads, so both
+    rows use the whole budget."""
+    calls = []
+    real = gather.gather
+
+    def spy(workloads, **kw):
+        calls.append((len(workloads), kw.get("budget", c.MAX_TOOL_CALLS)))
+        return real(workloads, **kw)
+
+    monkeypatch.setattr(gather, "gather", spy)
+    story = _plain_story() if with_origin else None
+    ex = cases.multi(_crash_pairs(), random.Random(26), healthy_origin=story)
+    labels = _evidence_labels(ex.user)
+    assert calls == [(3, c.MAX_TOOL_CALLS - with_origin)]
+    assert len(labels) == c.MAX_TOOL_CALLS
+    assert len(set(labels)) == len(labels)
+    if with_origin:
+        assert "{" not in ex.meta["origin_read_label"]
+        assert labels[0] == ex.meta["origin_read_label"]
+    else:
+        assert "origin_read_label" not in ex.meta
+
+
+def test_the_fourth_workload_of_a_full_row_gets_no_read():
+    ex = _starved_row(_entry("node-cordon-diskfull"))
+    labels = _evidence_labels(ex.user)
+    assert len(labels) == c.MAX_TOOL_CALLS
+    assert labels[-1].startswith("describe node /worker-3")
+    assert not [label for label in labels if "shop/gateway" in label]
+
+
+def test_a_starved_workload_whose_block_names_its_cause_answers_it():
+    """node-cordon-diskfull's keywords, "node" and "pod", are both on its
+    finding line, so its own block names its cause with no read."""
+    e = _entry("node-cordon-diskfull")
+    n = _names("shop", "gateway", "worker-4")
+    ex = _starved_row(e)
+    row = _verdict(ex, "shop/gateway")
+    assert (row["cause"], row["confidence"]) == (cases._fmt(e.own_cause, n), cases._confidence(e))
+    assert row["rationale"] == cases._fmt(e.rationale, n)
+    wm = ex.meta["workloads"]["shop/gateway"]
+    assert (wm["job"], wm["own_cause_keywords"]) == (2, list(e.own_cause_keywords))
+
+
+def test_a_starved_workload_whose_block_lacks_a_keyword_answers_none_of_these():
+    """The same row, with keywords its block does not print. Nothing the
+    prompt shows about the workload names the cause, so the gold is
+    `none of these`, as on a thin row."""
+    e = dataclasses.replace(_entry("node-cordon-diskfull"),
+                            own_cause_keywords=("disk", "pressure"))
+    ex = _starved_row(e)
+    row = _verdict(ex, "shop/gateway")
+    assert (row["cause"], row["confidence"], row["rationale"]) == (
+        c.NONE_OF_THESE, "low", cases._THIN_RATIONALE["ruled_out"])
+    wm = ex.meta["workloads"]["shop/gateway"]
+    assert (wm["job"], wm["expected_cause"], wm["own_cause_keywords"]) == (
+        2, c.NONE_OF_THESE, [])
+    assert ex.meta["expected"]["shop/gateway"] == c.NONE_OF_THESE
+
+
+def test_a_starved_workload_with_a_live_candidate_is_decided():
+    """The gather never read probe-failure's node, so the rules keep the
+    attribution, unverified: job 1, not the thin rule."""
+    ex = _starved_row(_entry("probe-failure"))
+    wm = ex.meta["workloads"]["shop/gateway"]
+    assert (wm["job"], wm["decided"], wm["decided_outcome"]) == (1, True, "unverified")
+    assert wm["decided_cause"].startswith("node worker-4 (")
+    assert _verdict(ex, "shop/gateway")["cause"] == wm["decided_cause"]
+
+
+def test_the_multi_probe_refuses_a_workload_the_budget_never_reached():
+    """A probe workload with no read has nothing to judge its own cause
+    from, so the row would not test what it is built to test."""
+    pairs = [*_crash_pairs(), (_entry("probe-failure"), _names("shop", "gateway", "worker-4"))]
+    with pytest.raises(ValueError, match=re.escape(
+            "multi_misattribution_probe: the read budget never reached shop/gateway")):
+        cases.multi_misattribution_probe(pairs, random.Random(7))
+
+
 def test_prose_decoy_helpers_are_retired():
     """No builder builds a prose decoy menu through these three helpers, and
     no builder renders its evidence panel by hand through _reads. multi()
@@ -827,12 +1039,18 @@ def test_the_catalog_winner_helpers_are_retired():
 
 
 def test_the_read_budget_helpers_are_retired():
-    """contradiction_probe was the last builder to apply the read budget by
-    hand. Every single-workload row now takes its reads from the gather,
-    which spends the budget itself."""
+    """Every row takes its reads from the gather, which spends the budget
+    itself. contradiction_probe was the last single-workload builder to
+    apply the budget by hand, and the two multi builders were the last to
+    build their reads by hand."""
     assert not hasattr(cases, "_decoy_result")
-    assert not hasattr(render, "apply_budget")
-    assert "apply_budget" not in render.__all__
+    for helper_name in ("_multi_reads", "_cap_reads", "_to_contract_candidates",
+                        "_WORKER_NAMES"):
+        assert not hasattr(cases, helper_name), helper_name
+    for helper_name in ("apply_budget", "object_reads", "registry_events_read",
+                        "render_workload"):
+        assert not hasattr(render, helper_name), helper_name
+        assert helper_name not in render.__all__, helper_name
 
 
 def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatch):
@@ -1376,13 +1594,9 @@ def test_every_undecided_row_reads_the_events_first_and_the_log_last(shape):
             assert "describe" not in kinds, e.key
 
 
-def test_the_undecided_candidates_come_from_the_gather(monkeypatch):
+def test_the_undecided_candidates_come_from_the_gather():
     """The fresh lines are the gather's, paired by `pair_candidates`: the
     live node gets its refuted read and the ruled-out PVC gets none."""
-    def refused(*_a, **_k):
-        raise AssertionError("_to_contract_candidates is not the undecided rows' path")
-
-    monkeypatch.setattr(cases, "_to_contract_candidates", refused)
     e = _two_object_entry()
     pvc = dataclasses.replace(e.objects[1], placement="unmounted")
     e = dataclasses.replace(e, objects=(e.objects[0], pvc))
@@ -1434,17 +1648,3 @@ def test_a_thin_row_hides_at_least_one_keyword(key, shape):
         user = ex.user.lower()
         shown = all(k.lower() in user for k in e.own_cause_keywords)
         assert shown == (key in THIN_SHOWS_EVERY_KEYWORD), (key, seed)
-
-
-def test_cap_reads_drops_droppable_reads_from_the_end_and_never_a_kept_one():
-    """A multi-workload row can pass 8 reads only with a healthy origin read
-    and 4 workloads. The cap cuts droppable object reads from the end and
-    keeps the origin read and every log read. A row with more than 8 reads
-    it may not drop is a generator bug, so it raises."""
-    r = [c.EvidenceRead(label=f"r{i}", content="x") for i in range(10)]
-    reads = [(r[0], True)] + [(x, False) for x in r[1:8]] + [(r[8], True), (r[9], False)]
-    assert [x.label for x in cases._cap_reads(reads)] == [
-        "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r8"]
-    assert cases._cap_reads([(x, False) for x in r[:3]]) == tuple(r[:3])
-    with pytest.raises(ValueError, match="budget"):
-        cases._cap_reads([(x, True) for x in r[:9]])

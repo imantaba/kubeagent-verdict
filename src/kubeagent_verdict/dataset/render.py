@@ -23,8 +23,8 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
 __all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
-           "draw_ending", "drop", "header_for", "object_reads", "prompt_meta", "refute",
-           "registry_events_read", "render_workload", "unverify", "workload_meta"]
+           "draw_ending", "drop", "header_for", "prompt_meta", "refute",
+           "unverify", "workload_meta"]
 
 MAX_PROMPT_BYTES = 64 * 1024
 
@@ -136,55 +136,6 @@ def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
     return unverify(obj, choice)
 
 
-def registry_events_read(
-    obj: o.Object,
-    *,
-    ns: str,
-    pod: str,
-    image: str,
-) -> c.EvidenceRead:
-    """Build the `events {ns}/{pod}` read for a registry object.
-
-    Mirrors kubeagent's own formatEvents: no literal (the "no_event"
-    ending) reads as "no events for ns/pod"; any other literal reads as
-    one "Failed:" line naming it.
-    """
-    label = f"events {ns}/{pod}"
-    if obj.fresh.literal == "":
-        return c.EvidenceRead(label=label, content=f"no events for {ns}/{pod}")
-    content = (
-        f"events for {ns}/{pod}:\n"
-        f'  Failed: Failed to pull image "{image}": {obj.fresh.literal} (x4)\n'
-    )
-    return c.EvidenceRead(label=label, content=content)
-
-
-def object_reads(
-    objects: tuple[o.Object, ...],
-    *,
-    ns: str,
-    pod: str,
-    image: str = "",
-) -> tuple[c.EvidenceRead, ...]:
-    """Turn ended objects into the EvidenceRead tuple a prompt renders.
-
-    Node and PVC objects reuse rules.read_text unchanged. Registry objects
-    go through registry_events_read (image is only used for those). An
-    object with fresh.how == "not_read" produces no read — the read
-    budget never reached it, so there is nothing to show.
-    """
-    reads = []
-    for obj in objects:
-        if obj.fresh.how == "not_read":
-            continue
-        if obj.kind == "registry":
-            reads.append(registry_events_read(obj, ns=ns, pod=pod, image=image))
-            continue
-        label, content = rules.read_text(obj, ns=ns, pod=pod)
-        reads.append(c.EvidenceRead(label=label, content=content))
-    return tuple(reads)
-
-
 # kubeagent's `confidence.ForRootCause` (internal/confidence/confidence.go:36-47
 # at v1.24.0), keyed by the attributed cause's prefix, in the Go switch's order.
 _HEADER_BY_PREFIX = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
@@ -208,61 +159,6 @@ def header_for(candidates: tuple[c.Candidate, ...]) -> str:
         if attributed[0].cause.startswith(prefix):
             return level
     return ""
-
-
-def render_workload(
-    objects: tuple[o.Object, ...],
-    *,
-    ns: str,
-    name: str,
-    pod: str,
-    image: str,
-    issue: str,
-    kind: str,
-    status: str,
-    rng: random.Random | None = None,
-) -> tuple[c.Workload, tuple[c.EvidenceRead, ...], rules.Result]:
-    """Assemble a partial Workload, its reads, and the rules.Result.
-
-    `objects` must already carry each object's final drawn ending — this
-    function does not call bind/draw_ending; the builder runs
-    those before handing objects in here. `rng` is accepted for signature
-    symmetry with this module's other helpers but is unused: every draw
-    already happened upstream.
-
-    The returned Workload fills only the fields this module owns —
-    namespace, name, kind, status, candidates, decided, decided_cause,
-    decided_outcome, and confidence (the trace header, via `header_for`).
-    findings, network_policies, rollout, ready, and desired stay at their
-    dataclass defaults; a caller building a full prompt-ready Workload
-    merges those in separately.
-    """
-    candidates = rules.attribute(objects, ns=ns, pod=pod, issue=issue)
-    result = rules.decide(candidates)
-    decisions = {d.candidate: d for d in result.decisions}
-    contract_candidates = tuple(
-        c.Candidate(
-            cause=cand.cause,
-            verdict=cand.verdict,
-            reason=cand.reason,
-            fresh_read_outcome=(
-                decisions[cand.cause].outcome if cand.cause in decisions else ""
-            ),
-            fresh_read_evidence=(
-                decisions[cand.cause].evidence if cand.cause in decisions else ""
-            ),
-        )
-        for cand in candidates
-    )
-    reads = object_reads(objects, ns=ns, pod=pod, image=image)
-    workload = c.Workload(
-        namespace=ns, name=name, kind=kind, ready=0, desired=0, status=status,
-        restarts=0, findings=(), candidates=contract_candidates,
-        decided=result.decided, decided_cause=result.cause,
-        decided_outcome=result.outcome,
-        confidence=header_for(contract_candidates),
-    )
-    return workload, reads, result
 
 
 def workload_meta(result: rules.Result, *, expected_cause: str,

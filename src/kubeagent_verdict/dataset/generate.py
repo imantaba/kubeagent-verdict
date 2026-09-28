@@ -164,15 +164,18 @@ def generate(seed: int, size: int) -> list[Example]:
     for i in range(counts["own_cause"]):
         e = rotate(i)
         out.append(cases.own_cause_case(e, _draw(e, rng)))
-    for i in range(counts["multi"]):
+    # The last counted `multi` slot is the worker-containerd-stop self-pair,
+    # below, so this loop builds one row fewer.
+    for i in range(counts["multi"] - 1):
         k = rng.randint(2, 4)
-        pairs, seen = [], set()
+        pairs = []
         picked = rng.sample(entries, k=min(k, len(entries)))
         for e in picked:
+            # Draw again until the workload is new to the row, runs on a
+            # node of its own and uses a claim of its own (`cases.multi_clash`).
             n = _draw(e, rng)
-            while (n.ns, n.name) in seen:
+            while cases.multi_clash([*(pn for _pe, pn in pairs), n]):
                 n = _draw(e, rng)
-            seen.add((n.ns, n.name))
             pairs.append((e, n))
         # Every third `multi` row carries a healthy origin read, rotating over
         # the trainable pool so every label that heads a `shared_origin` row
@@ -205,20 +208,24 @@ def generate(seed: int, size: int) -> list[Example]:
         # neither stands in for the other.
         healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
         out.append(cases.multi(pairs, rng, healthy_origin=healthy))
-    # Training-only: worker-containerd-stop paired with itself at two different
-    # (ns, node) draws. Both stay confirmed (its node object is intent="cause",
-    # so _multi_objects never draws it) -- two different node names give two
-    # different group_text values, so this row's label always comes out
-    # "separate". Not one of the CASE_MIX-counted "multi" rows.
-    worker_containerd_stop = catalog.by_slug()["worker-containerd-stop"]
-    names_a = _draw(worker_containerd_stop, rng)
-    while True:
-        names_b = _draw(worker_containerd_stop, rng)
-        if names_b.ns != names_a.ns and names_b.node != names_a.node:
-            break
-    out.append(cases.multi(
-        [(worker_containerd_stop, names_a), (worker_containerd_stop, names_b)],
-        rng, healthy_origin=None))
+    # The last counted `multi` slot, training-only: worker-containerd-stop
+    # paired with itself at two different (ns, node) draws. Both stay
+    # confirmed (its node object is intent="cause", so _multi_objects never
+    # draws it) -- two different node names give two different group_text
+    # values, so this row's label always comes out "separate". A different
+    # namespace and a different node also keep the two workloads and their
+    # claims apart, so the pair never clashes. A build with no `multi` slot
+    # has no self-pair, and every build has exactly `size` rows.
+    if counts["multi"] >= 1:
+        worker_containerd_stop = catalog.by_slug()["worker-containerd-stop"]
+        names_a = _draw(worker_containerd_stop, rng)
+        while True:
+            names_b = _draw(worker_containerd_stop, rng)
+            if names_b.ns != names_a.ns and names_b.node != names_a.node:
+                break
+        out.append(cases.multi(
+            [(worker_containerd_stop, names_a), (worker_containerd_stop, names_b)],
+            rng, healthy_origin=None))
     # 2026-09-19 (spec section 6): one pair in five now comes from the six
     # ruled stories instead of the 48 plain ones, so the rules pass gets a
     # shared origin it can confirm itself and training finally carries
@@ -470,9 +477,9 @@ def probe_sets() -> list[Example]:
         # missing row nobody counts. Since 2026-09-26 (faithful prompts) a
         # collision redraws the second workload from its own rng, as
         # `generate()`'s `multi` loop does, so a pair that does not collide
-        # draws exactly what it drew before. The pair that wraps round to the
-        # first entry is the one that collided when a new entry joined.
-        while (second.ns, second.name) == (first.ns, first.name):
+        # draws exactly what it drew before. A collision is any clash
+        # `cases.multi_clash` names: one workload, one node or one claim.
+        while cases.multi_clash([first, second]):
             second = _draw(other, second_rng)
         out.append(cases.multi_misattribution_probe(
             [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))

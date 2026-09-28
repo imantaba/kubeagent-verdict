@@ -116,6 +116,27 @@ cause; the 16 older ones answered `none_of_these` before. So
 `decoy_by_workload` move on every one of them, and `decoy_cause` is gone
 from their meta. No other row's meta, `flagged` list or system message
 moves.
+
+Re-pinned again on 2026-09-26, when the `multi` rows began taking their
+reads from one gather over the whole row, and the node list grew from
+three workers to five so each workload in a row can sit on a node of its
+own. The exam keeps 249 rows, and 155 of the 249 user messages change.
+The 20 `multi_misattribution_probe` rows change because of the gather:
+each workload reads its pod's events, the row lists its workloads in
+report order, and a second workload that shares a node or a claim with
+the first is drawn again. The other 135 change only because the longer
+node list moved the rng draws: rebuilt with the old three-worker list,
+only the 20 `multi_misattribution_probe` rows differ from the old exam.
+The `flagged` list moves on 18 rows: 14 `multi_misattribution_probe`
+rows (9 reordered, 5 with a redrawn workload) and 2 each in
+`shared_origin_probe` and `shared_origin_decoy_probe`, whose
+`node-disk-pressure` victims were drawn again. Meta moves with the drawn
+names and nodes: `expected_cause` on 66 rows, `decoy_by_workload` on 79,
+`decoy_cause` on 28, `decoy_causes` on 22 and `scope_value` on 4, and 76
+workloads' `decided_cause`. Six workloads change job: job 1 goes from 118
+to 120 and job 2 from 179 to 177 (see `test_oracle.py`). `expected_cause`
+and `expected_confidence` still sit on 209 and 219 rows. No system
+message moves.
 """
 
 from __future__ import annotations
@@ -162,7 +183,11 @@ def view(row):
 # rules, on the gather, over the 17 entries the rules decide
 # 39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d ->
 # 8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3
-GRADED_VIEW_SHA256 = "8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3"
+# 2026-09-26 (faithful prompts): the multi rows are built on the gather, and
+# five workers instead of three move every later draw
+# 8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3 ->
+# 65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d
+GRADED_VIEW_SHA256 = "65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d"
 
 
 def _digest(views) -> str:

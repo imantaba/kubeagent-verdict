@@ -1,7 +1,7 @@
 """kubeagent's evidence gather, and the text layer under it.
 
 Local verdict mode reads before the model answers. kubeagent picks the
-reads itself, under a budget of 8, and its rules then re-check each
+reads itself, under a budget of 8 reads, and its rules then re-check each
 candidate cause against what came back. This module ports that from
 kubeagent v1.24.0.
 
@@ -202,7 +202,7 @@ class GatherWorkload:
 
 # What the gather did with one candidate, checked in the gather's own order
 # (internal/investigate/gather.go:92-133):
-#   budget     it stopped first: 8 reads were already made;
+#   budget     it stopped first: the budget of reads was already spent;
 #   ruled_out  the verdict is ruled_out, so there is nothing to read;
 #   no_object  the candidate names no object;
 #   registry   a registry has no object to describe;
@@ -234,7 +234,7 @@ class Step:
 class GatherResult:
     """What the gather read, and what the rules made of it.
 
-    - `reads` is the evidence trail, in read order, at most MAX_TOOL_CALLS.
+    - `reads` is the evidence trail, in read order, at most `budget` reads.
     - `candidates` and `results` hold one entry for each workload in the
       scope, the first MAX_GATHER_WORKLOADS, in row order. A candidate
       carries its fresh-read outcome and evidence when it has a decision.
@@ -508,14 +508,19 @@ def pair_candidates(candidates: Sequence[rules.Candidate],
     return tuple(paired)
 
 
-def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
+def gather(workloads: Sequence[GatherWorkload], *,
+           budget: int = c.MAX_TOOL_CALLS) -> GatherResult:
     """Read one row of flagged workloads the way kubeagent's local verdict
     mode does, then decide each one.
+
+    `budget` is how many reads the gather may make. kubeagent's is 8. A row
+    that shows one read of its own before the gather's passes 7, so the
+    prompt still holds at most 8 reads.
 
     1. Check the row, and size each registry group over the whole row.
     2. Scope to the first MAX_GATHER_WORKLOADS workloads
        (internal/investigate/gather.go:28-43).
-    3. Read, per workload, until MAX_TOOL_CALLS reads are made
+    3. Read, per workload, until `budget` reads are made
        (internal/investigate/gather.go:71-156): the events of its events
        pod, a describe per live node or PVC candidate (once per object
        across the row), then a log per crash-family container (once per
@@ -550,7 +555,7 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
     candidate_steps: list[list[Step]] = [[] for _ in scoped]
     finding_steps: list[list[Step]] = [[] for _ in scoped]
     for (w, trace), cand_steps, find_steps in zip(scoped, candidate_steps, finding_steps):
-        if len(reads) >= c.MAX_TOOL_CALLS:
+        if len(reads) >= budget:
             break
         pod = _events_pod(w)
         key = f"{w.namespace}/{pod}"
@@ -564,7 +569,7 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
         reads.append(c.EvidenceRead(f"events {key}", content))
 
         for cand in trace:
-            if len(reads) >= c.MAX_TOOL_CALLS:
+            if len(reads) >= budget:
                 break
             obj = cand.obj
             if cand.verdict == "ruled_out":
@@ -585,7 +590,7 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
             cand_steps.append(Step("read", len(reads)))
 
         for f in w.findings:
-            if len(reads) >= c.MAX_TOOL_CALLS:
+            if len(reads) >= budget:
                 break
             if not _reads_log(f):
                 find_steps.append(Step("skip"))
@@ -619,12 +624,12 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
         results.append(result)
         candidates.append(pair_candidates(final, result))
     # The loop stops at the budget: every step it never reached is `budget`.
-    budget = Step("budget")
+    stopped = Step("budget")
     return GatherResult(
         tuple(reads), tuple(candidates), tuple(results),
         candidate_steps=tuple(
-            tuple(steps) + (budget,) * (len(trace) - len(steps))
+            tuple(steps) + (stopped,) * (len(trace) - len(steps))
             for steps, (_, trace) in zip(candidate_steps, scoped)),
         finding_steps=tuple(
-            tuple(steps) + (budget,) * (len(w.findings) - len(steps))
+            tuple(steps) + (stopped,) * (len(w.findings) - len(steps))
             for steps, (w, _) in zip(finding_steps, scoped)))

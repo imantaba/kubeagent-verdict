@@ -526,9 +526,31 @@ def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_r
 
 # ------------------------------------------------- the structural-cue killer
 
+def _template(label: str) -> str:
+    """The trainable origin-read template a filled label was built from.
+
+    2026-09-26 (faithful prompts): a `multi` row's healthy read now names
+    the node or namespace it describes, so its meta label is filled, while
+    the shared-origin rows still carry the template. The label maps back
+    by pattern: `{node}` and `{ns}` each stand for one name with no space
+    or slash in it, and exactly one template may match.
+    """
+    hits = set()
+    for p in propagation.trainable_scenarios():
+        template = p.origin_read[0]
+        pattern = re.escape(template)
+        for slot in (re.escape("{node}"), re.escape("{ns}")):
+            pattern = pattern.replace(slot, "[^ /]+")
+        if re.fullmatch(pattern, label):
+            hits.add(template)
+    assert len(hits) == 1, (label, sorted(hits))
+    return hits.pop()
+
+
 def _origin_labels(rows, *cases):
-    return {e.meta["origin_read_label"] for e in rows
-            if e.case in cases and "origin_read_label" in e.meta}
+    return {_template(e.meta["origin_read_label"]) if e.case == "multi"
+            else e.meta["origin_read_label"]
+            for e in rows if e.case in cases and "origin_read_label" in e.meta}
 
 
 # These two replace a single assertion that compared `shared_origin` against
@@ -707,7 +729,7 @@ def test_a_negative_multi_row_shows_the_component_healthy(rows):
             continue
         seen += 1
         assert e.meta["origin_healthy"] is True
-        first_lines = healthy[e.meta["origin_read_label"]]
+        first_lines = healthy[_template(e.meta["origin_read_label"])]
         assert any(line in e.user for line in first_lines), e.meta
         for b in broken:
             assert b not in e.user
@@ -953,7 +975,23 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # Every number banked against the old bytes is retired.
 # 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1 ->
 # e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043
-FROZEN_SLICE_SHA256 = "e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043"
+#
+# 2026-09-26 (faithful prompts): the `multi` rows moved onto the gather, and
+# the node list grew from three workers to five so that a row of up to four
+# workloads can put each one on a node of its own. The slice stays at 239
+# rows, and 152 of them move. The 20 `multi_misattribution_probe` rows move
+# because they now take their reads from one gather over the whole row. The
+# other 132 move only because the node list grew: every name drawn after a
+# node draw shifts, so drawn names, nodes and victims change. Rebuilt with
+# the old three-worker list, only the 20 `multi_misattribution_probe` rows
+# differ from the old bytes. By case: `own_cause` 22, `attributed` 20,
+# `truncated` 11, `injection` 13, `empty_candidates` 2, `wrong_attribution`
+# 15, `none_of_these` 6, `positional_probe` 12, `misattribution_probe` 13,
+# `contradiction_probe` 14, `shared_origin_probe` 4. No system message
+# moves. Every number banked against the old bytes is retired.
+# e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043 ->
+# b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1
+FROZEN_SLICE_SHA256 = "b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1055,7 +1093,16 @@ FROZEN_SLICE_SHA256 = "e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87e
 # so this digest moves only because the frozen slice inside it does.
 # 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89 ->
 # e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835
-EVAL_SET_SHA256 = "e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835"
+#
+# 2026-09-26 (faithful prompts): the `multi` gather and the five-worker node
+# list that moved `FROZEN_SLICE_SHA256` above. This time four of the ten
+# `shared_origin_decoy_probe` rows move too. They draw nodes and victims from
+# the same name lists, so the longer node list moves their draws; their user
+# message changes, and in two of them the gold answer does as well. The
+# other six decoy rows do not move.
+# e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835 ->
+# 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e
+EVAL_SET_SHA256 = "31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e"
 
 
 def _digest(rows) -> str:
@@ -1371,6 +1418,15 @@ def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     `separate` row now holds three workloads: one decided on its own PVC
     and two on two different NotReady nodes. The check reads "every cause
     is distinct" instead of "two nodes".
+
+    2026-09-26 (faithful prompts): the node list grew to five and a `multi`
+    row now redraws any draw that shares a workload, a node or a claim with
+    one already in the row, so the rng stream moved again. The first
+    `separate` row now holds four workloads: one decided on its own PVC and
+    three on three different nodes. The self-pair row (two
+    `worker-containerd-stop` workloads) is also `separate`. It comes last
+    in this split, and the training build drops it: one of its workloads
+    (`worker-containerd-stop:media/scheduler`) is an exam row's identity.
     """
     train, _ = generate.split(generate.generate(seed=17, size=8000), seed=17)
     separate_rows = [e for e in train
@@ -1379,7 +1435,9 @@ def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     row = separate_rows[0]
     workloads = row.meta["workloads"]
     # 2026-09-26 (faithful prompts): see the docstring. 2 -> 3.
-    assert len(workloads) == 3
+    # 2026-09-26 (faithful prompts): five nodes and clash redraws moved the
+    # rng stream; see the docstring. 3 -> 4.
+    assert len(workloads) == 4
     for meta in workloads.values():
         assert meta["decided"] is True
     # decided_evidence is a template sentence ("Ready condition is False

@@ -233,6 +233,20 @@ def test_the_global_budget_is_eight():
     assert got.results == (rules.Result(False, "", "", "", "", "", ()),) * 10
 
 
+def test_a_smaller_budget_stops_the_walk_sooner():
+    # A row that already spent a read (multi's healthy-origin read) hands the
+    # gather what is left. The walk is the same; it stops one read sooner.
+    full = gather.gather(_budget_row())
+    got = gather.gather(_budget_row(), budget=c.MAX_TOOL_CALLS - 1)
+    assert got.reads == full.reads[:7]
+    # c's describe was the 8th read. Now the budget stops it, so the PVC
+    # is not re-read, and the rules still pick it, unverified.
+    assert full.candidate_steps[2] == (gather.Step("read", 8),)
+    assert got.candidate_steps[2] == (gather.Step("budget"),)
+    assert (got.results[2].outcome, got.results[2].evidence) == ("unverified", NOT_READ)
+    assert gather.gather(_budget_row(), budget=c.MAX_TOOL_CALLS) == full
+
+
 def test_a_failed_events_read_counts_and_is_reduced():
     # investigate/gather_test.go:122
     got = gather.gather([_wl("web", pod="web", events_failed="boom")])

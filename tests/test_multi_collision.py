@@ -4,7 +4,7 @@ some other object in the row already shows in a bad state, or a
 registry-story read sitting next to a registry candidate of its own.
 
 Unit tests build synthetic `Propagation`/`Object`/`Names` values directly,
-one per rule branch (keep, rename, drop-all-three, registry-drop). The
+one per rule branch (keep, rename, drop-every-worker, registry-drop). The
 build-level test spies on the real per-story decision functions during a
 real `generate.generate(seed=17, size=8000)` run, so it exercises the
 exact rotation and RNG stream `kv-dataset` runs, not a hand-picked replay.
@@ -17,6 +17,7 @@ build, not only against the synthetic story the unit tests still use.
 from __future__ import annotations
 
 from kubeagent_verdict.dataset import cases, generate
+from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset import propagation as prop
 from kubeagent_verdict.dataset.names import Names
@@ -121,8 +122,8 @@ def test_healthy_origin_node_skips_a_second_clashing_worker_too():
     assert cases._multi_healthy_origin_node("worker-1", all_objects) == "worker-3"
 
 
-def test_healthy_origin_node_drops_when_all_three_workers_clash():
-    all_objects = tuple(_node_object(w, ready="False") for w in cases._WORKER_NAMES)
+def test_healthy_origin_node_drops_when_every_worker_clashes():
+    all_objects = tuple(_node_object(w, ready="False") for w in names_mod.NODES)
     assert cases._multi_healthy_origin_node("worker-1", all_objects) is None
 
 
@@ -148,10 +149,10 @@ def test_resolve_renames_on_a_clash():
     assert result == ("describe node worker-2", "Conditions:\n  Ready  True  KubeletReady")
 
 
-def test_resolve_drops_the_read_when_all_three_workers_clash():
+def test_resolve_drops_the_read_when_every_worker_clashes():
     story = _node_story()
     h = _names(node="worker-1")
-    all_objects = tuple(_node_object(w, ready="False") for w in cases._WORKER_NAMES)
+    all_objects = tuple(_node_object(w, ready="False") for w in names_mod.NODES)
     assert cases._resolve_multi_healthy_origin(story, h, all_objects) is None
 
 
@@ -190,6 +191,16 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     victim in that row carries a registry candidate of its own, and dropped
     (the function returns `None`) whenever one does -- against the real
     rotation and RNG stream, not a hand-picked replay.
+
+    2026-09-26 (faithful prompts): the build no longer reaches the drop
+    branch. `names.NODES` grew to five workers and the `multi` rows are
+    drawn again until no two workloads share a node or a claim, so every
+    row pairs different victims. None of the 12 rows that draw a
+    registry story holds `deployment-bad-image-tag`, the one trainable
+    entry with a registry object (164 of the 1040 `multi` rows hold it,
+    so 0 of 12 is chance). The keep branch is still checked here, and
+    `test_resolve_drops_a_registry_story_read_when_the_row_holds_a_registry_object`
+    still covers the drop.
     """
     calls: list[tuple[bool, bool]] = []  # (row has a registry candidate, kept)
     original = cases._resolve_multi_healthy_origin
@@ -225,15 +236,20 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     # `generate()` moved and each `multi` row pairs different victims.
     # Still 12 rows; 3 of them hold a registry candidate of their own, so
     # the rule drops 3 and keeps 9. (12, 4) -> (12, 3).
-    assert (len(calls), dropped) == (12, 3)
+    # 2026-09-26 (faithful prompts): `names.NODES` grew to five workers and a
+    # `multi` row redraws a workload that shares a node or a claim, so every
+    # row pairs different victims again. Still 12 rows; none holds a
+    # registry candidate of its own, so the rule keeps all 12 (see the
+    # docstring). (12, 3) -> (12, 0).
+    assert (len(calls), dropped) == (12, 0)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     """Spies on the real per-story node decision during the exact
     `kv-dataset --seed 17 --size 8000` build, so this exercises the real
     rotation and RNG stream. A kept or renamed read's chosen name never
-    clashes with the row it heads; a dropped read really did have all
-    three worker names clashing. Also counts keep/rename/drop for the
+    clashes with the row it heads; a dropped read really did have every
+    worker name clashing. Also counts keep/rename/drop for the
     measured footnote.
     """
     calls: list[tuple[str, tuple, str | None]] = []
@@ -254,7 +270,7 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
         if result is None:
             dropped += 1
             assert cases._node_clashes(h_node, all_objects)
-            for w in cases._WORKER_NAMES:
+            for w in names_mod.NODES:
                 assert cases._node_clashes(w, all_objects)
             continue
         assert not cases._node_clashes(result, all_objects)
@@ -280,4 +296,10 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     # No row has all three worker names clashing now, so this build no
     # longer reaches the drop branch; the unit tests above still cover it.
     # (96, 44, 51, 1) -> (96, 49, 47, 0).
-    assert (len(calls), kept, renamed, dropped) == (96, 49, 47, 0)
+    # 2026-09-26 (faithful prompts): `multi` sorts its workloads into report
+    # order, `names.NODES` has five workers, and no two workloads in a row
+    # share a node. The read takes the first sorted workload's node, and
+    # only that workload's own node objects can clash with it now, so
+    # fewer reads are renamed. Still 96 rows and no drop.
+    # (96, 49, 47, 0) -> (96, 73, 23, 0).
+    assert (len(calls), kept, renamed, dropped) == (96, 73, 23, 0)
