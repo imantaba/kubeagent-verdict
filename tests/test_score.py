@@ -2849,6 +2849,63 @@ def test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard():
     assert board["jobs"]["job2"]["rate"] >= score.JOB2_BAR
 
 
+_BAD_TAG_GOLD = "the image tag does not exist in the registry"
+
+
+def test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2():
+    """This is a known gap. A right answer can lose job 2 for naming the
+    registry host.
+
+    The bad-image-tag rows print the candidate `registry
+    registry.example.com` and rule it out, so it is the workload's decoy.
+    G2 zeroes any cause that contains a decoy. The gold cause is "the image
+    tag does not exist in the registry", and it passes. Add the host, "...
+    in the registry registry.example.com", and the words "registry
+    registry.example.com" now sit inside the answer, so G2 zeroes it,
+    although it is right.
+
+    Plan ruling 37 accepted this decoy, because the gold answer does not
+    contain it and the gold net test stays green. That is still true. The
+    cost is the one below, and a narrower G2 is a spec amendment that
+    Spec 4 owns.
+
+    Measured 2026-09-28 (final review) on the exam: 30 of the 177 job-2
+    workloads have the gold bad-tag cause. 29 of them carry the decoy and
+    lose the point. The one left, on an `empty_candidates` row, has no
+    decoy. The gold reply with the host added scores 148 of 177 = 0.8362,
+    where the gold reply scores 177 of 177.
+    """
+    rows = _corpus_rows()
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        reply = json.loads(row["messages"][2]["content"])
+        for verdict in reply["verdicts"]:
+            if (row["meta"]["workloads"][verdict["workload"]].get("job") == 2
+                    and verdict["cause"] == _BAD_TAG_GOLD):
+                verdict["cause"] = _BAD_TAG_GOLD + " registry.example.com"
+        return json.dumps(reply)
+
+    bad_tag = zeroed = 0
+    for row in rows:
+        own = score._own_blocks(row["messages"][1]["content"], row["meta"]["workloads"])
+        gold = {v["workload"]: v["cause"]
+                for v in json.loads(row["messages"][2]["content"])["verdicts"]}
+        for name, wm in row["meta"]["workloads"].items():
+            if wm.get("job") == 2 and gold[name] == _BAD_TAG_GOLD:
+                bad_tag += 1
+                decoys = score._workload_decoys(row["meta"], name)
+                assert not score._job2_guarded(_BAD_TAG_GOLD, decoys, own[name])
+                zeroed += score._job2_guarded(_BAD_TAG_GOLD + " registry.example.com",
+                                              decoys, own[name])
+
+    assert (bad_tag, zeroed) == (30, 29)
+    board = score.scoreboard(score.evaluate(rows, chat_fn))
+    assert board["jobs"]["job2"] == {"rate": 0.8362, "n": 177}
+    assert round(board["jobs"]["job2"]["rate"] * board["jobs"]["job2"]["n"]) == 177 - 29
+
+
 def _name_the_decoy_bot(rows: list[dict]):
     """Answers every flagged workload with its first decoy: its own
     `decoy_by_workload` entries first, then the row's decoys. A workload
