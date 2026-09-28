@@ -282,6 +282,189 @@ def test_job2_own_cause_row_with_no_keywords_is_refused():
         score.job2(wm, reply, [])
 
 
+# --------------------------------------------------- job 2: the grader guard
+
+
+# A hand-built prompt in the shape `contract.build_user_message` prints. The
+# two workloads share a name prefix, so a read labelled `web/api-gw-...` must
+# go to `web/api-gw` and not to `web/api`.
+_GUARD_LEADING = [
+    "Cluster health (P1): DEGRADED — 2/3 nodes Ready.",
+    "  node worker-1 NotReady",
+    "",
+    "Workload problems (P2):",
+    "",
+]
+_GUARD_API_INVENTORY = [
+    "- web/api (Deployment): 0/2 ready, status Degraded, 5 restarts",
+    "    issue: OOMKilled — container killed: out of memory (exit code 137)",
+    ("      suggested fix (deterministic, pre-reviewed — do not substitute): "
+     "raise the limit | run: kubectl -n web describe pod api-7d9f-abcde"),
+]
+_GUARD_GW_INVENTORY = [
+    "- web/api-gw (Deployment): 0/1 ready, status Degraded, 2 restarts",
+    "    issue: CrashLoopBackOff — container gw has restarted 2 times",
+]
+_GUARD_API_CANDIDATES = [
+    "- web/api (Deployment) [confidence: high]:",
+    "    considered node worker-1 (NotReady): attributed — pod api-7d9f-abcde is scheduled on it",
+    "      fresh read: refuted — Ready condition is True now",
+]
+_GUARD_GW_CANDIDATES = [
+    "- web/api-gw (Deployment):",
+    "    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it",
+]
+_GUARD_UNOWNED_READ = [
+    "== describe kube-system/coredns (Deployment) ==",
+    "Replicas:  2 desired | 0 available",
+    "",
+]
+_GUARD_API_READS = [
+    "== events web/api-7d9f-abcde ==",
+    "events for web/api-7d9f-abcde:",
+    "  BackOff:   back-off restarting failed container main (x4)",
+    "",
+    "== describe node /worker-1 ==",
+    "node worker-1: unschedulable=false",
+    "",
+]
+_GUARD_GW_READS = [
+    "== events web/api-gw-5c6b-fghij ==",
+    "no events for web/api-gw-5c6b-fghij",
+]
+_GUARD_PROMPT = "\n".join([
+    "== BEGIN inventory ==", *_GUARD_LEADING, *_GUARD_API_INVENTORY, *_GUARD_GW_INVENTORY,
+    "== END inventory ==", "",
+    "== BEGIN candidates ==", *_GUARD_API_CANDIDATES, *_GUARD_GW_CANDIDATES,
+    "== END candidates ==", "",
+    "== BEGIN evidence ==", *_GUARD_UNOWNED_READ, *_GUARD_API_READS, *_GUARD_GW_READS,
+    "== END evidence ==", "",
+    "Judge each listed workload now and answer with the JSON object only.",
+])
+
+
+def _normalized(lines: list[str]) -> frozenset[str]:
+    return frozenset(n for n in map(score._norm_cause, lines) if n)
+
+
+def test_own_blocks_puts_each_printed_line_under_its_own_workload():
+    """A workload's own lines are its inventory entry, its candidate entry
+    and the evidence reads that follow a label naming it. A read whose label
+    names no workload (the node describe) stays with the workload read just
+    before it. When two names match one label, the longest wins."""
+    blocks = score._own_blocks(_GUARD_PROMPT, ["web/api", "web/api-gw"])
+
+    assert blocks == {
+        "web/api": _normalized(_GUARD_API_INVENTORY + _GUARD_API_CANDIDATES
+                               + _GUARD_API_READS),
+        "web/api-gw": _normalized(_GUARD_GW_INVENTORY + _GUARD_GW_CANDIDATES
+                                  + _GUARD_GW_READS),
+    }
+    # Each line is normalized the way a reply's cause is: lowercased, its
+    # spaces collapsed, a trailing period dropped. Blank lines are dropped.
+    assert "backoff: back-off restarting failed container main (x4)" in blocks["web/api"]
+    assert "" not in blocks["web/api"] | blocks["web/api-gw"]
+    # The lines before the first entry, and a read before the first label
+    # that names a workload, belong to nobody.
+    for line in _GUARD_LEADING + _GUARD_UNOWNED_READ:
+        assert score._norm_cause(line) not in blocks["web/api"] | blocks["web/api-gw"], line
+
+
+def test_own_blocks_gives_a_workload_the_prompt_never_prints_an_empty_set():
+    blocks = score._own_blocks(_GUARD_PROMPT, ["web/api", "web/api-gw", "web/db"])
+    assert blocks["web/db"] == frozenset()
+
+
+def test_workload_decoys_joins_the_workload_list_and_the_row_decoys():
+    """The workload's own `decoy_by_workload` entries first, then the row's
+    decoys. Empty values are dropped. The same list the decoy gate reads."""
+    meta = {"decoy_by_workload": {"web/api": ["node worker-1 (NotReady)", ""]},
+            "decoy_causes": ["CoreDNS is down cluster-wide", None],
+            "decoy_cause": "not read while decoy_causes has entries"}
+    assert score._workload_decoys(meta, "web/api") == [
+        "node worker-1 (NotReady)", "CoreDNS is down cluster-wide"]
+    assert score._workload_decoys(meta, "web/db") == ["CoreDNS is down cluster-wide"]
+    assert score._workload_decoys({"decoy_cause": "node worker-2 (NotReady)"}, "web/api") == [
+        "node worker-2 (NotReady)"]
+    assert score._workload_decoys({"decoy_cause": None}, "web/api") == []
+
+
+def test_job2_guard_g2_finds_a_decoy_anywhere_in_the_cause():
+    """G2: a cause that holds a decoy is guarded, wherever the decoy sits.
+    Both sides go through `_norm_cause` first, so case, a trailing period
+    and extra spaces do not save a hedge."""
+    decoys = ["node worker-1 (NotReady)"]
+    assert score._job2_guarded("memory limit too low, or node worker-1 (NotReady)", decoys, ())
+    assert score._job2_guarded("NODE  Worker-1   (notready).", decoys, ())
+    assert not score._job2_guarded("memory limit too low for the workload", decoys, ())
+
+
+def test_job2_guard_g3b_finds_a_full_own_line_past_rune_512():
+    """G3b: a cause that holds a full printed line of the workload's own
+    block is guarded. It reads the RAW cause, so a line that starts after
+    rune 512, where a capped cause would already have ended, is still
+    found."""
+    own = _normalized(_GUARD_API_CANDIDATES)
+    line = _GUARD_API_CANDIDATES[1].strip()
+    cause = "memory limit " + "x" * 600 + " " + line
+    assert cause.index(line) > score.RATIONALE_MAX_RUNES
+    assert score._job2_guarded(cause, (), own)
+
+
+def test_job2_guard_does_not_fire_on_part_of_a_line():
+    own = _normalized(_GUARD_API_INVENTORY + _GUARD_API_CANDIDATES)
+    assert not score._job2_guarded("issue: OOMKilled — container killed: out of memory", (), own)
+    assert not score._job2_guarded("node worker-1 (NotReady)", (), own)
+
+
+def test_job2_guard_skips_an_empty_decoy_or_line():
+    """An empty string sits inside every cause. Skipping it keeps one blank
+    decoy from zeroing every reply."""
+    assert not score._job2_guarded("memory limit too low", ["", "  ", None], ["", " ."])
+
+
+def test_job2_zeroes_a_guarded_reply_even_when_every_keyword_is_present():
+    """The guard runs before the keyword rule, so a reply cannot buy the
+    keywords by pasting its block or by naming a decoy next to the right
+    cause. With no guard arguments, the same reply passes."""
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    hedge = {"cause": "the memory limit, or node worker-1 (NotReady)",
+             "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, hedge, ["memory", "limit"]) == 1.0
+    assert score.job2(wm, hedge, ["memory", "limit"],
+                      decoys=["node worker-1 (NotReady)"]) == 0.0
+
+    paste = {"cause": "memory limit: " + _GUARD_API_INVENTORY[1],
+             "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, paste, ["memory", "limit"]) == 1.0
+    assert score.job2(wm, paste, ["memory", "limit"],
+                      own_lines=_normalized(_GUARD_API_INVENTORY)) == 0.0
+
+
+def test_job2_guards_a_none_of_these_workload_too():
+    """The guard runs before the exact `none_of_these` match as well. The
+    decoy here is made up: it is the one way to show that order, since any
+    other guarded reply would miss the exact match anyway."""
+    wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
+    reply = {"cause": score.NONE_OF_THESE, "confidence": "medium", "rationale": "r"}
+    assert score.job2(wm, reply, []) == 1.0
+    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 0.0
+
+
+def test_job2_missing_reply_still_scores_zero_with_the_guard_on():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    assert score.job2(wm, None, ["memory", "limit"], decoys=["node worker-1 (NotReady)"],
+                      own_lines=_normalized(_GUARD_API_INVENTORY)) == 0.0
+
+
+def test_job2_refuses_an_ungradable_workload_before_the_guard_runs():
+    wm = {"job": 2, "expected_cause": "the registry is unreachable",
+          "decided_cause": "", "own_cause_keywords": []}
+    reply = {"cause": "node worker-1 (NotReady)", "confidence": "high", "rationale": "r"}
+    with pytest.raises(score.UngradableWorkload):
+        score.job2(wm, reply, [], workload="prod/api", decoys=["node worker-1 (NotReady)"])
+
+
 # --------------------------------------------------- job 3: the summary scorer
 
 
@@ -878,6 +1061,63 @@ def test_evaluate_scores_no_job2_when_told_it_is_not_grading_job2():
     assert board["jobs"]["job2"] == {"rate": None, "n": 0}
     assert board["overall"]["keyword_graded_n"] == 0
     assert board["overall"]["keyword_derivable_n"] == 0
+
+
+def _one_verdict(workload: str, cause: str, rationale: str = "r") -> str:
+    return json.dumps({"verdicts": [{"workload": workload, "cause": cause,
+                                     "confidence": "high", "rationale": rationale}],
+                       "summary": "s"})
+
+
+def test_evaluate_counts_a_hedge_as_a_miss_in_both_cause_graders():
+    """One helper guards the row's cause count and `job2`, so the two agree
+    on a guarded reply: both say miss. Without the decoy the same reply is
+    a hit in both, so the zero is the guard's doing."""
+    row = _row_with_job2_workload(["memory", "limit"])
+    hedge = _one_verdict("shop/api", "memory limit too low for the workload, "
+                                     "or node worker-1 (NotReady)")
+
+    [res] = score.evaluate([row], lambda _messages: hedge)
+    assert (res["cause_acc"], res["job2_scores"]) == (1.0, [1.0])
+
+    row["meta"]["decoy_by_workload"] = {"shop/api": ["node worker-1 (NotReady)"]}
+    [res] = score.evaluate([row], lambda _messages: hedge)
+    assert (res["cause_acc"], res["job2_scores"]) == (0.0, [0.0])
+
+
+def test_evaluate_zeroes_a_reply_that_pastes_a_line_of_its_own_block():
+    """G3b through `evaluate`: the reply holds every keyword, but it holds
+    them by carrying a full line of the workload's own inventory entry, so
+    both graders say miss."""
+    row = _row_with_job2_workload(["memory", "limit"])
+    line = "    issue: OOMKilled — container killed at its memory limit (exit code 137)"
+    inventory = ["== BEGIN inventory ==", "Workload problems (P2):", "",
+                 "- shop/api (Deployment): 0/2 ready, status Degraded, 3 restarts", line,
+                 "== END inventory ==", ""]
+    row["messages"][1]["content"] = "\n".join(inventory)
+    paste = _one_verdict("shop/api", "because " + line.strip())
+
+    [res] = score.evaluate([row], lambda _messages: paste)
+    assert (res["cause_acc"], res["job2_scores"]) == (0.0, [0.0])
+
+
+def test_evaluate_does_not_guard_a_job1_workload():
+    """On `shared_origin_probe` rows, `decoy_by_workload` lists the job-1
+    decided cause, and that cause IS the job-1 gold. Guarding job 1 would
+    zero the right answer."""
+    wm = _node_workload(cause="node worker-1 (no kubelet lease)",
+                        evidence="Ready condition is True, but the kubelet lease was not re-read",
+                        outcome="unverified")
+    gold = _one_verdict("shop/api", wm["decided_cause"], "the kubelet lease was not re-read")
+    row = {"messages": [{"role": "system", "content": "sys"},
+                        {"role": "user", "content": "user shop/api"},
+                        {"role": "assistant", "content": gold}],
+           "meta": {"case": "shared_origin_probe", "label": "none",
+                    "decoy_by_workload": {"shop/api": [wm["decided_cause"]]},
+                    "workloads": {"shop/api": wm}}}
+
+    [res] = score.evaluate([row], lambda _messages: gold)
+    assert (res["cause_acc"], res["job1_scores"]) == (1.0, [1.0])
 
 
 # --------------------------------------------------- evaluate(): the decoy gate
@@ -2058,11 +2298,13 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
 def _paste_the_prompt_bot(rows: list[dict]):
     """Answers every flagged workload with the prompt handed back verbatim.
 
-    It reads nothing and diagnoses nothing. It wins a job-2 workload only
-    when every keyword that workload's answer key requires is already
-    printed somewhere in the prompt, because job 2 marks a cause right when
-    all of its keywords appear as substrings. That makes this bot the
-    measured ceiling of job 2's keyword exposure.
+    It reads nothing and diagnoses nothing. With no grader guard it wins a
+    job-2 workload whenever every keyword that workload's answer key
+    requires is already printed somewhere in the prompt, because job 2
+    marks a cause right when all of its keywords appear as substrings. That
+    makes this bot the measured ceiling of job 2's keyword exposure. The
+    grader guard zeroes it: a pasted prompt holds every line of the
+    workload's own block.
     """
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
@@ -2079,9 +2321,25 @@ def _paste_the_prompt_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
-    """A bot that reads nothing still clears the job-2 workloads whose
-    answer keywords the prompt already prints.
+def _unguarded_job2_scores(rows: list[dict], chat_fn) -> list[float]:
+    """Job 2 with the grader guard off: `score.job2` called directly, with
+    no `decoys` and no `own_lines`, over the same replies `evaluate` grades.
+    It is what a bot would score if the guard were not there."""
+    scores = []
+    for row in rows:
+        doc = json.loads(chat_fn(row["messages"][:2]))
+        by_workload = {v["workload"]: v for v in doc["verdicts"]}
+        for name, wm in row["meta"]["workloads"].items():
+            if wm.get("job") == 2:
+                scores.append(score.job2(wm, by_workload.get(name),
+                                         wm.get("own_cause_keywords") or [], workload=name))
+    return scores
+
+
+def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
+    """A bot that reads nothing clears, with no guard, the job-2 workloads
+    whose answer keywords the prompt already prints. The grader guard
+    zeroes all of them.
 
     The scoreboard's footnote counts that exposure from the corpus alone:
     76 of the 134 keyword-graded job-2 workloads have every required
@@ -2106,16 +2364,201 @@ def test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling():
     the 134 stay and the denominator falls from 153 to 142: 76/142 =
     0.5352. The margin under JOB2_BAR narrows again, from 0.203 to 0.165,
     and the floor for any proposal to lower the bar rises to 0.54.
+
+    2026-09-26 (faithful prompts): the grader guard lands, and this test is
+    renamed from `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`.
+    A pasted prompt holds every full line of the workload's own block, so
+    G3b zeroes every reply: 0.5352 unguarded -> 0.0 guarded. The paragraphs
+    above are the unguarded account, and it is still measured below, by
+    calling `score.job2` with no guard over the same replies: 76 of 142.
+    The 76, 134 and 142 measure the corpus, not the guard, and do not move.
+    The margin under JOB2_BAR is now the whole bar. If the guarded rate
+    ever reaches JOB2_BAR, stop: a bot that reads nothing passes again.
     """
     rows = _corpus_rows()
-    results = score.evaluate(rows, _paste_the_prompt_bot(rows))
-    board = score.scoreboard(results)
+    bot = _paste_the_prompt_bot(rows)
+    board = score.scoreboard(score.evaluate(rows, bot))
+    unguarded = _unguarded_job2_scores(rows, bot)
 
     assert board["overall"]["keyword_derivable_n"] == 76
     assert board["overall"]["keyword_graded_n"] == 134
     assert board["jobs"]["job2"]["n"] == 142
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.535, abs=0.005)
+    # 2026-09-26 (faithful prompts): the grader guard zeroes a pasted prompt 0.535 -> 0.0
+    assert board["jobs"]["job2"]["rate"] == 0.0
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
+    assert (sum(unguarded), len(unguarded)) == (76, 142)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.5352
+
+
+def _own_entry(prompt: str, section: str, name: str) -> list[str]:
+    """One workload's own entry in one prompt section: its `- ns/name (`
+    header and the indented lines under it. The tests' own small loop, so
+    the echo bot does not grade `score._own_blocks` with itself."""
+    body = prompt.split(f"== BEGIN {section} ==\n", 1)[1].split(f"\n== END {section} ==", 1)[0]
+    entry, inside = [], False
+    for line in body.split("\n"):
+        if line.startswith("- "):
+            inside = line.startswith(f"- {name} (")
+        elif not line.startswith(" "):
+            inside = False
+        if inside:
+            entry.append(line)
+    return entry
+
+
+def _echo_the_own_entries_bot(rows: list[dict]):
+    """Answers every flagged workload with its own inventory entry and its
+    own candidate entry, joined by newlines. It is the paste bot cut down to
+    the part of the prompt about that one workload. It reads nothing."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        prompt = messages[1]["content"]
+        row = by_prompt[prompt]
+        verdicts = [{"workload": name,
+                     "cause": "\n".join(_own_entry(prompt, "inventory", name)
+                                        + _own_entry(prompt, "candidates", name)),
+                     "confidence": "medium",
+                     "rationale": "restating this workload's own entries"}
+                    for name in row["meta"]["workloads"]]
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
+    """With no guard, echoing a workload's own entries wins 74 of the 142
+    job-2 workloads, 0.5211: most keywords sit in those two entries. G3b
+    zeroes every one, because each echo holds full lines of the block.
+
+    Measured 2026-09-26 (faithful prompts). The design spec's table prints
+    0.5282 (75 of 142) for an echo bot it does not define line by line;
+    this is the bot defined above, and 74 is what it measures.
+    """
+    rows = _corpus_rows()
+    bot = _echo_the_own_entries_bot(rows)
+    board = score.scoreboard(score.evaluate(rows, bot))
+    unguarded = _unguarded_job2_scores(rows, bot)
+
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
+    assert (sum(unguarded), len(unguarded)) == (74, 142)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.5211
+
+
+def _name_the_decoy_bot(rows: list[dict]):
+    """Answers every flagged workload with its first decoy: its own
+    `decoy_by_workload` entries first, then the row's decoys. A workload
+    with no decoy at all gets `none_of_these`. It walks into the trap every
+    time it is offered one."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        meta = by_prompt[messages[1]["content"]]["meta"]
+        row_decoys = meta.get("decoy_causes") or [meta.get("decoy_cause")]
+        verdicts = []
+        for name in meta["workloads"]:
+            decoys = [d for d in [*(meta.get("decoy_by_workload") or {}).get(name, []),
+                                  *row_decoys] if d]
+            verdicts.append({"workload": name,
+                             "cause": decoys[0] if decoys else NONE_OF_THESE,
+                             "confidence": "high",
+                             "rationale": "the candidate the prompt offers"})
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_a_bot_that_names_the_decoy_scores_zero_on_job2_with_or_without_the_guard():
+    """A decoy is never a job-2 answer, so this bot scores nothing even
+    unguarded. The guard adds nothing here, and it must take nothing away:
+    the rate is 0.0 both ways. Measured 2026-09-26 (faithful prompts)."""
+    rows = _corpus_rows()
+    bot = _name_the_decoy_bot(rows)
+    board = score.scoreboard(score.evaluate(rows, bot))
+    unguarded = _unguarded_job2_scores(rows, bot)
+
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
+    assert (sum(unguarded), len(unguarded)) == (0, 142)
+
+
+def _hedge_bot(rows: list[dict]):
+    """Answers every job-2 workload with its gold cause, then " or ", then
+    the first entry of its own `decoy_by_workload` list: the real cause and
+    a trap in one breath. A job-2 workload whose list is empty gets its gold
+    cause alone. A job-1 workload gets its gold cause."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        gold = json.loads(row["messages"][2]["content"])
+        per_workload = row["meta"].get("decoy_by_workload") or {}
+        verdicts = []
+        for verdict in gold["verdicts"]:
+            verdict = dict(verdict)
+            decoys = per_workload.get(verdict["workload"]) or []
+            if row["meta"]["workloads"][verdict["workload"]].get("job") == 2 and decoys:
+                verdict["cause"] = verdict["cause"] + " or " + decoys[0]
+            verdicts.append(verdict)
+        return json.dumps({"verdicts": verdicts, "summary": gold["summary"]})
+
+    return chat_fn
+
+
+def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
+    """With no guard, naming the real cause next to a decoy wins every
+    keyword-graded job-2 workload: 134 of 142, 0.9437. The other 8 expect
+    `none_of_these`, which an exact match refuses to find inside a hedge.
+    G2 zeroes every hedge. What is left, 31 of 142 = 0.2183, is the
+    workloads with no `decoy_by_workload` entry, which this bot answers
+    with the gold cause alone.
+
+    Measured 2026-09-26 (faithful prompts). Both numbers match the design
+    spec's table. The hedge uses the workload's own decoy list only;
+    hedging with the row's decoys as well measures 19 of 142 guarded, and
+    the spec's number is the first.
+    """
+    rows = _corpus_rows()
+    bot = _hedge_bot(rows)
+    board = score.scoreboard(score.evaluate(rows, bot))
+    unguarded = _unguarded_job2_scores(rows, bot)
+
+    assert board["jobs"]["job2"] == {"rate": 0.2183, "n": 142}
+    assert (sum(unguarded), len(unguarded)) == (134, 142)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9437
+
+
+def test_the_gold_answer_passes_the_grader_guard_on_every_exam_job2_workload():
+    """The guard must never zero a right answer. For every job-2 workload in
+    the exam, the gold cause holds no decoy and no full line of its own
+    block, and the gold reply scores job 2 at 1.0 through `evaluate`.
+
+    If this fails, a change put a gold cause's text into its own block, or
+    a decoy into a gold cause. Find which one and fix the row. Do not relax
+    the guard: a guard loose enough to pass that row lets the paste bot back
+    in.
+    """
+    rows = _corpus_rows()
+    checked = 0
+    for row in rows:
+        meta = row["meta"]
+        own = score._own_blocks(row["messages"][1]["content"], meta["workloads"])
+        gold = {v["workload"]: v["cause"]
+                for v in json.loads(row["messages"][2]["content"])["verdicts"]}
+        for name, wm in meta["workloads"].items():
+            if wm.get("job") != 2:
+                continue
+            checked += 1
+            decoys = score._workload_decoys(meta, name)
+            assert not score._job2_guarded(gold[name], decoys, own[name]), (
+                meta["case"], name, gold[name])
+
+    replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
+    results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
+    assert checked > 0
+    assert score.scoreboard(results)["jobs"]["job2"] == {"rate": 1.0, "n": checked}
+    assert all(res["cause_acc"] == 1.0 for res in results)
 
 
 def _own_keyword_bot(rows: list[dict]):
@@ -2225,7 +2668,7 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     key, exactly as it always did, and the 20 eval-origin workloads are
     skipped rather than counted here. The full 76-workload population,
     catalog and eval-origin together, is
-    `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`'s number.
+    `test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt`'s number.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -2323,7 +2766,7 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     still returns `(rewritten, workload_level)`, but `workload_level` is its
     only counter).
     `keyword_derivable_n` moves from 56 to 76 before the rewrite for the
-    same reason `test_paste_the_prompt_bot_measures_the_job2_keyword_ceiling`
+    same reason `test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt`
     moved, and stays 0 after (the rewrite closes the exposure for every
     keyword-graded workload, old and new alike).
 

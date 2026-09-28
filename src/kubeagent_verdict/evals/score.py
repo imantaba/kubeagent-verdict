@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.evals.contract_check import contract_check
@@ -191,13 +192,133 @@ def _is_job2_keyword_graded(meta_workload: dict,
                 and own_cause_keywords)
 
 
+# The grader guard. Job 2 marks a cause right when every keyword is in it, so
+# a reply can collect the keywords without judging anything: paste the lines
+# the prompt printed about the workload, or name the real cause next to a
+# decoy. Two checks zero such a reply. G2: the cause holds a decoy. G3b: the
+# cause holds a full printed line of the workload's own block.
+#
+# Both read the RAW cause, normalized by `_norm_cause` and nothing else. No
+# 512-rune cap and no `_clean_rationale`: a capped cause cuts off the lines
+# a paste puts after rune 512, and capping first was measured to let the
+# paste bot through.
+#
+# Job 1 is not guarded. On `shared_origin_probe` rows `decoy_by_workload`
+# lists the job-1 workload's decided cause, and that IS the job-1 gold
+# answer, so G2 on job 1 would zero the right answer.
+
+_SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
+_READ_LABEL = re.compile(r"^== (.+) ==$")
+
+
+def _read_owner(label: str, workloads: list[str]) -> str | None:
+    """The workload an evidence read's label names, or None.
+
+    Each whitespace token shaped `ns/x` names workload `ns/name` when `x` is
+    the name or starts with `name-` (a pod of it). When two workloads match,
+    the longer name wins, so `web/api-gw-5c6b` goes to `web/api-gw`, not to
+    `web/api`.
+    """
+    owner = None
+    for token in label.split():
+        ns, slash, x = token.partition("/")
+        if not slash:
+            continue
+        for w in workloads:
+            wns, _, name = w.partition("/")
+            named = wns == ns and (x == name or x.startswith(name + "-"))
+            if named and (owner is None or len(w) > len(owner)):
+                owner = w
+    return owner
+
+
+def _own_blocks(prompt: str, workloads: Iterable[str]) -> dict[str, frozenset[str]]:
+    """Each workload's own printed lines, normalized by `_norm_cause`, with
+    empty results dropped. Every workload gets a key; one the prompt never
+    prints gets an empty set.
+
+    A workload's own lines are:
+    - its inventory entry: the line starting `- {w} (` and the lines under
+      it that start with a space;
+    - its candidate entry, by the same rule;
+    - its evidence reads: from a label line `== <label> ==` that names it
+      (see `_read_owner`) up to the next label that names another workload.
+
+    An entry ends at the next line starting `- ` or at any line that does not
+    start with a space. A read whose label names no workload, such as
+    `describe node /worker-1`, stays with the workload before it, because
+    kubeagent reads one workload's events, describes and logs before the
+    next workload's (`gatherEvidence`, internal/investigate/gather.go:57 at
+    v1.24.0). Lines before the first entry, or before the first read
+    that names a workload, belong to nobody. So do lines outside the three
+    sections.
+    """
+    names = list(workloads)
+    lines: dict[str, set[str]] = {w: set() for w in names}
+    section = None
+    current = None
+    for line in prompt.split("\n"):
+        mark = _SECTION_MARK.match(line)
+        if mark:
+            section = mark.group(2) if mark.group(1) == "BEGIN" else None
+            current = None
+            continue
+        if section in ("inventory", "candidates"):
+            if line.startswith("- "):
+                current = next((w for w in names if line.startswith(f"- {w} (")), None)
+            elif not line.startswith(" "):
+                current = None
+        elif section == "evidence":
+            label = _READ_LABEL.match(line)
+            if label:
+                current = _read_owner(label.group(1), names) or current
+        else:
+            continue
+        if current is not None:
+            normalized = _norm_cause(line)
+            if normalized:
+                lines[current].add(normalized)
+    return {w: frozenset(own) for w, own in lines.items()}
+
+
+def _workload_decoys(meta: dict, workload: str) -> list[str]:
+    """The decoys one workload can name: its own `decoy_by_workload` entries,
+    then the row's `decoy_causes` (or `[decoy_cause]` when that is empty).
+    Empty values are dropped. The decoy gate and G2 both read this list, so
+    they cannot disagree about what a decoy is."""
+    own = (meta.get("decoy_by_workload") or {}).get(workload) or []
+    row = meta.get("decoy_causes") or [meta.get("decoy_cause")]
+    return [d for d in [*own, *row] if d]
+
+
+def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -> bool:
+    """Whether the grader guard zeroes this job-2 cause.
+
+    G2: the normalized cause holds a normalized decoy. G3b: it holds one of
+    `own_lines`, which are already normalized (what `_own_blocks` returns).
+    An empty decoy or line is skipped: an empty string sits inside every
+    cause.
+    """
+    c = _norm_cause(cause)
+    if any(n and n in c for n in (_norm_cause(d) for d in decoys if d)):
+        return True
+    return any(line and line in c for line in own_lines)
+
+
 def job2(meta_workload: dict, reply_row: dict | None,
-         own_cause_keywords: list[str], *, workload: str = "") -> float:
+         own_cause_keywords: list[str], *, workload: str = "",
+         decoys: Iterable[str] = (), own_lines: Iterable[str] = ()) -> float:
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
     story's own cause -- all of `own_cause_keywords` appear in the reply's
     cause, matched as substrings after lowercasing both sides -- or, on a
     `none_of_these` workload, when the reply's cause is exactly that. 0.0
     otherwise, including a missing row or reply.
+
+    The grader guard runs first and scores 0.0 when the cause holds one of
+    `decoys` (G2) or one of `own_lines` (G3b). It runs before the keyword
+    rule because a pasted block or a hedge carries the keywords too, and
+    the keyword rule alone would mark it right. With no `decoys` and no
+    `own_lines`, nothing is guarded: that is the unguarded score.
 
     Raises `UngradableWorkload` for a named-cause workload with no keywords,
     BEFORE looking at the reply: that is a statement about the corpus, and a
@@ -205,6 +326,8 @@ def job2(meta_workload: dict, reply_row: dict | None,
     """
     _require_job2_gradable(workload, meta_workload, own_cause_keywords)
     if reply_row is None:
+        return 0.0
+    if _job2_guarded(str(reply_row.get("cause", "")), decoys, own_lines):
         return 0.0
     got_cause = str(reply_row.get("cause", "")).strip().lower()
     if meta_workload.get("expected_cause") == NONE_OF_THESE:
@@ -510,6 +633,16 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             by_workload = {r.get("workload"): r for r in doc["verdicts"]
                            if isinstance(r, dict)}
         meta = row.get("meta", {})
+        # The grader guard's inputs, once per row and once per job-2
+        # workload. `job2` and the cause_hits count below both read them, so
+        # `cause_acc` and job 2 agree on every all-job-2 row. Not graded on
+        # job 2, nothing is computed and nothing is guarded.
+        guards: dict[str, dict] = {}
+        if grade_job2:
+            own_blocks = _own_blocks(prompt, meta.get("workloads") or {})
+            guards = {w: {"decoys": _workload_decoys(meta, w), "own_lines": own_blocks[w]}
+                      for w, wm in (meta.get("workloads") or {}).items()
+                      if wm.get("job") == 2}
         cause_hits, conf_hits, total = 0, 0, len(expected["verdicts"])
         # Confidence grades on the verdicts the model got WRONG. A grade the
         # model never emitted (workload omitted) is absent, not a pass.
@@ -523,7 +656,10 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             # one, not only on the two cases that used to be named.
             wm = (meta.get("workloads") or {}).get(exp["workload"]) or {}
             keywords = wm.get("own_cause_keywords") or []
-            if wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
+            guard = guards.get(exp["workload"])
+            if guard is not None and _job2_guarded(str(got.get("cause", "")), **guard):
+                matched = False
+            elif wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
                 matched = all(str(k).lower() in str(got.get("cause", "")).lower()
                               for k in keywords)
             else:
@@ -562,6 +698,8 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # rows set, which can sit next to an unrelated (or empty)
         # `decoy_by_workload` entry for the same workload. A workload's real
         # decoy list is the union of both, so naming either kind counts.
+        # `_workload_decoys` builds that union; the grader guard's G2 reads
+        # the same list.
         #
         # A workload absent from the reply, or whose combined decoy list is
         # empty, contributes nothing to decoy_hits -- refusing is not
@@ -570,15 +708,13 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
-        row_decoys = [d for d in (meta.get("decoy_causes")
-                                  or [meta.get("decoy_cause")]) if d]
         # Per-workload keys first, in their own order, then any flagged
         # workload `decoy_by_workload` never mentioned -- sorted, so the scan
         # order does not depend on set-iteration order between runs.
         extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
         decoy_hits: list[bool] = []
         for workload in [*per_workload_decoys, *extra_workloads]:
-            decoys = per_workload_decoys.get(workload, []) + row_decoys
+            decoys = _workload_decoys(meta, workload)
             if not decoys:
                 continue
             got = by_workload.get(workload)
@@ -615,7 +751,7 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         job1_scores = [job1(wm, by_workload.get(w))
                        for w, wm in workloads.items() if wm.get("job") == 1]
         job2_scores = ([job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [],
-                             workload=w)
+                             workload=w, **guards[w])
                         for w, wm in workloads.items() if wm.get("job") == 2]
                        if grade_job2 else [])
         row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))
