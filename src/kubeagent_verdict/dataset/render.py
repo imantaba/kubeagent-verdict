@@ -22,9 +22,9 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # render.py's public surface. Each step that adds a new function or a new
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
-__all__ = ["apply_budget", "bind", "check_prompt_size", "cluster_health", "draw_ending", "drop",
-           "header_for", "object_reads", "prompt_meta", "refute", "registry_events_read",
-           "render_workload", "unverify", "workload_meta"]
+__all__ = ["apply_budget", "bind", "check_prompt_size", "cluster_health", "deciding_ending",
+           "draw_ending", "drop", "header_for", "object_reads", "prompt_meta", "refute",
+           "registry_events_read", "render_workload", "unverify", "workload_meta"]
 
 MAX_READS = 8
 MAX_PROMPT_BYTES = 64 * 1024
@@ -43,14 +43,32 @@ ENDINGS = {
     "registry": ("refuted", "auth", "no_event"),
 }
 
-# Nine always-ruled-out PVC decoys `truncated` appends to overflow the 8-read
-# budget. Never drawn by any rng (fresh.how="not_read" — draw_ending is never
-# called on them), so no seed's draw sequence moves when they are added.
+# Nine always-ruled-out PVC decoys. `truncated` appends all nine to push the
+# winner's line past kubeagent's 8-candidate cap, and `attributed` adds the
+# first on a coin. Unmounted, so the rules rule each one out and the gather
+# never reads it. Never drawn by any rng (fresh.how="not_read" — draw_ending
+# is never called on them), so no seed's draw sequence moves when they are
+# added.
 PAD_PVC_OBJECTS = tuple(
     o.Object(kind="pvc", name=pad_name, scan_reason="ProvisioningFailed",
              placement="unmounted", fresh=o.Fresh(how="not_read"), intent="decoy")
     for pad_name in names.PAD_PVCS
 )
+
+# `positional_probe`'s first candidate, per winner kind. It is live, so the
+# rules attribute it, and its fresh read refutes it, so they pass over it
+# and decide the winner. Each sorts before any winner of its kind:
+# worker-1 is the first node name (the builder moves a row's own worker-1
+# to worker-2), and a pad sorts before every drawn PVC. The claim's scan
+# reason is one of pvchealth's six (internal/pvchealth/pvchealth.go:27);
+# "Pending" is a phase, not a reason.
+POSITIONAL_DECOYS = {
+    "node": o.Object(kind="node", name=names.NODES[0], scan_reason="NotReady", placement="on",
+                     fresh=o.Fresh(ready="True"), intent="decoy"),
+    "pvc": o.Object(kind="pvc", name=names.PAD_PVCS[0], scan_reason="ProvisioningFailed",
+                    placement="mounted",
+                    fresh=o.Fresh(phase="Bound", storage_class="standard"), intent="decoy"),
+}
 
 
 def bind(obj: o.Object, names: dict) -> o.Object:
@@ -86,6 +104,39 @@ def draw_ending(obj: o.Object, rng: random.Random) -> o.Object:
     return unverify(obj, choice)
 
 
+# The endings `deciding_ending` may give a winner, per kind. "declared"
+# keeps the object as the entry wrote it; every other name is a `how`
+# unverify() takes. There is no registry row: a single-workload row never
+# clears the registry threshold, so no registry is ever a winner.
+DECIDING_ENDINGS = {
+    "node": ("declared", "lease", "read_failed"),
+    "pvc": ("declared", "read_failed"),
+}
+
+
+def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
+    """Draw the ending of a job-1 row's winner, one `rng.choice`.
+
+    The winner must still decide the row, so the choice is between the
+    object as declared and the two unverified shapes the rules keep:
+    `lease` (a node that is Ready but has no kubelet lease) and
+    `read_failed` (the describe failed). The declared object is a choice
+    only when the rules confirm it; a declared fresh read that refutes it
+    would leave the row undecided. `obj` is judged as given, placement
+    included, so an object the rules rule out gets no ending that decides.
+    """
+    if obj.kind not in DECIDING_ENDINGS:
+        raise ValueError(f"no deciding ending for a {obj.kind}: {obj.name}")
+    choices = DECIDING_ENDINGS[obj.kind]
+    declared = rules.decide(rules.attribute((obj,), ns="", pod="", issue=""))
+    if declared.outcome != "confirmed":
+        choices = choices[1:]
+    choice = rng.choice(choices)
+    if choice == "declared":
+        return obj
+    return unverify(obj, choice)
+
+
 _PHASE = {"registry": 0, "node": 1, "pvc": 2}
 
 
@@ -94,7 +145,6 @@ def apply_budget(
     *,
     workload_order: tuple[int, ...],
     entry_or_scenario_key: str,
-    allow_overflow: bool = False,
 ) -> tuple[o.Object, ...]:
     """Reorder into gather order, then apply the 8-read budget.
 
@@ -105,9 +155,7 @@ def apply_budget(
     matching what a real gather does when the read budget runs out before
     it reaches an object. An `intent="cause"` object that would be starved
     this way raises ValueError, since a scenario that silently loses its
-    own cause's evidence is almost always an authoring mistake — pass
-    `allow_overflow=True` for the one builder that starves the cause on
-    purpose.
+    own cause's evidence is almost always an authoring mistake.
     """
     order = sorted(range(len(objects)),
                     key=lambda i: (_PHASE[objects[i].kind], workload_order[i]))
@@ -117,11 +165,10 @@ def apply_budget(
         if idx < MAX_READS:
             out.append(obj)
             continue
-        if obj.intent == "cause" and not allow_overflow:
+        if obj.intent == "cause":
             raise ValueError(
                 f"entry {entry_or_scenario_key}: the {MAX_READS}-read budget "
-                f"would leave {obj.kind}/{obj.name} (intent=cause) unread; "
-                "pass allow_overflow=True if that is the point"
+                f"would leave {obj.kind}/{obj.name} (intent=cause) unread"
             )
         out.append(dataclasses.replace(obj, fresh=o.Fresh(how="not_read")))
     return tuple(out)

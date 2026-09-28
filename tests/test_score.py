@@ -1682,20 +1682,30 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     finding now prints its last exit. That exposes 53 more workloads, and
     every keyword-graded job-2 workload is now fully exposed. The grader
     guard is what keeps a pasted prompt from scoring.
+
+    Re-pinned on 2026-09-26, when the job-1 rows moved onto the evidence
+    gather: 134 of 134 becomes 171 of 171. The 31 exam rows whose entry has
+    no job-1 rule ask now come in as `own_cause` job-2 rows, the new
+    `pvc-unbound-unschedulable` entry adds 6 more, and every one of the 37
+    is fully exposed too.
     """
     rows = [generate.to_row(ex) for ex in generate.test_set()]
     board = score.scoreboard(score.evaluate(rows, lambda m: ""))
-    assert board["overall"]["keyword_graded_n"] == 134
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather; 31 rows
+    # rerouted to own_cause plus 6 from the new entry 134 -> 171
+    assert board["overall"]["keyword_graded_n"] == 171
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
-    assert board["overall"]["keyword_derivable_n"] == 134
+    # 2026-09-26 (faithful prompts): the 37 new job-2 workloads are all exposed 134 -> 171
+    assert board["overall"]["keyword_derivable_n"] == 171
     # Every counted workload is a job-2 workload, which is what design spec
     # line 547's "over all job-2 rows" asks for.
     counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
                   if wm.get("job") == 2
                   and wm.get("expected_cause") != NONE_OF_THESE
                   and wm.get("own_cause_keywords"))
-    assert counted == 134
+    # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
+    assert counted == 171
 
 
 # --- the length-gap decider -------------------------------------------------
@@ -2108,8 +2118,13 @@ def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     # 2026-09-26 (faithful prompts): oversized-job-unschedulable's decoy is now a
     # node the unscheduled pod is not on, so the rules rule it out and its
     # contradiction_probe workload is undecided: job 1 157 -> 156, job 2 142 -> 143
-    assert expected_job1_n == 156
-    assert expected_job2_n == 143
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather. 31 exam
+    # rows whose entry has no job-1 rule ask become own_cause job-2 rows,
+    # truncated/injection/positional_probe cover 17 entries instead of 19, the
+    # new pvc-unbound-unschedulable entry adds rows, and node-cordon-diskfull's
+    # contradiction_probe workload is undecided now: job 1 156 -> 118, job 2 143 -> 181
+    assert expected_job1_n == 118
+    assert expected_job2_n == 181
 
 
 def _echo_the_decided_cause_bot(rows: list[dict]):
@@ -2163,8 +2178,12 @@ def _never_say_shared_bot(rows: list[dict]):
     independence phrase. Against job 3's table (Step 25) that summary scores
     1.0 on a `none` row (neither claims nor denies -- correct), 0.0 on a
     `shared` row (must claim and does not) and 0.0 on a `separate` row (must
-    deny and does not). The exam is 5 shared / 0 separate / 34 none of 39,
-    so this bot's job3 rate is exactly the `none` share: 34/39.
+    deny and does not). The exam is 5 shared / 0 separate / 35 none of 40,
+    so this bot's job3 rate is exactly the `none` share: 35/40.
+
+    2026-09-26 (faithful prompts): the new `pvc-unbound-unschedulable` entry
+    adds a twentieth `multi_misattribution_probe` row, labelled `none`, so
+    the exam goes from 34 none of 39 to 35 none of 40.
     """
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
@@ -2178,16 +2197,20 @@ def _never_say_shared_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_never_say_shared_bot_scores_34_of_39_on_job3():
+def test_never_say_shared_bot_scores_35_of_40_on_job3():
     rows = _corpus_rows()
     results = score.evaluate(rows, _never_say_shared_bot(rows))
     board = score.scoreboard(results)
 
-    assert board["jobs"]["job3"]["n"] == 39
-    assert board["jobs"]["job3"]["rate"] == round(34 / 39, 4)
+    # 2026-09-26 (faithful prompts): a twentieth multi_misattribution_probe row
+    # from the new entry, labelled none 39 -> 40
+    assert board["jobs"]["job3"]["n"] == 40
+    # 2026-09-26 (faithful prompts): same row 34/39 -> 35/40 (0.8718 -> 0.875)
+    assert board["jobs"]["job3"]["rate"] == round(35 / 40, 4)
     assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 5
     assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 0
-    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 34
+    # 2026-09-26 (faithful prompts): same row 34 -> 35
+    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 35
     assert board["jobs"]["job3"]["by_label"]["shared"]["rate"] == 0.0
     assert board["jobs"]["job3"]["by_label"]["separate"]["rate"] is None
     assert board["jobs"]["job3"]["by_label"]["none"]["rate"] == 1.0
@@ -2252,11 +2275,16 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     # 2026-09-26 (faithful prompts): the oversized-job-unschedulable
     # contradiction_probe workload is undecided now (its node decoy is ruled
     # out) 157 -> 156
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 156}
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather; 31 rows
+    # rerouted to own_cause, 17 entries per job-1 case instead of 19, and the
+    # node-cordon-diskfull contradiction_probe workload undecided 156 -> 118
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 118}
     # 153 to 142 on 2026-09-24: the job-2 generator fix left 8
     # `none_of_these` rows in the exam, not 19.
     # 2026-09-26 (faithful prompts): that workload joins job 2 142 -> 143
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
+    # 2026-09-26 (faithful prompts): 31 rerouted, 6 from the new entry and the
+    # node-cordon-diskfull contradiction_probe workload 143 -> 181
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 181}
 
 
 def _always_none_of_these_bot(rows: list[dict]):
@@ -2312,6 +2340,13 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     is not on, so the rules rule it out and its `contradiction_probe`
     workload is undecided. Its gold is `none_of_these`, so it joins job 2
     as a ninth such workload: 9/143 = 0.0629.
+
+    Re-pinned again on 2026-09-26, when the job-1 rows moved onto the
+    evidence gather. `node-cordon-diskfull`'s node is now one its pod is not
+    placed on, so its `contradiction_probe` workload is undecided too, with
+    gold `none_of_these`: a tenth. The 31 rerouted `own_cause` workloads and
+    the 6 from the new `pvc-unbound-unschedulable` entry grow job 2 to 181
+    workloads, so this bot scores 10/181 = 0.0552.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _always_none_of_these_bot(rows))
@@ -2320,7 +2355,9 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     assert board["jobs"]["job2"]["n"] > 0
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now, gold none_of_these 0.0563 -> 0.0629 (8/142 -> 9/143)
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0629, abs=0.005)
+    # 2026-09-26 (faithful prompts): node-cordon-diskfull's contradiction_probe
+    # workload is undecided too, and job 2 grows 0.0629 -> 0.0552 (9/143 -> 10/181)
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0552, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -2422,6 +2459,14 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     now scores 134/143 = 0.9371, above JOB2_BAR. The guarded rate is still
     0.0. From here on the guard alone keeps a bot that reads nothing
     under the bar.
+
+    2026-09-26 (faithful prompts), when the job-1 rows moved onto the
+    evidence gather: 31 exam rows whose entry has no job-1 rule ask become
+    `own_cause` job-2 rows, the new `pvc-unbound-unschedulable` entry adds 6
+    job-2 workloads, and `node-cordon-diskfull`'s `contradiction_probe`
+    workload is undecided now. That is 38 more job-2 workloads, 37 of them
+    keyword-graded and all 37 exposed, so with no guard this bot scores
+    171/181 = 0.9448. The guarded rate is still 0.0.
     """
     rows = _corpus_rows()
     bot = _paste_the_prompt_bot(rows)
@@ -2430,11 +2475,16 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
 
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
-    assert board["overall"]["keyword_derivable_n"] == 134
-    assert board["overall"]["keyword_graded_n"] == 134
+    # 2026-09-26 (faithful prompts): 37 new keyword-graded job-2 workloads, all
+    # exposed 134 -> 171
+    assert board["overall"]["keyword_derivable_n"] == 171
+    # 2026-09-26 (faithful prompts): same 37 workloads 134 -> 171
+    assert board["overall"]["keyword_graded_n"] == 171
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now 142 -> 143
-    assert board["jobs"]["job2"]["n"] == 143
+    # 2026-09-26 (faithful prompts): 31 rerouted, 6 new, and node-cordon-diskfull's
+    # contradiction_probe workload 143 -> 181
+    assert board["jobs"]["job2"]["n"] == 181
     # 2026-09-26 (faithful prompts): the grader guard zeroes a pasted prompt 0.535 -> 0.0
     assert board["jobs"]["job2"]["rate"] == 0.0
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
@@ -2442,8 +2492,10 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     # (76, 142) -> (81, 142), 0.5352 -> 0.5704
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines,
     # and one workload joins job 2 (81, 142) -> (134, 143), 0.5704 -> 0.9371
-    assert (sum(unguarded), len(unguarded)) == (134, 143)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather, 38 workloads
+    # join job 2 (134, 143) -> (171, 181), 0.9371 -> 0.9448
+    assert (sum(unguarded), len(unguarded)) == (171, 181)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9448
 
 
 def _own_entry(prompt: str, section: str, name: str) -> list[str]:
@@ -2496,6 +2548,13 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     prints. Every keyword now sits on a finding line, which is in the
     workload's own inventory entry, so the unguarded echo wins all 134
     keyword-graded workloads of 143: 0.9371. Guarded it is still 0.0.
+
+    Re-pinned the same day, when the job-1 rows moved onto the evidence
+    gather. Job 2 gains 38 workloads (31 rerouted `own_cause` rows, 6 from
+    the new `pvc-unbound-unschedulable` entry, and `node-cordon-diskfull`'s
+    undecided `contradiction_probe` workload). The echo wins all 171
+    keyword-graded workloads of 181 unguarded: 0.9448. Guarded it is still
+    0.0.
     """
     rows = _corpus_rows()
     bot = _echo_the_own_entries_bot(rows)
@@ -2504,11 +2563,15 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
 
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now 142 -> 143
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather, 38 workloads
+    # join job 2 143 -> 181
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 181}
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on the finding
     # lines the echo copies (74, 142) -> (134, 143), 0.5211 -> 0.9371
-    assert (sum(unguarded), len(unguarded)) == (134, 143)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
+    # 2026-09-26 (faithful prompts): the 37 new keyword-graded workloads are all
+    # echoed (134, 143) -> (171, 181), 0.9371 -> 0.9448
+    assert (sum(unguarded), len(unguarded)) == (171, 181)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9448
 
 
 def _name_the_decoy_bot(rows: list[dict]):
@@ -2546,8 +2609,11 @@ def test_a_bot_that_names_the_decoy_scores_zero_on_job2_with_or_without_the_guar
 
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now 142 -> 143
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
-    assert (sum(unguarded), len(unguarded)) == (0, 143)
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather, 38 workloads
+    # join job 2 143 -> 181
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 181}
+    # 2026-09-26 (faithful prompts): same 38 workloads (0, 143) -> (0, 181)
+    assert (sum(unguarded), len(unguarded)) == (0, 181)
 
 
 def _hedge_bot(rows: list[dict]):
@@ -2590,6 +2656,15 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     prints. `oversized-job-unschedulable`'s `contradiction_probe` workload
     is undecided now, with gold `none_of_these` and no hedge, so job 2
     counts 143: 134 of 143 = 0.9371 unguarded, 31 of 143 = 0.2168 guarded.
+
+    Re-pinned the same day, when the job-1 rows moved onto the evidence
+    gather. Job 2 counts 181. The unguarded hedge wins all 171
+    keyword-graded workloads, 0.9448; the other 10 expect `none_of_these`.
+    Guarded, 32 workloads are left with no `decoy_by_workload` entry: 20
+    `empty_candidates` (one more, from the new `pvc-unbound-unschedulable`
+    entry) and 12 on `shared_origin_decoy_probe` rows. That is 32 of 181 =
+    0.1768. Every rerouted `own_cause` workload carries its own decoy, so
+    the hedge the guard zeroes grew and the rate fell.
     """
     rows = _corpus_rows()
     bot = _hedge_bot(rows)
@@ -2598,11 +2673,16 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
 
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now {0.2183, 142} -> {0.2168, 143} (31 of 143)
-    assert board["jobs"]["job2"] == {"rate": 0.2168, "n": 143}
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather, 38 workloads
+    # join job 2 and one more has no own decoy {0.2168, 143} -> {0.1768, 181}
+    # (31 of 143 -> 32 of 181)
+    assert board["jobs"]["job2"] == {"rate": 0.1768, "n": 181}
     # 2026-09-26 (faithful prompts): same workload (134, 142) -> (134, 143),
     # 0.9437 -> 0.9371
-    assert (sum(unguarded), len(unguarded)) == (134, 143)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
+    # 2026-09-26 (faithful prompts): 37 new keyword-graded workloads, all won
+    # unguarded (134, 143) -> (171, 181), 0.9371 -> 0.9448
+    assert (sum(unguarded), len(unguarded)) == (171, 181)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9448
 
 
 def test_the_gold_answer_passes_the_grader_guard_on_every_exam_job2_workload():
@@ -2682,7 +2762,14 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
 
     2026-09-26 (faithful prompts): `oversized-job-unschedulable`'s
     `contradiction_probe` row is all job 2 now (its node decoy is ruled
-    out, so nothing is decided), so 111 rows are checked."""
+    out, so nothing is decided), so 111 rows are checked.
+
+    2026-09-26 (faithful prompts), when the job-1 rows moved onto the
+    evidence gather: 31 rerouted `own_cause` rows, one more row each for
+    `empty_candidates`, `wrong_attribution`, `misattribution_probe` and
+    `multi_misattribution_probe` from the new `pvc-unbound-unschedulable`
+    entry, and `node-cordon-diskfull`'s all-job-2 `contradiction_probe` row
+    make 148."""
     rows = _corpus_rows()
     results = score.evaluate(rows, _own_keyword_bot(rows))
     checked = 0
@@ -2695,7 +2782,9 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
             sum(res["job2_scores"]) / len(res["job2_scores"])), row["meta"]["case"]
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe row is
     # all job 2 now 110 -> 111
-    assert checked == 111
+    # 2026-09-26 (faithful prompts): 31 rerouted own_cause rows, 4 rows from the
+    # new entry, and the node-cordon-diskfull contradiction_probe row 111 -> 148
+    assert checked == 148
 
 
 def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int]:
@@ -2719,7 +2808,7 @@ def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dic
     return rewritten, workload_level
 
 
-def test_the_exposed_workloads_trace_back_to_nineteen_catalog_entries():
+def test_the_exposed_workloads_trace_back_to_twenty_catalog_entries():
     """Pins the count the model card's limit 7 quotes as the size of the edit.
 
     `keyword_derivable_n` says 56 CATALOG workloads print their own answer
@@ -2769,6 +2858,14 @@ def test_the_exposed_workloads_trace_back_to_nineteen_catalog_entries():
     victim (`propagation.py`), so that one eval-origin workload traces to a
     catalog key here. 114 catalog workloads plus the 20 eval-origin ones
     make the scoreboard's 134.
+
+    Re-pinned again on 2026-09-26, when the job-1 rows moved onto the
+    evidence gather, and renamed from `..._to_nineteen_catalog_entries`.
+    The new `pvc-unbound-unschedulable` entry is the twentieth, fully
+    exposed on its 6 job-2 workloads, and the 31 exam rows rerouted to
+    `own_cause` are fully exposed too. 115 becomes 152: 151 catalog
+    workloads plus the one eval-origin victim, and 151 plus the 20
+    eval-origin ones make the scoreboard's 171.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -2802,15 +2899,19 @@ def test_the_exposed_workloads_trace_back_to_nineteen_catalog_entries():
     # so all 19 entries are fully exposed: (10, 60) -> (19, 115), (1, 1) -> (0, 0),
     # 61 -> 115 (one of the 115 is the eval-origin victim that shares
     # probe-failure's pair)
-    assert (len(fully), n_fully) == (19, 115)
+    # 2026-09-26 (faithful prompts): job-1 rows built on the gather; the new
+    # entry's 6 and the 31 rerouted own_cause workloads (19, 115) -> (20, 152)
+    assert (len(fully), n_fully) == (20, 152)
     assert (len(partly), n_partly) == (0, 0)
-    assert n_fully + n_partly == 115
-    # The scoreboard's total is bigger now: the catalog's 114 plus the 20
+    # 2026-09-26 (faithful prompts): same 37 workloads 115 -> 152
+    assert n_fully + n_partly == 152
+    # The scoreboard's total is bigger now: the catalog's 151 plus the 20
     # eval-origin workloads this test deliberately does not count above.
     board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
-    assert board["overall"]["keyword_derivable_n"] == 134
+    # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
+    assert board["overall"]["keyword_derivable_n"] == 171
     assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
@@ -2898,13 +2999,30 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     `contradiction_probe` workload is undecided now with gold
     `none_of_these`, so the post-rewrite job 2 reads 9/143 = 0.0629, still
     the always-none bot's figure.
+
+    2026-09-26 (faithful prompts), when the job-1 rows moved onto the
+    evidence gather. 37 more keyword-graded job-2 workloads (31 rerouted
+    `own_cause` rows and 6 from the new `pvc-unbound-unschedulable` entry)
+    make 171, and `node-cordon-diskfull`'s `contradiction_probe` workload is
+    undecided too, so the post-rewrite job 2 reads 10/181 = 0.0552, still
+    the always-none bot's figure. The exam's job-1 workloads fall from 156
+    to 118, and this bot misses every one, so there are fewer wrong rows
+    (110 -> 73): cause accuracy before the rewrite rises 0.5185 -> 0.664,
+    and overconfidence's population falls 123 -> 86 (225 -> 224 after).
+    The length decider moves most. `wrong_attribution` and
+    `misattribution_probe` now hold 40 keyword-graded `length helps` rows,
+    not 38. `positional_probe` holds 7, not 18: its gold is now the node
+    the rules decided, "node worker-N (NotReady)", the same length as the
+    decoy "node worker-1 (NotReady)" on 10 of its 17 rows, so those carry no
+    length verdict. 40 of 47 = 0.8511 before, 0 of 47 after.
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
     rewritten, workload_level = _rewrite_keyword_answer_keys(
         rows, "nonexistentkeywordtoken")
 
-    assert workload_level == 134
+    # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
+    assert workload_level == 171
 
     before = score.scoreboard(score.evaluate(rows, bot))
     after = score.scoreboard(score.evaluate(rewritten, bot))
@@ -2912,23 +3030,37 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     # The exposure closes, which is the point of the rewrite.
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
-    assert before["overall"]["keyword_derivable_n"] == 134
+    # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
+    assert before["overall"]["keyword_derivable_n"] == 171
     assert after["overall"]["keyword_derivable_n"] == 0
-    assert after["overall"]["keyword_graded_n"] == 134
+    # 2026-09-26 (faithful prompts): same 37 workloads 134 -> 171
+    assert after["overall"]["keyword_graded_n"] == 171
 
     # Four numbers retire: the same replies now score differently.
     assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now, gold none_of_these, the same figure the always-none bot
     # pins 0.0563 -> 0.0629 (8/142 -> 9/143)
-    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0629, abs=0.005)
-    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5185, abs=0.005)
-    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1071, abs=0.005)
-    assert before["overall"]["overconfidence_rate"]["n"] == 123
-    assert after["overall"]["overconfidence_rate"]["n"] == 225
-    assert before["overall"]["cause_when_length_helps"] == {"rate": 0.6786, "n": 56}
-    assert after["overall"]["cause_when_length_helps"] == {"rate": 0.0, "n": 56}
-    assert before["overall"]["length_gap"] == pytest.approx(0.6786, abs=0.005)
+    # 2026-09-26 (faithful prompts): node-cordon-diskfull's contradiction_probe
+    # workload joins it, the always-none bot's figure 0.0629 -> 0.0552 (10/181)
+    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0552, abs=0.005)
+    # 2026-09-26 (faithful prompts): 37 fewer job-1 rows, which this bot always
+    # misses (110 -> 73) 0.5185 -> 0.664
+    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.664, abs=0.005)
+    # 2026-09-26 (faithful prompts): same move after the rewrite 0.1071 -> 0.1076
+    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1076, abs=0.005)
+    # 2026-09-26 (faithful prompts): the same 37 fewer wrong job-1 rows 123 -> 86
+    assert before["overall"]["overconfidence_rate"]["n"] == 86
+    # 2026-09-26 (faithful prompts): 86 plus the 138 rows the rewrite turns wrong
+    # (was 123 plus 102) 225 -> 224
+    assert after["overall"]["overconfidence_rate"]["n"] == 224
+    # 2026-09-26 (faithful prompts): 40 keyword-graded rows plus 7 positional_probe
+    # rows (was 38 plus 18) {0.6786, 56} -> {0.8511, 47}
+    assert before["overall"]["cause_when_length_helps"] == {"rate": 0.8511, "n": 47}
+    # 2026-09-26 (faithful prompts): same 47 rows {0.0, 56} -> {0.0, 47}
+    assert after["overall"]["cause_when_length_helps"] == {"rate": 0.0, "n": 47}
+    # 2026-09-26 (faithful prompts): same 47 rows 0.6786 -> 0.8511
+    assert before["overall"]["length_gap"] == pytest.approx(0.8511, abs=0.005)
     assert after["overall"]["length_gap"] == pytest.approx(0.0, abs=0.005)
 
     # Everything else is untouched.

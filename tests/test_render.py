@@ -122,20 +122,17 @@ def test_apply_budget_raises_when_a_cause_would_be_starved():
     except ValueError as err:
         assert str(err) == (
             "entry e1: the 8-read budget would leave pvc/data-0 "
-            "(intent=cause) unread; pass allow_overflow=True if that is "
-            "the point"
+            "(intent=cause) unread"
         )
 
 
-def test_apply_budget_allow_overflow_starves_the_cause_on_purpose():
-    cause = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                      placement="mounted", fresh=o.Fresh(how="read", phase="Pending"),
-                      intent="cause")
-    objects = tuple(_node_decoy(i) for i in range(8)) + (cause,)
-    out = render.apply_budget(objects, workload_order=(0,) * 9,
-                               entry_or_scenario_key="e1", allow_overflow=True)
-    assert out[8].kind == "pvc"
-    assert out[8].fresh.how == "not_read"
+def test_apply_budget_has_no_overflow_switch():
+    """`truncated` was the one builder that starved its cause on purpose.
+    It now pads the candidate list with claims that are never read, so no
+    builder asks for an overflow."""
+    with pytest.raises(TypeError):
+        render.apply_budget((), workload_order=(), entry_or_scenario_key="e1",
+                            allow_overflow=True)
 
 
 def test_apply_budget_reorders_registry_before_node_before_pvc():
@@ -374,3 +371,71 @@ def test_check_prompt_size_raises_over_the_cap():
             f"entry e1: prompt is {len(big)} bytes, over the "
             f"{render.MAX_PROMPT_BYTES}-byte cap"
         )
+
+
+def _ending(obj, drawn):
+    """Name the ending `deciding_ending` gave `obj`."""
+    if drawn == obj:
+        return "declared"
+    if drawn.fresh.how == "read_failed":
+        return "read_failed"
+    assert drawn.scan_reason == "no kubelet lease", drawn
+    return "lease"
+
+
+def _decide(obj):
+    return rules.decide(rules.attribute((obj,), ns="shop", pod="api-0", issue="OOMKilled"))
+
+
+_DOWN_NODE = o.Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                      fresh=o.NODE_NOT_READY, intent="cause")
+_PENDING_PVC = o.Object(kind="pvc", name="data-0", scan_reason="MissingStorageClass",
+                        placement="mounted",
+                        fresh=o.Fresh(phase="Pending", storage_class="fast-ssd"), intent="cause")
+
+
+@pytest.mark.parametrize("obj, endings", [
+    (_DOWN_NODE, {"declared", "lease", "read_failed"}),
+    (_PENDING_PVC, {"declared", "read_failed"}),
+])
+def test_deciding_ending_draws_every_ending_and_each_one_decides(obj, endings):
+    rng = random.Random(7)
+    seen = set()
+    for _ in range(200):
+        drawn = render.deciding_ending(obj, rng)
+        seen.add(_ending(obj, drawn))
+        assert _decide(drawn).decided, drawn
+    assert seen == endings
+
+
+def test_deciding_ending_keeps_the_declared_node_only_because_it_confirms():
+    assert _decide(_DOWN_NODE).outcome == "confirmed"
+    rng = random.Random(7)
+    drawn = [render.deciding_ending(_DOWN_NODE, rng) for _ in range(200)]
+    for d in drawn:
+        if d == _DOWN_NODE:
+            assert _decide(d).outcome == "confirmed"
+    assert _DOWN_NODE in drawn
+
+
+def test_deciding_ending_never_keeps_a_declared_fresh_that_does_not_confirm():
+    ready = o.Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                     fresh=o.Fresh(ready="True"), intent="cause")
+    bound = o.Object(kind="pvc", name="data-0", scan_reason="MissingStorageClass",
+                     placement="mounted", fresh=o.Fresh(phase="Bound"), intent="cause")
+    # A refuted candidate never wins, so the row is undecided and only its
+    # decision says why.
+    assert [d.outcome for d in _decide(ready).decisions] == ["refuted"]
+    assert [d.outcome for d in _decide(bound).decisions] == ["refuted"]
+    rng = random.Random(7)
+    node_seen = {_ending(ready, render.deciding_ending(ready, rng)) for _ in range(200)}
+    pvc_seen = {_ending(bound, render.deciding_ending(bound, rng)) for _ in range(200)}
+    assert node_seen == {"lease", "read_failed"}
+    assert pvc_seen == {"read_failed"}
+
+
+def test_deciding_ending_refuses_a_registry():
+    reg = o.Object(kind="registry", name="registry.example.com", scan_reason="2",
+                   placement="", fresh=o.Fresh(literal="dial tcp"))
+    with pytest.raises(ValueError, match="no deciding ending for a registry"):
+        render.deciding_ending(reg, random.Random(7))

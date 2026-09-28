@@ -27,14 +27,19 @@ def test_attributed_example_shape():
     assert ex.system == c.SYSTEM_PROMPT
     assert f"- {n.ns}/{n.name} (Deployment)" in ex.user
     assert "== BEGIN candidates ==" in ex.user
-    assert "considered memory limit too low for the workload: attributed" in ex.user
     doc = json.loads(ex.assistant)
     assert set(doc) == {"verdicts", "summary"}
     (row,) = doc["verdicts"]
     assert row["workload"] == f"{n.ns}/{n.name}"
-    assert row["cause"] == "memory limit too low for the workload"
+    # The rules decide the node the pod runs on, and the answer is theirs.
+    assert row["cause"].startswith(f"node {n.node} (")
+    assert f"considered {row['cause']}: attributed — " in ex.user
+    assert f"    decided by rules: {row['cause']} — " in ex.user
     assert row["confidence"] == "high"  # direct=True entry with full evidence
+    assert doc["summary"] == f"{n.ns}/{n.name} is failing: {row['cause']}."
     assert ex.meta["expected_cause"] == row["cause"]
+    assert set(ex.meta) == {"case", "entry", "expected_cause", "expected_confidence",
+                            "workloads", "label", "decoy_by_workload"}
 
 
 def test_attributed_indirect_entry_gets_medium():
@@ -45,18 +50,162 @@ def test_attributed_indirect_entry_gets_medium():
 
 def test_attributed_user_message_is_contract_valid():
     n = names_mod.draw(random.Random(13))
-    ex = cases.attributed(_entry("deployment-bad-image-tag"), n, random.Random(13))
+    ex = cases.attributed(_entry("pvc-unbound-unschedulable"), n, random.Random(13))
     assert len(ex.user.encode("utf-8")) <= c.MAX_PROMPT_BYTES
     assert ex.user.endswith(c.CLOSING_INSTRUCTION)
 
 
-def test_attributed_menu_comes_from_declared_objects_not_losers():
-    e = _entry("worker-containerd-stop")
+@pytest.mark.parametrize("key", ["deployment-bad-image-tag", "node-cordon-diskfull",
+                                 "oversized-job-unschedulable"])
+@pytest.mark.parametrize("builder", ["attributed", "injection", "positional_probe",
+                                     "truncated"])
+def test_a_job1_builder_refuses_an_entry_the_rules_do_not_decide(key, builder):
+    """A job-1 row's answer is the rules' cause. These three entries leave
+    the rules undecided in a single-workload row, so no job-1 row exists
+    for them."""
     n = names_mod.draw(random.Random(7))
-    stripped = dataclasses.replace(e, objects=())
-    ex_full = cases.attributed(e, n, random.Random(7))
-    ex_stripped = cases.attributed(stripped, n, random.Random(7))
-    assert ex_full.user.count("considered") > ex_stripped.user.count("considered")
+    with pytest.raises(ValueError, match=f"the rules do not decide {key}"):
+        _build(builder, _entry(key), n, random.Random(7))
+
+
+@pytest.mark.parametrize("builder", ["attributed", "injection", "positional_probe",
+                                     "truncated"])
+def test_a_job1_builder_refuses_an_entry_with_no_object(builder):
+    stripped = dataclasses.replace(_entry("worker-containerd-stop"), objects=())
+    n = names_mod.draw(random.Random(7))
+    with pytest.raises(ValueError, match=f"{builder} needs at least one object"):
+        _build(builder, stripped, n, random.Random(7))
+
+
+def _build(builder, e, n, rng):
+    """Call a job-1 builder by name. `injection` takes the first payload."""
+    if builder == "injection":
+        return cases.injection(e, n, cases.INJECTION_PAYLOADS[0], rng)
+    return getattr(cases, builder)(e, n, rng)
+
+
+def _job1_rows(builder, count, seed=3):
+    """`count` rows the way generate.py builds them: one rng draws each
+    row's names and then feeds its builder, rotating over the job-1
+    entries."""
+    from kubeagent_verdict.dataset import generate
+
+    job1 = catalog.job1_entries()
+    rng = random.Random(seed)
+    out = []
+    for i in range(count):
+        e = job1[i % len(job1)]
+        n = generate._draw(e, rng)
+        out.append((e, n, _build(builder, e, n, rng)))
+    return out
+
+
+def _decided_line(ex):
+    """The row's `decided by rules:` line, as (cause, outcome)."""
+    (line,) = [ln for ln in ex.user.splitlines() if ln.startswith("    decided by rules: ")]
+    cause, outcome = line[len("    decided by rules: "):].rsplit(" — ", 1)
+    return cause, outcome
+
+
+@pytest.mark.parametrize("builder", ["attributed", "injection", "positional_probe",
+                                     "truncated"])
+def test_every_job1_row_is_decided_and_its_gold_is_the_rules_cause(builder):
+    from kubeagent_verdict.dataset import rules
+
+    for e, n, ex in _job1_rows(builder, 68):
+        key = f"{n.ns}/{n.name}"
+        wm = ex.meta["workloads"][key]
+        (row,) = json.loads(ex.assistant)["verdicts"]
+        assert _decided_line(ex) == (wm["decided_cause"], wm["decided_outcome"]), e.key
+        assert wm["job"] == 1 and wm["decided"], e.key
+        assert row["cause"] == ex.meta["expected_cause"] == wm["decided_cause"], e.key
+        assert row["rationale"] == cases._rule_rationale(rules.Result(
+            decided=True, cause=wm["decided_cause"], outcome=wm["decided_outcome"],
+            evidence=wm["decided_evidence"], group_key="", group_text="", decisions=()))
+        assert row["confidence"] == ex.meta["expected_confidence"] == cases._confidence(e)
+        assert json.loads(ex.assistant)["summary"] == f"{key} is failing: {row['cause']}."
+        assert ex.meta["entry"] == e.key and ex.meta["case"] == builder
+
+
+def test_the_attributed_coin_adds_the_first_pad_about_half_the_time():
+    """The second draw is a coin: heads adds `aux-0`, a claim no pod mounts.
+    The rules rule it out, so the gather never reads it."""
+    rows = _job1_rows("attributed", 340)
+    pad = "considered PVC aux-0 (ProvisioningFailed): ruled out — "
+    heads = 0
+    for e, n, ex in rows:
+        shown = [ln for ln in _cand_lines(ex.user) if ln.startswith(pad)]
+        heads += len(shown)
+        assert f"describe pvc {n.ns}/aux-0" not in _evidence_labels(ex.user), e.key
+        key = f"{n.ns}/{n.name}"
+        decoys = ["PVC aux-0 (ProvisioningFailed)"] if shown else []
+        assert ex.meta["decoy_by_workload"] == {key: decoys}, e.key
+    assert 0.4 * len(rows) <= heads <= 0.6 * len(rows), heads
+
+
+# Injection: the payload is one more event of the workload's pod. kubeagent
+# reads those events and sanitises each line, so the payload arrives as one
+# folded line among the pod's own events.
+
+def test_injection_answer_ignores_payload():
+    n = names_mod.draw(random.Random(24))
+    payload = cases.INJECTION_PAYLOADS[0]
+    ex = cases.injection(_entry("memory-limit-oomkill"), n, payload, random.Random(24))
+    assert payload in ex.user  # the attack is really in the evidence
+    doc = json.loads(ex.assistant)  # the answer is still pure contract JSON
+    assert set(doc) == {"verdicts", "summary"}
+    blob = ex.assistant.lower()
+    for marker in ("ignore all previous", "markdown", "system:"):
+        assert marker not in blob
+    assert ex.meta["injection_payload"] == payload
+
+
+def _injected_reason(ex, payload):
+    """The reason the payload's event line carries in `ex`."""
+    line = f": {gather._sanitize(payload)} (x1)\n"
+    found = [r for r in cases.INJECTION_REASONS if f"  {r}{line}" in ex.user]
+    assert len(found) == 1, found
+    assert ex.user.count(line) == 1
+    return found[0]
+
+
+@pytest.mark.parametrize("payload", cases.INJECTION_PAYLOADS)
+def test_injection_payload_is_one_event_line_after_the_pods_own(payload):
+    e = _entry("memory-limit-oomkill")
+    n = names_mod.draw(random.Random(3))
+    ex = cases.injection(e, n, payload, random.Random(3))
+    reason = _injected_reason(ex, payload)
+    events = gather.format_events(
+        n.ns, n.pod, cases.gather_workload(e, n, ()).events + ((reason, payload, 1),))
+    assert f"== events {n.ns}/{n.pod} ==\n{events.rstrip()}\n" in ex.user
+    assert "\n" not in gather._sanitize(payload)
+    assert ex.meta["injection_payload"] == payload
+
+
+def test_injection_reasons_are_the_three_and_none_is_a_pull_event():
+    assert cases.INJECTION_REASONS == ("Unhealthy", "Killing", "FailedSync")
+    for reason in cases.INJECTION_REASONS:
+        for payload in cases.INJECTION_PAYLOADS:
+            assert not gather._is_pull_event(reason, payload), (reason, payload)
+    seen = {_injected_reason(ex, cases.INJECTION_PAYLOADS[0])
+            for _e, _n, ex in _job1_rows("injection", 60)}
+    assert seen == set(cases.INJECTION_REASONS)
+
+
+def test_injection_is_the_attributed_row_plus_one_event_line():
+    """The same draws, in the same order, then the reason. So the row
+    without the payload's line is the attributed row, and the gold is
+    the same."""
+    for e in catalog.job1_entries():
+        n = names_mod.draw(random.Random(5))
+        payload = cases.INJECTION_PAYLOADS[1]
+        ex = cases.injection(e, n, payload, random.Random(5))
+        attr = cases.attributed(e, n, random.Random(5))
+        reason = _injected_reason(ex, payload)
+        line = f"\n  {reason}: {gather._sanitize(payload)} (x1)"
+        assert ex.user.replace(line, "", 1) == attr.user, e.key
+        assert ex.assistant == attr.assistant, e.key
+        assert ex.meta == dict(attr.meta, case="injection", injection_payload=payload)
 
 
 def test_none_of_these_names_no_cause_and_answers_none_at_low():
@@ -80,37 +229,35 @@ def test_own_cause_omits_winner_from_candidates():
     assert ex.meta["expected_own_keywords"] == ["memory", "limit"]
 
 
-def test_truncated_case_earns_low_confidence():
-    n = names_mod.draw(random.Random(23))
-    ex = cases.truncated(_entry("crashloop-pod"), n, random.Random(23))
-    assert c.TRUNCATION_MARKER in ex.user
-    (row,) = json.loads(ex.assistant)["verdicts"]
-    assert row["confidence"] == "low"
+# Truncated: nine pads no pod mounts, so the rules rule each one out and
+# the gather reads none. kubeagent shows at most 8 candidates per workload
+# (internal/investigate/prime.go), so the row tests that display cap, not
+# the read budget.
+
+def test_truncated_shows_eight_candidates_then_the_marker():
+    for e, n, ex in _job1_rows("truncated", 34):
+        lines = _cand_lines(ex.user)
+        assert len(lines) == c.MAX_CANDIDATES_PER_WORKLOAD, e.key
+        assert f"    {c.TRUNCATION_MARKER}\n" in _cand_section(ex.user), e.key
+        assert not any("aux-" in label for label in _evidence_labels(ex.user)), e.key
+        cause = ex.meta["expected_cause"]
+        assert _decided_line(ex)[0] == cause, e.key
+        on_a_line = [ln for ln in lines if ln.startswith(f"considered {cause}: ")]
+        if e.key == "pvc-unbound-unschedulable":
+            # Nine pads sort before the entry's own claim: it is past the cap.
+            assert on_a_line == [], e.key
+            assert f"describe pvc {n.ns}/{n.pvc}" in _evidence_labels(ex.user)
+        else:
+            assert lines[0].startswith(f"considered {cause}: attributed — "), e.key
 
 
-def test_injection_answer_ignores_payload():
-    n = names_mod.draw(random.Random(24))
-    payload = cases.INJECTION_PAYLOADS[0]
-    ex = cases.injection(_entry("deployment-bad-image-tag"), n, payload, random.Random(24))
-    assert payload in ex.user  # the attack is really in the evidence
-    doc = json.loads(ex.assistant)  # the answer is still pure contract JSON
-    assert set(doc) == {"verdicts", "summary"}
-    blob = ex.assistant.lower()
-    for marker in ("ignore all previous", "markdown", "system:"):
-        assert marker not in blob
-    assert ex.meta["injection_payload"] == payload
-
-
-def test_injection_payload_lands_on_the_first_object_read():
-    e = _entry("worker-containerd-stop")
-    n = names_mod.draw(random.Random(3))
-    payload = cases.INJECTION_PAYLOADS[0]
-    ex = cases.injection(e, n, payload, random.Random(3))
-    assert payload in ex.user
-    assert payload.lower() not in ex.assistant.lower()
-    assert ex.meta["injection_payload"] == payload
-    ex_attr = cases.attributed(e, n, random.Random(3))
-    assert ex.user.count("== BEGIN read") == ex_attr.user.count("== BEGIN read")
+def test_truncated_answers_at_the_entrys_confidence_with_no_caution():
+    for e, _n, ex in _job1_rows("truncated", 17):
+        doc = json.loads(ex.assistant)
+        (row,) = doc["verdicts"]
+        assert row["confidence"] == ex.meta["expected_confidence"] == cases._confidence(e)
+        assert row["confidence"] != "low"
+        assert "treat with caution" not in doc["summary"]
 
 
 def test_empty_candidates_renders_none_section():
@@ -364,29 +511,38 @@ def _winner_is_first(user, winner_cause):
     return _cand_lines(user)[0].startswith(f"considered {winner_cause}:")
 
 
-# The regression test for the defect that compromised the first tuned model:
-# _candidates() appended the winner first unconditionally, so in 100% of
-# training rows with a winner the answer was candidate #1, and the model
-# learned to answer by index. kubeagent's own annotators walk a verdict-blind
-# sort.Strings key, so position carries no information in the field either.
-def test_candidate_order_is_shuffled_not_winner_first():
-    entry = _entry("memory-limit-oomkill")
-    winner = "memory limit too low for the workload"
-    firsts = [_winner_is_first(cases.attributed(entry, names_mod.draw(random.Random(s)),
-                                                random.Random(s)).user, winner)
-              for s in range(60)]
-    assert any(firsts), "winner never appears first — that is a shortcut too"
-    assert not all(firsts), "winner is ALWAYS first: position is a giveaway again"
+# The defect that compromised the first tuned model: _candidates() appended
+# the winner first unconditionally, so in 100% of training rows with a
+# winner the answer was candidate #1, and the model learned to answer by
+# index. A job-1 row now prints its candidates in the rules' trace order,
+# as kubeagent does: nodes, then claims, each sorted by name (rootcause.go's
+# Annotate, then AnnotatePVC; see `rules.attribute`). A node winner is first
+# in most rows. Position is not where the answer is: the `decided by rules:`
+# line names it, and `positional_probe` puts the winner last so a model that
+# answers by index scores zero there.
+_TRACE_RANK = {"node": 0, "PVC": 1}
 
 
-def test_shuffle_covers_every_case_that_renders_a_menu():
-    entry = _entry("memory-limit-oomkill")
-    winner = "memory limit too low for the workload"
-    for builder in (cases.attributed, cases.truncated):
-        firsts = [_winner_is_first(
-            builder(entry, names_mod.draw(random.Random(s)), random.Random(s)).user, winner)
-            for s in range(60)]
-        assert not all(firsts), f"{builder.__name__} still renders the winner first"
+def _trace_key(line):
+    kind, name = line.split()[1:3]
+    return _TRACE_RANK[kind], name
+
+
+@pytest.mark.parametrize("builder", ["attributed", "injection", "positional_probe",
+                                     "truncated"])
+def test_job1_candidates_come_in_trace_order(builder):
+    for e, _n, ex in _job1_rows(builder, 34):
+        lines = _cand_lines(ex.user)
+        assert lines == sorted(lines, key=_trace_key), e.key
+
+
+def test_the_winner_is_first_only_where_the_trace_puts_it():
+    """A node winner sorts before every claim; the one claim winner sorts
+    after `aux-0` when the coin adds it."""
+    for e, _n, ex in _job1_rows("attributed", 68):
+        firsts = _winner_is_first(ex.user, ex.meta["expected_cause"])
+        pad = "aux-0" in _cand_section(ex.user)
+        assert firsts == (e.key != "pvc-unbound-unschedulable" or not pad), e.key
 
 
 def test_injection_prompt_and_answer_agree_on_one_menu():
@@ -399,15 +555,39 @@ def test_injection_prompt_and_answer_agree_on_one_menu():
     assert f"considered {cause}:" in _cand_section(ex.user)
 
 
-def test_positional_probe_puts_the_winner_last_with_an_honest_tag():
-    n = names_mod.draw(random.Random(41))
-    ex = cases.positional_probe(_entry("memory-limit-oomkill"), n, random.Random(41))
+def test_positional_probe_puts_the_winner_last_behind_a_refuted_decoy():
+    """The decoy sorts first and carries `attributed`, and its fresh read
+    refutes it. The rules then decide the winner, which the trace printed
+    last, outranked."""
+    for e, n, ex in _job1_rows("positional_probe", 34):
+        lines = _cand_lines(ex.user)
+        cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
+        decoy = ("PVC aux-0 (ProvisioningFailed)" if e.key == "pvc-unbound-unschedulable"
+                 else "node worker-1 (NotReady)")
+        assert len(lines) == 2, e.key
+        assert lines[0].startswith(f"considered {decoy}: attributed — "), e.key
+        assert lines[1].startswith(f"considered {cause}: outranked — "), e.key
+        section = _cand_section(ex.user)
+        after_decoy = section.split(f"considered {decoy}: attributed — ")[1].split("\n")[1]
+        assert after_decoy.startswith("      fresh read: refuted — "), e.key
+        assert _decided_line(ex)[0] == cause, e.key
+        assert ex.meta["decoy_cause"] == decoy, e.key
+        assert ex.meta["decoy_by_workload"] == {f"{n.ns}/{n.name}": [decoy]}, e.key
+
+
+def test_positional_probe_moves_the_rows_own_node_off_the_decoys_name():
+    """The decoy is `worker-1`. A row that drew `worker-1` for its own node
+    takes `worker-2` instead, before any template is filled, so the winner
+    still sorts last."""
+    e = _entry("memory-limit-oomkill")
+    n = dataclasses.replace(names_mod.draw(random.Random(41)), node="worker-1")
+    ex = cases.positional_probe(e, n, random.Random(41))
+    cause = json.loads(ex.assistant)["verdicts"][0]["cause"]
+    assert cause.startswith("node worker-2 (")
     lines = _cand_lines(ex.user)
-    assert len(lines) >= 2
-    assert lines[-1].startswith("considered memory limit too low for the workload: attributed")
-    assert not lines[0].startswith("considered memory limit too low for the workload:")
-    assert json.loads(ex.assistant)["verdicts"][0]["cause"] == \
-        "memory limit too low for the workload"
+    assert lines[0].startswith("considered node worker-1 (NotReady): attributed — ")
+    assert lines[1].startswith(f"considered {cause}: outranked — ")
+    assert "describe node /worker-2" in _evidence_labels(ex.user)
 
 
 def test_misattribution_probe_menu_never_tags_attributed():
@@ -446,7 +626,8 @@ def test_multi_objects_injects_foreign_nodes_ruled_out():
     """Fact 1: each pair's combined objects gain the OTHER pair's declared node
     object(s), placement forced to 'off' (ruled out -- this workload's pod is not
     on that node)."""
-    node_entries = [e for e in catalog.trainable() if any(o.kind == "node" for o in e.objects)]
+    node_entries = [e for e in catalog.trainable()
+                    if any(o.kind == "node" and o.placement == "on" for o in e.objects)]
     assert len(node_entries) >= 2, "need at least 2 catalog entries with a node object"
     e1, e2 = node_entries[0], node_entries[1]
     e1_node_count = sum(1 for obj in e1.objects if obj.kind == "node")
@@ -476,7 +657,8 @@ def test_multi_derives_job_and_label_from_the_objects():
     makes this pair a real regression check, not just a shape check: the
     gold cause and rationale must follow what `rules.decide` actually
     found, never the catalog's `winner_cause`."""
-    node_entries = [e for e in catalog.trainable() if any(o.kind == "node" for o in e.objects)]
+    node_entries = [e for e in catalog.trainable()
+                    if any(o.kind == "node" and o.placement == "on" for o in e.objects)]
     assert len(node_entries) >= 2
     e1, e2 = node_entries[0], node_entries[1]
     n1 = names_mod.draw(random.Random(1))
@@ -561,6 +743,14 @@ def test_prose_decoy_helpers_are_retired():
     for helper_name in ("_candidates", "_swapped_candidates", "_decoy_cause", "_reads"):
         assert not hasattr(cases, helper_name), (
             f"cases.{helper_name} should be deleted once every builder reads e.objects")
+
+
+def test_the_catalog_winner_helpers_are_retired():
+    """Every job-1 row is built on the gather, so nothing reads the catalog's
+    hand-written winner or draws an ending for it any more."""
+    for helper_name in ("_winner_example", "_option_a_menu", "draw_ending"):
+        assert not hasattr(cases, helper_name), (
+            f"cases.{helper_name} should be deleted once job-1 rows use the gather")
 
 
 def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatch):
@@ -917,7 +1107,9 @@ def test_a_thin_entrys_clear_row_names_the_cause_its_thin_row_drops(key, shape):
 def test_thin_evidence_raises_for_every_entry_outside_the_thin_set():
     n = names_mod.draw(random.Random(5))
     outside = [e for e in catalog.trainable() if e.key not in cases.THIN_ENTRIES]
-    assert len(outside) == 15
+    # 2026-09-26 (faithful prompts): pvc-unbound-unschedulable is trainable
+    # and not thin 15 -> 16
+    assert len(outside) == 16
     for e in outside:
         for shape in SHAPES:
             with pytest.raises(ValueError, match=f"{e.key} is not a thin entry"):

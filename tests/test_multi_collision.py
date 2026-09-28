@@ -220,7 +220,12 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     # pairs different victims. Still 12 rows; 4 of them now hold a registry
     # candidate of their own, so the rule drops 4 and keeps 8. (12, 1) ->
     # (12, 4).
-    assert (len(calls), dropped) == (12, 4)
+    # 2026-09-26 (faithful prompts): job-1 rows now rotate over the 17
+    # entries the rules decide, not all 19, so every later rng draw in
+    # `generate()` moved and each `multi` row pairs different victims.
+    # Still 12 rows; 3 of them hold a registry candidate of their own, so
+    # the rule drops 3 and keeps 9. (12, 4) -> (12, 3).
+    assert (len(calls), dropped) == (12, 3)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
@@ -269,4 +274,10 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     # distinct node names (197, not 172). More names clash, so more reads
     # are renamed. Still 96 rows and 1 drop. (96, 54, 41, 1) ->
     # (96, 44, 51, 1).
-    assert (len(calls), kept, renamed, dropped) == (96, 44, 51, 1)
+    # 2026-09-26 (faithful prompts): job-1 rows now rotate over the 17
+    # entries the rules decide, not all 19, so every later rng draw in
+    # `generate()` moved. Still 96 rows; the rule keeps 49 and renames 47.
+    # No row has all three worker names clashing now, so this build no
+    # longer reaches the drop branch; the unit tests above still cover it.
+    # (96, 44, 51, 1) -> (96, 49, 47, 0).
+    assert (len(calls), kept, renamed, dropped) == (96, 49, 47, 0)

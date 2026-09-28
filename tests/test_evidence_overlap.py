@@ -67,7 +67,17 @@ DECLARED = {
     # `auth` used to render the same read; the rng stream moved and none
     # does now. Every other read is still reused, including the node
     # describes, which now print kubeagent's four conditions.
-    "positional_probe": (18, 19),
+    # 2026-09-26 (faithful prompts): (18, 19) -> (55, 56). The slice is built
+    # on the gather now, for the 17 entries the rules decide: 17 rows, each
+    # reading its pod's events, the refuted decoy's describe and the
+    # winner's read (a describe, a failed read, or nothing for a lease
+    # ending), plus the log read for the crash family. These are the reads
+    # an `attributed` row of the same entry makes, and the node decoy's
+    # describe is the healthy describe most training rows render, so 55 are
+    # reused. The miss is the claim decoy's describe, `pvc <ns>/aux-0:
+    # phase=Bound storageClass=standard`: no training row mounts `aux-0`,
+    # so none reads it.
+    "positional_probe": (55, 56),
     # Since 2026-09-24 this probe builds `own_cause`'s ruled-out prompt: no
     # object reads, and one log read on each of the five crash-family
     # entries. All five are reused, from `own_cause` and `wrong_attribution`
@@ -81,7 +91,16 @@ DECLARED = {
     # `deployment-bad-image-tag`'s: its pull events print the drawn image,
     # whose tag the mask does not blank. The five log reads are still
     # reused. (5, 5) -> (23, 24)
-    "misattribution_probe": (23, 24),
+    # 2026-09-26 (faithful prompts): (23, 24) -> (23, 25). The new entry
+    # `pvc-unbound-unschedulable` adds one row and its events read, which is
+    # reused. Three matches moved by chance, as the job-1 rows now rotate
+    # over 17 entries and every later training draw moved: the
+    # `init-crashloop` and `restart-loop` events reads each matched one
+    # `none_of_these` training row that drew the same container and restart
+    # count, and no kept row does now; `deployment-bad-image-tag`'s pull
+    # events, the old miss, now match a training row that drew the same tag.
+    # 23 + 1 - 2 + 1 = 23.
+    "misattribution_probe": (23, 25),
     # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
     # reads its first object read and then its clear log read, the read
     # kubeagent makes for every crash-family workload; any other constituent
@@ -90,7 +109,18 @@ DECLARED = {
     # read is one template per entry, and crash-family training rows render
     # it too. The one miss is the same events read as before. It read
     # (39, 40) when every constituent took its first two object reads.
-    "multi_misattribution_probe": (47, 48),
+    # 2026-09-26 (faithful prompts): (47, 48) -> (47, 50). The new entry
+    # joins the pairing at the end, so the pair that wrapped round,
+    # `volume-mount-error` with `memory-limit-oomkill` (3 reads, all hits),
+    # became two pairs with `pvc-unbound-unschedulable` (2 and 3 reads, 4
+    # hits). The miss is the new entry's refuted describe, `pvc <ns>/data-0:
+    # phase=Bound storageClass=fast-ssd`, which no kept row renders under
+    # that row's mask. The other pull events read of
+    # `deployment-bad-image-tag` stopped matching: only that entry's
+    # `attributed` and `truncated` training rows rendered it, and the rules
+    # do not decide that entry, so neither case trains it now.
+    # 47 - 3 - 1 + 4 = 47.
+    "multi_misattribution_probe": (47, 50),
     # THIS ROW WAS THE POINT OF THE INSTRUMENT. It was written to catch this
     # slice reusing none_of_these_case's read text, which is why the slice
     # cannot catch a model reciting an entry-lookup table. Negative control v4
@@ -227,7 +257,9 @@ def _fake(user: str) -> generate.Example:
 # the crash family rendered one: no object read and no log read. Since
 # 2026-09-26 every undecided row reads its pod's events first, as kubeagent
 # does, so none is empty. Measured at SEED/SIZE: 0 of 7107 kept rows and 0
-# of 252 test rows, down from 746 and 30. Such a row would have no reads, so
+# of 252 test rows, down from 746 and 30. Job-1 rows read through the gather
+# too since later on 2026-09-26, and it still holds: 0 of 7148 kept rows and
+# 0 of 251 test rows. Such a row would have no reads, so
 # it would add nothing to the trained set and nothing to a slice's count.
 # The `assert pairs` in the allowlist test still fails a slice that goes
 # wholly empty.

@@ -11,9 +11,10 @@ about `expected_cause` job 2 switches on (exact match vs. keyword
 match).
 
 Two gold fields do survive, at the top of `meta`, where a
-single-workload row mirrors them: `expected_cause` on 213 of the 252
-rows and `expected_confidence` on 223 (224 and 234 of 263 before the
-2026-09-24 generator fix removed 11 `none_of_these` rows). This view
+single-workload row mirrors them: `expected_cause` on 211 of the 251
+rows and `expected_confidence` on 221 (213 and 223 of 252 before the
+job-1 rows moved onto the gather on 2026-09-26; 224 and 234 of 263 before
+the 2026-09-24 generator fix removed 11 `none_of_these` rows). This view
 keeps both. That makes
 the pin stricter than the gated numbers need, never looser: a gold
 cause or confidence that moved on one of those rows fails this test
@@ -23,7 +24,8 @@ partly free to move. They read those two fields, and a row that carries
 one of them is pinned on it.
 
 `GRADED_VIEW_SHA256` pins the sha256 of that view over the whole exam
-(`generate.test_set()`, 252 rows since 2026-09-24; 263 before). This is not a TDD red test: it
+(`generate.test_set()`, 251 rows since the job-1 rows moved onto the
+gather on 2026-09-26; 252 from 2026-09-24; 263 before). This is not a TDD red test: it
 passes today, before the training-targets fix, because the fix only
 touches shared-origin rows, and this view keeps none of the fields it
 changes there -- their gold cause lives in the `meta["expected"]` dict.
@@ -77,6 +79,23 @@ events first, as kubeagent does, a ruled-out node gets no describe, and
 row's `decoy_cause` and `decoy_by_workload` now name `registry
 registry.example.com`, the cause its candidate line prints; no other meta
 field moves. No gold answer, `flagged` list or system message moves.
+
+Re-pinned again on 2026-09-26, when the job-1 rows began taking their
+reads, candidates and gold from the gather and the rules. The exam is a
+new baseline: it has 251 rows, not 252, and rows move from the first one
+on, because the corpus rows lead the file. 114 of the 251 user messages
+are new: every `attributed`, `truncated`, `injection` and
+`positional_probe` row (73); the 31 corpus rows whose entry the rules do
+not decide, which are `own_cause` rows now; the new entry
+`pvc-unbound-unschedulable`'s rows (one each in `own_cause`,
+`empty_candidates`, `wrong_attribution` and `misattribution_probe`, and
+two `multi_misattribution_probe` pairs that replace one); and the four
+rows where `node-cordon-diskfull`'s node is now ruled out (one each in
+`wrong_attribution` and `contradiction_probe`, two in
+`multi_misattribution_probe`). The other 137 user messages are byte for
+byte ones the old exam had. A job-1 row's gold is now the rules' cause,
+so `expected_cause`, the confidence, the rationale, the summary and
+`decoy_by_workload` move on every job-1 row.
 """
 
 from __future__ import annotations
@@ -114,7 +133,12 @@ def view(row):
 # reads, events first, and show the registry kubeagent rules out
 # 00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5 ->
 # 08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab
-GRADED_VIEW_SHA256 = "08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab"
+# 2026-09-26 (faithful prompts): the job-1 rows are built on the gather with
+# the rules' gold, the corpus rows the rules do not decide ask for their own
+# cause, a new entry joins, and node-cordon-diskfull's node is ruled out
+# 08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab ->
+# 39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d
+GRADED_VIEW_SHA256 = "39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d"
 
 
 def _digest(views) -> str:

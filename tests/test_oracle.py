@@ -142,7 +142,12 @@ def test_oracle_job1_is_perfect_on_train():
     # different number of times; every later name moves, and so does the
     # group-hash split (841 val rows before the held-out drop, not 736). The
     # case mix is unchanged. 3120 -> 3072. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3072}
+    # 2026-09-26 (faithful prompts): the `attributed`, `truncated` and
+    # `injection` rows now rotate over the 17 entries the rules decide, not
+    # all 19, and build their prompt from the evidence gather. A new entry
+    # (`pvc-unbound-unschedulable`) joins the catalog. Every later rng draw
+    # moves, and so does the split. 3072 -> 3030. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3030}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -152,7 +157,9 @@ def test_oracle_job1_is_perfect_on_val():
     # Re-measured 2026-09-24 again, case mix. 357 to 309. Rate unchanged.
     # 2026-09-26 (faithful prompts): same reason as train; the split moved
     # and val grew. 309 -> 356. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 356}
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    # as train. 356 -> 319. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 319}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
@@ -161,7 +168,9 @@ def test_oracle_job2_gate_is_perfect_on_train():
     # Re-measured 2026-09-24 again, case mix. 3000 to 3030. Rate unchanged.
     # 2026-09-26 (faithful prompts): the rng stream and the split moved, as
     # for job 1. 3030 -> 2859. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2859}
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    # as job 1. 2859 -> 2999. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2999}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
@@ -169,7 +178,9 @@ def test_oracle_job2_gate_is_perfect_on_val():
     # Re-measured 2026-09-24, job-2 generator fix. 304 to 321. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 321 to 298. Rate unchanged.
     # 2026-09-26 (faithful prompts): same reason. 298 -> 315. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 315}
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason.
+    # 315 -> 336. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 336}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -187,8 +198,11 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     `wrong_attribution` rows, which are keyword-graded. Rate still 1.0.
 
     2026-09-26 (faithful prompts): the rng stream and the split moved, as
-    for job 1 above. 2785 -> 2621. Rate still 1.0."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2621}
+    for job 1 above. 2785 -> 2621. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 2621 -> 2748. Rate still 1.0."""
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2748}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -219,13 +233,22 @@ def test_oracle_job3_is_perfect_on_train():
 
     2026-09-26 (faithful prompts): the rng stream and the split moved, as
     for job 1 above. 2832 -> 2736: `shared` 195 -> 183, `none` 2636 ->
-    2552, `separate` still 1. Rate still 1.0."""
+    2552, `separate` still 1. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 2736 -> 2793: `shared` 183 -> 190, `none` 2552 ->
+    2590, `separate` 1 -> 13. All 12 new `separate` rows are `multi` rows
+    that pair the new `pvc-unbound-unschedulable` entry (its PVC
+    confirmed) with `worker-containerd-stop` (its node confirmed): two
+    confirmed causes, and no shared one. The 13th is still two
+    `worker-containerd-stop` workloads on different nodes. Rate still
+    1.0."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2736,
-        "by_label": {"shared": {"rate": 1.0, "n": 183},
-                     "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2552}}}
+        "rate": 1.0, "n": 2793,
+        "by_label": {"shared": {"rate": 1.0, "n": 190},
+                     "separate": {"rate": 1.0, "n": 13},
+                     "none": {"rate": 1.0, "n": 2590}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -238,13 +261,19 @@ def test_oracle_job3_is_perfect_on_val():
 
     2026-09-26 (faithful prompts): the rng stream and the split moved, as
     for job 1 above. 296 -> 351: `shared` 19 -> 31, `none` 277 -> 320.
-    Rate still 1.0."""
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 351 -> 313: `shared` 31 -> 24, `none` 320 -> 288,
+    `separate` 0 -> 1 (a `pvc-unbound-unschedulable` workload next to a
+    `worker-containerd-stop` one, as on the train side). Rate still
+    1.0."""
     board = score.scoreboard(list(_val_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 351,
-        "by_label": {"shared": {"rate": 1.0, "n": 31},
-                     "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 320}}}
+        "rate": 1.0, "n": 313,
+        "by_label": {"shared": {"rate": 1.0, "n": 24},
+                     "separate": {"rate": 1.0, "n": 1},
+                     "none": {"rate": 1.0, "n": 288}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -267,13 +296,20 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     2026-09-26 (faithful prompts): the `multi` share is unchanged again,
     but the rng stream moved (five PVC decoys became node decoys or went
     away), so the names and the split moved -- 1226 -> 1240 in train, 132 -> 118 in val. Still
-    perfect."""
+    perfect.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather. The `multi`
+    share is unchanged, but the rng stream moved and a new entry joined
+    the pool, so the names and the split moved -- 1240 -> 1161 in train,
+    118 -> 109 in val. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (1240.0, 1240)
-    assert multi_job1(_val_results()) == (118.0, 118)
+    # 2026-09-26 (faithful prompts): see the docstring. (1240.0, 1240) ->
+    # (1161.0, 1161); (118.0, 118) -> (109.0, 109).
+    assert multi_job1(_train_results()) == (1161.0, 1161)
+    assert multi_job1(_val_results()) == (109.0, 109)
 
 
 def test_exam_oracle_job1_misses_only_contradiction_probe():
@@ -287,16 +323,30 @@ def test_exam_oracle_job1_misses_only_contradiction_probe():
     sits on another node, so kubeagent rules it out. Its
     `contradiction_probe` row has no attributed candidate any more; it is
     undecided, so it moved from job 1 to job 2. 157 -> 156 graded, 19 -> 18
-    misses; the 138 passes do not move."""
+    misses; the 138 passes do not move.
+
+    2026-09-26 (faithful prompts): job-1 rows are built on the gather now.
+    `attributed` fell from 53 rows to 22, and the corpus rows the rules do
+    not decide became `own_cause` rows, which are job 2. `truncated`,
+    `injection` and `positional_probe` fell from 19 rows to 17. The
+    `node-cordon-diskfull` `contradiction_probe` row also left job 1: its
+    node object now names a node the pod is not on, so the rules rule it
+    out and the row is undecided. 156 -> 118
+    graded, 138 -> 101 passes, 18 -> 17 misses -- still exactly the
+    `contradiction_probe` rows."""
     exam, results = _exam()
     scores = [s for r in results for s in r["job1_scores"]]
     # 2026-09-26 (faithful prompts): oversized's contradiction row left
     # job 1. 157 -> 156; passes stay 138.
-    assert (len(scores), sum(scores)) == (156, 138.0)
+    # 2026-09-26 (faithful prompts): see the docstring. (156, 138.0) ->
+    # (118, 101.0).
+    assert (len(scores), sum(scores)) == (118, 101.0)
     misses = [e.case for e, r in zip(exam, results)
              if sum(r["job1_scores"]) < len(r["job1_scores"])]
     # 2026-09-26 (faithful prompts): same reason. 19 -> 18.
-    assert len(misses) == 18
+    # 2026-09-26 (faithful prompts): node-cordon-diskfull's row left job 1
+    # too. 18 -> 17.
+    assert len(misses) == 17
     assert set(misses) == {"contradiction_probe"}
 
 
@@ -307,14 +357,18 @@ def test_exam_oracle_job3_is_perfect():
     `FROZEN_SLICE_SHA256` / `EVAL_SET_SHA256` over them would bank the error.
     It reads 1.0 -- 5 of 5 `shared`-labeled rows (the three origin-object
     stories' `shared_origin_probe` halves) and 34 of 34 `none`-labeled
-    rows."""
+    rows.
+
+    2026-09-26 (faithful prompts): the new `pvc-unbound-unschedulable`
+    entry adds one `multi_misattribution_probe` row, labeled `none`. 39 ->
+    40 rows, `none` 34 -> 35. Still 1.0."""
     _, results = _exam()
     board = score.scoreboard(list(results))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 39,
+        "rate": 1.0, "n": 40,
         "by_label": {"shared": {"rate": 1.0, "n": 5},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 34}}}
+                     "none": {"rate": 1.0, "n": 35}}}
 
 
 def test_exam_oracle_job2_is_perfect():
@@ -333,7 +387,15 @@ def test_exam_oracle_job2_is_perfect():
     2026-09-26 (faithful prompts): the `oversized` `contradiction_probe`
     row is now undecided (its node decoy is ruled out), so it joined job 2
     -- 142 to 143. Still perfect.
+
+    2026-09-26 (faithful prompts): job-1 rows are built on the gather.
+    31 corpus rows the rules do not decide became `own_cause` rows (+31).
+    The new `pvc-unbound-unschedulable` entry adds its `own_cause`,
+    `empty_candidates`, `wrong_attribution` and `misattribution_probe`
+    rows and one two-workload `multi_misattribution_probe` row (+6).
+    `node-cordon-diskfull`'s `contradiction_probe` row is now undecided
+    (+1). 143 -> 181. Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 143}
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 181}

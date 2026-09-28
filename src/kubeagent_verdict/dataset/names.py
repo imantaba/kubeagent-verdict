@@ -19,11 +19,12 @@ INIT_CONTAINERS = ("init-config", "init-migrate")
 NODES = ("worker-1", "worker-2", "worker-3")
 PVCS = ("data-0", "cache-0", "media-assets")
 # A fixed decoy-PVC pool, never drawn by the rng. No catalog entry names
-# one: a pod with a finding is past scheduling or waits on something other
-# than a claim, so no entry has a mounted Pending PVC to blame. All nine are
-# the always-ruled-out pads `truncated` appends to overflow the read budget
-# (render.PAD_PVC_OBJECTS). A scenario may still name one directly when its
-# own PVC decoy must stay distinct from a drawn {pvc}.
+# one, so a pad never collides with a drawn {pvc}, and every pad sorts
+# before every drawn PVC, so in the rules' trace a pad comes first. Three
+# builders use them: `attributed` adds an unmounted aux-0 on a coin;
+# `positional_probe` puts a mounted, refuted aux-0 ahead of a claim winner;
+# and `truncated` appends all nine, unmounted, to push a claim winner past
+# the 8-candidate cap (render.PAD_PVC_OBJECTS).
 PAD_PVCS = ("aux-0", "aux-1", "aux-2", "aux-3", "aux-4", "aux-5",
             "aux-6", "aux-7", "aux-8")
 DNS_NAMESPACE = "kube-system"  # fixed pair for the CoreDNS entries

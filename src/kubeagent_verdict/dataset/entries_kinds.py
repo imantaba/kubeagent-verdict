@@ -1,7 +1,12 @@
-"""Kind-keyed catalog entries — one per issue kind no slug entry covers (11 when complete)."""
+"""Kind-keyed catalog entries — one per issue kind no slug entry covers (11),
+then `pvc-unbound-unschedulable`, which covers neither a slug nor a kind."""
 
 from kubeagent_verdict.dataset.catalog import CatalogEntry
-from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Object
+from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
+
+_UNBOUND_CLAIM = ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
+                  "preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
+                  "scheduling.")
 
 ENTRIES = [
     CatalogEntry(
@@ -482,6 +487,43 @@ ENTRIES = [
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
+        ),
+    ),
+    # The one job-1 entry whose winner is a claim. It covers no slug and no
+    # kind, and sits last in the catalog so every other entry keeps its
+    # place in `trainable()`.
+    CatalogEntry(
+        key="pvc-unbound-unschedulable",
+        covered_slugs=(),
+        covered_kinds=(),
+        trains=True,
+        workload_kind="Deployment",
+        status="Degraded",
+        issue="Unschedulable",
+        reason="No node can schedule this pod",
+        evidence=_UNBOUND_CLAIM,
+        recommendation="create the storage class the claim {pvc} asks for, or point the claim "
+                       "at one that exists",
+        # The pod's own event only. kubeagent reads a pod's events by its name
+        # (FieldSelector "involvedObject.name=" + name,
+        # internal/investigate/reader.go:302), and the volume controller
+        # records ProvisioningFailed on the claim, not on the pod. So the
+        # events read shows the scheduler's FailedScheduling and never
+        # ProvisioningFailed. The storage class still reaches the prompt: in
+        # the candidate line's MissingStorageClass and in the claim's describe.
+        events=(("FailedScheduling", _UNBOUND_CLAIM, 5),),
+        # Every row shows the events line; the describe and the candidate's
+        # verdict differ by case, so the rationale cites the events line only.
+        rationale="The scheduler's FailedScheduling event says the pod has unbound immediate "
+                  "PersistentVolumeClaims, so the pod cannot be placed until the claim it "
+                  "mounts gets a volume.",
+        direct=True,
+        own_cause="a claim the pod mounts is still waiting for its volume to be provisioned",
+        own_cause_keywords=("claim", "volume"),
+        objects=(
+            Object(kind="pvc", name="{pvc}", scan_reason="MissingStorageClass",
+                   placement="mounted", fresh=Fresh(phase="Pending", storage_class="fast-ssd"),
+                   intent="cause"),
         ),
     ),
 ]

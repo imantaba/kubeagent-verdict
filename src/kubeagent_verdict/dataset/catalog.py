@@ -1,14 +1,14 @@
 """The scenario catalog: one curated entry per fault slug and per issue kind.
 
-An entry is a template kit, not an example: Task 7's case builders
+An entry is a template kit, not an example: the case builders in cases.py
 substitute synthetic names (names.py) into the {placeholder} fields and
-assemble full prompts through the contract renderers. Cause phrasing
-(winner_cause) is hand-authored per entry, not lifted from
-internal/rootcause/rootcause.go — none of its node/registry/PVC shapes
-match a winner_cause value. Reason phrasing echoes kubeagent's own
-kubelet/API-server reason strings, not text copied from the known-issues
-snapshot. Literal braces inside a template must be doubled ({{ }}) because
-templates go through str.format.
+assemble full prompts through the contract renderers. A job-1 row's cause
+is never written here: the rules decide it from the entry's objects, in
+kubeagent's own words. The cause an entry does write is its own_cause, the
+answer when the rules leave the workload undecided. Reason phrasing echoes
+kubeagent's own kubelet/API-server reason strings, not text copied from
+the known-issues snapshot. Literal braces inside a template must be
+doubled ({{ }}) because templates go through str.format.
 """
 
 from __future__ import annotations
@@ -84,3 +84,25 @@ def by_slug() -> dict[str, CatalogEntry]:
 
 def trainable() -> tuple[CatalogEntry, ...]:
     return tuple(e for e in all_entries() if e.trains)
+
+
+# The trainable entries the rules decide in a single-workload row: the
+# job-1 rows (attributed, injection, positional_probe, truncated) draw
+# only from these. Listed, not computed, so a catalog edit that changes
+# the set fails tests/test_catalog.py instead of quietly moving the
+# rotation. The three trainable entries left out cannot decide:
+# deployment-bad-image-tag's registry counts one workload against a
+# threshold of 2, and node-cordon-diskfull's and
+# oversized-job-unschedulable's nodes hold no pod of the workload.
+_JOB1_KEYS = frozenset({
+    "memory-limit-oomkill", "networkpolicy-deny-all", "coredns-corefile-broken",
+    "worker-containerd-stop", "crashloop-pod", "probe-failure", "container-start-error",
+    "create-container-config-error", "init-crashloop", "init-config-error",
+    "init-errimagepull", "init-imagepullbackoff", "init-oomkilled", "restart-loop",
+    "volume-attach-error", "volume-mount-error", "pvc-unbound-unschedulable",
+})
+
+
+def job1_entries() -> tuple[CatalogEntry, ...]:
+    """The 17 trainable entries the rules decide, in `trainable()` order."""
+    return tuple(e for e in trainable() if e.key in _JOB1_KEYS)

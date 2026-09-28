@@ -141,10 +141,18 @@ def generate(seed: int, size: int) -> list[Example]:
     def rotate(i: int):
         return entries[i % len(entries)]
 
+    # `attributed`, `truncated` and `injection` answer with the rules' own
+    # cause, so they rotate over the entries the rules decide. The other
+    # cases rotate over every trainable entry.
+    job1 = catalog.job1_entries()
+
+    def rotate_job1(i: int):
+        return job1[i % len(job1)]
+
     train_scen = propagation.trainable_scenarios()
 
     for i in range(counts["attributed"]):
-        e = rotate(i)
+        e = rotate_job1(i)
         out.append(cases.attributed(e, _draw(e, rng), rng))
     # Thin evidence exists for four entries only. Rotate through them, and
     # alternate the two undecided shapes once per full pass.
@@ -266,11 +274,11 @@ def generate(seed: int, size: int) -> list[Example]:
         out.append(cases.shared_origin_decoy(
             p, random.Random(salt), victims=victims))
     for i in range(counts["truncated"]):
-        e = rotate(i)
+        e = rotate_job1(i)
         out.append(cases.truncated(e, _draw(e, rng), rng))
     for i in range(counts["injection"]):
         payload = cases.INJECTION_PAYLOADS[i % len(cases.INJECTION_PAYLOADS)]
-        e = rotate(i)
+        e = rotate_job1(i)
         out.append(cases.injection(e, _draw(e, rng), payload, rng))
     for i in range(counts["empty_candidates"]):
         e = rotate(i)
@@ -323,6 +331,7 @@ def corpus_test_set() -> list[Example]:
     data_dir = Path(__file__).resolve().parents[3] / "data" / "corpus"
     load = corpus.load_corpus(sorted(data_dir.glob("chaos-corpus-*.jsonl")))
     slugs = catalog.by_slug()
+    job1 = {e.key for e in catalog.job1_entries()}
     out: list[Example] = []
     for row in load.rows:
         entry = slugs.get(row.fault)
@@ -331,7 +340,12 @@ def corpus_test_set() -> list[Example]:
         digest = hashlib.sha256(
             f"{row.scenario}|{row.fault}|{row.k8s}|{row.distro}".encode()).digest()
         rng = random.Random(int.from_bytes(digest[:8], "big"))
-        ex = cases.attributed(entry, _draw(entry, rng), rng)
+        # A fault whose entry the rules do not decide has no rule cause to
+        # be the gold, so its row asks for the entry's own cause instead.
+        if entry.key in job1:
+            ex = cases.attributed(entry, _draw(entry, rng), rng)
+        else:
+            ex = cases.own_cause_case(entry, _draw(entry, rng))
         meta = dict(ex.meta, source={"scenario": row.scenario, "fault": row.fault,
                                      "k8s": row.k8s, "distro": row.distro, "rc": row.rc})
         out.append(Example(case=ex.case, group=ex.group, system=ex.system,
@@ -348,6 +362,10 @@ def _entry_rng(*parts: str) -> random.Random:
 
 def held_out_case_set() -> list[Example]:
     """One held-out example per (trainable entry, non-attributed case).
+
+    `truncated` and `injection` are the exceptions on the other side: they
+    answer with the rules' cause, so they give one row per entry the rules
+    decide (`catalog.job1_entries()`) and none for the rest.
 
     Without this the test set is 100% `attributed` — the shape corpus rows
     happen to take — so roughly half the curriculum trains and is never
@@ -366,9 +384,12 @@ def held_out_case_set() -> list[Example]:
         "empty_candidates": lambda e, n, rng: cases.empty_candidates(e, n),
         "wrong_attribution": lambda e, n, rng: cases.wrong_attribution(e, n),
     }
+    job1 = {e.key for e in catalog.job1_entries()}
     out: list[Example] = []
     for entry in catalog.trainable():
         for case in HELD_OUT_CASES:
+            if case in ("truncated", "injection") and entry.key not in job1:
+                continue
             if case == "none_of_these":
                 if entry.key in cases.THIN_ENTRIES:
                     for shape in ("refuted", "ruled_out"):
@@ -387,9 +408,12 @@ def held_out_case_set() -> list[Example]:
 
 
 def probe_sets() -> list[Example]:
-    """The four adversarial eval-only slices, one row per trainable entry.
+    """The four adversarial eval-only slices, one row per trainable entry
+    that declares an object.
 
-    `positional_probe` puts the correct answer last with an honest tag;
+    `positional_probe` gives one row only per entry the rules decide
+    (`catalog.job1_entries()`): its winner prints last, behind a decoy the
+    rules attribute and then refute;
     `misattribution_probe` rules every candidate out, so the answer is on no
     candidate line (no attributed candidate since 2026-09-16; since
     2026-09-24 also no header and no object reads); `multi_misattribution_probe`
@@ -410,19 +434,25 @@ def probe_sets() -> list[Example]:
     """
     from kubeagent_verdict.dataset import cases, catalog
 
+    job1 = {e.key for e in catalog.job1_entries()}
     out: list[Example] = []
     for entry in catalog.trainable():
         if not entry.objects:
             continue
-        positional_rng = _entry_rng("positional-probe", entry.key)
-        out.append(cases.positional_probe(
-            entry, _draw(entry, positional_rng), positional_rng))
+        if entry.key in job1:
+            positional_rng = _entry_rng("positional-probe", entry.key)
+            out.append(cases.positional_probe(
+                entry, _draw(entry, positional_rng), positional_rng))
         out.append(cases.misattribution_probe(
             entry, _draw(entry, _entry_rng("misattribution-probe", entry.key))))
 
     # APPENDED, never interleaved: the two slices above keep their exact row
     # positions, so a scoreboard banked against the previous test file still
-    # lines up row-for-row and the negative control stays comparable.
+    # lines up row-for-row and the negative control stays comparable. That
+    # held until 2026-09-26 (faithful prompts): `positional_probe` dropped
+    # its rows for the entries the rules do not decide, and a new entry
+    # joined both slices, so a scoreboard banked before then no longer lines
+    # up with this file.
     #
     # `multi` is ~13% of the curriculum and had no test row at all, while
     # `cases.multi()` never swaps a tag — so "trust the attributed tag" is a
@@ -433,11 +463,18 @@ def probe_sets() -> list[Example]:
     for i, entry in enumerate(with_objects):
         other = with_objects[(i + 1) % len(with_objects)]
         first = _draw(entry, _entry_rng("multi-probe-a", entry.key))
-        second = _draw(other, _entry_rng("multi-probe-b", entry.key, other.key))
+        second_rng = _entry_rng("multi-probe-b", entry.key, other.key)
+        second = _draw(other, second_rng)
         # A collision used to `continue` here, which silently shrank the slice
         # and the denominator every rate on it is divided by. The builder now
         # raises instead, so a collision is a named failure rather than a
-        # missing row nobody counts.
+        # missing row nobody counts. Since 2026-09-26 (faithful prompts) a
+        # collision redraws the second workload from its own rng, as
+        # `generate()`'s `multi` loop does, so a pair that does not collide
+        # draws exactly what it drew before. The pair that wraps round to the
+        # first entry is the one that collided when a new entry joined.
+        while (second.ns, second.name) == (first.ns, first.name):
+            second = _draw(other, second_rng)
         out.append(cases.multi_misattribution_probe(
             [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))
 

@@ -760,10 +760,14 @@ def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
 
 # ------------------------------------------------------ the eval must not move
 
-def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
+def test_the_eval_set_is_two_hundred_and_fifty_one_rows():
     """253 until `shared_origin_decoy_probe` appended its ten, then 263
     until the 2026-09-24 job-2 generator fix cut the `none_of_these` slice
-    from 19 rows to 8.
+    from 19 rows to 8, then 252 until 2026-09-26 (faithful prompts), when
+    `truncated`, `injection` and `positional_probe` came to cover only the
+    17 entries the rules decide (-6) and the new
+    `pvc-unbound-unschedulable` entry added one row to each of five other
+    cases (+5).
 
     This test exists so the TRAINING half of the shared-origin work cannot
     move the exam by accident — a curriculum change that grows the test set
@@ -772,9 +776,11 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
     `tests/test_shared_origin_decoy_probe.py` proving the training set stayed
     byte-identical across the change. The 2026-09-24 generator fix moved it
     on purpose too, and re-pinned both exam digests below in the same
-    commit.
+    commit. The 2026-09-26 job-1 change did too, and re-pinned all three
+    exam digests in the same commit.
     """
-    assert len(generate.test_set()) == 252
+    # 2026-09-26 (faithful prompts): see the docstring. 252 -> 251.
+    assert len(generate.test_set()) == 251
 
 
 # The frozen slice, byte for byte: the first 253 rows until 2026-09-24,
@@ -904,7 +910,30 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 # system message, gold answer, label or `flagged` list moves.
 # e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa ->
 # 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b
-FROZEN_SLICE_SHA256 = "24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b"
+#
+# 2026-09-26 (faithful prompts): the job-1 rows now take their reads,
+# candidates and gold answer from the gather. The slice goes from 242 rows
+# to 241, and only 127 rows stay byte for byte. 31 corpus rows the rules do
+# not decide (`deployment-bad-image-tag` 24, `node-cordon-diskfull` 4,
+# `oversized-job-unschedulable` 3) are `own_cause` rows now, not
+# `attributed`. `truncated`, `injection` and `positional_probe` lose those
+# three entries' rows and gain one for the new `pvc-unbound-unschedulable`
+# entry, which also adds one row each to `own_cause`, `empty_candidates`,
+# `wrong_attribution`, `misattribution_probe` and
+# `multi_misattribution_probe` (there it takes the wrap pair's place, so one
+# old pair goes and two new ones come). The 70 job-1 rows that stay
+# (`attributed` 22, the other three 16 each) change their user message,
+# gold answer and meta: the gold cause is the rules' own decision, the
+# summary is one line, and `truncated` loses its flat "low" and its "treat
+# with caution" line. IS-10 moves 4 more rows: `node-cordon-diskfull`'s
+# `wrong_attribution` row (user message), its `contradiction_probe` row
+# (user message and meta: it is undecided now, so it moves from job 1 to
+# job 2), and two `multi_misattribution_probe` rows (user message). No
+# system message moves. Every number banked against the old bytes is
+# retired.
+# 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b ->
+# 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1
+FROZEN_SLICE_SHA256 = "41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -992,7 +1021,14 @@ FROZEN_SLICE_SHA256 = "24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9
 # move, so this digest moves only because the frozen slice inside it does.
 # f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb ->
 # f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee
-EVAL_SET_SHA256 = "f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee"
+#
+# 2026-09-26 (faithful prompts): the job-1 rows moved onto the gather,
+# which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not job-1 catalog rows and do not
+# move, so this digest moves only because the frozen slice inside it does.
+# f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee ->
+# 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89
+EVAL_SET_SHA256 = "8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89"
 
 
 def _digest(rows) -> str:
@@ -1005,11 +1041,13 @@ def test_the_frozen_slice_is_every_row_before_the_decoy_probe():
     """The frozen slice is named by what it holds, not by a row number:
     every exam row before the trailing ten `shared_origin_decoy_probe`
     rows. Its length is pinned here, apart from its digest: 253 until the
-    2026-09-24 job-2 generator fix, 242 since."""
+    2026-09-24 job-2 generator fix, 242 until the 2026-09-26 job-1 change
+    (see `FROZEN_SLICE_SHA256`), 241 since."""
     rows = generate.test_set()
     assert [e.case for e in rows[-10:]] == ["shared_origin_decoy_probe"] * 10
     assert "shared_origin_decoy_probe" not in {e.case for e in rows[:-10]}
-    assert len(rows[:-10]) == 242
+    # 2026-09-26 (faithful prompts): see `FROZEN_SLICE_SHA256`. 242 -> 241.
+    assert len(rows[:-10]) == 241
 
 
 def test_the_frozen_slice_is_byte_identical_to_the_ones_every_scoreboard_used():
@@ -1292,10 +1330,18 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
 def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     """The `separate` label is pinned three ways (a rules unit test, a scorer
     unit test, and this one): at least one real training prompt must reach
-    `label == "separate"`, both its workloads confirmed and on different
-    nodes, or the label exists only in isolated unit tests and never in a
-    prompt a model actually trains on. `separate` stays at 0 in the exam
+    `label == "separate"`, every workload in it confirmed with a cause of
+    its own, or the label exists only in isolated unit tests and never in
+    a prompt a model actually trains on. `separate` stays at 0 in the exam
     (R42), so this prompt has to live in the training split.
+
+    2026-09-26 (faithful prompts): the first such row used to hold two
+    `worker-containerd-stop` workloads on two different nodes. Job-1 rows
+    now rotate over 17 entries, so the rng stream moved, and the new
+    `pvc-unbound-unschedulable` entry joined the `multi` pool. The first
+    `separate` row now holds three workloads: one decided on its own PVC
+    and two on two different NotReady nodes. The check reads "every cause
+    is distinct" instead of "two nodes".
     """
     train, _ = generate.split(generate.generate(seed=17, size=8000), seed=17)
     separate_rows = [e for e in train
@@ -1303,13 +1349,15 @@ def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     assert separate_rows, "no training-only separate-label multi prompt at seed=17"
     row = separate_rows[0]
     workloads = row.meta["workloads"]
-    assert len(workloads) == 2
+    # 2026-09-26 (faithful prompts): see the docstring. 2 -> 3.
+    assert len(workloads) == 3
     for meta in workloads.values():
         assert meta["decided"] is True
     # decided_evidence is a template sentence ("Ready condition is False
     # now") shared by every worker-containerd-stop draw regardless of which
     # node it lands on, so it carries no node identity. decided_cause does
-    # ("node worker-2 (NotReady)" vs. "node worker-1 (NotReady)") -- the
-    # per-workload field this assert actually needs.
-    nodes = {meta["decided_cause"] for meta in workloads.values()}
-    assert len(nodes) == 2, "both workloads must be on different nodes"
+    # ("node worker-2 (NotReady)" vs. "node worker-3 (NotReady)" vs.
+    # "PVC data-0 (MissingStorageClass)") -- the per-workload field this
+    # assert actually needs.
+    causes = {meta["decided_cause"] for meta in workloads.values()}
+    assert len(causes) == len(workloads), "every workload must have its own cause"

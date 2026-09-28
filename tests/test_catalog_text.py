@@ -217,16 +217,15 @@ def test_the_typed_node_describes_are_what_read_text_prints():
         assert e.contradiction.format(**NAMES) == r.read_text(healthy, ns=N.ns, pod=N.pod)[1], key
 
 
-def test_the_refuted_row_shows_the_disk_pressure_describe():
-    # An empty_candidates row has no candidate, so nothing to describe
-    # (internal/investigate/gather.go:92-133 reads only a candidate's
-    # object). The refuted row describes its attributed node.
+def test_the_cordoned_node_is_ruled_out_and_never_described():
+    # The pod is unscheduled, so no pod of the workload is on the node, and
+    # kubeagent reads only a live candidate's object
+    # (internal/investigate/gather.go:92-133). The describe text itself is
+    # pinned by test_the_cordoned_disk_pressure_node_prints_its_story.
     user = cases.wrong_attribution(_entry("node-cordon-diskfull"), N).user
-    assert ("== describe node /worker-2 ==\n"
-            "node worker-2: unschedulable=true\n"
-            + MEMORY_OK + DISK_PRESSURE + PID_OK + READY_TRUE
-            + "  taint node.kubernetes.io/unschedulable=:NoSchedule\n"
-            "  taint node.kubernetes.io/disk-pressure=:NoSchedule\n") in user
+    assert ("    considered node worker-2 (NotReady): ruled out — no pod of this workload "
+            "is scheduled on it\n") in user
+    assert "== describe node" not in user
 
 
 def test_the_contradiction_row_shows_a_ready_describe():
@@ -299,12 +298,18 @@ FINDING_LINES = [
      "Unschedulable — No node can schedule this pod "
      "(0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had untolerated "
      "taint(s)." + PREEMPTION + ")")),
+    ("pvc-unbound-unschedulable", (
+     "Unschedulable — No node can schedule this pod "
+     "(0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims."
+     + PREEMPTION + ")")),
 ]
 
 
 @pytest.mark.parametrize("key, line", FINDING_LINES, ids=[k for k, _ in FINDING_LINES])
 def test_the_finding_line_is_the_detector_text(key, line):
-    user = cases.attributed(_entry(key), N, random.Random(0)).user
+    # own_cause builds a row for every trainable entry; attributed builds
+    # one only for an entry the rules decide.
+    user = cases.own_cause_case(_entry(key), N).user
     assert f"    issue: {line}\n" in user
 
 
@@ -326,6 +331,32 @@ def test_the_cordoned_node_events_read_carries_the_preemption_suffix():
         "events for shop/api-7f9c4d5b6-x2x9k:\n"
         "  FailedScheduling: 0/3 nodes are available: 1 node(s) were unschedulable, "
         "2 node(s) had untolerated taint(s)." + PREEMPTION + " (x6)\n")
+
+
+def test_the_unbound_claim_events_read_carries_the_preemption_suffix():
+    # The pod's own event. The claim's ProvisioningFailed event is recorded
+    # on the claim, and kubeagent reads events by the pod's name
+    # (internal/investigate/reader.go:302).
+    w = cases.gather_workload(_entry("pvc-unbound-unschedulable"), N, ())
+    assert gather.format_events(N.ns, N.pod, w.events) == (
+        "events for shop/api-7f9c4d5b6-x2x9k:\n"
+        "  FailedScheduling: 0/3 nodes are available: pod has unbound immediate "
+        "PersistentVolumeClaims." + PREEMPTION + " (x5)\n")
+
+
+def test_the_unbound_claim_row_prints_its_candidate_and_its_describe():
+    e = _entry("pvc-unbound-unschedulable")
+    users = [cases.attributed(e, N, random.Random(seed)).user for seed in range(20)]
+    line = ("    considered PVC data-0 (MissingStorageClass): attributed — "
+            "pod api-7f9c4d5b6-x2x9k mounts it\n")
+    assert all(line in user for user in users)
+    confirmed = [user for user in users
+                 if line + "      fresh read: confirmed — phase is still Pending\n" in user]
+    assert confirmed
+    for user in confirmed:
+        # internal/investigate/reader.go:250-257, describePVC
+        assert ("== describe pvc shop/data-0 ==\n"
+                "pvc shop/data-0: phase=Pending storageClass=fast-ssd volume=\n") in user
 
 
 def test_the_volume_mount_events_read_is_the_kubelet_text():
@@ -370,9 +401,11 @@ def _old_events_read(e: catalog.CatalogEntry) -> str:
 def test_the_events_print_the_old_read_byte_for_byte():
     """Where the old read was already kubeagent's form, the tuples print it
     exactly. The namespace and pod come from the old read's own first line:
-    coredns-corefile-broken's says kube-system."""
+    coredns-corefile-broken's says kube-system. An entry written after the
+    old reads has none to compare."""
+    with_reads = [e for e in catalog.trainable() if e.reads]
     kubeagent_form = set()
-    for e in catalog.trainable():
+    for e in with_reads:
         old = _old_events_read(e)
         if not old.startswith("events for "):
             continue
@@ -380,7 +413,7 @@ def test_the_events_print_the_old_read_byte_for_byte():
         ns, pod = old.split(":\n", 1)[0].removeprefix("events for ").split("/")
         w = cases.gather_workload(e, N, ())
         assert gather.format_events(ns, pod, w.events) == old, e.key
-    assert {e.key for e in catalog.trainable()} - kubeagent_form == set(TABLE_FORM)
+    assert {e.key for e in with_reads} - kubeagent_form == set(TABLE_FORM)
 
 
 @pytest.mark.parametrize("key", sorted(TABLE_FORM))
@@ -464,6 +497,7 @@ KEYWORDS = {
     "restart-loop": ("panic", "container"),
     "volume-attach-error": ("attached", "node"),
     "volume-mount-error": ("volume", "pod"),
+    "pvc-unbound-unschedulable": ("claim", "volume"),
 }
 
 
@@ -495,6 +529,8 @@ def test_the_coredns_command_names_the_coredns_container():
 @pytest.mark.parametrize("key", ["create-container-config-error", "volume-attach-error",
                                  "volume-mount-error", "oversized-job-unschedulable"])
 def test_the_swapped_decoy_is_a_node_on_the_prompt(key):
-    user = cases.attributed(_entry(key), N, random.Random(0)).user
+    # own_cause shows the declared objects alone: an attributed row may add
+    # a ruled-out PVC of its own.
+    user = cases.own_cause_case(_entry(key), N).user
     assert "    considered node worker-2 (" in user
     assert "considered PVC " not in user

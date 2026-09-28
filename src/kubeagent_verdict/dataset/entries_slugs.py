@@ -164,9 +164,12 @@ ENTRIES = [
         own_cause="the pod's node is cordoned and reporting disk pressure",
         own_cause_keywords=("node", "pod"),
         grounding=("Unschedulable",),
+        # The pod is unscheduled, so no pod of the workload is on the node
+        # and the rules rule it out: placement "off". No builder describes
+        # it, so no prompt for this entry shows the disk pressure.
         objects=(
             Object(kind="node", name="{node}", scan_reason="no kubelet lease",
-                   placement="on",
+                   placement="off",
                    fresh=Fresh(ready="True", unschedulable=True, disk_pressure=True,
                                taints=(("node.kubernetes.io/unschedulable", "", "NoSchedule"),
                                        ("node.kubernetes.io/disk-pressure", "", "NoSchedule"))),
