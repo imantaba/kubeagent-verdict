@@ -375,6 +375,90 @@ def test_own_blocks_gives_a_workload_the_prompt_never_prints_an_empty_set():
     assert blocks["web/db"] == frozenset()
 
 
+def _evidence_prompt(*reads: list[str]) -> str:
+    return "\n".join(["== BEGIN evidence ==", *(line for read in reads for line in read),
+                      "== END evidence =="])
+
+
+def test_own_blocks_keeps_a_read_in_the_gather_group_it_sits_in():
+    """kubeagent's gather reads one workload at a time. Each workload's group
+    opens with the events read of its pod, then its describes, then its logs
+    (`gatherEvidence`, internal/investigate/gather.go:71-155 at v1.24.0). So a
+    describe belongs to the group it sits in, whatever object it names.
+
+    This is the example the final review found in a `multi` row of the
+    training pool. The claim `cache-0` is `web/indexer`'s, and its describe
+    sits in `web/indexer`'s group. A rule that read the owner off the label's
+    name gave it to `web/cache`, because `cache-0` starts with `cache-`.
+    """
+    cache_reads = [
+        "== events web/cache-f42a77777-6d9cl ==",
+        "events for web/cache-f42a77777-6d9cl:",
+        "  Failed: Error: RunContainerError: failed to create containerd task (x4)",
+        "",
+        "== describe node /worker-2 ==",
+        "node worker-2: unschedulable=false",
+        "",
+    ]
+    indexer_reads = [
+        "== events web/indexer-c658459e4-9dwxr ==",
+        "events for web/indexer-c658459e4-9dwxr:",
+        "  FailedScheduling: pod has unbound immediate PersistentVolumeClaims (x5)",
+        "",
+        "== describe pvc web/cache-0 ==",
+        "pvc web/cache-0: phase=Pending storageClass=fast-ssd volume=",
+    ]
+    blocks = score._own_blocks(_evidence_prompt(cache_reads, indexer_reads),
+                               ["web/cache", "web/indexer"])
+
+    assert blocks == {"web/cache": _normalized(cache_reads),
+                      "web/indexer": _normalized(indexer_reads)}
+
+
+def test_own_blocks_gives_a_gather_group_no_flagged_workload_opens_to_nobody():
+    """An events read whose pod belongs to no flagged workload opens a group
+    that is no flagged workload's. Its reads do not fall to the workload read
+    before it."""
+    api_reads = [
+        "== events web/api-7d9f-abcde ==",
+        "events for web/api-7d9f-abcde:",
+        "  BackOff:   back-off restarting failed container main (x4)",
+        "",
+    ]
+    other_reads = [
+        "== events web/other-1a2b-klmno ==",
+        "events for web/other-1a2b-klmno:",
+        "  Failed: Error: ErrImagePull (x1)",
+    ]
+    blocks = score._own_blocks(_evidence_prompt(api_reads, other_reads), ["web/api"])
+
+    assert blocks == {"web/api": _normalized(api_reads)}
+
+
+def test_own_blocks_reads_a_tool_loop_trail_by_name():
+    """A trail with no events read has no gather group: the shared-origin
+    rows print the tool loop's labels (`get_events`, `describe ... (Pod)`).
+    There each label that names a workload, or a pod of one, moves the owner,
+    and the longest name wins. A read that names no workload stays with the
+    one before it. This rule held before the gather-group rule, and it still
+    holds where no group exists."""
+    api_reads = [
+        "== get_events web/api ==",
+        "Warning  BackOff  kubelet  Back-off restarting failed container main",
+        "",
+        "== describe kube-system/coredns (Deployment) ==",
+        "Replicas:  2 desired | 0 available",
+        "",
+    ]
+    gw_reads = [
+        "== describe web/api-gw-5c6b-fghij (Pod) ==",
+        "Events: Warning  FailedMount  kubelet  timed out waiting for the condition",
+    ]
+    blocks = score._own_blocks(_evidence_prompt(api_reads, gw_reads), ["web/api", "web/api-gw"])
+
+    assert blocks == {"web/api": _normalized(api_reads), "web/api-gw": _normalized(gw_reads)}
+
+
 def test_workload_decoys_joins_the_workload_list_and_the_row_decoys():
     """The workload's own `decoy_by_workload` entries first, then the row's
     decoys. Empty values are dropped. The same list the decoy gate reads."""

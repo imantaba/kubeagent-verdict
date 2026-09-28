@@ -209,6 +209,9 @@ def _is_job2_keyword_graded(meta_workload: dict,
 
 _SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
 _READ_LABEL = re.compile(r"^== (.+) ==$")
+# The read that opens a workload's gather group: kubeagent reads the events
+# of the workload's pod first (internal/investigate/gather.go:75-90 at v1.24.0).
+_GATHER_GROUP_LABEL = re.compile(r"^events \S+/\S+$")
 
 
 def _read_owner(label: str, workloads: list[str]) -> str | None:
@@ -218,6 +221,10 @@ def _read_owner(label: str, workloads: list[str]) -> str | None:
     the name or starts with `name-` (a pod of it). When two workloads match,
     the longer name wins, so `web/api-gw-5c6b` goes to `web/api-gw`, not to
     `web/api`.
+
+    A name is not an owner on its own: a claim called `cache-0` starts with
+    `cache-` too. So `_own_blocks` asks this only of a label that opens a
+    gather group, or of a label in a trail that has no gather group.
     """
     owner = None
     for token in label.split():
@@ -241,27 +248,44 @@ def _own_blocks(prompt: str, workloads: Iterable[str]) -> dict[str, frozenset[st
     - its inventory entry: the line starting `- {w} (` and the lines under
       it that start with a space;
     - its candidate entry, by the same rule;
-    - its evidence reads: from a label line `== <label> ==` that names it
-      (see `_read_owner`) up to the next label that names another workload.
+    - its evidence reads: its gather group, when the trail has one, or else
+      the reads from a label that names it up to the next label that names
+      another workload.
 
     An entry ends at the next line starting `- ` or at any line that does not
-    start with a space. A read whose label names no workload, such as
-    `describe node /worker-1`, stays with the workload before it, because
+    start with a space.
+
     kubeagent reads one workload's events, describes and logs before the
-    next workload's (`gatherEvidence`, internal/investigate/gather.go:57 at
-    v1.24.0). Lines before the first entry, or before the first read
-    that names a workload, belong to nobody. So do lines outside the three
-    sections.
+    next workload's (`gatherEvidence`, internal/investigate/gather.go:71-155
+    at v1.24.0). So each workload's gather group opens with an `events
+    <ns>/<pod>` read, and every read up to the next `events` read is in that
+    group: `describe node /worker-1`, `describe pvc web/cache-0`, `log causes
+    ...`. The group's owner is the workload the `events` label names (see
+    `_read_owner`), or nobody when it names no flagged workload. No other
+    label in the group can move the owner, so a claim named `cache-0` in
+    `web/indexer`'s group stays `web/indexer`'s even when `web/cache` is
+    flagged too.
+
+    A trail with no `events` read yet (the tool loop's labels on a
+    shared-origin row, or the one healthy-origin read printed before the
+    gather) has no group. There every label that names a workload moves the
+    owner, by `_read_owner`'s name rule, and a read whose label names no
+    workload stays with the workload before it.
+
+    Lines before the first entry, or before the first read that names a
+    workload, belong to nobody. So do lines outside the three sections.
     """
     names = list(workloads)
     lines: dict[str, set[str]] = {w: set() for w in names}
     section = None
     current = None
+    grouped = False
     for line in prompt.split("\n"):
         mark = _SECTION_MARK.match(line)
         if mark:
             section = mark.group(2) if mark.group(1) == "BEGIN" else None
             current = None
+            grouped = False
             continue
         if section in ("inventory", "candidates"):
             if line.startswith("- "):
@@ -270,7 +294,10 @@ def _own_blocks(prompt: str, workloads: Iterable[str]) -> dict[str, frozenset[st
                 current = None
         elif section == "evidence":
             label = _READ_LABEL.match(line)
-            if label:
+            if label and _GATHER_GROUP_LABEL.match(label.group(1)):
+                grouped = True
+                current = _read_owner(label.group(1), names)
+            elif label and not grouped:
                 current = _read_owner(label.group(1), names) or current
         else:
             continue
