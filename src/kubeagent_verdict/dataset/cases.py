@@ -397,8 +397,10 @@ def _refuted_menu(n: Names, objects: tuple) -> tuple:
 def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
     """Bind every declared object, then force each one into a ruled-out
     ending below rules.decide()'s threshold: node placement="off", pvc
-    placement="unmounted", registry scan_reason below REGISTRY_THRESHOLD.
-    No Option-A draw, so the menu never wins outright.
+    placement="unmounted". A registry is left as declared: the gather
+    counts its pullers over the row (`gather._registry_counts`), and a
+    one-workload row has at most one, below REGISTRY_THRESHOLD. No
+    Option-A draw, so the menu never wins outright.
     """
     names = dataclasses.asdict(n)
     out = []
@@ -408,8 +410,6 @@ def _ruled_out_menu(n: Names, objects: tuple) -> tuple:
             bound = dataclasses.replace(bound, placement="off")
         elif bound.kind == "pvc":
             bound = dataclasses.replace(bound, placement="unmounted")
-        elif bound.kind == "registry":
-            bound = dataclasses.replace(bound, scan_reason="1")
         out.append(bound)
     return tuple(out)
 

@@ -447,21 +447,29 @@ def test_misattribution_probe_raises_on_empty_objects_not_losers():
         cases.misattribution_probe(stripped, n)
 
 
-def test_ruled_out_menu_forces_registry_decoy_below_threshold():
-    """A registry decoy that would otherwise be a real confirmed cause (enough pullers,
-    a connection literal) is forced below REGISTRY_THRESHOLD, so attribute() rules it out
-    and decide() can never pick it."""
-    from kubeagent_verdict.dataset import objects as o
-    from kubeagent_verdict.dataset import rules
+def test_ruled_out_menu_leaves_a_registry_decoy_ruled_out():
+    """A registry decoy declared as a real confirmed cause (5 pullers, a
+    connection literal) still comes out ruled out, and the workload stays
+    undecided. The gather sizes each registry group over the whole row
+    (`gather._registry_counts`) and writes that count over the declared
+    `scan_reason`, and a one-workload row has at most one puller.
 
+    2026-09-28 (final review): the menu used to force the count to "1"
+    itself. The gather overwrote it before any rule read it, so that
+    branch changed no byte, and it is gone. This test used to call
+    `rules.attribute` on the menu directly, which skipped the gather."""
+    from kubeagent_verdict.dataset import objects as o
+
+    e = _entry("deployment-bad-image-tag")
     n = names_mod.draw(random.Random(7))
     registry = o.Object(kind="registry", name="registry.example.com", scan_reason="5",
                         placement="", fresh=o.Fresh(how="read", literal="dial tcp"))
     menu = cases._ruled_out_menu(n, (registry,))
-    assert int(menu[0].scan_reason) < rules.REGISTRY_THRESHOLD
-    raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue="ImagePullBackOff")
-    assert raw[0].verdict == "ruled_out"
-    assert rules.decide(raw).decided is False
+    res = gather.gather([cases.gather_workload(e, n, menu)])
+    (candidates,), (result,) = res.candidates, res.results
+    assert [(cand.cause, cand.verdict) for cand in candidates] == [
+        ("registry registry.example.com", "ruled_out")]
+    assert result.decided is False
 
 
 def test_contradiction_probe_raises_on_empty_objects():

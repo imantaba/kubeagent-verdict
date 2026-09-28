@@ -101,15 +101,22 @@ def _parenthesized(text: str) -> str:
 def attribute(objects: tuple[Object, ...], *, ns: str, pod: str, issue: str) -> tuple[Candidate, ...]:
     """Port of rootcause.Annotate + AnnotatePVC + AnnotateRegistry, per workload.
 
-    `objects` is the menu already scoped to this one workload: kubeagent's
-    Go annotators fold in every flagged workload and every down node,
-    broken PVC and registry host at once; a declared story instead hands
-    each workload's own candidates straight to this call, so there is no
-    cross-workload state to thread through here. The one place kubeagent's
-    Go genuinely needs OTHER workloads is the registry threshold count, and
-    that count is baked into the declared registry Object's `scan_reason`
-    (see objects.py's Object docstring) rather than computed in this
-    function.
+    `objects` is this one workload's whole menu, and this function keeps
+    no state across workloads. kubeagent's Go annotators walk every down
+    node for every flagged workload, and every broken PVC in the
+    workload's own namespace (rootcause.go Annotate :24-56, AnnotatePVC
+    :177-222), so a workload's menu is not only its own objects. On a
+    multi-workload row the builders also pass every other workload's node,
+    placement "off", and every other same-namespace workload's PVC,
+    placement "unmounted" (`cases._foreign_objects`); this function rules
+    both out.
+
+    The registry threshold count is the one number that needs OTHER
+    workloads' findings, and the caller fills it into the registry
+    Object's `scan_reason` before this call. The gather counts each host's
+    pullers over the whole row and writes that count over the declared
+    value (`gather._registry_counts`). The shared-origin builder fills a
+    `"{count}"` template with the victims its row renders.
 
     Node candidates are processed first, then PVC, then registry —
     kubeagent's own call order (rootcause.go's Annotate, AnnotatePVC,
