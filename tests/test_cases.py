@@ -9,6 +9,7 @@ import pytest
 from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import cases, catalog, render
 from kubeagent_verdict.dataset import names as names_mod
+from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset.render import object_reads
 from kubeagent_verdict.evals import score
 
@@ -180,8 +181,23 @@ def test_truncated_expected_cause_matches_attributed_for_the_same_seed():
     assert ex_trunc.meta["expected_cause"] == ex_attr.meta["expected_cause"]
 
 
-def test_refuted_menu_refutes_every_declared_object():
+def _two_object_entry():
+    """worker-containerd-stop with a PVC decoy added after its cause node.
+
+    No catalog entry declares two objects any more (a pod with a finding has
+    no Pending claim to blame), but the builders still take a tuple, so the
+    two-object behaviour is tested on a built entry.
+    """
     e = _entry("worker-containerd-stop")
+    pvc = o.Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
+                   placement="mounted",
+                   fresh=o.Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0947"),
+                   intent="decoy")
+    return dataclasses.replace(e, objects=(*e.objects, pvc))
+
+
+def test_refuted_menu_refutes_every_declared_object():
+    e = _two_object_entry()
     n = names_mod.draw(random.Random(5))
     menu = cases._refuted_menu(n, e.objects)
     assert len(menu) == len(e.objects) == 2
@@ -885,7 +901,7 @@ def test_the_menu_keeps_trace_order():
     """No shuffle: kubeagent prints candidates in trace order, and the answer
     is on no candidate line, so position gives nothing away. The order is the
     entry's declared order, node then PVC, on every draw."""
-    e = _entry("worker-containerd-stop")
+    e = _two_object_entry()
     for build in (cases.wrong_attribution, cases.own_cause_case):
         orders = {tuple(ln.split()[1] for ln in _cand_lines(
             build(e, names_mod.draw(random.Random(s))).user)) for s in range(20)}

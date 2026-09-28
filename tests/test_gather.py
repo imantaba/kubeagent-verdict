@@ -33,7 +33,10 @@ WRONG_POD = "events of the pulling pod were not read"
 # --- builders --------------------------------------------------------------
 
 def _node(name, *, placement="on", ready="False", reason="NotReady"):
-    return o.Object("node", name, reason, placement, o.Fresh(ready=ready))
+    # A NotReady node carries the kubelet's own Ready=False text; the node
+    # describe refuses one without it.
+    fresh = o.NODE_NOT_READY if ready == "False" else o.Fresh(ready=ready)
+    return o.Object("node", name, reason, placement, fresh)
 
 
 def _pvc(name, *, placement="mounted", phase="Pending", reason="ProvisioningFailed"):

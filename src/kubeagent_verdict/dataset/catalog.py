@@ -51,10 +51,15 @@ class CatalogEntry:
     # The nodes, PVCs and registries this entry puts on the menu. Empty for
     # the 9 entries with no fault-side object (control-plane read failures,
     # Service-only issues, a deleted namespace, policy/GitOps findings with
-    # no workload, and the two healthy-cluster entries). Exactly one
-    # non-empty tuple per producing entry, except worker-containerd-stop,
-    # which declares both its own cause node and a decoy PVC.
+    # no workload, and the two healthy-cluster entries). Every producing
+    # entry declares exactly one object.
     objects: tuple[Object, ...] = ()
+    # The lowest restart count names.draw may give this entry's workload.
+    # A finding that prints its restart count only fires from 3 restarts
+    # on (kubeagent internal/diagnose/restartloop.go:15, 35-37;
+    # crashloop.go:46 prints the last exit only from 3), so those entries
+    # set 3.
+    min_restarts: int = 1
 
 
 def all_entries() -> tuple[CatalogEntry, ...]:

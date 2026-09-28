@@ -54,6 +54,20 @@ Re-pinned on 2026-09-26 for the faithful prompts. A row with a node
 candidate now opens its inventory with kubeagent's cluster-health block,
 so 150 of the 252 user messages gain it. Each of them changes by exactly
 that block; no meta field and no gold answer moves, and no other row does.
+
+Re-pinned again on 2026-09-26, when the catalog began using the detector
+and kubelet text kubeagent really prints. 218 of the 252 user messages
+change: the finding, event and describe-node lines now carry
+kubeagent's own words. Meta fields move too. Eleven entries have new
+keyword pairs (66 workloads' `own_cause_keywords`, 22 rows'
+`expected_own_keywords`). Five impossible PVC decoys became node decoys or
+went away, so `decoy_cause` moves on 16 rows, `decoy_causes` on 7 and
+`decoy_by_workload` on 50. `worker-containerd-stop`'s own cause now uses
+the kubelet's words, which moves `expected_cause` on 4 single-workload
+rows. Three `contradiction_probe` workloads now decide on a node decoy
+instead of a PVC one, and the `oversized` one is undecided now, so it
+moves from job 1 to job 2. No row's `flagged` list and no system message
+moves.
 """
 
 from __future__ import annotations
@@ -83,7 +97,11 @@ def view(row):
 # 2026-09-26 (faithful prompts): 150 user messages gain the cluster-health block
 # 250f2bc2bc6860ec5e04e9574e36b8cf23cea2625961b735bb1a0888914d5b18 ->
 # 2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7
-GRADED_VIEW_SHA256 = "2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7"
+# 2026-09-26 (faithful prompts): kubeagent's own detector and kubelet text,
+# new keyword pairs, and node decoys where PVC decoys could not happen
+# 2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7 ->
+# 00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5
+GRADED_VIEW_SHA256 = "00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5"
 
 
 def _digest(views) -> str:

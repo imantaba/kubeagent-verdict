@@ -123,8 +123,15 @@ def counts_for(size: int) -> dict[str, int]:
     return counts
 
 
+def _draw(entry, rng: random.Random):
+    """Draw one row's names for `entry`, at the entry's restart floor."""
+    from kubeagent_verdict.dataset import names
+
+    return names.draw(rng, min_restarts=entry.min_restarts)
+
+
 def generate(seed: int, size: int) -> list[Example]:
-    from kubeagent_verdict.dataset import cases, catalog, names, propagation
+    from kubeagent_verdict.dataset import cases, catalog, propagation
 
     rng = random.Random(seed)
     entries = catalog.trainable()
@@ -137,23 +144,26 @@ def generate(seed: int, size: int) -> list[Example]:
     train_scen = propagation.trainable_scenarios()
 
     for i in range(counts["attributed"]):
-        out.append(cases.attributed(rotate(i), names.draw(rng), rng))
+        e = rotate(i)
+        out.append(cases.attributed(e, _draw(e, rng), rng))
     # Thin evidence exists for four entries only. Rotate through them, and
     # alternate the two undecided shapes once per full pass.
     thin = [next(e for e in entries if e.key == key) for key in cases.THIN_ENTRIES]
     for i in range(counts["none_of_these"]):
         shape = ("refuted", "ruled_out")[(i // len(thin)) % 2]
-        out.append(cases.none_of_these_case(thin[i % len(thin)], names.draw(rng), shape=shape))
+        e = thin[i % len(thin)]
+        out.append(cases.none_of_these_case(e, _draw(e, rng), shape=shape))
     for i in range(counts["own_cause"]):
-        out.append(cases.own_cause_case(rotate(i), names.draw(rng)))
+        e = rotate(i)
+        out.append(cases.own_cause_case(e, _draw(e, rng)))
     for i in range(counts["multi"]):
         k = rng.randint(2, 4)
         pairs, seen = [], set()
         picked = rng.sample(entries, k=min(k, len(entries)))
         for e in picked:
-            n = names.draw(rng)
+            n = _draw(e, rng)
             while (n.ns, n.name) in seen:
-                n = names.draw(rng)
+                n = _draw(e, rng)
             seen.add((n.ns, n.name))
             pairs.append((e, n))
         # Every third `multi` row carries a healthy origin read, rotating over
@@ -193,9 +203,9 @@ def generate(seed: int, size: int) -> list[Example]:
     # different group_text values, so this row's label always comes out
     # "separate". Not one of the CASE_MIX-counted "multi" rows.
     worker_containerd_stop = catalog.by_slug()["worker-containerd-stop"]
-    names_a = names.draw(rng)
+    names_a = _draw(worker_containerd_stop, rng)
     while True:
-        names_b = names.draw(rng)
+        names_b = _draw(worker_containerd_stop, rng)
         if names_b.ns != names_a.ns and names_b.node != names_a.node:
             break
     out.append(cases.multi(
@@ -256,14 +266,18 @@ def generate(seed: int, size: int) -> list[Example]:
         out.append(cases.shared_origin_decoy(
             p, random.Random(salt), victims=victims))
     for i in range(counts["truncated"]):
-        out.append(cases.truncated(rotate(i), names.draw(rng), rng))
+        e = rotate(i)
+        out.append(cases.truncated(e, _draw(e, rng), rng))
     for i in range(counts["injection"]):
         payload = cases.INJECTION_PAYLOADS[i % len(cases.INJECTION_PAYLOADS)]
-        out.append(cases.injection(rotate(i), names.draw(rng), payload, rng))
+        e = rotate(i)
+        out.append(cases.injection(e, _draw(e, rng), payload, rng))
     for i in range(counts["empty_candidates"]):
-        out.append(cases.empty_candidates(rotate(i), names.draw(rng)))
+        e = rotate(i)
+        out.append(cases.empty_candidates(e, _draw(e, rng)))
     for i in range(counts["wrong_attribution"]):
-        out.append(cases.wrong_attribution(rotate(i), names.draw(rng)))
+        e = rotate(i)
+        out.append(cases.wrong_attribution(e, _draw(e, rng)))
     return out
 
 
@@ -303,7 +317,7 @@ def drop_held_out(examples: list[Example], test: list[Example]) -> list[Example]
 def corpus_test_set() -> list[Example]:
     import hashlib
 
-    from kubeagent_verdict.dataset import cases, catalog, corpus, names
+    from kubeagent_verdict.dataset import cases, catalog, corpus
 
     # __file__ is src/kubeagent_verdict/dataset/generate.py; repo root is parents[3]
     data_dir = Path(__file__).resolve().parents[3] / "data" / "corpus"
@@ -317,7 +331,7 @@ def corpus_test_set() -> list[Example]:
         digest = hashlib.sha256(
             f"{row.scenario}|{row.fault}|{row.k8s}|{row.distro}".encode()).digest()
         rng = random.Random(int.from_bytes(digest[:8], "big"))
-        ex = cases.attributed(entry, names.draw(rng), rng)
+        ex = cases.attributed(entry, _draw(entry, rng), rng)
         meta = dict(ex.meta, source={"scenario": row.scenario, "fault": row.fault,
                                      "k8s": row.k8s, "distro": row.distro, "rc": row.rc})
         out.append(Example(case=ex.case, group=ex.group, system=ex.system,
@@ -344,7 +358,7 @@ def held_out_case_set() -> list[Example]:
     exists only for `cases.THIN_ENTRIES`, so that case gives one row per thin
     entry per undecided shape, 8 rows in all.
     """
-    from kubeagent_verdict.dataset import cases, catalog, names
+    from kubeagent_verdict.dataset import cases, catalog
 
     builders = {
         "own_cause": lambda e, n, rng: cases.own_cause_case(e, n),
@@ -358,11 +372,11 @@ def held_out_case_set() -> list[Example]:
             if case == "none_of_these":
                 if entry.key in cases.THIN_ENTRIES:
                     for shape in ("refuted", "ruled_out"):
-                        n = names.draw(_entry_rng("held-out", case, entry.key, shape))
+                        n = _draw(entry, _entry_rng("held-out", case, entry.key, shape))
                         out.append(cases.none_of_these_case(entry, n, shape=shape))
                 continue
             rng = _entry_rng("held-out", case, entry.key)
-            n = names.draw(rng)
+            n = _draw(entry, rng)
             if case == "injection":
                 payload = cases.INJECTION_PAYLOADS[
                     int.from_bytes(entry.key.encode()[:2], "big") % len(cases.INJECTION_PAYLOADS)]
@@ -394,7 +408,7 @@ def probe_sets() -> list[Example]:
     slice here can separate a model that reads from one that recites per-entry
     answers. Ruling that out needs held-out entries and a retrain.
     """
-    from kubeagent_verdict.dataset import cases, catalog, names
+    from kubeagent_verdict.dataset import cases, catalog
 
     out: list[Example] = []
     for entry in catalog.trainable():
@@ -402,9 +416,9 @@ def probe_sets() -> list[Example]:
             continue
         positional_rng = _entry_rng("positional-probe", entry.key)
         out.append(cases.positional_probe(
-            entry, names.draw(positional_rng), positional_rng))
+            entry, _draw(entry, positional_rng), positional_rng))
         out.append(cases.misattribution_probe(
-            entry, names.draw(_entry_rng("misattribution-probe", entry.key))))
+            entry, _draw(entry, _entry_rng("misattribution-probe", entry.key))))
 
     # APPENDED, never interleaved: the two slices above keep their exact row
     # positions, so a scoreboard banked against the previous test file still
@@ -418,8 +432,8 @@ def probe_sets() -> list[Example]:
     with_objects = [e for e in catalog.trainable() if e.objects]
     for i, entry in enumerate(with_objects):
         other = with_objects[(i + 1) % len(with_objects)]
-        first = names.draw(_entry_rng("multi-probe-a", entry.key))
-        second = names.draw(_entry_rng("multi-probe-b", entry.key, other.key))
+        first = _draw(entry, _entry_rng("multi-probe-a", entry.key))
+        second = _draw(other, _entry_rng("multi-probe-b", entry.key, other.key))
         # A collision used to `continue` here, which silently shrank the slice
         # and the denominator every rate on it is divided by. The builder now
         # raises instead, so a collision is a named failure rather than a
@@ -440,10 +454,10 @@ def probe_sets() -> list[Example]:
     # `none_of_these` rows stopped carrying that sentence on 2026-09-16
     # (e2eb459); since 2026-09-24 (5a58915) they use thin evidence and share
     # neither it nor the rationale — but they still share this slice's gold
-    # summary sentence, and 14 of its 19 rows carry a generic describe-node
-    # read a `none_of_these` training row also renders (the other five carry a
-    # PVC read, which no `none_of_these` row has): 13 of its 38 reads under
-    # the overlap guard's name mask (14 byte for byte). See
+    # summary sentence, and 18 of its 19 rows carry a describe-node read a
+    # `none_of_these` training row also renders (the other one reads only its
+    # registry events): 18 of its 37 reads under the overlap guard's name
+    # mask (19 byte for byte), measured 2026-09-26. See
     # `cases.contradiction_probe`'s docstring for the full retraction and the
     # byte-for-byte discrepancy; the slice is kept for the three shortcuts it
     # does defeat.
@@ -451,7 +465,7 @@ def probe_sets() -> list[Example]:
         if not entry.objects or not entry.contradiction:
             continue
         out.append(cases.contradiction_probe(
-            entry, names.draw(_entry_rng("contradiction-probe", entry.key))))
+            entry, _draw(entry, _entry_rng("contradiction-probe", entry.key))))
 
     # APPENDED again, same comparability rule. Every slice above perturbs the
     # candidate menu of an otherwise ordinary row; this one changes what the

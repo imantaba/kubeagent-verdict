@@ -332,10 +332,9 @@ def check_prompt_size(prompt: str, *, entry_or_scenario_key: str) -> None:
 # prompt already shows, because the dataset has no node list.
 #
 # The dataset tells one NotReady story: the kubelet reports KubeletNotReady
-# because the container runtime is down. These are the NodeReady
-# condition's reason and message kubeagent would read for that node.
-_NOT_READY_REASON = "KubeletNotReady"
-_NOT_READY_MESSAGE = "container runtime is down"
+# because the container runtime is down. The NodeReady condition's reason
+# and message kubeagent would read for that node are objects.NOT_READY_REASON
+# and NOT_READY_MESSAGE, the same text the node describe prints.
 _NO_LEASE = "no kubelet lease"  # clusterhealth.go:140
 _SYSTEM_NAMESPACE = "kube-system"  # clusterhealth.go:18
 _MIN_NODES = 3
@@ -437,8 +436,8 @@ def cluster_health(workloads: tuple[c.Workload, ...],
             raise ValueError(f"node {name}: no cluster-health text for reason "
                              f"{min(unknown)!r}")
         if "NotReady" in reasons[name]:
-            node_issues.append(name + " " + _not_ready_issue(_NOT_READY_REASON,
-                                                             _NOT_READY_MESSAGE))
+            node_issues.append(name + " " + _not_ready_issue(o.NOT_READY_REASON,
+                                                             o.NOT_READY_MESSAGE))
         else:
             node_issues.append(name + " " + _NO_LEASE)
     not_ready = sum(1 for rs in reasons.values() if "NotReady" in rs)

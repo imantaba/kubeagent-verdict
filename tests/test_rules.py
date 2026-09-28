@@ -461,24 +461,29 @@ def test_shared_three_pvcs_provisioning_failed_stays_separate():
 # read_text()
 # ---------------------------------------------------------------------------
 
-def test_read_text_node_ready_read():
+def test_read_text_node_not_ready_read():
+    # The kubelet's four conditions in its own order, then the node's taints
+    # (internal/investigate/reader.go:240-246).
     n = node(placement="on", fresh=o.Fresh(
-        how="read", ready="False", unschedulable=False,
-        extra=(
-            "  condition Ready=False (KubeletNotReady): container runtime is down",
-            "  taint node.kubernetes.io/not-ready=:NoSchedule",
-        )))
+        how="read", ready="False", ready_reason="KubeletNotReady",
+        ready_message="container runtime is down",
+        taints=(("node.kubernetes.io/not-ready", "", "NoSchedule"),)))
     label, content = r.read_text(n, ns="web", pod="web-abc")
     assert label == "describe node /worker-1"
     assert content == (
         "node worker-1: unschedulable=false\n"
+        "  condition MemoryPressure=False (KubeletHasSufficientMemory): "
+        "kubelet has sufficient memory available\n"
+        "  condition DiskPressure=False (KubeletHasNoDiskPressure): kubelet has no disk pressure\n"
+        "  condition PIDPressure=False (KubeletHasSufficientPID): "
+        "kubelet has sufficient PID available\n"
         "  condition Ready=False (KubeletNotReady): container runtime is down\n"
         "  taint node.kubernetes.io/not-ready=:NoSchedule\n"
     )
 
 
 def test_read_text_node_unschedulable_true():
-    n = node(placement="on", fresh=o.Fresh(how="read", ready="Unknown", unschedulable=True))
+    n = node(placement="on", fresh=o.Fresh(how="read", ready="True", unschedulable=True))
     _, content = r.read_text(n, ns="web", pod="web-abc")
     assert content.startswith("node worker-1: unschedulable=true\n")
 
@@ -576,22 +581,12 @@ def test_check_declaration_still_runs_objects_check_objects():
 
 _NODE_DEFS = {
     "worker-1": {"scan_reason": "NotReady", "fresh": o.Fresh(
-        how="read", ready="False",
-        extra=(
-            "  condition Ready=False (KubeletNotReady): container runtime is down",
-            "  taint node.kubernetes.io/not-ready=:NoSchedule",
-        ))},
-    "worker-2": {"scan_reason": "no kubelet lease", "fresh": o.Fresh(
-        how="read", ready="True",
-        extra=(
-            "  condition Ready=True (KubeletReady): kubelet is posting ready status",
-        ))},
+        how="read", ready="False", ready_reason="KubeletNotReady",
+        ready_message="container runtime is down",
+        taints=(("node.kubernetes.io/not-ready", "", "NoSchedule"),))},
+    "worker-2": {"scan_reason": "no kubelet lease", "fresh": o.Fresh(how="read", ready="True")},
     "worker-3": {"scan_reason": "kubelet not heartbeating", "fresh": o.Fresh(how="not_read")},
-    "worker-5": {"scan_reason": "NotReady", "fresh": o.Fresh(
-        how="read", ready="Unknown",
-        extra=(
-            "  condition Ready=Unknown (NodeStatusUnknown): Kubelet stopped posting node status.",
-        ))},
+    "worker-5": {"scan_reason": "NotReady", "fresh": o.Fresh(how="read", ready="Unknown")},
     "worker-6": {"scan_reason": "NotReady", "fresh": o.Fresh(how="read", ready="missing")},
     "worker-7": {"scan_reason": "NotReady",
                       "fresh": o.Fresh(how="read_failed", message='nodes "worker-7" is forbidden')},
@@ -768,6 +763,19 @@ _READ_TEXT_CASES = [
 ]
 
 
+# The capture's node objects carry one condition each, not the kubelet's
+# four (contract/capture/kv_capture_test.go.txt:263-272, `captureReads`).
+# read_text() always writes all four, so a read node's content is pinned
+# through describe_node() fed the capture's own node: (unschedulable,
+# conditions, taints).
+_CAPTURE_NODES = {
+    "worker-1": (False, (("Ready", "False", "KubeletNotReady", "container runtime is down"),),
+                 (("node.kubernetes.io/not-ready", "", "NoSchedule"),)),
+    "worker-2": (False, (("Ready", "True", "KubeletReady", "kubelet is posting ready status"),),
+                 ()),
+}
+
+
 @pytest.mark.parametrize("fixture_index, roster_index, lookup, ns, pod", _READ_TEXT_CASES)
 def test_read_text_matches_fixture(fixture_index, roster_index, lookup, ns, pod):
     fixture = _fixture()
@@ -777,6 +785,10 @@ def test_read_text_matches_fixture(fixture_index, roster_index, lookup, ns, pod)
     obj = next(o for o in entry["objects"] if o.kind == kind and o.name == name)
     label, content = r.read_text(obj, ns=ns, pod=pod)
     assert label == fx_read["label"]
+    if kind == "node" and obj.fresh.how == "read":
+        unschedulable, conditions, taints = _CAPTURE_NODES[name]
+        content = r.describe_node(name, unschedulable=unschedulable, conditions=conditions,
+                                  taints=taints)
     assert content == fx_read["content"]
 
 

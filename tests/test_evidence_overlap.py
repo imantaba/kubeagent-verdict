@@ -58,7 +58,16 @@ POD = re.compile(r"<NAME>-[a-z0-9]{3,}(?:-[a-z0-9]{3,})?")
 DECLARED = {
     # Reuses attributed's reads by design -- the candidate menu is the only
     # perturbation, which IS the whole measurement. Costs nothing.
-    "positional_probe": (20, 20),
+    # 2026-09-26 (faithful prompts): (20, 20) -> (18, 19). One read went:
+    # `worker-containerd-stop` lost its PVC decoy (a mounted, Pending claim
+    # cannot sit on a pod past scheduling), so its row renders one read, not
+    # two. One read stopped matching by chance: the
+    # `deployment-bad-image-tag` exam row lives in namespace `auth`, so the
+    # mask turns "unauthorized" into "un<NS>orized". A kept training row in
+    # `auth` used to render the same read; the rng stream moved and none
+    # does now. Every other read is still reused, including the node
+    # describes, which now print kubeagent's four conditions.
+    "positional_probe": (18, 19),
     # Since 2026-09-24 this probe builds `own_cause`'s ruled-out prompt: no
     # object reads, and one log read on each of the five crash-family
     # entries. All five are reused, from `own_cause` and `wrong_attribution`
@@ -97,7 +106,18 @@ DECLARED = {
     # reads 17/19. The build size moving to 8000, this task's own change,
     # does not touch it: it already read 17/19 at size 5500 with the same
     # mix and pool, so the size is not what moved this row.
-    "contradiction_probe": (19, 38),
+    # 2026-09-26 (faithful prompts): (19, 38) -> (20, 37). One read went:
+    # `worker-containerd-stop` lost its PVC decoy, and with it the
+    # "persistentvolumeclaims ... is forbidden" read, which was a hit. Two
+    # contradiction lines are reused now, where none was before. A node
+    # describe now prints kubeagent's four conditions with the kubelet's
+    # stock messages, so the healthy describe that contradicts
+    # `worker-containerd-stop`'s and `node-cordon-diskfull`'s scan finding
+    # is byte for byte the ordinary healthy describe most training rows
+    # render. That is the confound this row watches, measured, not closed:
+    # the contradiction now lives only in the scan finding beside the read.
+    # 19 - 1 + 2 = 20.
+    "contradiction_probe": (20, 37),
     # THIS ROW WAS THE POINT OF THE ALLOWLIST at 0/34: its rows come from
     # dataset.propagation, not the catalog, so an eval scenario itself is
     # never trained on. That is still true. What moved is generic PVC

@@ -215,7 +215,12 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     # Re-measured 2026-09-24 (job-2 generator fix: the case mix moved, so
     # every `multi` row draws new names): still 12 rows, the rule drops 1
     # and keeps 11. The drop branch is still reached.
-    assert (len(calls), dropped) == (12, 1)
+    # 2026-09-26 (faithful prompts): five impossible PVC decoys became node
+    # decoys or went away, so the rng stream moved and each `multi` row
+    # pairs different victims. Still 12 rows; 4 of them now hold a registry
+    # candidate of their own, so the rule drops 4 and keeps 8. (12, 1) ->
+    # (12, 4).
+    assert (len(calls), dropped) == (12, 4)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
@@ -259,4 +264,9 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     # Re-measured 2026-09-24 (job-2 generator fix: the case mix moved, so
     # every `multi` row draws new names): still 96 rows; the rule keeps 54,
     # renames 41 and drops 1. The drop branch is still reached.
-    assert (len(calls), kept, renamed, dropped) == (96, 54, 41, 1)
+    # 2026-09-26 (faithful prompts): three entries' PVC decoys became node
+    # decoys, so these rows carry more node objects (880, not 717) and more
+    # distinct node names (197, not 172). More names clash, so more reads
+    # are renamed. Still 96 rows and 1 drop. (96, 54, 41, 1) ->
+    # (96, 44, 51, 1).
+    assert (len(calls), kept, renamed, dropped) == (96, 44, 51, 1)

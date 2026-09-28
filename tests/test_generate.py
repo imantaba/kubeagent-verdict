@@ -368,6 +368,16 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     `wrong_attribution` and `misattribution_probe`, and two in
     `multi_misattribution_probe`. "node" was already printed on all five.
     76 + 5 = 81 derivable; the 134 graded do not move.
+
+    Re-pinned again on 2026-09-26, when the catalog began using the
+    detector and kubelet text kubeagent really prints. Eleven entries got
+    new keyword pairs, each chosen from a line the prompt shows, and the
+    finding and event lines now carry kubeagent's own words. That makes the
+    other 53 graded workloads derivable too: 9 more in each of `own_cause`,
+    `empty_candidates`, `wrong_attribution` and `misattribution_probe`, and
+    17 more in `multi_misattribution_probe`. 81 + 53 = 134 of 134. Every
+    job-2 keyword is now on screen, so only the grader guard keeps a bot
+    that pastes prompt words from scoring.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -388,14 +398,21 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     # 2026-09-26 (faithful prompts): the cluster-health block prints "runtime" on
     # five worker-containerd-stop workloads: own_cause 9 -> 10, wrong_attribution
     # 9 -> 10, misattribution_probe 9 -> 10, multi_misattribution_probe 19 -> 21
-    assert dict(by_case) == {"own_cause": 10, "empty_candidates": 10,
-                             "wrong_attribution": 10, "misattribution_probe": 10,
-                             "multi_misattribution_probe": 21,
+    # 2026-09-26 (faithful prompts): eleven new keyword pairs sit on lines the
+    # prompt shows, and the catalog prints kubeagent's own detector and kubelet
+    # text, so every graded workload is now derivable: own_cause,
+    # empty_candidates, wrong_attribution and misattribution_probe 10 -> 19,
+    # multi_misattribution_probe 21 -> 38
+    assert dict(by_case) == {"own_cause": 19, "empty_candidates": 19,
+                             "wrong_attribution": 19, "misattribution_probe": 19,
+                             "multi_misattribution_probe": 38,
                              "shared_origin_probe": 4,
                              "shared_origin_decoy_probe": 16}
     assert sum(graded.values()) == 134
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
-    assert sum(by_case.values()) == 81
+    # 2026-09-26 (faithful prompts): kubeagent's own text and the new keyword
+    # pairs 81 -> 134
+    assert sum(by_case.values()) == 134
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():
@@ -489,8 +506,12 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # printed 157 and 153, so those are the pinned literals, not R40's
     # rounded figures. job2 fell from 153 to 142 on 2026-09-24: the job-2
     # generator fix cut the `none_of_these` slice from 19 rows to 8.
-    assert job1 == 157
-    assert job2 == 142
+    # 2026-09-26 (faithful prompts): `oversized`'s node decoy now sits off the
+    # pod's node, so kubeagent rules it out; its `contradiction_probe` row has
+    # no attributed candidate and moves from job 1 to job 2. job1 157 -> 156,
+    # job2 142 -> 143.
+    assert job1 == 156
+    assert job2 == 143
     assert job3_prompts == 39
     assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
 
@@ -670,7 +691,9 @@ def test_every_job1_workload_prints_its_decided_line_and_no_job2_one_does():
                 decided_total += 1
             else:
                 assert key not in lines, (e.meta["case"], key)
-    assert decided_total == 157
+    # 2026-09-26 (faithful prompts): `oversized`'s `contradiction_probe` row is
+    # undecided now (its node decoy is ruled out). 157 -> 156
+    assert decided_total == 156
 
 
 def test_every_decoy_probe_row_names_its_decoy_cause():

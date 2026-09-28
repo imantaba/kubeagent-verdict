@@ -1,7 +1,7 @@
 """Kind-keyed catalog entries — one per issue kind no slug entry covers (11 when complete)."""
 
 from kubeagent_verdict.dataset.catalog import CatalogEntry
-from kubeagent_verdict.dataset.objects import Fresh, Object
+from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Object
 
 ENTRIES = [
     CatalogEntry(
@@ -12,8 +12,8 @@ ENTRIES = [
         workload_kind="Deployment",
         status="Degraded",
         issue="ProbeFailure",
-        reason="readiness probe failing",
-        evidence="Readiness probe failed: HTTP probe failed with statuscode: 500",
+        reason="the readiness probe keeps failing — the pod is kept out of Service endpoints",
+        evidence='container "{container}": readiness probe failed — HTTP 500',
         recommendation="check what the probe endpoint returns and why",
         winner_cause="application failing its readiness probe",
         winner_reason="the probe returns HTTP 500 while the container keeps running",
@@ -36,11 +36,11 @@ ENTRIES = [
                       "8s         Normal  Killing  Stopping container {container} "
                       "(node {node} shutting down)\n",
         own_cause="the application answers its readiness endpoint with errors",
-        own_cause_keywords=("application", "readiness"),
+        own_cause_keywords=("readiness", "endpoint"),
         service_issue=("NoReadyEndpoints", "service has 0 ready endpoints"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -75,10 +75,10 @@ ENTRIES = [
                       "  Failed: Error: StartError: OCI runtime create failed: runc did not "
                       "terminate successfully (x3)\n",
         own_cause="the container's entrypoint names a path that does not exist in the image",
-        own_cause_keywords=("names", "path"),
+        own_cause_keywords=("container", "image"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -91,7 +91,8 @@ ENTRIES = [
         issue="CreateContainerConfigError",
         reason="a referenced ConfigMap or Secret is missing, or a required key is absent — the "
                "container cannot start",
-        evidence="container {container}: couldn't find key API_TOKEN in ConfigMap {ns}/app-config",
+        evidence='container "{container}": couldn\'t find key API_TOKEN in ConfigMap '
+                 "{ns}/app-config",
         recommendation="add the missing key to the ConfigMap or fix the key name in the pod spec",
         winner_cause="the pod spec references a ConfigMap key that does not exist",
         winner_reason="the kubelet's waiting message names the exact missing key",
@@ -115,10 +116,8 @@ ENTRIES = [
         own_cause="the pod spec references a ConfigMap key that was never added or was renamed",
         own_cause_keywords=("configmap", "key"),
         objects=(
-            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0442"),
-                   intent="decoy"),
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -157,7 +156,7 @@ ENTRIES = [
         own_cause_keywords=("init", "dependency"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -170,7 +169,7 @@ ENTRIES = [
         issue="Init:CreateContainerConfigError",
         reason="an init container's ConfigMap or Secret is missing, or a required key is "
                "absent — the pod cannot start",
-        evidence="init container {init_container} (1/2): secret migration-creds not found",
+        evidence='init container "{init_container}" (1/2): secret migration-creds not found',
         recommendation="create the missing Secret or fix its name in the init container's spec",
         winner_cause="a Secret the init container references does not exist",
         winner_reason="the kubelet's waiting message names the missing Secret directly",
@@ -195,7 +194,7 @@ ENTRIES = [
         own_cause_keywords=("secret", "init"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -207,7 +206,7 @@ ENTRIES = [
         status="Degraded",
         issue="Init:ErrImagePull",
         reason="an init container's image cannot be pulled — the pod cannot start",
-        evidence='init container "{init_container}": Failed to pull image '
+        evidence='init container "{init_container}" (1/2): Failed to pull image '
                  '"registry.example.com/shop/migrate:v0.9.0": not found',
         recommendation="fix the init image's tag or push the missing image",
         winner_cause="the init image's tag does not exist in the registry",
@@ -234,7 +233,7 @@ ENTRIES = [
         own_cause_keywords=("tag", "registry"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -246,7 +245,7 @@ ENTRIES = [
         status="Degraded",
         issue="Init:ImagePullBackOff",
         reason="an init container's image cannot be pulled — the pod cannot start",
-        evidence='init container "{init_container}": Back-off pulling image '
+        evidence='init container "{init_container}" (1/2): Back-off pulling image '
                  '"registry.example.com/shop/migrate:v0.9.0"',
         recommendation="fix the init image's tag or push the missing image",
         winner_cause="the init image's tag does not exist in the registry",
@@ -273,7 +272,7 @@ ENTRIES = [
         own_cause_keywords=("registry", "tag"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -314,7 +313,7 @@ ENTRIES = [
         own_cause_keywords=("memory", "init"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -326,7 +325,7 @@ ENTRIES = [
         status="Degraded",
         issue="RestartLoop",
         reason="Container keeps exiting with an error and restarting",
-        evidence='container "{container}", {restarts} restarts, last exit 1 (Error), 90s ago',
+        evidence='container "{container}", {restarts} restarts, last exit 1 (Error), 1m30s ago',
         log_cause="application panic (code bug)",
         recommendation="check the previous log for the panic and what request triggered it",
         winner_cause="the container panics intermittently under load",
@@ -351,11 +350,12 @@ ENTRIES = [
                       "  Unhealthy: Liveness probe failed: HTTP probe failed with statuscode: "
                       "503 (x{restarts})\n",
         own_cause="the container panics intermittently, most often under load",
-        own_cause_keywords=("intermittently", "panics"),
+        own_cause_keywords=("panic", "container"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
+        min_restarts=3,
     ),
     CatalogEntry(
         key="volume-attach-error",
@@ -393,12 +393,10 @@ ENTRIES = [
                       "  FailedAttachVolume: rpc error: code = Internal desc = CSI driver not "
                       "responding (x8)\n",
         own_cause="the PVC is still attached to the node the previous pod ran on",
-        own_cause_keywords=("attached", "previous"),
+        own_cause_keywords=("attached", "node"),
         objects=(
-            Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
-                   intent="decoy"),
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
     CatalogEntry(
@@ -410,8 +408,8 @@ ENTRIES = [
         status="Degraded",
         issue="VolumeMountError",
         reason="a volume the pod needs could not be mounted — the pod cannot start",
-        evidence="Unable to attach or mount volumes: unmounted volumes=[data], timed out "
-                 "waiting for the condition",
+        evidence="Unable to attach or mount volumes: unmounted volumes=[data], unattached "
+                 "volumes=[], failed to process volumes=[]: timed out waiting for the condition",
         recommendation="check the CSI driver and the underlying volume's health on {node}",
         winner_cause="the PVC's underlying volume is unhealthy on node {node}",
         winner_reason="the mount times out repeatedly while the PVC itself describes as Bound",
@@ -423,7 +421,8 @@ ENTRIES = [
             ("events {ns}/{pod}",
              ("events for {ns}/{pod}:\n"
               "  FailedMount: Unable to attach or mount volumes: unmounted volumes=[data], "
-              "timed out waiting for the condition (x5)\n")),
+              "unattached volumes=[], failed to process volumes=[]: timed out waiting for the "
+              "condition (x5)\n")),
             ("describe pvc {ns}/{pvc}",
              "pvc {ns}/{pvc}: phase=Bound storageClass=fast-ssd volume=pv-0821\n"),
         ),
@@ -435,12 +434,10 @@ ENTRIES = [
                       '  FailedMount: MountVolume.SetUp failed for volume "config": configmap '
                       '"app-config" not found (x5)\n',
         own_cause="the PVC's underlying volume is unhealthy or unreachable on the pod's node",
-        own_cause_keywords=("unreachable", "underlying"),
+        own_cause_keywords=("volume", "pod"),
         objects=(
-            Object(kind="pvc", name="aux-1", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
-                   intent="decoy"),
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                   fresh=NODE_NOT_READY, intent="decoy"),
         ),
     ),
 ]

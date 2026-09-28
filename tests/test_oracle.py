@@ -136,7 +136,13 @@ def test_oracle_job1_is_perfect_on_train():
     # `own_cause` 10% -> 13%, `wrong_attribution` 10% -> 14%; the row
     # counts change, and so does every later rng draw) -- 3081 to 3120.
     # Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3120}
+    # 2026-09-26 (faithful prompts): the catalog now uses the text kubeagent
+    # prints. Five impossible PVC decoys became node decoys or went away,
+    # and restarts start at 3, so those entries draw from the rng a
+    # different number of times; every later name moves, and so does the
+    # group-hash split (841 val rows before the held-out drop, not 736). The
+    # case mix is unchanged. 3120 -> 3072. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3072}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -144,21 +150,26 @@ def test_oracle_job1_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 289 to 355. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 355 to 357. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 357 to 309. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 309}
+    # 2026-09-26 (faithful prompts): same reason as train; the split moved
+    # and val grew. 309 -> 356. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 356}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
     # Re-measured 2026-09-19, same reason. 3121 to 2975. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 2975 to 3000. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 3000 to 3030. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3030}
+    # 2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    # for job 1. 3030 -> 2859. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2859}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 352 to 304. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 304 to 321. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 321 to 298. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 298}
+    # 2026-09-26 (faithful prompts): same reason. 298 -> 315. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 315}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -173,8 +184,11 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
 
     Re-measured 2026-09-24 again (case mix, same reason as job 1 above)
     -- 2324 to 2785. Most of the rise is the extra `own_cause` and
-    `wrong_attribution` rows, which are keyword-graded. Rate still 1.0."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2785}
+    `wrong_attribution` rows, which are keyword-graded. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 2785 -> 2621. Rate still 1.0."""
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2621}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -201,13 +215,17 @@ def test_oracle_job3_is_perfect_on_train():
 
     Re-measured 2026-09-24 again (case mix, same reason as job 1 above) --
     2803 to 2832: `shared` 192 to 195, `none` 2610 to 2636. Rate still
-    1.0."""
+    1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 2832 -> 2736: `shared` 195 -> 183, `none` 2636 ->
+    2552, `separate` still 1. Rate still 1.0."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2832,
-        "by_label": {"shared": {"rate": 1.0, "n": 195},
+        "rate": 1.0, "n": 2736,
+        "by_label": {"shared": {"rate": 1.0, "n": 183},
                      "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2636}}}
+                     "none": {"rate": 1.0, "n": 2552}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -216,13 +234,17 @@ def test_oracle_job3_is_perfect_on_val():
     every one -- re-measured 2026-09-19, Task 9 (22 rows then).
 
     Re-measured 2026-09-24 (case mix, same reason as job 1 above) -- 336 to
-    296: `shared` 22 to 19, `none` 314 to 277. Rate still 1.0."""
+    296: `shared` 22 to 19, `none` 314 to 277. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 296 -> 351: `shared` 19 -> 31, `none` 277 -> 320.
+    Rate still 1.0."""
     board = score.scoreboard(list(_val_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 296,
-        "by_label": {"shared": {"rate": 1.0, "n": 19},
+        "rate": 1.0, "n": 351,
+        "by_label": {"shared": {"rate": 1.0, "n": 31},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 277}}}
+                     "none": {"rate": 1.0, "n": 320}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -240,27 +262,41 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
 
     Re-measured 2026-09-24 again (case mix: the `multi` share is unchanged,
     but every `multi` row draws new names, so the split moves) -- 1227 to
-    1226 in train, 145 to 132 in val. Still perfect."""
+    1226 in train, 145 to 132 in val. Still perfect.
+
+    2026-09-26 (faithful prompts): the `multi` share is unchanged again,
+    but the rng stream moved (five PVC decoys became node decoys or went
+    away), so the names and the split moved -- 1226 -> 1240 in train, 132 -> 118 in val. Still
+    perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (1226.0, 1226)
-    assert multi_job1(_val_results()) == (132.0, 132)
+    assert multi_job1(_train_results()) == (1240.0, 1240)
+    assert multi_job1(_val_results()) == (118.0, 118)
 
 
 def test_exam_oracle_job1_misses_only_contradiction_probe():
     """spec section 10 gate 2: the frozen exam's own job1, oracle-read.
-    138 of 157 pass; the 19 misses are exactly the `contradiction_probe`
+    138 of 156 pass; the 18 misses are exactly the `contradiction_probe`
     rows, a case whose gold reply is engineered to contradict what job1
     grades by design -- not a shared-origin regression. No `multi`,
-    `shared_origin_probe` or `shared_origin_decoy_probe` row misses."""
+    `shared_origin_probe` or `shared_origin_decoy_probe` row misses.
+
+    2026-09-26 (faithful prompts): the `oversized` entry's node decoy now
+    sits on another node, so kubeagent rules it out. Its
+    `contradiction_probe` row has no attributed candidate any more; it is
+    undecided, so it moved from job 1 to job 2. 157 -> 156 graded, 19 -> 18
+    misses; the 138 passes do not move."""
     exam, results = _exam()
     scores = [s for r in results for s in r["job1_scores"]]
-    assert (len(scores), sum(scores)) == (157, 138.0)
+    # 2026-09-26 (faithful prompts): oversized's contradiction row left
+    # job 1. 157 -> 156; passes stay 138.
+    assert (len(scores), sum(scores)) == (156, 138.0)
     misses = [e.case for e, r in zip(exam, results)
              if sum(r["job1_scores"]) < len(r["job1_scores"])]
-    assert len(misses) == 19
+    # 2026-09-26 (faithful prompts): same reason. 19 -> 18.
+    assert len(misses) == 18
     assert set(misses) == {"contradiction_probe"}
 
 
@@ -293,7 +329,11 @@ def test_exam_oracle_job2_is_perfect():
 
     Re-measured 2026-09-24 (job-2 generator fix: the exam's `none_of_these`
     slice is 8 thin-evidence rows, not 19) -- 153 to 142. Still perfect.
+
+    2026-09-26 (faithful prompts): the `oversized` `contradiction_probe`
+    row is now undecided (its node decoy is ruled out), so it joined job 2
+    -- 142 to 143. Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 142}
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 143}

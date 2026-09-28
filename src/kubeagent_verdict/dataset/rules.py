@@ -7,7 +7,8 @@ commit 15ec5649bbd2d07558eae945b71430afc8f231fd, by Task 2):
 - `internal/rootcause` (node/PVC/registry candidate attribution) -> attribute()
 - `internal/hypothesis` (fresh-read decision, storage-class grouping,
   shared-cause lines) -> decide(), shared()
-- `internal/investigate/reader.go` (the gather's describe formats) -> read_text()
+- `internal/investigate/reader.go` (the gather's describe formats) ->
+  describe_node(), read_text()
 
 Every cause, reason and evidence string below is copied verbatim from
 kubeagent's own Go source; nothing here is paraphrased. This module is
@@ -378,6 +379,72 @@ def label(lines: tuple[str, ...]) -> str:
     return "shared"
 
 
+# The kubelet's node conditions, as (type, status, reason, message). The
+# kubelet sets them in this order: MemoryPressure, DiskPressure,
+# PIDPressure, Ready (kubelet pkg/kubelet/nodestatus/setters.go). The
+# Ready=False text is objects.NOT_READY_REASON / NOT_READY_MESSAGE, read at
+# call time so there is one copy of it.
+_MEMORY_OK = ("MemoryPressure", "False", "KubeletHasSufficientMemory",
+              "kubelet has sufficient memory available")
+_DISK_OK = ("DiskPressure", "False", "KubeletHasNoDiskPressure", "kubelet has no disk pressure")
+_DISK_PRESSURE = ("DiskPressure", "True", "KubeletHasDiskPressure", "kubelet has disk pressure")
+_PID_OK = ("PIDPressure", "False", "KubeletHasSufficientPID",
+           "kubelet has sufficient PID available")
+_READY_TRUE = ("Ready", "True", "KubeletReady", "kubelet is posting ready status")
+
+
+def describe_node(name: str, *, unschedulable: bool,
+                  conditions: tuple[tuple[str, str, str, str], ...],
+                  taints: tuple[tuple[str, str, str], ...]) -> str:
+    """Port of reader.go's `describeNode` (internal/investigate/reader.go:238-248).
+
+    One header line, then one line per condition and one per taint, in the
+    order given. A condition is (type, status, reason, message); its reason
+    and message pass through `sanitize` (reader.go:242, 88-90), which is
+    `gather._sanitize` here. A taint is (key, value, effect) and is printed
+    as it is (reader.go:245). An empty value prints as nothing, so a taint
+    with no value reads `key=:Effect`.
+    """
+    # gather imports this module at load time, so this import waits for
+    # the call.
+    from kubeagent_verdict.dataset.gather import _sanitize
+
+    lines = [f"node {name}: unschedulable={'true' if unschedulable else 'false'}\n"]
+    for typ, status, reason, message in conditions:
+        lines.append(f"  condition {typ}={status} ({_sanitize(reason)}): {_sanitize(message)}\n")
+    for key, value, effect in taints:
+        lines.append(f"  taint {key}={value}:{effect}\n")
+    return "".join(lines)
+
+
+def _node_conditions(obj: Object) -> tuple[tuple[str, str, str, str], ...]:
+    """The kubelet conditions a node object's describe prints.
+
+    `ready` "True" and "False" print all four conditions. Ready=False must
+    carry the shared kubelet text (objects.NOT_READY_REASON and
+    NOT_READY_MESSAGE); anything else raises ValueError. "missing" is a
+    node that reports no conditions, so it prints none, as describeNode
+    does for such a node. "Unknown" raises: its text would come from the
+    node lifecycle controller, not the kubelet, and no dataset read needs
+    it.
+    """
+    fresh = obj.fresh
+    if fresh.ready == "missing":
+        return ()
+    disk = _DISK_PRESSURE if fresh.disk_pressure else _DISK_OK
+    if fresh.ready == "True":
+        return (_MEMORY_OK, disk, _PID_OK, _READY_TRUE)
+    if fresh.ready == "False":
+        want = (ds_objects.NOT_READY_REASON, ds_objects.NOT_READY_MESSAGE)
+        if (fresh.ready_reason, fresh.ready_message) != want:
+            raise ValueError(
+                f"read_text: node {obj.name!r} is Ready=False but does not carry the "
+                f"kubelet text {want[0]} / {want[1]!r}; use objects.NODE_NOT_READY")
+        return (_MEMORY_OK, disk, _PID_OK, ("Ready", "False") + want)
+    raise ValueError(f"read_text: node {obj.name!r} is Ready={fresh.ready}; the dataset "
+                     "has no kubelet text for that condition")
+
+
 def read_text(obj: Object, *, ns: str, pod: str) -> tuple[str, str]:
     """Port of reader.go's describeNode/describePVC and gather.go's read label.
 
@@ -387,15 +454,11 @@ def read_text(obj: Object, *, ns: str, pod: str) -> tuple[str, str]:
     pod's events, out of scope for this function (see the module docstring).
     Calling this with a registry object raises ValueError.
 
-    Every line this function writes itself is byte-for-byte the Go format: the
-    label, the `read failed: ` prefix, the node's `unschedulable=` line and the
-    whole PVC line. The node's condition and taint lines are not written here.
-    describeNode builds one line per condition and one per taint, in the
-    node's own order, with the reason and message sanitized; this port takes
-    them ready-made from `fresh.extra` and joins them. So their fidelity is
-    the fixture author's, not this function's, and `fresh.ready` is not read
-    at all — a node's Ready condition reaches the content only because
-    `extra` carries it.
+    A read node's content is `describe_node` fed the kubelet's four
+    conditions for the node's `fresh.ready` (see `_node_conditions`), with
+    DiskPressure=True when `fresh.disk_pressure` is set, then the node's
+    `fresh.taints`. A Ready=False node without the shared kubelet text, and
+    a Ready=Unknown node, raise ValueError.
 
     `pod` is accepted for signature symmetry with the events read this
     function does not cover; neither the node nor the PVC read format uses
@@ -411,9 +474,9 @@ def read_text(obj: Object, *, ns: str, pod: str) -> tuple[str, str]:
         trail_label = f"describe node /{obj.name}"
         if fresh.how == "read_failed":
             return trail_label, f"read failed: {fresh.message}"
-        lines = [f"node {obj.name}: unschedulable={'true' if fresh.unschedulable else 'false'}"]
-        lines.extend(fresh.extra)
-        return trail_label, "\n".join(lines) + "\n"
+        return trail_label, describe_node(obj.name, unschedulable=fresh.unschedulable,
+                                          conditions=_node_conditions(obj),
+                                          taints=fresh.taints)
     # obj.kind == "pvc"
     trail_label = f"describe pvc {ns}/{obj.name}"
     if fresh.how == "read_failed":

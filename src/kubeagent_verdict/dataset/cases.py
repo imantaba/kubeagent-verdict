@@ -77,7 +77,7 @@ def _rule_rationale(result: rules.Result) -> str:
             f"the read ruled out.")
 
 
-def _suggestion(issue: str, n: Names) -> rem.Suggestion:
+def _suggestion(issue: str, n: Names, key: str = "") -> rem.Suggestion:
     """The `suggested fix` line kubeagent would render for this finding.
 
     Derived from the issue kind rather than authored per entry. The field is a
@@ -86,9 +86,12 @@ def _suggestion(issue: str, n: Names) -> rem.Suggestion:
     serve time. See src/kubeagent_verdict/remediation.py.
 
     kubeagent names the init container on an Init:* finding, so the --previous
-    log command it builds addresses that container and not the app one.
+    log command it builds addresses that container and not the app one. Any
+    other finding names the entry's own container (`_LOG_CONTAINER`), keyed
+    by the catalog entry's `key`.
     """
-    container = n.init_container if issue.startswith("Init:") else n.container
+    container = (n.init_container if issue.startswith("Init:")
+                 else _LOG_CONTAINER.get(key, n.container))
     return rem.suggest(issue, ns=n.ns, pod=n.pod, container=container)
 
 
@@ -97,7 +100,7 @@ def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Findin
     if e.resources is not None:
         res = c.ContainerResources(mem_request=e.resources[0], mem_limit=e.resources[1],
                                    cpu_request=e.resources[2], cpu_limit=e.resources[3])
-    sug = _suggestion(e.issue, n)
+    sug = _suggestion(e.issue, n, key=e.key)
     return c.Finding(
         issue=e.issue, reason=_fmt(e.reason, n), evidence=_fmt(e.evidence, n),
         log_cause=_fmt(e.log_cause, n) if (e.log_cause and with_log_cause) else "",
@@ -151,8 +154,10 @@ LOG_READS: dict[str, tuple[str, str | None]] = {
     "worker-containerd-stop": (_NO_PREVIOUS, None),
 }
 
-# The container kubeagent reads is the finding's own. coredns-corefile-broken's
-# finding pins `coredns`; every other entry's is the drawn `n.container`.
+# The container a finding names. kubeagent's previous-log read and the
+# `--previous` log command in its suggested fix both address the finding's
+# own container. coredns-corefile-broken's finding pins `coredns`; every
+# other entry's is the drawn `n.container`.
 _LOG_CONTAINER = {"coredns-corefile-broken": "coredns"}
 
 
@@ -656,13 +661,16 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from thin
     evidence on four entries, answer at low confidence, and no longer share
     the rationale — but they still share this row's gold summary sentence (no
-    other training case carries it), and 14 of the 19 rows here carry a
-    generic describe-node read that a `none_of_these` training row also
-    renders (the other five carry a PVC read, which no `none_of_these` row
-    has): 13 of contradiction_probe's 38 reads under the overlap guard's name
-    mask (14 byte for byte; `networkpolicy-deny-all`'s own workload is named
+    other training case carries it), and 18 of the 19 rows here carry a
+    describe-node read that a `none_of_these` training row also renders (the
+    other one, `deployment-bad-image-tag`, reads only its registry events):
+    18 of contradiction_probe's 37 reads under the overlap guard's name mask
+    (19 byte for byte; `networkpolicy-deny-all`'s own workload is named
     `worker`, so the guard's mask also rewrites its node read's `worker-3`,
-    dropping it from the masked count). Holding the adversarial menu roughly
+    dropping it from the masked count). Measured 2026-09-26. It was 14 rows
+    and 13 of 38 reads before five PVC decoys that could not happen became
+    node decoys or went away, and before a node describe printed its four
+    kubelet conditions. Holding the adversarial menu roughly
     fixed and changing only the read text moves cause accuracy from 0.1579
     (`misattribution_probe`) and 0.4737 (`wrong_attribution`) to 1.0 here. The
     menu is what this row perturbs, and the menu is what such a model never
@@ -680,7 +688,10 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
         raise ValueError(f"contradiction_probe needs a contradiction read: {e.key}")
     bound, menu = _contradiction_menu(n, e.objects)
     candidates, result = _decoy_result(e, n, menu)
-    w = _workload(e, n, candidates, confidence=_confidence(e), result=result)
+    # The header is kubeagent's rule for the attributed candidate, as in
+    # `_undecided_example`. A decoy placed off the pod's node is ruled out,
+    # so no candidate is attributed and kubeagent prints no header.
+    w = _workload(e, n, candidates, render.header_for(candidates), result=result)
     own_line = _fmt(e.contradiction, n)
     used_registry = False
     reads = []

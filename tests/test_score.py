@@ -1675,12 +1675,20 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     of 134. The cluster-health block's NotReady line ends "container
     runtime is down", which prints `worker-containerd-stop`'s keyword
     "runtime" on five workloads whose prompt did not print it before.
+
+    Re-pinned again on 2026-09-26, when the catalog took the text kubeagent
+    really prints: 81 of 134 becomes 134 of 134. Eleven entries changed
+    their keywords to words on a line the prompt shows, and `crashloop-pod`'s
+    finding now prints its last exit. That exposes 53 more workloads, and
+    every keyword-graded job-2 workload is now fully exposed. The grader
+    guard is what keeps a pasted prompt from scoring.
     """
     rows = [generate.to_row(ex) for ex in generate.test_set()]
     board = score.scoreboard(score.evaluate(rows, lambda m: ""))
     assert board["overall"]["keyword_graded_n"] == 134
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
-    assert board["overall"]["keyword_derivable_n"] == 81
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
+    assert board["overall"]["keyword_derivable_n"] == 134
     # Every counted workload is a job-2 workload, which is what design spec
     # line 547's "over all job-2 rows" asks for.
     counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
@@ -2097,8 +2105,11 @@ def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     # Re-pinned 2026-09-24 for the job-2 generator fix: the exam's
     # `none_of_these` slice is 8 thin-evidence rows, not 19, so job 2 falls
     # from 153 to 142. Job 1 is untouched.
-    assert expected_job1_n == 157
-    assert expected_job2_n == 142
+    # 2026-09-26 (faithful prompts): oversized-job-unschedulable's decoy is now a
+    # node the unscheduled pod is not on, so the rules rule it out and its
+    # contradiction_probe workload is undecided: job 1 157 -> 156, job 2 142 -> 143
+    assert expected_job1_n == 156
+    assert expected_job2_n == 143
 
 
 def _echo_the_decided_cause_bot(rows: list[dict]):
@@ -2238,10 +2249,14 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     results = score.evaluate(rows, _regex_copier_bot(rows))
     board = score.scoreboard(results)
 
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 157}
+    # 2026-09-26 (faithful prompts): the oversized-job-unschedulable
+    # contradiction_probe workload is undecided now (its node decoy is ruled
+    # out) 157 -> 156
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 156}
     # 153 to 142 on 2026-09-24: the job-2 generator fix left 8
     # `none_of_these` rows in the exam, not 19.
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
+    # 2026-09-26 (faithful prompts): that workload joins job 2 142 -> 143
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
 
 
 def _always_none_of_these_bot(rows: list[dict]):
@@ -2291,13 +2306,21 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     so the exam holds 8 such rows, not 19. 8 of the 142 undecided workloads
     expect `none_of_these`, and this bot scores 8/142 = 0.0563. The
     paragraphs above are the older account.
+
+    Re-pinned on 2026-09-26 for the faithful prompts.
+    `oversized-job-unschedulable`'s decoy is now a node the unscheduled pod
+    is not on, so the rules rule it out and its `contradiction_probe`
+    workload is undecided. Its gold is `none_of_these`, so it joins job 2
+    as a ninth such workload: 9/143 = 0.0629.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _always_none_of_these_bot(rows))
     board = score.scoreboard(results)
 
     assert board["jobs"]["job2"]["n"] > 0
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0563, abs=0.005)
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now, gold none_of_these 0.0563 -> 0.0629 (8/142 -> 9/143)
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0629, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -2390,6 +2413,15 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     0.0: the block sits before the first inventory entry, so it is in no
     workload's own block, and the bot's pasted prompt still holds every
     line of the workload's own block.
+
+    2026-09-26 (faithful prompts), when the catalog took the text kubeagent
+    really prints: every keyword now sits on a line the prompt shows, so
+    all 134 keyword-graded workloads are exposed, not 81. One
+    `contradiction_probe` workload (`oversized-job-unschedulable`) is
+    undecided now, so job 2 counts 143, not 142. With no guard this bot
+    now scores 134/143 = 0.9371, above JOB2_BAR. The guarded rate is still
+    0.0. From here on the guard alone keeps a bot that reads nothing
+    under the bar.
     """
     rows = _corpus_rows()
     bot = _paste_the_prompt_bot(rows)
@@ -2397,16 +2429,21 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     unguarded = _unguarded_job2_scores(rows, bot)
 
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
-    assert board["overall"]["keyword_derivable_n"] == 81
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
+    assert board["overall"]["keyword_derivable_n"] == 134
     assert board["overall"]["keyword_graded_n"] == 134
-    assert board["jobs"]["job2"]["n"] == 142
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now 142 -> 143
+    assert board["jobs"]["job2"]["n"] == 143
     # 2026-09-26 (faithful prompts): the grader guard zeroes a pasted prompt 0.535 -> 0.0
     assert board["jobs"]["job2"]["rate"] == 0.0
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime"
     # (76, 142) -> (81, 142), 0.5352 -> 0.5704
-    assert (sum(unguarded), len(unguarded)) == (81, 142)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.5704
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines,
+    # and one workload joins job 2 (81, 142) -> (134, 143), 0.5704 -> 0.9371
+    assert (sum(unguarded), len(unguarded)) == (134, 143)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
 
 
 def _own_entry(prompt: str, section: str, name: str) -> list[str]:
@@ -2454,15 +2491,24 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     Measured 2026-09-26 (faithful prompts). The design spec's table prints
     0.5282 (75 of 142) for an echo bot it does not define line by line;
     this is the bot defined above, and 74 is what it measures.
+
+    Re-pinned the same day, when the catalog took the text kubeagent really
+    prints. Every keyword now sits on a finding line, which is in the
+    workload's own inventory entry, so the unguarded echo wins all 134
+    keyword-graded workloads of 143: 0.9371. Guarded it is still 0.0.
     """
     rows = _corpus_rows()
     bot = _echo_the_own_entries_bot(rows)
     board = score.scoreboard(score.evaluate(rows, bot))
     unguarded = _unguarded_job2_scores(rows, bot)
 
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
-    assert (sum(unguarded), len(unguarded)) == (74, 142)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.5211
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now 142 -> 143
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on the finding
+    # lines the echo copies (74, 142) -> (134, 143), 0.5211 -> 0.9371
+    assert (sum(unguarded), len(unguarded)) == (134, 143)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
 
 
 def _name_the_decoy_bot(rows: list[dict]):
@@ -2498,8 +2544,10 @@ def test_a_bot_that_names_the_decoy_scores_zero_on_job2_with_or_without_the_guar
     board = score.scoreboard(score.evaluate(rows, bot))
     unguarded = _unguarded_job2_scores(rows, bot)
 
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 142}
-    assert (sum(unguarded), len(unguarded)) == (0, 142)
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now 142 -> 143
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 143}
+    assert (sum(unguarded), len(unguarded)) == (0, 143)
 
 
 def _hedge_bot(rows: list[dict]):
@@ -2537,15 +2585,24 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     spec's table. The hedge uses the workload's own decoy list only;
     hedging with the row's decoys as well measures 19 of 142 guarded, and
     the spec's number is the first.
+
+    Re-pinned the same day, when the catalog took the text kubeagent really
+    prints. `oversized-job-unschedulable`'s `contradiction_probe` workload
+    is undecided now, with gold `none_of_these` and no hedge, so job 2
+    counts 143: 134 of 143 = 0.9371 unguarded, 31 of 143 = 0.2168 guarded.
     """
     rows = _corpus_rows()
     bot = _hedge_bot(rows)
     board = score.scoreboard(score.evaluate(rows, bot))
     unguarded = _unguarded_job2_scores(rows, bot)
 
-    assert board["jobs"]["job2"] == {"rate": 0.2183, "n": 142}
-    assert (sum(unguarded), len(unguarded)) == (134, 142)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9437
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now {0.2183, 142} -> {0.2168, 143} (31 of 143)
+    assert board["jobs"]["job2"] == {"rate": 0.2168, "n": 143}
+    # 2026-09-26 (faithful prompts): same workload (134, 142) -> (134, 143),
+    # 0.9437 -> 0.9371
+    assert (sum(unguarded), len(unguarded)) == (134, 143)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.9371
 
 
 def test_the_gold_answer_passes_the_grader_guard_on_every_exam_job2_workload():
@@ -2621,7 +2678,11 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
     on 64 of the 121 rows then checked, every `wrong_attribution`,
     `misattribution_probe`, `multi_misattribution_probe` and shared-origin
     probe row among them. The same fix cut the exam's `none_of_these` slice
-    from 19 rows to 8, so 110 rows are checked now."""
+    from 19 rows to 8, so 110 rows are checked now.
+
+    2026-09-26 (faithful prompts): `oversized-job-unschedulable`'s
+    `contradiction_probe` row is all job 2 now (its node decoy is ruled
+    out, so nothing is decided), so 111 rows are checked."""
     rows = _corpus_rows()
     results = score.evaluate(rows, _own_keyword_bot(rows))
     checked = 0
@@ -2632,7 +2693,9 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
         checked += 1
         assert res["cause_acc"] == pytest.approx(
             sum(res["job2_scores"]) / len(res["job2_scores"])), row["meta"]["case"]
-    assert checked == 110
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe row is
+    # all job 2 now 110 -> 111
+    assert checked == 111
 
 
 def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int]:
@@ -2656,7 +2719,7 @@ def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dic
     return rewritten, workload_level
 
 
-def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
+def test_the_exposed_workloads_trace_back_to_nineteen_catalog_entries():
     """Pins the count the model card's limit 7 quotes as the size of the edit.
 
     `keyword_derivable_n` says 56 CATALOG workloads print their own answer
@@ -2695,6 +2758,17 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     Still eleven entries: ten fully exposed on 60 workloads, and one,
     `volume-attach-error`, on a single row. 56 becomes 61, and the
     scoreboard's 76 becomes 81.
+
+    Re-pinned again on 2026-09-26, when the catalog took the text kubeagent
+    really prints, and renamed from `..._to_eleven_catalog_entries`. Eleven
+    entries changed their keywords to words on a line the prompt shows, and
+    `crashloop-pod`'s finding now prints its last exit. Every one of the 19
+    trainable entries is now fully exposed, and none is partly exposed. The
+    count is 115, not 114: `probe-failure`'s new pair ("readiness",
+    "endpoint") is also the curated pair of one `shared_origin_decoy_probe`
+    victim (`propagation.py`), so that one eval-origin workload traces to a
+    catalog key here. 114 catalog workloads plus the 20 eval-origin ones
+    make the scoreboard's 134.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -2724,14 +2798,19 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
 
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" exposes
     # worker-containerd-stop fully: (9, 54) -> (10, 60), (2, 2) -> (1, 1), 56 -> 61
-    assert (len(fully), n_fully) == (10, 60)
-    assert (len(partly), n_partly) == (1, 1)
-    assert n_fully + n_partly == 61
-    # The scoreboard's total is bigger now: the catalog's 61 plus the 20
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines,
+    # so all 19 entries are fully exposed: (10, 60) -> (19, 115), (1, 1) -> (0, 0),
+    # 61 -> 115 (one of the 115 is the eval-origin victim that shares
+    # probe-failure's pair)
+    assert (len(fully), n_fully) == (19, 115)
+    assert (len(partly), n_partly) == (0, 0)
+    assert n_fully + n_partly == 115
+    # The scoreboard's total is bigger now: the catalog's 114 plus the 20
     # eval-origin workloads this test deliberately does not count above.
     board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
-    assert board["overall"]["keyword_derivable_n"] == 81
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
+    assert board["overall"]["keyword_derivable_n"] == 134
     assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
@@ -2812,6 +2891,13 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     `none_of_these` fallback missed all 20 of them: 114 + 19 = 133,
     133/153 = 0.8693. (Since the 2026-09-24 generator fix the corpus holds 8
     `none_of_these` workloads, not 19: 134 + 8 = 142, still every one.)
+
+    2026-09-26 (faithful prompts): the catalog's keywords now sit on lines
+    the prompt shows, so `keyword_derivable_n` before the rewrite is 134,
+    every keyword-graded workload. `oversized-job-unschedulable`'s
+    `contradiction_probe` workload is undecided now with gold
+    `none_of_these`, so the post-rewrite job 2 reads 9/143 = 0.0629, still
+    the always-none bot's figure.
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
@@ -2825,13 +2911,17 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
 
     # The exposure closes, which is the point of the rewrite.
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
-    assert before["overall"]["keyword_derivable_n"] == 81
+    # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
+    assert before["overall"]["keyword_derivable_n"] == 134
     assert after["overall"]["keyword_derivable_n"] == 0
     assert after["overall"]["keyword_graded_n"] == 134
 
     # Four numbers retire: the same replies now score differently.
     assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
-    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0563, abs=0.005)
+    # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
+    # is undecided now, gold none_of_these, the same figure the always-none bot
+    # pins 0.0563 -> 0.0629 (8/142 -> 9/143)
+    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0629, abs=0.005)
     assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5185, abs=0.005)
     assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.1071, abs=0.005)
     assert before["overall"]["overconfidence_rate"]["n"] == 123

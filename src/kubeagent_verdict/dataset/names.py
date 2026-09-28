@@ -18,11 +18,12 @@ CONTAINERS = ("app", "web", "worker", "main")
 INIT_CONTAINERS = ("init-config", "init-migrate")
 NODES = ("worker-1", "worker-2", "worker-3")
 PVCS = ("data-0", "cache-0", "media-assets")
-# A fixed decoy-PVC pool, never drawn by the rng. A catalog entry or
-# scenario names one of these directly (a literal, not a template) when its
-# own PVC decoy must stay distinct from the entry's own {pvc}. Task 5
-# declares two: aux-0 (volume-attach-error), aux-1 (volume-mount-error).
-# The other seven are Task 6's, drawn by its option-A endings.
+# A fixed decoy-PVC pool, never drawn by the rng. No catalog entry names
+# one: a pod with a finding is past scheduling or waits on something other
+# than a claim, so no entry has a mounted Pending PVC to blame. All nine are
+# the always-ruled-out pads `truncated` appends to overflow the read budget
+# (render.PAD_PVC_OBJECTS). A scenario may still name one directly when its
+# own PVC decoy must stay distinct from a drawn {pvc}.
 PAD_PVCS = ("aux-0", "aux-1", "aux-2", "aux-3", "aux-4", "aux-5",
             "aux-6", "aux-7", "aux-8")
 DNS_NAMESPACE = "kube-system"  # fixed pair for the CoreDNS entries
@@ -51,12 +52,14 @@ def pod_name(rng: random.Random, name: str) -> str:
     return f"{name}-{mid}-{tail}"
 
 
-def draw(rng: random.Random) -> Names:
+def draw(rng: random.Random, *, min_restarts: int = 1) -> Names:
+    """Draw one row's names. `restarts` is drawn from min_restarts..40, last,
+    so a different floor changes no other field of the same draw."""
     ns = rng.choice(NAMESPACES)
     name = rng.choice(NAMES)
     return Names(
         ns=ns, name=name, pod=pod_name(rng, name),
         container=rng.choice(CONTAINERS), init_container=rng.choice(INIT_CONTAINERS),
         image=f"registry.example.com/{ns}/{name}:v{rng.randint(1, 3)}.{rng.randint(0, 9)}.{rng.randint(0, 9)}",
-        node=rng.choice(NODES), pvc=rng.choice(PVCS), restarts=rng.randint(1, 40),
+        node=rng.choice(NODES), pvc=rng.choice(PVCS), restarts=rng.randint(min_restarts, 40),
     )

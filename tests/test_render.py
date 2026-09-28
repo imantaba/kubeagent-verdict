@@ -184,14 +184,26 @@ def test_registry_events_read_contradiction_probe_two_lines():
 
 def test_object_reads_uses_rules_read_text_for_node_and_pvc():
     node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="False"))
+                     placement="on", fresh=o.NODE_NOT_READY)
     pvc = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
                     placement="mounted",
                     fresh=o.Fresh(how="read", phase="Pending",
                                    storage_class="standard", volume=""))
     reads = render.object_reads((node, pvc), ns="shop", pod="api-0")
     assert reads[0].label == "describe node /worker-1"
-    assert reads[0].content == "node worker-1: unschedulable=false\n"
+    # 2026-09-26 (faithful prompts): the node describe is now a port of
+    # kubeagent's describeNode, so a NotReady node prints the kubelet's four
+    # conditions, not the header alone.
+    # "node worker-1: unschedulable=false\n" -> the four-condition block
+    assert reads[0].content == (
+        "node worker-1: unschedulable=false\n"
+        "  condition MemoryPressure=False (KubeletHasSufficientMemory): "
+        "kubelet has sufficient memory available\n"
+        "  condition DiskPressure=False (KubeletHasNoDiskPressure): kubelet has no disk pressure\n"
+        "  condition PIDPressure=False (KubeletHasSufficientPID): "
+        "kubelet has sufficient PID available\n"
+        "  condition Ready=False (KubeletNotReady): container runtime is down\n"
+    )
     assert reads[1].label == "describe pvc shop/data-0"
     assert reads[1].content == (
         "pvc shop/data-0: phase=Pending storageClass=standard volume=\n"
@@ -215,7 +227,7 @@ def test_object_reads_delegates_registry_to_registry_events_read():
 
 def test_render_workload_builds_candidates_reads_and_result():
     node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="False"),
+                     placement="on", fresh=o.NODE_NOT_READY,
                      intent="cause")
     workload, reads, result = render.render_workload(
         (node,), ns="shop", name="api", pod="api-0",
@@ -243,7 +255,7 @@ def test_render_workload_builds_candidates_reads_and_result():
 
 def test_render_workload_prints_no_header_when_every_candidate_is_ruled_out():
     node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="off", fresh=o.Fresh(how="read", ready="False"),
+                     placement="off", fresh=o.NODE_NOT_READY,
                      intent="decoy")
     workload, _reads, _result = render.render_workload(
         (node,), ns="shop", name="api", pod="api-0",

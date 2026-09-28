@@ -876,7 +876,21 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 # the old bytes is retired.
 # aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490 ->
 # e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1
-FROZEN_SLICE_SHA256 = "e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1"
+#
+# 2026-09-26 (faithful prompts), again: the catalog now uses the detector and
+# kubelet text kubeagent really prints. The catalog feeds every case here,
+# so 222 of the 242 rows move. 218 change their user message: the finding
+# and event lines carry kubeagent's own words, a node describe prints its
+# four conditions, and five impossible PVC decoys became node decoys or went
+# away. 89 change their meta: eleven entries have new keyword pairs, the
+# decoy causes follow the PVC swap, and the `oversized`
+# `contradiction_probe` row is undecided now, so it moves from job 1 to
+# job 2. 6 change their gold answer: `worker-containerd-stop`'s own cause
+# now uses the kubelet's words. No system message moves. Every number
+# banked against the old bytes is retired.
+# e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1 ->
+# e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa
+FROZEN_SLICE_SHA256 = "e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -950,7 +964,14 @@ FROZEN_SLICE_SHA256 = "e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c7
 # frozen slice inside it does.
 # 97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81 ->
 # d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31
-EVAL_SET_SHA256 = "d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31"
+#
+# 2026-09-26 (faithful prompts), again: the catalog text change that moved
+# `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows come
+# from `dataset.propagation`, not the catalog, and do not move, so this
+# digest moves only because the frozen slice inside it does.
+# d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31 ->
+# f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb
+EVAL_SET_SHA256 = "f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb"
 
 
 def _digest(rows) -> str:

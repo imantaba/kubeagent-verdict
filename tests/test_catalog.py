@@ -17,48 +17,56 @@ def test_catalog_entry_objects_field_defaults_to_empty():
     assert e.objects == ()
 
 
+# The shared Ready=False text every NotReady node object carries: the
+# kubelet's own reason and message when the container runtime is down
+# (kubelet pkg/kubelet/runtime.go:129). Written out here, not imported, so
+# a change to the constant fails these pins.
+def _not_ready():
+    from kubeagent_verdict.dataset.objects import Fresh
+
+    return Fresh(ready="False", ready_reason="KubeletNotReady",
+                 ready_message="container runtime is down")
+
+
+def _node_decoy():
+    from kubeagent_verdict.dataset.objects import Object
+
+    return Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
+                  fresh=_not_ready(), intent="decoy")
+
+
 def test_entries_slugs_declare_their_objects():
     from kubeagent_verdict.dataset.objects import Fresh, Object
 
     expected = {
-        "memory-limit-oomkill": (
-            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
-        ),
+        "memory-limit-oomkill": (_node_decoy(),),
         "deployment-bad-image-tag": (
             Object(kind="registry", name="registry.example.com", scan_reason="2",
                    placement="", fresh=Fresh(literal="dial tcp"), intent="decoy"),
         ),
+        # Cordoned, under disk pressure and still Ready, with the two
+        # NoSchedule taints the node lifecycle controller adds for those.
         "node-cordon-diskfull": (
             Object(kind="node", name="{node}", scan_reason="no kubelet lease",
-                   placement="on", fresh=Fresh(ready="True"), intent="decoy"),
+                   placement="on",
+                   fresh=Fresh(ready="True", unschedulable=True, disk_pressure=True,
+                               taints=(("node.kubernetes.io/unschedulable", "", "NoSchedule"),
+                                       ("node.kubernetes.io/disk-pressure", "", "NoSchedule"))),
+                   intent="decoy"),
         ),
-        "networkpolicy-deny-all": (
-            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
-        ),
-        "coredns-corefile-broken": (
-            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
-        ),
+        "networkpolicy-deny-all": (_node_decoy(),),
+        "coredns-corefile-broken": (_node_decoy(),),
         "worker-containerd-stop": (
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="cause"),
-            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0947"),
-                   intent="decoy"),
+                   fresh=_not_ready(), intent="cause"),
         ),
+        # A Pending pod has no mounted claim to blame, so its decoy is a
+        # node the pod is not placed on.
         "oversized-job-unschedulable": (
-            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
-                   intent="decoy"),
+            Object(kind="node", name="{node}", scan_reason="NotReady", placement="off",
+                   fresh=_not_ready(), intent="decoy"),
         ),
-        "crashloop-pod": (
-            Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
-                   fresh=Fresh(ready="False"), intent="decoy"),
-        ),
+        "crashloop-pod": (_node_decoy(),),
     }
     by_key = {e.key: e.objects for e in catalog.all_entries()}
     for key, objects in expected.items():
@@ -66,37 +74,22 @@ def test_entries_slugs_declare_their_objects():
 
 
 def test_entries_kinds_declare_their_objects():
-    from kubeagent_verdict.dataset.objects import Fresh, Object
-
-    node_decoy = Object(kind="node", name="{node}", scan_reason="NotReady",
-                         placement="on", fresh=Fresh(ready="False"), intent="decoy")
+    # A pod with a config or volume finding is past scheduling, so every
+    # claim it mounts is Bound: a mounted, Pending PVC decoy cannot happen
+    # there. Those three entries carry a node decoy instead.
+    node_decoy = _node_decoy()
     expected = {
         "probe-failure": (node_decoy,),
         "container-start-error": (node_decoy,),
-        "create-container-config-error": (
-            Object(kind="pvc", name="{pvc}", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0442"),
-                   intent="decoy"),
-        ),
+        "create-container-config-error": (node_decoy,),
         "init-crashloop": (node_decoy,),
         "init-config-error": (node_decoy,),
         "init-errimagepull": (node_decoy,),
         "init-imagepullbackoff": (node_decoy,),
         "init-oomkilled": (node_decoy,),
         "restart-loop": (node_decoy,),
-        "volume-attach-error": (
-            Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
-                   intent="decoy"),
-        ),
-        "volume-mount-error": (
-            Object(kind="pvc", name="aux-1", scan_reason="ProvisioningFailed",
-                   placement="mounted",
-                   fresh=Fresh(phase="Pending", storage_class="fast-ssd", volume="pv-0821"),
-                   intent="decoy"),
-        ),
+        "volume-attach-error": (node_decoy,),
+        "volume-mount-error": (node_decoy,),
     }
     by_key = {e.key: e.objects for e in catalog.all_entries()}
     for key, objects in expected.items():
@@ -114,11 +107,14 @@ def test_19_entries_declare_an_object_and_9_declare_none():
     assert with_objects | without_objects == {e.key for e in entries}
 
 
-def test_worker_containerd_stop_declares_its_cause_node_and_a_decoy_pvc():
+def test_worker_containerd_stop_declares_only_its_cause_node():
     entry = next(e for e in catalog.all_entries() if e.key == "worker-containerd-stop")
-    assert len(entry.objects) == 2
-    assert {o.kind for o in entry.objects} == {"node", "pvc"}
-    assert {o.intent for o in entry.objects} == {"cause", "decoy"}
+    assert [(o.kind, o.intent) for o in entry.objects] == [("node", "cause")]
+
+
+def test_every_producing_entry_declares_exactly_one_object():
+    for e in catalog.all_entries():
+        assert len(e.objects) in (0, 1), e.key
 
 
 def test_every_declared_catalog_object_passes_check_declaration():
