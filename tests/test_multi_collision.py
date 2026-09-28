@@ -201,6 +201,13 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     so 0 of 12 is chance). The keep branch is still checked here, and
     `test_resolve_drops_a_registry_story_read_when_the_row_holds_a_registry_object`
     still covers the drop.
+
+    2026-09-26 (faithful prompts): the build reaches the drop branch again.
+    `coredns-corefile-broken` now draws its restarts from 6, not 1, and
+    `randint(6, 40)` throws away a different number of raw draws than
+    `randint(1, 40)`, so every later rng draw moved. 2 of the 12 rows now
+    hold `deployment-bad-image-tag` next to the registry story, and the rule
+    drops both.
     """
     calls: list[tuple[bool, bool]] = []  # (row has a registry candidate, kept)
     original = cases._resolve_multi_healthy_origin
@@ -241,7 +248,12 @@ def test_a_real_registry_healthy_origin_read_is_dropped_next_to_its_own_candidat
     # row pairs different victims again. Still 12 rows; none holds a
     # registry candidate of its own, so the rule keeps all 12 (see the
     # docstring). (12, 3) -> (12, 0).
-    assert (len(calls), dropped) == (12, 0)
+    # 2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    # restarts from 6, so the rng stream moved and each `multi` row pairs
+    # different victims. Still 12 rows; 2 of them hold a registry candidate
+    # of their own, so the rule drops 2 and keeps 10 (see the docstring).
+    # (12, 0) -> (12, 2).
+    assert (len(calls), dropped) == (12, 2)
 
 
 def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
@@ -302,4 +314,9 @@ def test_no_real_healthy_node_read_names_a_clashing_node(monkeypatch):
     # only that workload's own node objects can clash with it now, so
     # fewer reads are renamed. Still 96 rows and no drop.
     # (96, 49, 47, 0) -> (96, 73, 23, 0).
-    assert (len(calls), kept, renamed, dropped) == (96, 73, 23, 0)
+    # 2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    # restarts from 6, so the rng stream moved and each `multi` row pairs
+    # different victims. Still 96 rows and no drop; by chance more drawn
+    # nodes clash with a node object in their row, so more reads are
+    # renamed. (96, 73, 23, 0) -> (96, 65, 31, 0).
+    assert (len(calls), kept, renamed, dropped) == (96, 65, 31, 0)

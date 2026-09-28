@@ -187,7 +187,12 @@ def view(row):
 # five workers instead of three move every later draw
 # 8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3 ->
 # 65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d
-GRADED_VIEW_SHA256 = "65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d"
+# 2026-09-26 (faithful prompts): coredns-corefile-broken draws its restarts
+# from 6, so the 16 coredns exam rows show a workload restart count
+# kubeagent can print; no flagged list, gold or meta moves
+# 65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d ->
+# 4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b
+GRADED_VIEW_SHA256 = "4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b"
 
 
 def _digest(views) -> str:

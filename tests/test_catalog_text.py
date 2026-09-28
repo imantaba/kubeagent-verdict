@@ -530,9 +530,28 @@ def test_the_default_draw_still_starts_at_one():
 def test_only_the_two_restart_counting_entries_start_at_three():
     # internal/diagnose/restartloop.go:15, 35-37: RestartThreshold is 3, and
     # crashloop.go:46 prints the last exit only from 3 restarts on.
+    # 2026-09-26 (faithful prompts): coredns-corefile-broken now starts at 6
+    # (see the test below), so a third entry leaves 1. The two that start at
+    # 3 are unchanged. {crashloop-pod: 3, restart-loop: 3} ->
+    # {crashloop-pod: 3, restart-loop: 3, coredns-corefile-broken: 6}.
     starts = {e.key: e.min_restarts for e in catalog.all_entries()}
-    assert {k for k, v in starts.items() if v != 1} == {"crashloop-pod", "restart-loop"}
-    assert starts["crashloop-pod"] == starts["restart-loop"] == 3
+    assert {k: v for k, v in starts.items() if v != 1} == {
+        "crashloop-pod": 3, "restart-loop": 3, "coredns-corefile-broken": 6}
+
+
+def test_the_draw_can_start_at_six():
+    rng = random.Random(0)
+    got = {names.draw(rng, min_restarts=6).restarts for _ in range(3000)}
+    assert (min(got), max(got)) == (6, 40)
+
+
+def test_coredns_starts_at_its_own_restart_count():
+    # Its finding text fixes restartCount=6, and kubeagent's workload line
+    # sums the restarts of its pods' containers (internal/inventory/
+    # inventory.go:158-170, 488), so the line can never show fewer than 6.
+    e = _entry("coredns-corefile-broken")
+    assert 'restartCount=6,' in e.evidence
+    assert e.min_restarts == 6
 
 
 _CRASH_COUNT = re.compile(

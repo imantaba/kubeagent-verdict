@@ -71,7 +71,9 @@ class CatalogEntry:
     # A finding that prints its restart count only fires from 3 restarts
     # on (kubeagent internal/diagnose/restartloop.go:15, 35-37;
     # crashloop.go:46 prints the last exit only from 3), so those entries
-    # set 3.
+    # set 3. coredns-corefile-broken sets 6: its evidence fixes
+    # restartCount=6, and a workload's count is the sum over its pods'
+    # containers (inventory/inventory.go:158-170, 488).
     min_restarts: int = 1
 
 

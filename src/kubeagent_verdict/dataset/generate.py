@@ -668,7 +668,12 @@ def test_set() -> list[Example]:
 
 def manifest(seed: int, size: int, train: list[Example], val: list[Example],
              test: list[Example]) -> dict:
+    """The dataset's summary. `checker_violations` is a report: each case's
+    count of places its rows differ from what kubeagent sends. It never
+    blocks a write."""
     from collections import Counter
+
+    from kubeagent_verdict.dataset import checker
 
     return {
         "seed": seed, "size": size,
@@ -678,4 +683,6 @@ def manifest(seed: int, size: int, train: list[Example], val: list[Example],
         "corpus_files": sorted(
             p.name for p in
             (Path(__file__).resolve().parents[3] / "data" / "corpus").glob("*.jsonl")),
+        "checker_violations": checker.count_by_case(
+            to_row(ex) for ex in train + val + test),
     }

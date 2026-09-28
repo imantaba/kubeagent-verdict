@@ -83,7 +83,12 @@ DECLARED = {
     # by chance: an `init-crashloop` row's BackOff line for container
     # `init-migrate` at (x5). No kept training row draws that container with
     # that count now. The `aux-0` miss stays. 55 - 1 = 54.
-    "positional_probe": (54, 56),
+    # 2026-09-26 (faithful prompts): (54, 56) -> (55, 56). The slice builds
+    # the same reads. coredns-corefile-broken now draws its restarts from 6,
+    # which moved every later training draw, and the `init-crashloop`
+    # BackOff read for `init-migrate` at (x5) matches a kept training row
+    # again by chance. The `aux-0` miss stays. 54 + 1 = 55.
+    "positional_probe": (55, 56),
     # Since 2026-09-24 this probe builds `own_cause`'s ruled-out prompt: no
     # object reads, and one log read on each of the five crash-family
     # entries. All five are reused, from `own_cause` and `wrong_attribution`
@@ -113,7 +118,13 @@ DECLARED = {
     # kept training row. `deployment-bad-image-tag`'s pull events miss
     # again: they print the drawn tag (`v2.8.4`), which the mask does not
     # blank, and no kept row drew it. 23 + 2 - 1 = 24.
-    "misattribution_probe": (24, 25),
+    # 2026-09-26 (faithful prompts): (24, 25) -> (23, 25). The slice builds
+    # the same reads. coredns-corefile-broken now draws its restarts from 6,
+    # which moved every later training draw, and one match went by chance:
+    # the `restart-loop` events read, a BackOff line for container `main` at
+    # (x6), matches no kept training row now. The
+    # `deployment-bad-image-tag` miss stays. 24 - 1 = 23.
+    "misattribution_probe": (23, 25),
     # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
     # reads its first object read and then its clear log read, the read
     # kubeagent makes for every crash-family workload; any other constituent

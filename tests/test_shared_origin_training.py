@@ -991,7 +991,19 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # moves. Every number banked against the old bytes is retired.
 # e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043 ->
 # b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1
-FROZEN_SLICE_SHA256 = "b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1"
+#
+# 2026-09-26 (faithful prompts): coredns-corefile-broken now draws its
+# restarts from 6, not 1. Its finding text fixes restartCount=6, and
+# kubeagent's workload line sums its containers' restarts
+# (internal/inventory/inventory.go:158-170, 488), so a line below 6 was one
+# kubeagent cannot print. The slice stays at 239 rows, and the 16
+# coredns-corefile-broken rows move: each one changes one line of its user
+# message, the workload line's restart count. No group, gold answer, meta
+# or system message moves, and no other row moves. Every number banked
+# against the old bytes is retired.
+# b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1 ->
+# 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1
+FROZEN_SLICE_SHA256 = "99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1102,7 +1114,15 @@ FROZEN_SLICE_SHA256 = "b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5
 # other six decoy rows do not move.
 # e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835 ->
 # 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e
-EVAL_SET_SHA256 = "31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e"
+#
+# 2026-09-26 (faithful prompts): coredns-corefile-broken draws its restarts
+# from 6, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows hold no coredns-corefile-broken workload
+# and do not move, so this digest moves only because the frozen slice
+# inside it does.
+# 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e ->
+# 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4
+EVAL_SET_SHA256 = "423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4"
 
 
 def _digest(rows) -> str:

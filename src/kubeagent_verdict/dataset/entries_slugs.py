@@ -176,6 +176,10 @@ ENTRIES = [
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
         ),
+        # The evidence fixes restartCount=6, and kubeagent's workload count
+        # sums its pods' container restarts (internal/inventory/inventory.go:
+        # 158-170, 488), so the workload line never shows fewer than 6.
+        min_restarts=6,
     ),
     CatalogEntry(
         key="loadbalancer-no-provider",

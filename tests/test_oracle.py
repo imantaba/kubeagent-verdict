@@ -163,7 +163,16 @@ def test_oracle_job1_is_perfect_on_train():
     # already in the row, and the worker-containerd-stop self-pair takes
     # the last counted `multi` slot, so a build has exactly `size` rows.
     # 3028 -> 3058. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3058}
+    # 2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    # restarts from 6, not 1, because its finding text fixes restartCount=6
+    # and kubeagent's workload line sums its containers' restarts. The
+    # restart count is the last field `names.draw` draws, so no other field
+    # of that draw changes, but `randint(6, 40)` sometimes throws away a raw
+    # draw that `randint(1, 40)` kept. From the first such draw on every
+    # later name moves, and so do the groups and the split (kept rows: 6415
+    # train -> 6457, 749 val -> 721). The case mix is unchanged. 3058 ->
+    # 3074. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3074}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -177,7 +186,9 @@ def test_oracle_job1_is_perfect_on_val():
     # as train. 356 -> 319. Rate unchanged.
     # 2026-09-26 (faithful prompts): `multi` rows on the gather and five
     # workers, same reason as train; val grew. 319 -> 376. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 376}
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as train; the split moved. 376 -> 387. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 387}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
@@ -188,7 +199,9 @@ def test_oracle_job2_gate_is_perfect_on_train():
     # for job 1. 3030 -> 2859. Rate unchanged.
     # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
     # as job 1. 2859 -> 2999. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 2999}
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as job 1; the split moved. 2999 -> 3017. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3017}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
@@ -205,7 +218,9 @@ def test_oracle_job2_gate_is_perfect_on_val():
     # 2026-09-26 (faithful prompts): `multi` rows on the gather and five
     # workers, same reason as job 1; the split moved. 340 -> 321. Rate
     # unchanged. (Train stays at 2999 by chance.)
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 321}
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as job 1; the split moved. 321 -> 326. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 326}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -229,9 +244,14 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     as job 1 above. 2621 -> 2748. Rate still 1.0.
 
     2026-09-26 (faithful prompts): `multi` rows on the gather and five
-    workers, same reason as job 1 above. 2748 -> 2747. Rate still 1.0."""
+    workers, same reason as job 1 above. 2748 -> 2747. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above. 2747 -> 2766. Rate still
+    1.0."""
     # 2026-09-26 (faithful prompts): see the docstring. 2748 -> 2747.
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2747}
+    # 2026-09-26 (faithful prompts): see the docstring. 2747 -> 2766.
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2766}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -286,15 +306,25 @@ def test_oracle_job3_is_perfect_on_train():
     `separate` too, but one of its two workloads
     (`worker-containerd-stop:media/scheduler`) is an exam
     `wrong_attribution` row's identity, so `drop_held_out` drops it.
-    Rate still 1.0."""
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above. 2766 -> 2830: `shared`
+    186 -> 194, `separate` 11 -> 13, `none` 2569 -> 2623. 12 of the 13
+    `separate` rows still pair `pvc-unbound-unschedulable` (its PVC
+    confirmed) with `worker-containerd-stop` (its node confirmed). The 13th
+    is the self-pair row: it drew new names that no exam row holds, so
+    `drop_held_out` keeps it now. Rate still 1.0."""
     board = score.scoreboard(list(_train_results()))
     # 2026-09-26 (faithful prompts): see the docstring. 2792 -> 2766;
     # shared 190 -> 186, separate 13 -> 11, none 2589 -> 2569.
+    # 2026-09-26 (faithful prompts): see the docstring. 2766 -> 2830;
+    # shared 186 -> 194, separate 11 -> 13, none 2569 -> 2623.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2766,
-        "by_label": {"shared": {"rate": 1.0, "n": 186},
-                     "separate": {"rate": 1.0, "n": 11},
-                     "none": {"rate": 1.0, "n": 2569}}}
+        "rate": 1.0, "n": 2830,
+        "by_label": {"shared": {"rate": 1.0, "n": 194},
+                     "separate": {"rate": 1.0, "n": 13},
+                     "none": {"rate": 1.0, "n": 2623}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -319,15 +349,22 @@ def test_oracle_job3_is_perfect_on_val():
     workers, same reason as job 1 above. 313 -> 346: `shared` 24 -> 28,
     `none` 288 -> 318, `separate` 1 -> 0. No `separate` row lands in val
     at this seed, so its rate is None; the train side still has 11.
-    Rate still 1.0."""
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above; val shrank. 346 -> 308:
+    `shared` 28 -> 20, `none` 318 -> 288, `separate` still 0. Rate still
+    1.0."""
     board = score.scoreboard(list(_val_results()))
     # 2026-09-26 (faithful prompts): see the docstring. 313 -> 346;
     # shared 24 -> 28, separate 1 -> 0, none 288 -> 318.
+    # 2026-09-26 (faithful prompts): see the docstring. 346 -> 308;
+    # shared 28 -> 20, separate 0 -> 0, none 318 -> 288.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 346,
-        "by_label": {"shared": {"rate": 1.0, "n": 28},
+        "rate": 1.0, "n": 308,
+        "by_label": {"shared": {"rate": 1.0, "n": 20},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 318}}}
+                     "none": {"rate": 1.0, "n": 288}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -367,7 +404,11 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     the node list grew to five workers, and a row redraws any workload
     that clashes with one already in it, so more workloads decide and the
     split moved (see job 1 above) -- 1159 -> 1188 in train, 109 -> 140 in
-    val. Still perfect."""
+    val. Still perfect.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, so the rng stream and the split moved (see job 1
+    above) -- 1188 -> 1207 in train, 140 -> 163 in val. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
@@ -378,8 +419,10 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     # (1159.0, 1159).
     # 2026-09-26 (faithful prompts): see the docstring. (1159.0, 1159) ->
     # (1188.0, 1188); (109.0, 109) -> (140.0, 140).
-    assert multi_job1(_train_results()) == (1188.0, 1188)
-    assert multi_job1(_val_results()) == (140.0, 140)
+    # 2026-09-26 (faithful prompts): see the docstring. (1188.0, 1188) ->
+    # (1207.0, 1207); (140.0, 140) -> (163.0, 163).
+    assert multi_job1(_train_results()) == (1207.0, 1207)
+    assert multi_job1(_val_results()) == (163.0, 163)
 
 
 def test_exam_oracle_job1_is_perfect():
