@@ -771,9 +771,15 @@ Seven limits on this reading, carried from the design that scored it:
    76" above is out of date too. The prompt now prints kubeagent's own
    text, which names the cause, so every keyword-graded answer is on
    screen: 134 of 134 when that text landed, and 169 of 169 on the rebuilt
-   exam. The keywords no longer hold a copier down. The guard does. Every
-   number above in this limit, 0908's included, was measured before the
-   guard.)
+   exam. The keywords no longer hold a copier down. The guard holds a
+   verbatim copy down: it scores 0. Every number above in this limit,
+   0908's included, was measured before the guard.)
+
+   (2026-09-28, final review: this note used to say "The guard does", as if
+   the guard held every copier down. It does not. A near-copy is a known
+   gap. A bot that copies its own lines and cuts the first word off each
+   one keeps no whole line, so the guard never fires, and it scores 147 of
+   177 = 0.8305 on job 2, over the 0.7 bar. See known limit 11 below.)
 
 ## Known limits of the training data and the exam
 
@@ -892,3 +898,35 @@ against these.
     does not move. But the answer teaches a fact the prompt does not hold.
     That is 10 exam rows, and 213 train and 13 val rows in
     `out/dataset-0926`. A later design (Spec 4) owns the fix.
+11. **The job-2 guard stops a verbatim copy, not a near-copy.** (Added
+    2026-09-28.) Job 2 zeroes an answer in two cases: it names one of the
+    row's decoys (G2), or it holds a whole line of the workload's own
+    block (G3b). A bot that pastes its own lines back scores 0. Now cut
+    the first word off each pasted line: no whole line is left, so G3b
+    never fires. That bot pastes each job-2 workload's own inventory
+    entry and its own reads, each line one word short. On the exam it
+    scores 147 of 177 job-2 workloads = 0.8305, with the guard on and
+    with it off. That is over the job-2 bar of 0.7, and the bot judges
+    nothing. So a job-2 score over the bar does not prove on its own that
+    a model judged the evidence. A test pins the number
+    (`tests/test_score.py`,
+    `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`).
+    A stronger G3b changes the grader, so it needs a change to the spec.
+    A later design (Spec 4) owns it.
+12. **A right bad-image-tag answer scores 0 if it names the registry
+    host.** (Added 2026-09-28.) The bad-image-tag rows print the
+    candidate `registry registry.example.com` and rule it out, so it is
+    that workload's decoy, and G2 zeroes any answer that contains a
+    decoy. The gold answer, "the image tag does not exist in the
+    registry", passes. Add the host — "… in the registry
+    registry.example.com" — and the decoy's words now sit inside a right
+    answer, so G2 zeroes it. On the exam, 30 of the 177 job-2 workloads
+    have that gold answer, and 29 of them carry the decoy (the 30th, on
+    an `empty_candidates` row, has none). The gold reply with the host
+    added scores 148 of 177 = 0.8362, where the plain gold reply scores
+    177 of 177. Plan ruling 37 accepted this decoy because the gold
+    answer passes, and that still holds. A test pins the number
+    (`tests/test_score.py`,
+    `test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2`).
+    A narrower G2 changes the grader, so it needs a change to the spec. A
+    later design (Spec 4) owns it.
