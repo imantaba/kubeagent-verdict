@@ -638,8 +638,9 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
     512 val, every one in a `shared_origin` or `shared_origin_decoy` row):
     nothing grades the training pool by keyword, and `tests/test_oracle.py`'s
     `_job2_gate` already scores job 2 over its own population. Curating 217
-    more pairs to satisfy a grader that never reads them is the cost this
-    parameter exists to avoid.
+    more pairs (the count before 2026-09-26; not measured again since) to
+    satisfy a grader that never reads them is the cost this parameter
+    exists to avoid.
     """
     # The validation pre-pass. A malformed row is a fixture bug, not a model
     # failure, and it must never spend a chat_fn call finding that out: every
