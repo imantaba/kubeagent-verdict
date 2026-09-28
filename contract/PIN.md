@@ -311,7 +311,11 @@ the why is recorded.
   The guard matters more now than when it landed: the catalog prints
   kubeagent's own text, and that text names the cause, so 169 of the 177
   job-2 answers are on screen. The keywords no longer hold a paste bot
-  down. The guard does. Job 2, unguarded → guarded:
+  down. The guard holds a verbatim paste to 0. (2026-09-28, final review:
+  this said "The guard does", which was too strong. A near-copy is a known
+  gap: the same own lines with the first word of each line cut score 147
+  of 177 = 0.8305 with the guard on, over the 0.7 bar. See the 2026-09-28
+  entry.) Job 2, unguarded → guarded:
 
   | Bot | Spec (old exam) | Measured, old exam (142) | Measured, new exam (177) |
   |---|---|---|---|
@@ -332,7 +336,8 @@ the why is recorded.
   send. The manifest gains a ninth key, `checker_violations`: per case, how
   many places differ. It is a report and never blocks a write. On this
   build it is 0 for all 16 cases.
-  - It has 49 rules: the spec's table plus `TXT-POD`.
+  - It has 49 rules: the spec's table plus `TXT-POD`. (2026-09-28: 50
+    since `B8` landed; see the next entry.)
   - The four shared-origin cases skip 19 of them until Spec 4 rewrites
     `propagation.py`: the 12 evidence rules and 7 rules that fail on text
     `propagation.py` types itself. The spec named only the 12 evidence
@@ -409,3 +414,119 @@ the why is recorded.
     covers it.
 
   The golden re-capture is recorded under "Capture record" above.
+
+- **2026-09-28 — final review fixes.** All three hashes moved again:
+  `FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256` and `GRADED_VIEW_SHA256`. The
+  exam is still 249 rows and the frozen slice still 239. Only user
+  messages moved. No gold answer, system message, `meta` field or decoy
+  moved, so the graded populations stay the same: job 1 120 workloads,
+  job 2 177 (169 keyword-graded), job 3 40 rows. 20 of the 249 rows show
+  new bytes, so a score on this exam compares with one on the 2026-09-26
+  exam only over the other 229 rows. The banked exam the
+  prompt-stability test reads is now `out/dataset-0928/test.jsonl`. It
+  was built with the same command as `out/dataset-0926` (`--seed 17
+  --size 8000`), and it has the same counts: 6,457 train rows, 721 val
+  rows, 249 test rows. `out/dataset-0926` stays on disk, unused.
+
+  Why. A final review found rows that leave out lines kubeagent prints.
+  kubeagent's root-cause pass lists on every workload of a row every node
+  the row names as down, and rules it out where no pod of that workload
+  runs (`internal/rootcause/rootcause.go`, `Annotate`, lines 24-56). It
+  does the same for claims: every workload lists every broken PVC another
+  workload of its namespace names (`AnnotatePVC`, lines 177-222).
+  - The `multi_misattribution_probe` rows listed each workload's own node
+    only. Now each workload also lists the other workloads' nodes, ruled
+    out, and their claims in its own namespace, ruled out.
+  - The `multi` rows left out a same-namespace workload's claim. Now they
+    list it, ruled out.
+
+  The probe's decoys are still built from each workload's own candidates
+  only, so the grader counts the same decoys as before.
+
+  The footprint, measured by diffing each file against `out/dataset-0926`:
+  - Exam: 20 of 249 rows moved, all 20 `multi_misattribution_probe` rows.
+    Each changed its user message only: 36 lines added and 0 removed, all
+    of the form `considered node worker-N (NotReady): ruled out — no pod
+    of this workload is scheduled on it`. No other case moved, the ten
+    `shared_origin_decoy_probe` rows included.
+  - Train: 12 of 6,457 rows moved, all `multi`, one ruled-out PVC line
+    each.
+  - Val: 1 of 721 rows moved, a `multi` row, one ruled-out PVC line.
+  - The 8,000-row pool moved 22 `multi` rows. The split drops 9 of them.
+
+  The hashes, old → new:
+
+  | Pin | Old | New |
+  |---|---|---|
+  | `FROZEN_SLICE_SHA256` | `9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6` | `48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69` |
+  | `EVAL_SET_SHA256` | `85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f` | `b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653` |
+  | `GRADED_VIEW_SHA256` | `3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c` | `396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108` |
+
+  The bank, `out/dataset-0928`, by sha256:
+  - `test.jsonl`: `9396e347a2336f4ea08fb0ef5283fbceb37c496f1199096d1cd23bf4e8cea48e`
+  - `train.jsonl`: `e384aee64d7d06d7c59a4f577a09f425feefdff9cbf038c21333ec378aa0f915`
+  - `val.jsonl`: `2138d992b25bb003d3a4277879c14b4aea1fb90add59994d4a1523059fe94d83`
+
+  The checker gained a 50th rule, `B8`, which catches this gap. On a row
+  with two or more workload blocks, every block must list every down node
+  the row names, and every PVC another block of its namespace names. A
+  block cut at the candidate cap is exempt. Places it flags:
+
+  | Set | Before the fixes | After |
+  |---|---|---|
+  | exam (249 rows) | 20 rows, 36 places (missing node lines) | 0 |
+  | 8,000-row pool | 22 rows, 22 places (missing PVC lines) | 0 |
+  | 800-row seed set | 3 rows, 3 places (missing PVC lines) | 0 |
+
+  The manifest's `checker_violations` stay 0 for all 16 cases. The pod
+  slot rule `TXT-POD` also got stricter. It found nothing new: 0 on the
+  exam, the pool and the seed set. Two more changes moved 0 rows: the
+  ruled-out menu lost a registry count nothing read, and a test now pins
+  the Unicode tables the text port matches (15.0.0, the version Go 1.26
+  and Python 3.12 share).
+
+  The grader: one fix, two known gaps pinned, and no bar moved (0.9 /
+  0.7 / 0.9).
+  - The fix. G3b reads a workload's own block, and that block includes
+    the evidence reads that belong to it. A read used to go to a workload
+    by name prefix, so `describe pvc web/cache-0` went to `web/cache`
+    although it sat in `web/indexer`'s gather group. Now a read goes to
+    the gather group it sits in. Each group opens with an `events
+    <ns>/<pod>` read. On the exam no own-block line moved (4,004 before
+    and after). In the 8,000-row pool 1 row moved: 2 lines went from
+    `web/cache` to `web/indexer` (172,051 lines before and after). The
+    job-2 bot table did not move: paste 0, echo 0, name the decoy 0,
+    hedge 0.1808 (32 of 177), always-`none_of_these` 0.0452 (8 of 177).
+  - The gold net. The gold answer passes the guard on every exam job-2
+    workload (0 of 177 zeroed). A new test checks the 8,000-row training
+    pool too: 0 of its 9,426 job-2 golds are zeroed.
+  - Gap 1, a near-copy. The guard holds a verbatim paste to 0. A bot that
+    pastes each job-2 workload's own inventory entry and own reads, with
+    the first word of each line cut, keeps no whole line, so G3b never
+    fires. It scores 147 of 177 = 0.8305 with the guard on and with it
+    off, over the 0.7 bar.
+  - Gap 2, the registry host. A right bad-image-tag answer that adds the
+    host ("… in the registry registry.example.com") contains the decoy
+    `registry registry.example.com`, so G2 zeroes it. 30 of the 177 job-2
+    workloads have that gold answer, and 29 of them carry the decoy. The
+    gold reply with the host added scores 148 of 177 = 0.8362. Plan
+    ruling 37 accepted this decoy because the gold answer passes.
+
+  Tests pin both gaps, and the model card lists them as known limits 11
+  and 12. Closing either one changes the grader, so it needs a change to
+  the spec.
+
+  Left for Spec 4 (known, not fixed here):
+  - B4: three arms the generator reaches have no Go capture to check
+    them byte for byte (the candidate-cap line, a registry auth sentence
+    and the no-pull-event sentence). Covering them needs a new capture.
+  - B6: a refused read's message is shorter than the API server's real
+    text.
+  - C9: the guard's text cleaning has no NFKC step, so a look-alike
+    character (say, a full-width letter) can slip a copy past it.
+  - D4: `multi`'s decoy list is keyed on each object's intent, not on
+    what the prompt shows, so it can hold a decided workload's own gold.
+    No grader reads it today.
+  - A node's state at scan time: a cordon and a pressure condition.
+  - A stronger G3b.
+  - A narrower G2.
