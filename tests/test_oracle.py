@@ -46,7 +46,9 @@ def _gold_results(examples: list, *, grade_job2: bool = True) -> list[dict]:
     grades the training pool by keyword: 4,880 train and 532 val job-2
     workloads carry a named expected cause and no keywords (measured
     2026-09-24 against `out/dataset-0924`; the job-2 generator fix moved
-    this count from the 0923 bank's 4,823/589), and `score.evaluate`
+    this count from the 0923 bank's 4,823/589; 2026-09-26 (faithful
+    prompts): `out/dataset-0926` counts 4,900 train and 512 val, every one
+    in a `shared_origin` or `shared_origin_decoy` row), and `score.evaluate`
     refuses such a corpus rather than scoring it zero.
     Job 2 on those pools is measured by `_job2_gate` below, over the
     population spec section 10 gate 1 defines. The exam passes nothing and

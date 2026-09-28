@@ -553,6 +553,11 @@ def _norm_cause(s: str) -> str:
 # job-2 score incomparable, so it waits for evidence a model is actually
 # clearing job 2 while failing elsewhere. This number is what would supply that
 # evidence.
+#
+# It counts words the prompt prints, not lines a reply pastes. The grader
+# guard, `_job2_guarded`, is what stops a reply that pastes them (2026-09-26,
+# faithful prompts: 169 of the exam's 169 keyword-graded workloads have every
+# keyword on screen).
 
 
 def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
@@ -601,7 +606,9 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
     keys (see `cli.py`). The oracle's train/val dataset self-check is the
     other, where 4,880 train and 532 val job-2 workloads carry a named cause
     and no keywords (measured 2026-09-24 against `out/dataset-0924`; the
-    job-2 generator fix moved this count from the 0923 bank's 4,823/589):
+    job-2 generator fix moved this count from the 0923 bank's 4,823/589;
+    2026-09-26 (faithful prompts): `out/dataset-0926` counts 4,900 train and
+    512 val, every one in a `shared_origin` or `shared_origin_decoy` row):
     nothing grades the training pool by keyword, and `tests/test_oracle.py`'s
     `_job2_gate` already scores job 2 over its own population. Curating 217
     more pairs to satisfy a grader that never reads them is the cost this
@@ -726,6 +733,9 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # entries, so "pick the longer candidate" scores ~83% on both
         # adversarial probe slices while reading nothing -- see the longer
         # comment this carried before this task, unchanged in spirit.
+        # (2026-09-26, faithful prompts: 15 of 19 is the catalog before that
+        # day. The rules now pick every winner, and the split has not been
+        # measured again.)
         decoy_cause = meta.get("decoy_cause")
         exp_cause = meta.get("expected_cause")
         length_helps = None
@@ -841,7 +851,8 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     SIGNED, not absolute. The failure this decider exists to catch is a word
     counter, and a word counter scores HIGH where length points at the true
     cause and LOW where it points at the decoy -- the winning cause is the
-    longer phrase in 15 of 19 catalog entries. A model that scores *better* on
+    longer phrase in 15 of 19 catalog entries (the catalog before 2026-09-26;
+    not measured again since). A model that scores *better* on
     the misleading rows has ruled that shortcut out, so a negative gap passes.
     An `abs()` bar would instead fail it for scoring well on the harder slice,
     where the overall denominator is now 1 row: the misleads rate can only

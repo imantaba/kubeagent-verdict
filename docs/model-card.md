@@ -713,6 +713,9 @@ Seven limits on this reading, carried from the design that scored it:
    34 of 39 — 0.8718 against a 0.9 bar, five rows short, and still fails. The
    design spec states this same figure and calls it a failure by design: the
    bar is built to catch exactly this bot, not a margin to worry about.
+   (2026-09-26: the exam was rebuilt. On the new exam this bot scores 35 of
+   40 — 0.875. It still misses the five `shared` rows, and it still fails.
+   The 34 of 39 above is the exam before that day.)
 5. 0908 was trained on the v1.23.0 prompt shape. It never saw a fresh-read or
    decided line in training.
 6. The misleads slice is 1 row of 57. Whenever a run's `length helps` clears
@@ -758,6 +761,19 @@ Seven limits on this reading, carried from the design that scored it:
    scored 0.2418, below the 0.366 a copier got under the same grader, so it
    did not exploit the exposure — its job-2 number simply cannot prove it
    read anything.
+
+   (2026-09-26: since this day the grader zeroes a job-2 answer that
+   contains a whole line of the workload's own block, or that names a decoy
+   cause. It checks the raw reply, before the 512-rune cap. The bot that
+   hands the prompt back now scores 0. Without that guard it would score
+   169 of 177 — 0.9548 — on the rebuilt exam, far over the 0.7 bar, and the
+   test that pinned 0.497 now pins both of those numbers. The "56 of the
+   76" above is out of date too. The prompt now prints kubeagent's own
+   text, which names the cause, so every keyword-graded answer is on
+   screen: 134 of 134 when that text landed, and 169 of 169 on the rebuilt
+   exam. The keywords no longer hold a copier down. The guard does. Every
+   number above in this limit, 0908's included, was measured before the
+   guard.)
 
 ## Known limits of the training data and the exam
 
@@ -867,3 +883,12 @@ against these.
    special case where this invented text also happens to contradict
    something the prompt does print (`Unknown` against `False`); this is
    the general case, and the bigger fact.
+10. **One story's answer names disk pressure its prompt never shows.**
+    (Added 2026-09-26.) `node-cordon-diskfull`'s own cause, rationale and
+    keywords still say the node reports disk pressure. Since 2026-09-26 no
+    line of that workload's own block shows it: the made-up event text is
+    gone, and so is the one node read that printed `DiskPressure=True`. Its
+    keywords, `node` and `pod`, both sit on the finding line, so grading
+    does not move. But the answer teaches a fact the prompt does not hold.
+    That is 10 exam rows, and 213 train and 13 val rows in
+    `out/dataset-0926`. A later design (Spec 4) owns the fix.

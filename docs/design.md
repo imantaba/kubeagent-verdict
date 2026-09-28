@@ -182,8 +182,9 @@ regexes — a dotted-quad IP, an `http(s)://` scheme, the word "kubeconfig", a
 which is where the corpus-derived, held-out-case and probe rows live; and
 `test_provenance_scan_reaches_every_catalog_entry` asserts the scanned
 corpus renders every trainable catalog entry, because a sampled 60-example
-batch renders `own_cause` for only 6 of the 19 and a denylist cannot guard
-prose it never emits. That third test is the one that makes the first two
+batch renders `own_cause` for only 7 of the 20 (6 of 19 before
+2026-09-26) and a denylist cannot guard prose it never emits. That third
+test is the one that makes the first two
 mean something. No live cluster name, node name, private IP, internal
 hostname, kubeconfig path or context name is meant to enter a tracked file —
 the same rule kubeagent's own repository enforces — but these tests still
@@ -223,6 +224,14 @@ Each catalog entry declares:
   rather than by evidence;
 - evidence-line templates;
 - the correct verdict: cause, confidence, a one-sentence rationale template.
+
+Since 2026-09-26 that list is out of date. An entry now declares the
+cluster objects (`objects`) and the events its pod shows. kubeagent's
+ported gather and rules build the candidates from those objects, in
+kubeagent's trace order, with no shuffle. The rules decide the winning
+cause wherever they can, so no entry types a winner. The one cause an
+entry still writes is `own_cause`, the answer when the rules leave the
+workload undecided.
 
 **The corpus grounds the catalog — for entries that opt in.** A `grounding`
 declaration (`CatalogEntry.grounding`, a tuple of substrings) is optional
@@ -450,13 +459,32 @@ truncated or thin → low), so calibration is trained, not guessed.
   tag and position probes this holds the shortcut fixed against the
   correct answer. Their groups are held out of train and val, so the
   model has never seen that (entry, workload) pair.
+
+  Since 2026-09-26 the gather and the rules build these rows, and some of
+  the above no longer holds. `positional_probe` (17 rows) and
+  `contradiction_probe` (17 rows) are job-1 rows now: each prints a
+  `decided by rules:` line, and the gold is the rules' cause. In
+  `positional_probe` the correct cause still comes last, but it is
+  `outranked`; the `attributed` tag sits on a decoy that a fresh read
+  refutes. `contradiction_probe` no longer hands the tag to a decoy: its
+  tag sits on the gold cause, it names no decoy, and extra events argue
+  against the gold instead. `misattribution_probe` has 20 rows, not 19,
+  and the twin count above was not measured again. `multi_misattribution_probe`
+  still hands `attributed` to a decoy the evidence contradicts: 34 of its
+  40 job-2 workloads carry such a tag, each refuted by a fresh read.
 - The third closes a hole the first two could not see. `multi` is ~13% of
   the curriculum and had no test row at all, and `cases.multi()` never
   swaps a tag — so across all 2,140 constituent workloads it contributes to
   train and val at `--seed 17 --size 8000` (3,157 before `drop_held_out`;
   2,127 and 3,160 before the 2026-09-24 case-mix change),
   "trust the `attributed` tag" is a strategy the training data never once
-  contradicts in that shape. Both single-workload probes render one
+  contradicts in that shape. (2026-09-26: this no longer holds, and the
+  618 labels in the next bullet already broke it on 2026-09-24. Measured
+  on `out/dataset-0926`, `multi` gives train and val 2,170 workloads, and
+  3,111 before `drop_held_out`. In train, 444 of its 1,651 `attributed`
+  tags sit on a decoy that a fresh read refutes, each on a job-2 workload
+  whose answer is its own cause. In val it is 48 of 211.) Both
+  single-workload probes render one
   workload, so neither can reach it. `multi_misattribution_probe` renders
   two workloads, each with the tag handed to a decoy; naming **either**
   decoy counts as tag-following. Its rows are **appended** to the test
@@ -486,6 +514,16 @@ truncated or thin → low), so calibration is trained, not guessed.
   same refuted-node shape), teach naming a cause the prompt does not show.
   The spec keeps the 618 on purpose — Spec 3's finding line is what closes
   the gap — but decide before the retrain whether to wait for Spec 3.
+  Spec 3 closed it on 2026-09-26. Since then a `multi` block prints each
+  workload's finding lines, and its reads come from one gather over the
+  whole row: 8 reads, or 7 when a healthy-origin read takes the first
+  slot. Counted the same way in `out/dataset-0926/train.jsonl`, `multi`
+  rows carry 717 job-2 workloads: 626 at `high` and 91 at `medium`, and
+  none answers `none_of_these`. All 717 are keyword-graded, and all 717
+  show every keyword in their own block. So 0 `multi` labels name a cause
+  the prompt does not show (618 before). The thin-row rule
+  (`_thin_multi`) fires on 0 rows. In val, 83 job-2 workloads (72 `high`,
+  11 `medium`) all show every keyword in their own block.
 
 ## Training (kv-train)
 
@@ -559,7 +597,8 @@ confidence from the closed set, line-length bounds. Then task metrics:
   as *the* metric that separates reading from reciting. That claim was too
   wide, and a third shortcut walks through the gap it left. In 15 of the 19
   trainable catalog entries the winning cause is the longer phrase (mean
-  9.0 words against 6.4), so "pick the longer candidate" scores ~83% on
+  9.0 words against 6.4; measured on the catalog before 2026-09-26, see
+  below), so "pick the longer candidate" scores ~83% on
   **both** single-workload probe slices while reading nothing at all — no
   evidence, no tag, no position — and it beats the decoy rate for free,
   because the trap and the longer phrase usually disagree. Splitting cause
@@ -630,11 +669,18 @@ the metric reads well, which is the opposite of what the metric is for. The
 split makes the shortcut visible first; whether to rebalance the catalog is
 then a decision from data rather than a guess.
 
+(2026-09-26: the 19 hand-typed pairs are gone. The rules now pick every
+winner and print it in kubeagent's own cause shapes, such as
+`node worker-2 (NotReady)`. The counts in this section describe the old
+catalog. The length split has not been measured again on the new one.)
+
 (An earlier draft justified leaving the cue alone on the grounds that the
 winner phrases were lifted verbatim from `internal/rootcause`, so shortening
 them would de-align the model from its consumer's vocabulary. That was
 checked and is false — none of `rootcause.go`'s shapes matches a
-`winner_cause` value; every one is hand-authored here. The cue is therefore
+`winner_cause` value; every one is hand-authored here. `winner_cause` was
+a hand-typed catalog field. It was removed on 2026-09-26, when the rules
+started deciding every winner. The cue is therefore
 this repository's to fix, if the data ever says it should be.)
 
 **An eval change that could not fail the model it replaced is not a fix.**
@@ -649,7 +695,7 @@ pool, and both `held_out_case_set()` and `probe_sets()` iterate
 `catalog.trainable()` too — so every trainable catalog entry appears in
 train, val and test alike, and no entry is ever held out of training. Each
 entry's issue/reason/evidence finding block is also a fingerprint: the
-tuples are distinct across all 19 trainable entries, so a model could in
+tuples are distinct across all 20 trainable entries, so a model could in
 principle skip the candidate list entirely and answer from a memorised
 finding-block-to-winner-cause lookup instead of judging the evidence.
 `positional_probe`, `misattribution_probe` and `multi_misattribution_probe`
@@ -702,6 +748,14 @@ changing only the read text moves cause accuracy from 0.1579
 slice is kept — it does defeat an index-copier, a tag-copier and a word
 counter — but not as a memorisation test.
 
+Since 2026-09-26 the slice is built differently, and the numbers above
+describe the old one. It has 17 rows, one per entry the rules decide. Its
+reads come from the gather and its gold from the rules, so its answer is
+the rules' cause, not `none_of_these`. It names no decoy. Its extra events
+argue against the gold on 15 of the 17 rows, by design; the other two
+entries have none. Its gold is the same cause `attributed` rows teach for
+that entry, so it still cannot tell reading from reciting.
+
 The honest position for v0.1.0: **no slice built from this catalog can
 separate a model that reads from one that recites per-entry answers, while
 every entry appears in training.** Closing it means holding whole catalog
@@ -720,8 +774,9 @@ scoreboard should not be read as evidence of entry-level generalisation.
   "kubeconfig", `/home/`, bare `@`) over a generated train/val batch *and*
   over `generate.test_set()`, plus a coverage assertion that the scanned
   corpus renders every trainable catalog entry — a sampled 60-example batch
-  renders `own_cause` for only 6 of 19, and a denylist cannot guard prose it
-  never emits. Still not a scan for every token outside the synthetic
+  renders `own_cause` for only 7 of 20 (6 of 19 before 2026-09-26), and a
+  denylist cannot guard prose it never emits. Still not a scan for every
+  token outside the synthetic
   allowlist. (This entry previously ended "it does not run over
   `generate.test_set()`", which was true when written.)
 - **Corpus loader tests** — required keys enforced; slug must be in the

@@ -403,7 +403,9 @@ confirms it when the run ends.
      stored as `length_gap` / `length_gap_ok` in `scoreboard.json`.
      Apart, the model is counting words: the winning cause is the longer
      phrase in 15 of 19 catalog entries, so a word counter beats the decoy
-     rate for free without reading anything. A wide gap invalidates the
+     rate for free without reading anything. (That count is the catalog
+     before 2026-09-26. Since then the rules pick every winner, and it has
+     not been measured again.) A wide gap invalidates the
      decoy rate.
 
      Two properties of the gate matter more than the number. It is

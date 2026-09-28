@@ -107,10 +107,13 @@ contract version.
 
 The exam's two hashes live in `tests/test_shared_origin_training.py`:
 `FROZEN_SLICE_SHA256` over every row before the ten
-`shared_origin_decoy_probe` rows (242 rows) and `EVAL_SET_SHA256` over all
-252. Until 2026-09-24 the first was `FROZEN_253_SHA256`, over 253 rows of
-263. They are pinned so a change to the generators cannot move the exam
-without someone saying why. This is where the why is recorded.
+`shared_origin_decoy_probe` rows (239 rows) and `EVAL_SET_SHA256` over all
+249. Until 2026-09-26 they were over 242 and 252 rows. Until 2026-09-24 the
+first was `FROZEN_253_SHA256`, over 253 rows of 263. A third pin,
+`GRADED_VIEW_SHA256` in `tests/test_exam_graded_view.py`, hashes the part
+of each row the grader reads. They are pinned so a change to the
+generators cannot move the exam without someone saying why. This is where
+the why is recorded.
 
 - **2026-09-16 — the missing `decided by rules:` line.** Both hashes moved.
   Not one of the 263 prompts carried that line, though job 1 grades the
@@ -221,3 +224,188 @@ without someone saying why. This is where the why is recorded.
   `JOB2_BAR` (0.7), which does not move. The full per-change footprint is
   in the comment above `FROZEN_SLICE_SHA256` in
   `tests/test_shared_origin_training.py`.
+
+- **2026-09-26 — faithful prompts.** All three hashes moved:
+  `FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256` and `GRADED_VIEW_SHA256`. The
+  exam falls from 252 rows to 249, and the frozen slice from 242 to 239.
+  Rendered bytes moved on all 249 rows, so the new exam is a new baseline:
+  no number on it compares with one from before. Every scoreboard number
+  banked before this change is retired. The banked exam the
+  prompt-stability test reads is now `out/dataset-0926/test.jsonl` (built
+  with `--seed 17 --size 8000`: 6,457 train rows, 721 val rows, 249 test
+  rows).
+
+  Why. The old generators typed many prompt lines by hand, and some of
+  those lines were ones kubeagent never sends. Now every row gets its reads
+  the way kubeagent's gather gets them: the same order and the same budget
+  of 8 reads. Each case is built on a shape kubeagent can really produce.
+  The catalog prints the detector and kubelet text kubeagent prints. The
+  rules decide every winner, so no hand-typed winner is left.
+
+  Per case, old count → new count: `attributed` 53 → 22, `own_cause`
+  19 → 51, `truncated` 19 → 17, `injection` 19 → 17, `empty_candidates`
+  19 → 20, `wrong_attribution` 19 → 20, `positional_probe` 19 → 17,
+  `misattribution_probe` 19 → 20, `multi_misattribution_probe` 19 → 20,
+  `contradiction_probe` 19 → 17. `none_of_these` (8),
+  `shared_origin_probe` (10) and `shared_origin_decoy_probe` (10) keep
+  their counts. This matches the spec's table.
+
+  What is graded, measured on the file:
+  - Job 1: 157 → 120 workloads. The spec predicted 118.
+  - Job 2: 142 → 177 workloads. The spec predicted 179. 169 of the 177
+    are keyword-graded (134 before; the spec predicted 171), and all 169
+    print every keyword somewhere in the prompt.
+  - Job 3: 39 → 40 rows. The labels shared / separate / none go from
+    5 / 0 / 34 to 5 / 0 / 35.
+  - The spec's counts were 2 off because the node list grew from three
+    workers to five, which moved the draws. The `networkpolicy-deny-all`
+    victims in `shared_origin_probe` and its decoy probe are now decided
+    by the rules on their nodes (4 more job-1 workloads). The
+    `node-disk-pressure` pair lost 2 decided victims (2 fewer).
+  - The always-`none_of_these` bot scores 8 of 177 = 0.0452 on job 2.
+
+  The footprint, in commit order, measured by building the exam before and
+  after each change and matching rows by content:
+  - Port kubeagent's text cleaning and event format. 0 rows move.
+  - Port kubeagent's evidence gather. 0 rows move.
+  - The grader guard (below). 0 rows move; it changes the grader only.
+  - Show the cluster-health block kubeagent sends. 150 of the 252 rows
+    gain the block in their user message, all inside the frozen slice.
+    Nothing else moves.
+  - Use the detector and kubelet text kubeagent really prints. 222 of the
+    242 frozen rows move: 218 change their user message, 89 their meta and
+    6 their gold answer. The decoy probe rows do not move.
+  - Check the gather byte for byte against kubeagent. 0 rows move.
+  - Build the undecided rows on the gather. 71 rows change their user
+    message: `own_cause`, `wrong_attribution` and `misattribution_probe`
+    19 each, `none_of_these` 8, `empty_candidates` 6.
+  - Build the job-1 rows on the gather. The exam goes from 252 rows to
+    251. 137 rows stay byte for byte (127 frozen rows and the 10 decoy
+    probe rows). 31 rows the rules do not decide move from `attributed` to
+    `own_cause`.
+  - Decide the `contradiction_probe` rows by the rules. The exam goes from
+    251 rows to 249. The 19 old rows go and 17 new ones come; the other
+    232 rows do not move. The new rows name no decoy.
+  - Build the `multi` rows on the gather, with five workers in the node
+    list. 156 rows move: 152 of the 239 frozen rows and 4 of the 10 decoy
+    probe rows.
+  - Check every prompt against what kubeagent can send. The checker's
+    coredns fix moves 16 rows, one line each (the workload line's restart
+    count). The training build moves too: train 6,415 → 6,457 rows, val
+    749 → 721.
+  - Mask the pod in the suggested fix line as kubeagent does. All 249
+    rows move, only in their fix lines: 297 commands (273 in the frozen
+    slice, 24 in the decoy probe rows).
+
+  No system message moved in any of them. The full per-change footprint is
+  in the comment above `FROZEN_SLICE_SHA256` in
+  `tests/test_shared_origin_training.py`.
+
+  The grader guard. Job 2 now zeroes a workload's answer in two cases,
+  before it looks for keywords. G2: the answer names one of the row's
+  decoy causes. G3b: the answer contains a whole line of the workload's
+  own block (its inventory line, its candidate block or its matched
+  reads). Both run on the model's raw reply, before the 512-rune cap and
+  before keyword matching. A guard that ran after the cap let a paste bot
+  slip through, because the cap cut off every line pasted after rune 512.
+  The guard matters more now than when it landed: the catalog prints
+  kubeagent's own text, and that text names the cause, so 169 of the 177
+  job-2 answers are on screen. The keywords no longer hold a paste bot
+  down. The guard does. Job 2, unguarded → guarded:
+
+  | Bot | Spec (old exam) | Measured, old exam (142) | Measured, new exam (177) |
+  |---|---|---|---|
+  | paste the prompt | 0.5352 → 0 | 0.5352 → 0 | 0.9548 → 0 |
+  | echo | 0.5282 (75 of 142) → 0 | 0.5211 (74 of 142) → 0 | 0.9548 → 0 |
+  | name the decoy | 0 → 0 | 0 → 0 | 0 → 0 |
+  | hedge | 0.9437 → 0.2183 | 0.9437 → 0.2183 | 0.9548 → 0.1808 (32 of 177) |
+  | gold | 1.0 → 1.0 | 1.0 → 1.0 | 1.0 → 1.0 |
+
+  "Old exam" is the exam as it was when the guard landed. The spec does
+  not say exactly what its echo bot echoes; the test's echo bot scored 74
+  of 142, one short of the spec's 75. The gold reply passes every guard on
+  every exam row (the guard zeroes 0 of 177), and a test pins that.
+  `JOB2_BAR` stays 0.7.
+
+  The checker (`dataset/checker.py`) reads every row the build writes and
+  counts the places where it differs from a prompt kubeagent v1.24.0 can
+  send. The manifest gains a ninth key, `checker_violations`: per case, how
+  many places differ. It is a report and never blocks a write. On this
+  build it is 0 for all 16 cases.
+  - It has 49 rules: the spec's table plus `TXT-POD`.
+  - The four shared-origin cases skip 19 of them until Spec 4 rewrites
+    `propagation.py`: the 12 evidence rules and 7 rules that fail on text
+    `propagation.py` types itself. The spec named only the 12 evidence
+    rules. A test fails if one of the 7 stops firing there.
+  - A `multi` row's healthy-origin read skips 7 rules. 35 of the 104
+    `multi` rows of `generate(17, 800)` have that read (the spec said 35
+    of 105).
+  - It is slower than the spec guessed: 0.64 s for the 800-row seed set
+    and 6.58 s for the exam pool, against about 0.17 s and 1.7 s.
+  - Measured at the branch base, its counts matched the spec for IS-1, 3,
+    8, 15, 17 and 21. The others differed, each for a known reason:
+    IS-2 (213 rows of 246, spec 618 of 718: the seed set, not the training
+    build), IS-4 (168, spec 147: the rule also checks candidate order),
+    IS-9 (73 lines in 47 rows, spec 164 lines in 24: 115 of the spec's
+    lines sit in shared-origin rows, which skip the rule), IS-11 (24, spec
+    50: 18 are in exempt rows, and the rule checks only the three literals
+    in the inventory), IS-16 (31, spec 13 objects: E7 accepts a header
+    with no conditions, and D3 catches them) and IS-19 (50 rows, spec 25
+    of 105: the rule covers both duplicate shapes).
+  - It found two bugs. `coredns-corefile-broken` could draw as
+    few as 1 restart, but its finding says `restartCount=6` and kubeagent sums a
+    workload's restarts, so it now draws at least 6. And the golden
+    answer gave `img/solo` the cause `registry mirror.invalid`. Only one
+    workload fails to pull from that registry, below kubeagent's threshold
+    of two, so the answer is now `none_of_these`, at `low` as before.
+  - `TXT-POD` fired on every row before the fix-line change (800 of 800
+    seed rows, 8,249 of 8,249 exam-pool rows) and on none after. The fix
+    line now names `<pod>`, as kubeagent's prompt does. A finding on the
+    workload object itself (RolloutStuck) keeps the workload's name, but
+    no catalog entry emits that shape, so only the Go test vector and the
+    checker's own test cover it. 28 exam fix commands
+    (`shared_origin_probe` 14, `shared_origin_decoy_probe` 14) now name
+    no pod for their workload, and that pod name appeared nowhere else in
+    the prompt. That matches kubeagent.
+  - One shape has no rule yet: `deployment-bad-image-tag` rows in
+    `empty_candidates` (2 in the seed set, 1 in the exam, 20 in the
+    8,000-row pool).
+
+  The `multi` rows, measured on the new training build:
+  - A `multi` block now prints each workload's finding lines, and its reads
+    come from one gather over the whole row.
+  - The oracle's multi curriculum is 1,207 job-1 workloads in train and
+    163 in val. The spec predicted 1,226 and 132.
+  - The thin-row rule (`_thin_multi`) fires 0 times. The spec expected it
+    to fire on some rows.
+  - Job-2 labels in `multi` rows that name a cause their prompt does not
+    show: 618 before, 0 now.
+  - `generate(seed, size)` returns exactly `size` rows. It used to return
+    `size + 1`.
+
+  Left for Spec 4 (known, not fixed here):
+  - `node-cordon-diskfull`'s own cause, rationale and keywords
+    (`"node"`, `"pod"`) still claim disk pressure, which no line of the
+    workload's own block shows. 10 exam rows carry that gold, and 213
+    train and 13 val rows.
+  - `coredns-corefile-broken` lives in the drawn namespace, not
+    `kube-system`; its restart count is pinned; and it is the one named
+    exception to the thin-row test.
+  - Some event wording is not the kubelet's (`memory-limit-oomkill`
+    among others).
+  - `propagation.py` types its own candidate, describe and scheduler
+    text, and 13 healthy-origin `describe node …` reads in
+    `generate(17, 800)` are hand-typed (6 of them with a suffix such as
+    ` (CSI status)`).
+  - 14 shared-origin exam victims carry the gold `node worker-N
+    (NotReady)`, which no line of theirs names.
+  - `volume-mount-error`'s P1 decoy.
+  - No node carries the `node.kubernetes.io/not-ready` taint.
+  - A flagged `kube-system` workload outside the first 10 gets a system
+    line in Go but not here.
+  - A `not_read` object's fresh value is typed by hand and is not checked
+    against Go.
+  - The candidate-cap marker is no longer in the golden; only a unit test
+    covers it.
+
+  The golden re-capture is recorded under "Capture record" above.
