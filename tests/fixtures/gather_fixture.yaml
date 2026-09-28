@@ -1,0 +1,457 @@
+# One cluster that the Go capture harness (contract/capture/kv_capture_test.go.txt)
+# and the Python byte-equal gather test both load. The top-level keys:
+#   kubeagent       the kubeagent tag and commit the Go dumps were captured from.
+#   summary         the CPU and memory summary the prompt prints (resources.Summary).
+#   platform_line   the prompt's platform line; empty means none.
+#   service_issues  the service issues the prompt prints (svchealth.Issue).
+#   nodes           every node: its name, what the scan saw (scan_reason) and what a fresh describe finds (fresh).
+#   pvcs            every broken PVC: namespace, name, the scan's reason and what a fresh describe finds.
+#   workloads       every workload in file order (not report order): pods, findings, events and log text.
+#
+# A node's scan_reason is "NotReady", "no kubelet lease", or "" for a healthy node.
+# A fresh block uses the field names of kubeagent_verdict.dataset.objects.Fresh.
+# A workload's pod is its events pod: the first finding's pod name, else the workload name.
+# A workload's events are what a read of its events pod returns, as [reason, message, count];
+# events_failed, when set, is the message of a refused events read instead.
+# decoy_events are events of other objects in the same namespace. The events read must not return them.
+# A finding's log is the previous-instance log text the API server serves; log_read is the body
+# kubeagent makes of it (a Go self-check keeps the two in step).
+
+kubeagent:
+  tag: "v1.24.0"
+  commit: "15ec5649bbd2d07558eae945b71430afc8f231fd"
+
+summary:
+  cpu:
+    allocatable: "6"
+    requests: "4200m"
+    requests_pct: 70
+    limits: "5400m"
+    limits_pct: 90
+  memory:
+    allocatable: "12Gi"
+    requests: "9Gi"
+    requests_pct: 75
+    limits: "11Gi"
+    limits_pct: 91
+  metrics_available: false
+
+platform_line: ""
+
+service_issues:
+  - namespace: "shop"
+    name: "api"
+    type: "NoReadyEndpoints"
+    detail: "service has 0 ready endpoints"
+
+nodes:
+  - name: "worker-1"
+    scan_reason: "NotReady"
+    fresh:
+      how: "read"
+      ready: "False"
+      ready_reason: "KubeletNotReady"
+      ready_message: "container runtime is down"
+      taints:
+        - ["node.kubernetes.io/not-ready", "", "NoSchedule"]
+  - name: "worker-2"
+    scan_reason: "no kubelet lease"
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "worker-4"
+    scan_reason: ""
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "worker-7"
+    scan_reason: "NotReady"
+    fresh:
+      how: "read_failed"
+      message: 'nodes "worker-7" is forbidden'
+
+pvcs:
+  - namespace: "db"
+    name: "aux-0"
+    scan_reason: "ProvisioningFailed"
+    fresh:
+      how: "read"
+      phase: "Bound"
+      storage_class: "fast-ssd"
+      volume: "pv-0442"
+  - namespace: "db"
+    name: "aux-1"
+    scan_reason: "ProvisioningFailed"
+    fresh:
+      how: "read_failed"
+      message: 'persistentvolumeclaims "aux-1" is forbidden'
+  - namespace: "db"
+    name: "aux-2"
+    scan_reason: "ProvisioningFailed"
+    fresh:
+      how: "read"
+      phase: "Pending"
+      storage_class: "fast-ssd"
+      volume: ""
+  - namespace: "db"
+    name: "data-0"
+    scan_reason: "FailedBinding"
+    fresh:
+      how: "read"
+      phase: "Lost"
+      storage_class: "fast-ssd"
+      volume: "pv-0821"
+  - namespace: "store"
+    name: "cache-0"
+    scan_reason: "ProvisionerNotResponding"
+    fresh:
+      how: "read"
+      phase: "Pending"
+      storage_class: "standard"
+      volume: ""
+  - namespace: "store"
+    name: "cache-1"
+    scan_reason: "ProvisionerNotResponding"
+    fresh:
+      how: "read"
+      phase: "Pending"
+      storage_class: "standard"
+      volume: ""
+  - namespace: "web"
+    name: "assets-0"
+    scan_reason: "ProvisioningFailed"
+    fresh:
+      how: "read"
+      phase: "Pending"
+      storage_class: "standard"
+      volume: ""
+
+workloads:
+  - namespace: "web"
+    name: "frontend"
+    kind: "Deployment"
+    ready: 1
+    desired: 3
+    status: "Degraded"
+    restarts: 0
+    pod: "frontend-5b8d7f6c9-q2w3e"
+    pods:
+      - {name: "frontend-5b8d7f6c9-q2w3e", node: "worker-2", claims: ["assets-0"]}
+      - {name: "frontend-5b8d7f6c9-r4t5y", node: "worker-4", claims: []}
+      - {name: "frontend-5b8d7f6c9-u6i7o", node: "worker-4", claims: []}
+    findings:
+      - pod: "web/frontend-5b8d7f6c9-q2w3e"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/web/frontend:2.1"'
+        container: ""
+        image: "registry.invalid/web/frontend:2.1"
+    events:
+      - ["Failed", 'Failed to pull image "registry.invalid/web/frontend:2.1": rpc error: code = NotFound desc = manifest unknown', 4]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "img"
+    name: "two"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "two-7c9d4b5f6-bcdef"
+    pods:
+      - {name: "two-7c9d4b5f6-bcdef", node: "worker-4", claims: []}
+    findings:
+      - pod: "img/two-7c9d4b5f6-bcdef"
+        issue: "ErrImagePull"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/img/two:1.0"'
+        container: ""
+        image: "registry.invalid/img/two:1.0"
+    events:
+      - ["Failed", 'Failed to pull image "registry.invalid/img/two:1.0": i/o timeout', 2]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "app"
+    name: "api"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "Degraded"
+    restarts: 0
+    pod: "api-6d5f7c8b9-k2m4p"
+    pods:
+      - {name: "api-6d5f7c8b9-k2m4p", node: "worker-1", claims: []}
+      - {name: "api-6d5f7c8b9-x7q9r", node: "worker-7", claims: []}
+    findings:
+      - pod: "app/api-6d5f7c8b9-k2m4p"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/app/api:1.4"'
+        container: ""
+        image: "registry.invalid/app/api:1.4"
+    events:
+      - ["Pulling", 'Pulling image "registry.invalid/app/api:1.4"', 5]
+      - ["Failed", 'Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable desc = dial tcp 192.0.2.10:443: connect: connection refused', 5]
+      - ["BackOff", 'Back-off pulling image "registry.invalid/app/api:1.4"', 12]
+    events_failed: ""
+    decoy_events:
+      - object: "api-6d5f7c8b9-x7q9r"
+        events:
+          - ["NodeNotReady", "Node is not ready", 1]
+      - object: "api"
+        events:
+          - ["ScalingReplicaSet", "Scaled up replica set api-6d5f7c8b9 from 0 to 2", 1]
+
+  - namespace: "img"
+    name: "seven"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "seven-7c9d4b5f6-fghij"
+    pods:
+      - {name: "seven-7c9d4b5f6-fghij", node: "worker-4", claims: []}
+    findings:
+      - pod: "img/seven-7c9d4b5f6-fghij"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/img/seven:1.0"'
+        container: ""
+        image: "registry.invalid/img/seven:1.0"
+    events: []
+    events_failed: "events is forbidden"
+    decoy_events: []
+
+  - namespace: "web"
+    name: "static"
+    kind: "Deployment"
+    ready: 2
+    desired: 2
+    status: "Running"
+    restarts: 0
+    pod: "static"
+    pods:
+      - {name: "static-8a7b6c5d4-mnbvc", node: "worker-4", claims: []}
+      - {name: "static-8a7b6c5d4-lkjhg", node: "worker-4", claims: []}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "db"
+    name: "orders"
+    kind: "StatefulSet"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "orders-0"
+    pods:
+      - {name: "orders-0", node: "worker-1", claims: ["aux-0", "aux-1", "data-0"]}
+    findings:
+      - pod: "db/orders-0"
+        issue: "ErrImagePull"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/db/orders:2.0"'
+        container: ""
+        image: "registry.invalid/db/orders:2.0"
+    events:
+      - ["Failed", 'Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown', 3]
+      - ["Failed", "Error: ErrImagePull", 3]
+    events_failed: ""
+    decoy_events:
+      - object: "orders"
+        events:
+          - ["SuccessfulCreate", "create Pod orders-0 in StatefulSet orders successful", 1]
+
+  - namespace: "img"
+    name: "six"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "Degraded"
+    restarts: 7
+    pod: "six-6f8e9d0a1-crash"
+    pods:
+      - {name: "six-6f8e9d0a1-crash", node: "worker-4", claims: []}
+      - {name: "six-6f8e9d0a1-pulls", node: "worker-4", claims: []}
+    findings:
+      - pod: "img/six-6f8e9d0a1-crash"
+        issue: "CrashLoopBackOff"
+        reason: "container keeps exiting"
+        evidence: "back-off 5m0s restarting failed container"
+        container: "app"
+        image: ""
+        log: |
+          starting worker pool size=4
+          loading config from /etc/six/config.yaml
+          panic: runtime error: invalid memory address or nil pointer dereference
+          goroutine 1 [running]:
+          main.main()
+        log_read: "log cause: application panic (code bug)"
+      - pod: "img/six-6f8e9d0a1-pulls"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/img/six:1.1"'
+        container: ""
+        image: "registry.invalid/img/six:1.1"
+    events:
+      - ["BackOff", "Back-off restarting failed container app in pod six-6f8e9d0a1-crash", 9]
+    events_failed: ""
+    decoy_events:
+      - object: "six-6f8e9d0a1-pulls"
+        events:
+          - ["Failed", 'Failed to pull image "registry.invalid/img/six:1.1": connection reset by peer', 6]
+
+  - namespace: "store"
+    name: "metrics"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 3
+    pod: "metrics"
+    pods:
+      - {name: "metrics-4d3c2b1a0-qwert", node: "worker-4", claims: []}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "img"
+    name: "solo"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "solo-7c9d4b5f6-efghi"
+    pods:
+      - {name: "solo-7c9d4b5f6-efghi", node: "worker-4", claims: []}
+    findings:
+      - pod: "img/solo-7c9d4b5f6-efghi"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "mirror.invalid/img/solo:1.0"'
+        container: ""
+        image: "mirror.invalid/img/solo:1.0"
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "coredns"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "Degraded"
+    restarts: 12
+    pod: "coredns-76f75df574-abcde"
+    pods:
+      - {name: "coredns-76f75df574-abcde", node: "worker-4", claims: []}
+      - {name: "coredns-76f75df574-fghij", node: "worker-4", claims: []}
+    findings:
+      - pod: "kube-system/coredns-76f75df574-abcde"
+        issue: "CrashLoopBackOff"
+        reason: "container keeps exiting"
+        evidence: "back-off 5m0s restarting failed container"
+        container: "coredns"
+        image: ""
+        log: |
+          [INFO] plugin/reload: Running configuration SHA512 = 5a1c
+          CoreDNS-1.11.1
+          linux/amd64, go1.21.1
+        log_read: "log cause: last output before exit (no signature in the last 25 lines)"
+    events:
+      - ["BackOff", "Back-off restarting failed container coredns in pod coredns-76f75df574-abcde", 14]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "web"
+    name: "worker"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "worker-9e8d7c6b5-zxcvb"
+    pods:
+      - {name: "worker-9e8d7c6b5-zxcvb", node: "worker-4", claims: []}
+    findings:
+      - pod: "web/worker-9e8d7c6b5-zxcvb"
+        issue: "ErrImagePull"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/web/worker:3.2"'
+        container: ""
+        image: "registry.invalid/web/worker:3.2"
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "store"
+    name: "cache"
+    kind: "StatefulSet"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "cache-0"
+    pods:
+      - {name: "cache-0", node: "", claims: ["cache-0", "cache-1"]}
+    findings:
+      - pod: "store/cache-0"
+        issue: "Pending"
+        reason: "pod is not scheduled"
+        evidence: "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims"
+        container: ""
+        image: ""
+    events:
+      - ["FailedScheduling", "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims", 8]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "img"
+    name: "three"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "three-7c9d4b5f6-cdefg"
+    pods:
+      - {name: "three-7c9d4b5f6-cdefg", node: "worker-4", claims: []}
+    findings:
+      - pod: "img/three-7c9d4b5f6-cdefg"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/img/three:1.0"'
+        container: ""
+        image: "registry.invalid/img/three:1.0"
+    events:
+      - ["Failed", 'Failed to pull image "registry.invalid/img/three:1.0": unauthorized: authentication required', 4]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "web"
+    name: "shop"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "shop-3b2c1d0e9-poiuy"
+    pods:
+      - {name: "shop-3b2c1d0e9-poiuy", node: "worker-4", claims: []}
+    findings:
+      - pod: "web/shop-3b2c1d0e9-poiuy"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "registry.invalid/web/shop:5.0"'
+        container: ""
+        image: "registry.invalid/web/shop:5.0"
+    events: []
+    events_failed: ""
+    decoy_events: []

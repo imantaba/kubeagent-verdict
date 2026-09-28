@@ -29,3 +29,10 @@ def test_pad_pvcs_are_nine_names_disjoint_from_pvcs():
     assert len(set(names.PAD_PVCS)) == 9
     assert set(names.PAD_PVCS).isdisjoint(names.PVCS)
     assert names.PAD_PVCS == tuple(f"aux-{i}" for i in range(9))
+
+
+def test_every_pad_sorts_before_every_drawn_pvc():
+    """kubeagent lists PVC candidates by name. `truncated` needs its nine
+    pads to come before the entry's own claim, so that claim lands past
+    the 8-candidate cap."""
+    assert max(names.PAD_PVCS) < min(names.PVCS)

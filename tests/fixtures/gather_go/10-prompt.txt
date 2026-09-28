@@ -1,0 +1,176 @@
+cluster	Degraded	2	4
+node_issue	worker-1 NotReady: KubeletNotReady — container runtime is down
+node_issue	worker-2 no kubelet lease
+node_issue	worker-7 NotReady: KubeletNotReady — container runtime is down
+system_issue	kube-system/coredns 0/2 Degraded
+shared	2 workloads share one upstream cause: node worker-1 (NotReady)
+block	prompt	13375
+== BEGIN inventory ==
+Cluster health (P1): DEGRADED — 2/4 nodes Ready.
+  node worker-1 NotReady: KubeletNotReady — container runtime is down
+  node worker-2 no kubelet lease
+  node worker-7 NotReady: KubeletNotReady — container runtime is down
+  system kube-system/coredns 0/2 Degraded
+
+Cluster resources:
+  CPU: allocatable 6 cores, requests 4200m (70%), limits 5400m (90%)
+  Memory: allocatable 12Gi, requests 9Gi (75%), limits 11Gi (91%)
+
+Workload problems (P2):
+
+- app/api (Deployment): 0/2 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "registry.invalid/app/api:1.4")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n app describe pod <pod>
+- db/orders (StatefulSet): 0/1 ready, status Degraded, 0 restarts
+    issue: ErrImagePull — image pull keeps failing (Failed to pull image "registry.invalid/db/orders:2.0")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n db describe pod <pod>
+- img/seven (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "registry.invalid/img/seven:1.0")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
+- img/six (Deployment): 0/2 ready, status Degraded, 7 restarts
+    issue: CrashLoopBackOff — container keeps exiting (back-off 5m0s restarting failed container)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n img logs <pod> -c app --previous
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "registry.invalid/img/six:1.1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
+- img/solo (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "mirror.invalid/img/solo:1.0")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
+- img/three (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "registry.invalid/img/three:1.0")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
+- img/two (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ErrImagePull — image pull keeps failing (Failed to pull image "registry.invalid/img/two:1.0")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n img describe pod <pod>
+- kube-system/coredns (Deployment): 0/2 ready, status Degraded, 12 restarts
+    issue: CrashLoopBackOff — container keeps exiting (back-off 5m0s restarting failed container)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> -c coredns --previous
+- store/cache (StatefulSet): 0/1 ready, status Degraded, 0 restarts
+    issue: Pending — pod is not scheduled (0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims)
+      suggested fix (deterministic, pre-reviewed — do not substitute): inspect the object for details | run: kubectl -n store describe pod <pod>
+- web/frontend (Deployment): 1/3 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "registry.invalid/web/frontend:2.1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n web describe pod <pod>
+Service issues:
+  - shop/api (NoReadyEndpoints): service has 0 ready endpoints
+== END inventory ==
+
+== BEGIN candidates ==
+- app/api (Deployment) [confidence: high]:
+    considered node worker-1 (NotReady): attributed — pod api-6d5f7c8b9-k2m4p is scheduled on it
+      fresh read: confirmed — Ready condition is False now
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: unverified — fresh read failed: nodes "worker-7" is forbidden
+    considered registry registry.invalid: outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: confirmed — a pull event shows a connection error: dial tcp
+    decided by rules: node worker-1 (NotReady) — confirmed
+- db/orders (StatefulSet) [confidence: high]:
+    considered node worker-1 (NotReady): attributed — pod orders-0 is scheduled on it
+      fresh read: confirmed — Ready condition is False now
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered PVC aux-0 (ProvisioningFailed): outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: refuted — phase is Bound now
+    considered PVC aux-1 (ProvisioningFailed): outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: unverified — fresh read failed: persistentvolumeclaims "aux-1" is forbidden
+    considered PVC aux-2 (ProvisioningFailed): ruled out — not mounted by this workload's pods
+    considered PVC data-0 (FailedBinding): outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: confirmed — phase is Lost
+    considered registry registry.invalid: outranked — node worker-1 (NotReady) is the stronger cause
+      fresh read: refuted — a pull event shows an image error: manifest unknown; this pull fails for this image, not the host
+    decided by rules: node worker-1 (NotReady) — confirmed
+- img/seven (Deployment) [confidence: medium]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered registry registry.invalid (6 workloads failing to pull): attributed — 6 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — fresh read failed: events is forbidden
+    decided by rules: registry registry.invalid (6 workloads failing to pull) — unverified
+- img/six (Deployment) [confidence: medium]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered registry registry.invalid (6 workloads failing to pull): attributed — 6 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — events of the pulling pod were not read
+    decided by rules: registry registry.invalid (6 workloads failing to pull) — unverified
+- img/solo (Deployment):
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered registry mirror.invalid: ruled out — only workload failing to pull from this host; threshold is 2
+- img/three (Deployment) [confidence: medium]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered registry registry.invalid (6 workloads failing to pull): attributed — 6 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — not re-read: the read budget was spent first
+    decided by rules: registry registry.invalid (6 workloads failing to pull) — unverified
+- img/two (Deployment) [confidence: medium]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered registry registry.invalid (6 workloads failing to pull): attributed — 6 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — not re-read: the read budget was spent first
+    decided by rules: registry registry.invalid (6 workloads failing to pull) — unverified
+- kube-system/coredns (Deployment):
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+- store/cache (StatefulSet) [confidence: high]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered PVC cache-0 (ProvisionerNotResponding): attributed — pod cache-0 mounts it
+      fresh read: unverified — not re-read: the read budget was spent first
+    considered PVC cache-1 (ProvisionerNotResponding): outranked — PVC cache-0 (ProvisionerNotResponding) is the stronger cause
+      fresh read: unverified — not re-read: the read budget was spent first
+    decided by rules: PVC cache-0 (ProvisionerNotResponding) — unverified
+- web/frontend (Deployment) [confidence: high]:
+    considered node worker-1 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node worker-2 (no kubelet lease): attributed — pod frontend-5b8d7f6c9-q2w3e is scheduled on it
+      fresh read: unverified — not re-read: the read budget was spent first
+    considered node worker-7 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered PVC assets-0 (ProvisioningFailed): outranked — node worker-2 (no kubelet lease) is the stronger cause
+      fresh read: unverified — not re-read: the read budget was spent first
+    considered registry registry.invalid: outranked — node worker-2 (no kubelet lease) is the stronger cause
+      fresh read: unverified — not re-read: the read budget was spent first
+    decided by rules: node worker-2 (no kubelet lease) — unverified
+== END candidates ==
+
+== BEGIN evidence ==
+== events app/api-6d5f7c8b9-k2m4p ==
+events for app/api-6d5f7c8b9-k2m4p:
+  Pulling: Pulling image "registry.invalid/app/api:1.4" (x5)
+  Failed: Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable desc = dial tcp <redacted>: connect: connection refused (x5)
+  BackOff: Back-off pulling image "registry.invalid/app/api:1.4" (x12)
+
+== describe node /worker-1 ==
+node worker-1: unschedulable=false
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=False (KubeletHasNoDiskPressure): kubelet has no disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down
+  taint node.kubernetes.io/not-ready=:NoSchedule
+
+== describe node /worker-7 ==
+read failed: nodes "worker-7" is forbidden
+
+== events db/orders-0 ==
+events for db/orders-0:
+  Failed: Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown (x3)
+  Failed: Error: ErrImagePull (x3)
+
+== describe pvc db/aux-0 ==
+pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442
+
+== describe pvc db/aux-1 ==
+read failed: persistentvolumeclaims "aux-1" is forbidden
+
+== describe pvc db/data-0 ==
+pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821
+
+== events img/seven-7c9d4b5f6-fghij ==
+read failed: events is forbidden
+== END evidence ==
+
+Judge each listed workload now and answer with the JSON object only.

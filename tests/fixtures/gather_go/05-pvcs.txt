@@ -1,0 +1,9 @@
+pvc	5	db	aux-0	ok	
+block	content	62
+pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442
+pvc	6	db	aux-1	failed	persistentvolumeclaims "aux-1" is forbidden
+block	content	56
+read failed: persistentvolumeclaims "aux-1" is forbidden
+pvc	7	db	data-0	ok	
+block	content	62
+pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821

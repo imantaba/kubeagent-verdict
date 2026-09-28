@@ -526,9 +526,31 @@ def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_r
 
 # ------------------------------------------------- the structural-cue killer
 
+def _template(label: str) -> str:
+    """The trainable origin-read template a filled label was built from.
+
+    2026-09-26 (faithful prompts): a `multi` row's healthy read now names
+    the node or namespace it describes, so its meta label is filled, while
+    the shared-origin rows still carry the template. The label maps back
+    by pattern: `{node}` and `{ns}` each stand for one name with no space
+    or slash in it, and exactly one template may match.
+    """
+    hits = set()
+    for p in propagation.trainable_scenarios():
+        template = p.origin_read[0]
+        pattern = re.escape(template)
+        for slot in (re.escape("{node}"), re.escape("{ns}")):
+            pattern = pattern.replace(slot, "[^ /]+")
+        if re.fullmatch(pattern, label):
+            hits.add(template)
+    assert len(hits) == 1, (label, sorted(hits))
+    return hits.pop()
+
+
 def _origin_labels(rows, *cases):
-    return {e.meta["origin_read_label"] for e in rows
-            if e.case in cases and "origin_read_label" in e.meta}
+    return {_template(e.meta["origin_read_label"]) if e.case == "multi"
+            else e.meta["origin_read_label"]
+            for e in rows if e.case in cases and "origin_read_label" in e.meta}
 
 
 # These two replace a single assertion that compared `shared_origin` against
@@ -707,7 +729,7 @@ def test_a_negative_multi_row_shows_the_component_healthy(rows):
             continue
         seen += 1
         assert e.meta["origin_healthy"] is True
-        first_lines = healthy[e.meta["origin_read_label"]]
+        first_lines = healthy[_template(e.meta["origin_read_label"])]
         assert any(line in e.user for line in first_lines), e.meta
         for b in broken:
             assert b not in e.user
@@ -760,10 +782,16 @@ def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
 
 # ------------------------------------------------------ the eval must not move
 
-def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
+def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
     """253 until `shared_origin_decoy_probe` appended its ten, then 263
     until the 2026-09-24 job-2 generator fix cut the `none_of_these` slice
-    from 19 rows to 8.
+    from 19 rows to 8, then 252 until 2026-09-26 (faithful prompts), when
+    `truncated`, `injection` and `positional_probe` came to cover only the
+    17 entries the rules decide (-6) and the new
+    `pvc-unbound-unschedulable` entry added one row to each of five other
+    cases (+5). Then 251 until later that day, when `contradiction_probe`
+    came to cover the same 17 entries: three entries' rows left it and the
+    new entry's row joined it (-2).
 
     This test exists so the TRAINING half of the shared-origin work cannot
     move the exam by accident — a curriculum change that grows the test set
@@ -772,9 +800,13 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
     `tests/test_shared_origin_decoy_probe.py` proving the training set stayed
     byte-identical across the change. The 2026-09-24 generator fix moved it
     on purpose too, and re-pinned both exam digests below in the same
-    commit.
+    commit. The 2026-09-26 job-1 change did too, and re-pinned all three
+    exam digests in the same commit. So did the 2026-09-26 contradiction
+    change.
     """
-    assert len(generate.test_set()) == 252
+    # 2026-09-26 (faithful prompts): see the docstring. 252 -> 251.
+    # 2026-09-26 (faithful prompts): see the docstring. 251 -> 249.
+    assert len(generate.test_set()) == 249
 
 
 # The frozen slice, byte for byte: the first 253 rows until 2026-09-24,
@@ -868,7 +900,131 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 #   direct entry), and 5 of those 16 also change their user message (one
 #   per crash-family entry). The other 3 are the indirect entries, whose
 #   own confidence is `medium`. No other row moves.
-FROZEN_SLICE_SHA256 = "aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490"
+#
+# 2026-09-26 (faithful prompts): a row with a node candidate now opens its
+# inventory with kubeagent's cluster-health block. 150 of the 242 rows here
+# gain it in the user message and change by exactly that block; no gold
+# answer or meta moves, and no other row does. Every number banked against
+# the old bytes is retired.
+# aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490 ->
+# e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1
+#
+# 2026-09-26 (faithful prompts), again: the catalog now uses the detector and
+# kubelet text kubeagent really prints. The catalog feeds every case here,
+# so 222 of the 242 rows move. 218 change their user message: the finding
+# and event lines carry kubeagent's own words, a node describe prints its
+# four conditions, and five impossible PVC decoys became node decoys or went
+# away. 89 change their meta: eleven entries have new keyword pairs, the
+# decoy causes follow the PVC swap, and the `oversized`
+# `contradiction_probe` row is undecided now, so it moves from job 1 to
+# job 2. 6 change their gold answer: `worker-containerd-stop`'s own cause
+# now uses the kubelet's words. No system message moves. Every number
+# banked against the old bytes is retired.
+# e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1 ->
+# e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa
+#
+# 2026-09-26 (faithful prompts): the undecided rows now take their reads and
+# candidates from the ported gather. 71 of the 242 rows change their user
+# message, all in the five undecided cases: `own_cause`,
+# `wrong_attribution` and `misattribution_probe` 19 each, `none_of_these`
+# 8, `empty_candidates` 6. Each reads its pod's events first, as kubeagent
+# does. A refuted row's ruled-out node no longer gets a describe.
+# `deployment-bad-image-tag`'s refuted row now shows its registry ruled out,
+# since one failing workload does not reach the threshold of 2. That row is
+# the only meta change: its `decoy_cause` and `decoy_by_workload` now name
+# `registry registry.example.com`, the cause its candidate line prints. No
+# system message, gold answer, label or `flagged` list moves.
+# e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa ->
+# 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b
+#
+# 2026-09-26 (faithful prompts): the job-1 rows now take their reads,
+# candidates and gold answer from the gather. The slice goes from 242 rows
+# to 241, and only 127 rows stay byte for byte. 31 corpus rows the rules do
+# not decide (`deployment-bad-image-tag` 24, `node-cordon-diskfull` 4,
+# `oversized-job-unschedulable` 3) are `own_cause` rows now, not
+# `attributed`. `truncated`, `injection` and `positional_probe` lose those
+# three entries' rows and gain one for the new `pvc-unbound-unschedulable`
+# entry, which also adds one row each to `own_cause`, `empty_candidates`,
+# `wrong_attribution`, `misattribution_probe` and
+# `multi_misattribution_probe` (there it takes the wrap pair's place, so one
+# old pair goes and two new ones come). The 70 job-1 rows that stay
+# (`attributed` 22, the other three 16 each) change their user message,
+# gold answer and meta: the gold cause is the rules' own decision, the
+# summary is one line, and `truncated` loses its flat "low" and its "treat
+# with caution" line. IS-10 moves 4 more rows: `node-cordon-diskfull`'s
+# `wrong_attribution` row (user message), its `contradiction_probe` row
+# (user message and meta: it is undecided now, so it moves from job 1 to
+# job 2), and two `multi_misattribution_probe` rows (user message). No
+# system message moves. Every number banked against the old bytes is
+# retired.
+# 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b ->
+# 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1
+#
+# 2026-09-26 (faithful prompts): the `contradiction_probe` rows now take
+# their reads from the gather and their gold answer from the rules, over
+# the 17 entries the rules decide. The slice goes from 241 rows to 239.
+# The 19 old `contradiction_probe` rows go and 17 new ones come: the rows
+# of `deployment-bad-image-tag`, `node-cordon-diskfull` and
+# `oversized-job-unschedulable` leave, and the new
+# `pvc-unbound-unschedulable` entry joins. The other 16 entries keep their
+# place and their drawn names, but every one of their rows changes its user
+# message, gold answer and meta: the gold is the rules' cause, not
+# `none_of_these`, and `decoy_cause` is gone. The other 222 rows are byte
+# for byte the old ones, in the same order; the ten `shared_origin_probe`
+# rows at the end of the slice sit two places earlier. No system message moves.
+# Every number banked against the old bytes is retired.
+# 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1 ->
+# e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043
+#
+# 2026-09-26 (faithful prompts): the `multi` rows moved onto the gather, and
+# the node list grew from three workers to five so that a row of up to four
+# workloads can put each one on a node of its own. The slice stays at 239
+# rows, and 152 of them move. The 20 `multi_misattribution_probe` rows move
+# because they now take their reads from one gather over the whole row. The
+# other 132 move only because the node list grew: every name drawn after a
+# node draw shifts, so drawn names, nodes and victims change. Rebuilt with
+# the old three-worker list, only the 20 `multi_misattribution_probe` rows
+# differ from the old bytes. By case: `own_cause` 22, `attributed` 20,
+# `truncated` 11, `injection` 13, `empty_candidates` 2, `wrong_attribution`
+# 15, `none_of_these` 6, `positional_probe` 12, `misattribution_probe` 13,
+# `contradiction_probe` 14, `shared_origin_probe` 4. No system message
+# moves. Every number banked against the old bytes is retired.
+# e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043 ->
+# b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1
+#
+# 2026-09-26 (faithful prompts): coredns-corefile-broken now draws its
+# restarts from 6, not 1. Its finding text fixes restartCount=6, and
+# kubeagent's workload line sums its containers' restarts
+# (internal/inventory/inventory.go:158-170, 488), so a line below 6 was one
+# kubeagent cannot print. The slice stays at 239 rows, and the 16
+# coredns-corefile-broken rows move: each one changes one line of its user
+# message, the workload line's restart count. No group, gold answer, meta
+# or system message moves, and no other row moves. Every number banked
+# against the old bytes is retired.
+# b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1 ->
+# 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1
+#
+# 2026-09-26 (faithful prompts): the suggested fix line names the pod
+# `<pod>`, as kubeagent's prompt does (internal/explain/explain.go:148-171).
+# A drawn pod name is never the workload's own, so every fix command in the
+# slice changes: all 239 rows move, and each changes only in its fix lines,
+# 273 commands in all. No group, gold answer, meta or system message moves.
+# Every number banked against the old bytes is retired.
+# 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1 ->
+# 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6
+#
+# 2026-09-28 (final review): a `multi_misattribution_probe` row now lists
+# every down node for every workload, as kubeagent does: a node the
+# workload has no pod on is "ruled out — no pod of this workload is
+# scheduled on it" (internal/rootcause/rootcause.go:24-56). Before, each
+# workload listed only its own node. The slice stays at 239 rows, and the
+# 20 `multi_misattribution_probe` rows move: each changes only its user
+# message, which gains ruled-out node lines, 36 in all, and loses none. No
+# group, gold answer, meta, decoy or system message moves, and no other row
+# moves. Every number banked against the old bytes is retired.
+# 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6 ->
+# 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69
+FROZEN_SLICE_SHA256 = "48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -935,7 +1091,74 @@ FROZEN_SLICE_SHA256 = "aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f
 # same job-2 generator fix that moved `FROZEN_SLICE_SHA256` above (see its
 # 2026-09-24 entry). None of the ten `shared_origin_decoy_probe` rows
 # moves, so this digest moves only because the frozen slice inside it does.
-EVAL_SET_SHA256 = "97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81"
+#
+# 2026-09-26 (faithful prompts): the cluster-health block that moved
+# `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows have
+# no node candidate and do not move, so this digest moves only because the
+# frozen slice inside it does.
+# 97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81 ->
+# d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31
+#
+# 2026-09-26 (faithful prompts), again: the catalog text change that moved
+# `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows come
+# from `dataset.propagation`, not the catalog, and do not move, so this
+# digest moves only because the frozen slice inside it does.
+# d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31 ->
+# f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb
+#
+# 2026-09-26 (faithful prompts): the undecided rows moved onto the gather,
+# which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not undecided catalog rows and do not
+# move, so this digest moves only because the frozen slice inside it does.
+# f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb ->
+# f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee
+#
+# 2026-09-26 (faithful prompts): the job-1 rows moved onto the gather,
+# which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not job-1 catalog rows and do not
+# move, so this digest moves only because the frozen slice inside it does.
+# f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee ->
+# 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89
+#
+# 2026-09-26 (faithful prompts): the contradiction rows moved onto the
+# gather and the rules, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not catalog rows and do not move,
+# so this digest moves only because the frozen slice inside it does.
+# 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89 ->
+# e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835
+#
+# 2026-09-26 (faithful prompts): the `multi` gather and the five-worker node
+# list that moved `FROZEN_SLICE_SHA256` above. This time four of the ten
+# `shared_origin_decoy_probe` rows move too. They draw nodes and victims from
+# the same name lists, so the longer node list moves their draws; their user
+# message changes, and in two of them the gold answer does as well. The
+# other six decoy rows do not move.
+# e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835 ->
+# 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e
+#
+# 2026-09-26 (faithful prompts): coredns-corefile-broken draws its restarts
+# from 6, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows hold no coredns-corefile-broken workload
+# and do not move, so this digest moves only because the frozen slice
+# inside it does.
+# 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e ->
+# 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4
+#
+# 2026-09-26 (faithful prompts): the fix line names the pod `<pod>`, which
+# moved `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows
+# move too, for the same reason: their 24 fix commands name `<pod>` now.
+# Only their fix lines change; no gold answer or meta moves.
+# 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4 ->
+# 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f
+#
+# 2026-09-28 (final review): the `multi_misattribution_probe` rows list
+# every down node for every workload, which moved `FROZEN_SLICE_SHA256`
+# above. The ten `shared_origin_decoy_probe` rows are not `multi` rows and
+# do not move, so this digest moves only because the frozen slice inside
+# it does.
+# 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f ->
+# b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653
+EVAL_SET_SHA256 = "b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653"
 
 
 def _digest(rows) -> str:
@@ -948,11 +1171,15 @@ def test_the_frozen_slice_is_every_row_before_the_decoy_probe():
     """The frozen slice is named by what it holds, not by a row number:
     every exam row before the trailing ten `shared_origin_decoy_probe`
     rows. Its length is pinned here, apart from its digest: 253 until the
-    2026-09-24 job-2 generator fix, 242 since."""
+    2026-09-24 job-2 generator fix, 242 until the 2026-09-26 job-1 change,
+    241 until the 2026-09-26 contradiction change (see
+    `FROZEN_SLICE_SHA256`), 239 since."""
     rows = generate.test_set()
     assert [e.case for e in rows[-10:]] == ["shared_origin_decoy_probe"] * 10
     assert "shared_origin_decoy_probe" not in {e.case for e in rows[:-10]}
-    assert len(rows[:-10]) == 242
+    # 2026-09-26 (faithful prompts): see `FROZEN_SLICE_SHA256`. 242 -> 241.
+    # 2026-09-26 (faithful prompts): see `FROZEN_SLICE_SHA256`. 241 -> 239.
+    assert len(rows[:-10]) == 239
 
 
 def test_the_frozen_slice_is_byte_identical_to_the_ones_every_scoreboard_used():
@@ -1235,10 +1462,27 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
 def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     """The `separate` label is pinned three ways (a rules unit test, a scorer
     unit test, and this one): at least one real training prompt must reach
-    `label == "separate"`, both its workloads confirmed and on different
-    nodes, or the label exists only in isolated unit tests and never in a
-    prompt a model actually trains on. `separate` stays at 0 in the exam
+    `label == "separate"`, every workload in it confirmed with a cause of
+    its own, or the label exists only in isolated unit tests and never in
+    a prompt a model actually trains on. `separate` stays at 0 in the exam
     (R42), so this prompt has to live in the training split.
+
+    2026-09-26 (faithful prompts): the first such row used to hold two
+    `worker-containerd-stop` workloads on two different nodes. Job-1 rows
+    now rotate over 17 entries, so the rng stream moved, and the new
+    `pvc-unbound-unschedulable` entry joined the `multi` pool. The first
+    `separate` row now holds three workloads: one decided on its own PVC
+    and two on two different NotReady nodes. The check reads "every cause
+    is distinct" instead of "two nodes".
+
+    2026-09-26 (faithful prompts): the node list grew to five and a `multi`
+    row now redraws any draw that shares a workload, a node or a claim with
+    one already in the row, so the rng stream moved again. The first
+    `separate` row now holds four workloads: one decided on its own PVC and
+    three on three different nodes. The self-pair row (two
+    `worker-containerd-stop` workloads) is also `separate`. It comes last
+    in this split, and the training build drops it: one of its workloads
+    (`worker-containerd-stop:media/scheduler`) is an exam row's identity.
     """
     train, _ = generate.split(generate.generate(seed=17, size=8000), seed=17)
     separate_rows = [e for e in train
@@ -1246,13 +1490,17 @@ def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     assert separate_rows, "no training-only separate-label multi prompt at seed=17"
     row = separate_rows[0]
     workloads = row.meta["workloads"]
-    assert len(workloads) == 2
+    # 2026-09-26 (faithful prompts): see the docstring. 2 -> 3.
+    # 2026-09-26 (faithful prompts): five nodes and clash redraws moved the
+    # rng stream; see the docstring. 3 -> 4.
+    assert len(workloads) == 4
     for meta in workloads.values():
         assert meta["decided"] is True
     # decided_evidence is a template sentence ("Ready condition is False
     # now") shared by every worker-containerd-stop draw regardless of which
     # node it lands on, so it carries no node identity. decided_cause does
-    # ("node worker-2 (NotReady)" vs. "node worker-1 (NotReady)") -- the
-    # per-workload field this assert actually needs.
-    nodes = {meta["decided_cause"] for meta in workloads.values()}
-    assert len(nodes) == 2, "both workloads must be on different nodes"
+    # ("node worker-2 (NotReady)" vs. "node worker-3 (NotReady)" vs.
+    # "PVC data-0 (MissingStorageClass)") -- the per-workload field this
+    # assert actually needs.
+    causes = {meta["decided_cause"] for meta in workloads.values()}
+    assert len(causes) == len(workloads), "every workload must have its own cause"

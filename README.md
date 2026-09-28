@@ -117,10 +117,12 @@ scoreboard" and "Known limitations". In short, and each argued there:
 ### The shared-origin probe — added after v0.1.0
 
 The table above is a historical record of the 243-row test set and is left
-as it was measured. The test set is now 263 rows: `shared_origin_probe` added
+as it was measured. The test set grew to 263 rows: `shared_origin_probe` added
 ten afterwards, and `shared_origin_decoy_probe` ten more after that. Each
 addition was strictly appended, so the rows any earlier run was scored on kept
 their bytes and their positions; v0.1.0 was scored against the probe separately.
+(Since then the test set was rebuilt twice: at 252 rows on 2026-09-24, and at
+249 rows on 2026-09-26. `contract/PIN.md` records each rebuild.)
 
 The slice puts 2–4 flagged workloads in one prompt, all downstream of a
 single broken component. When it was added, the correct answer named the

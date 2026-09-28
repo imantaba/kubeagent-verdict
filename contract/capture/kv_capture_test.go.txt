@@ -2,319 +2,579 @@
 
 // Golden capture for kubeagent-verdict. This file lives in
 // kubeagent-verdict as contract/capture/kv_capture_test.go.txt and is
-// copied into a throwaway worktree of kubeagent to run. It never lands
+// copied into an unpacked archive of kubeagent to run. It never lands
 // in kubeagent.
 //
-// The five steps, from /home/ubuntu/git/kubeagent (HEAD at tag v1.24.0):
-//   1. git worktree add "$SCRATCH/ka-v1.24.0" v1.24.0
-//   2. cp /home/ubuntu/git/kubeagent-verdict/contract/capture/kv_capture_test.go.txt \
-//         "$SCRATCH/ka-v1.24.0/internal/investigate/kv_capture_test.go"
-//   3. cd "$SCRATCH/ka-v1.24.0" && export PATH=$PATH:/usr/local/go/bin && \
-//      KV_GOLDEN_DIR="$SCRATCH/capture" go test -tags goldencapture \
-//         -run TestCaptureVerdictGolden ./internal/investigate -v
-//   4. copy rules_golden.json to tests/fixtures/ and the other three files
-//      to contract/capture/out/ in kubeagent-verdict; record the tag and
-//      commit in contract/PIN.md
-//   5. git worktree remove --force "$SCRATCH/ka-v1.24.0" && \
-//      git worktree prune && git status --short   # must print nothing
+// It loads the shared fixture tests/fixtures/gather_fixture.yaml, builds
+// the scan-time workloads and a fake clientset from it, and runs
+// kubeagent's own pipeline over them, in scan.go's order:
+// clusterhealth.Assess, inventory.Prioritize, the three rootcause
+// annotators, confidence.Annotate; then local verdict mode's flaggedScope,
+// gatherEvidence, hypothesis.Decide and Shared, and buildVerdictPrompt.
+// One run writes the golden files and the ten stage dumps
+// (tests/fixtures/gather_go/README.md gives their format).
 //
-// Re-run these five steps only by the re-pin procedure in contract/PIN.md.
+// The same run then does it all again over the log fixture,
+// tests/fixtures/gather_fixture_logs.yaml, whose reads are mostly log
+// reads: the main fixture spends its 8 reads before the gather reaches a
+// crashed container. That pass writes its own dumps and no golden file.
+//
+// The seven steps. KV is the kubeagent-verdict checkout, SCRATCH a new
+// folder outside both repos; run the git commands in the kubeagent repo.
+//   1. git status --short    # note what it prints
+//      git archive v1.24.0 | gzip > "$SCRATCH/ka.tar.gz"
+//      git ls-tree -r v1.24.0 --name-only | wc -l    # the file count
+//   2. cp "$KV/tests/fixtures/gather_fixture.yaml" \
+//         "$KV/tests/fixtures/gather_fixture_logs.yaml" \
+//         "$KV/contract/capture/kv_capture_test.go.txt" "$SCRATCH/"
+//   3. mkdir "$SCRATCH/ka" && tar -xzf "$SCRATCH/ka.tar.gz" -C "$SCRATCH/ka"
+//      find "$SCRATCH/ka" ! -type d | wc -l    # must equal the count in step 1
+//      cp "$SCRATCH/kv_capture_test.go.txt" \
+//         "$SCRATCH/ka/internal/investigate/kv_capture_test.go"
+//   4. cd "$SCRATCH/ka" && export PATH=$PATH:/usr/local/go/bin && \
+//      KV_FIXTURE="$SCRATCH/gather_fixture.yaml" \
+//      KV_FIXTURE_LOGS="$SCRATCH/gather_fixture_logs.yaml" KV_GOLDEN_DIR="$SCRATCH/out" \
+//      go test -count=1 -tags goldencapture -run TestCaptureVerdictGolden ./internal/investigate -v
+//   5. copy back into KV: out/input.json and out/user_message.txt to
+//      contract/golden/, out/system_prompt.txt to contract/,
+//      out/rules_golden.json to tests/fixtures/, out/gather_go/* to
+//      tests/fixtures/gather_go/, out/gather_go_logs/* to
+//      tests/fixtures/gather_go_logs/; record the tag and commit in
+//      contract/PIN.md
+//   6. check that the fixture still exercises every rule path the old
+//      rules_golden.json did (each attribution rule and each Decide
+//      outcome, at least once), and that the refused reads of node
+//      worker-7, PVC aux-1 and the events of img/seven are still there
+//   7. rm -rf "$SCRATCH" && git status --short    # must print what step 1 printed
+//
+// The run needs no API server. Three stand-ins replace one:
+//   - no read that needs a real RESTClient runs: the harness never calls
+//     scan.Evaluate (whose kubelet, CoreDNS, readyz and stats reads are
+//     proxied through one), and the wrapped CoreV1 panics if anything asks
+//     for its RESTClient;
+//   - a previous-log read goes to an httptest server that serves the
+//     fixture's log text (the fake clientset's GetLogs always answers
+//     "fake logs"), or answers 403 where the fixture sets log_refused;
+//   - a PrependReactor lists events by involvedObject.name (the fake
+//     ignores field selectors), and a self-check proves two workloads'
+//     events reads differ.
+//
+// Re-run these seven steps only by the re-pin procedure in contract/PIN.md.
 
 package investigate
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
 
 	"github.com/imantaba/kubeagent/internal/clusterhealth"
+	"github.com/imantaba/kubeagent/internal/collect"
+	"github.com/imantaba/kubeagent/internal/confidence"
 	"github.com/imantaba/kubeagent/internal/diagnose"
 	"github.com/imantaba/kubeagent/internal/hypothesis"
 	"github.com/imantaba/kubeagent/internal/inventory"
 	"github.com/imantaba/kubeagent/internal/pvchealth"
+	"github.com/imantaba/kubeagent/internal/redact"
 	"github.com/imantaba/kubeagent/internal/remediation"
 	"github.com/imantaba/kubeagent/internal/resources"
 	"github.com/imantaba/kubeagent/internal/rootcause"
 	"github.com/imantaba/kubeagent/internal/svchealth"
 )
 
-const (
-	kvTag    = "v1.24.0"
-	kvCommit = "15ec5649bbd2d07558eae945b71430afc8f231fd"
-	regHost  = "registry.invalid"
+// ---------------------------------------------------------------------------
+// The fixture, as tests/fixtures/gather_fixture.yaml writes it. The file's
+// own header says what each key holds. Every key is a JSON tag because
+// sigs.k8s.io/yaml turns YAML into JSON before it decodes; UnmarshalStrict
+// makes an unknown or duplicated key a load error.
+
+type kvFixture struct {
+	Kubeagent     kvVersion        `json:"kubeagent"`
+	Summary       kvSummary        `json:"summary"`
+	PlatformLine  string           `json:"platform_line"`
+	ServiceIssues []kvServiceIssue `json:"service_issues"`
+	Nodes         []kvNode         `json:"nodes"`
+	PVCs          []kvPVC          `json:"pvcs"`
+	Workloads     []kvWorkload     `json:"workloads"`
+}
+
+type kvVersion struct {
+	Tag    string `json:"tag"`
+	Commit string `json:"commit"`
+}
+
+type kvLine struct {
+	Allocatable string `json:"allocatable"`
+	Requests    string `json:"requests"`
+	RequestsPct int    `json:"requests_pct"`
+	Limits      string `json:"limits"`
+	LimitsPct   int    `json:"limits_pct"`
+}
+
+type kvSummary struct {
+	CPU              kvLine `json:"cpu"`
+	Memory           kvLine `json:"memory"`
+	MetricsAvailable bool   `json:"metrics_available"`
+}
+
+type kvServiceIssue struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Detail    string `json:"detail"`
+}
+
+// kvFresh is what a fresh describe of a node or PVC finds. The field names
+// are kubeagent_verdict.dataset.objects.Fresh's. how is "read" or
+// "read_failed"; message is a refused read's error text.
+type kvFresh struct {
+	How           string     `json:"how"`
+	Message       string     `json:"message"`
+	Ready         string     `json:"ready"`
+	ReadyReason   string     `json:"ready_reason"`
+	ReadyMessage  string     `json:"ready_message"`
+	Unschedulable bool       `json:"unschedulable"`
+	DiskPressure  bool       `json:"disk_pressure"`
+	Taints        [][]string `json:"taints"`
+	Phase         string     `json:"phase"`
+	StorageClass  string     `json:"storage_class"`
+	Volume        string     `json:"volume"`
+}
+
+type kvNode struct {
+	Name       string  `json:"name"`
+	ScanReason string  `json:"scan_reason"`
+	Fresh      kvFresh `json:"fresh"`
+}
+
+type kvPVC struct {
+	Namespace  string  `json:"namespace"`
+	Name       string  `json:"name"`
+	ScanReason string  `json:"scan_reason"`
+	Fresh      kvFresh `json:"fresh"`
+}
+
+type kvPod struct {
+	Name   string   `json:"name"`
+	Node   string   `json:"node"`
+	Claims []string `json:"claims"`
+}
+
+type kvFinding struct {
+	Pod        string `json:"pod"`
+	Issue      string `json:"issue"`
+	Reason     string `json:"reason"`
+	Evidence   string `json:"evidence"`
+	Container  string `json:"container"`
+	Image      string `json:"image"`
+	Log        string `json:"log"`
+	LogRefused bool   `json:"log_refused"`
+	LogRead    string `json:"log_read"`
+}
+
+// kvEvent is one event, written in the fixture as [reason, message, count].
+type kvEvent struct {
+	Reason  string
+	Message string
+	Count   int32
+}
+
+func (e *kvEvent) UnmarshalJSON(b []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if len(raw) != 3 {
+		return fmt.Errorf("an event is [reason, message, count], got %d items", len(raw))
+	}
+	if err := json.Unmarshal(raw[0], &e.Reason); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &e.Message); err != nil {
+		return err
+	}
+	return json.Unmarshal(raw[2], &e.Count)
+}
+
+type kvDecoy struct {
+	Object string    `json:"object"`
+	Events []kvEvent `json:"events"`
+}
+
+type kvWorkload struct {
+	Namespace    string      `json:"namespace"`
+	Name         string      `json:"name"`
+	Kind         string      `json:"kind"`
+	Ready        int         `json:"ready"`
+	Desired      int         `json:"desired"`
+	Status       string      `json:"status"`
+	Restarts     int         `json:"restarts"`
+	Pod          string      `json:"pod"`
+	Pods         []kvPod     `json:"pods"`
+	Findings     []kvFinding `json:"findings"`
+	Events       []kvEvent   `json:"events"`
+	EventsFailed string      `json:"events_failed"`
+	DecoyEvents  []kvDecoy   `json:"decoy_events"`
+}
+
+func (w kvWorkload) key() string { return w.Namespace + "/" + w.Name + "/" + w.Kind }
+
+// ---------------------------------------------------------------------------
+// Scan-time and fresh objects.
+
+// The kubelet text the dataset gives a node's conditions
+// (kubeagent_verdict/dataset/rules.py, _MEMORY_OK and its neighbours), so
+// a node describe here prints what the Python read_text prints.
+var (
+	kvMemoryOK     = kvCond(corev1.NodeMemoryPressure, "False", "KubeletHasSufficientMemory", "kubelet has sufficient memory available")
+	kvDiskOK       = kvCond(corev1.NodeDiskPressure, "False", "KubeletHasNoDiskPressure", "kubelet has no disk pressure")
+	kvDiskPressure = kvCond(corev1.NodeDiskPressure, "True", "KubeletHasDiskPressure", "kubelet has disk pressure")
+	kvPIDOK        = kvCond(corev1.NodePIDPressure, "False", "KubeletHasSufficientPID", "kubelet has sufficient PID available")
+	kvReadyTrue    = kvCond(corev1.NodeReady, "True", "KubeletReady", "kubelet is posting ready status")
+	kvReadyFalse   = kvCond(corev1.NodeReady, "False", "KubeletNotReady", "container runtime is down")
 )
 
-// Pod names are fixed so the prompt and the fixture are reproducible.
-var pods = map[string]string{
-	"web/frontend": "frontend-5b8d7f6c9-q2w3e",
-	"db/postgres":  "postgres-0",
-	"db/cache":     "cache-0",
-	"db/search":    "search-0",
-	"img/one":      "one-7c9d4b5f6-abcde",
-	"img/two":      "two-7c9d4b5f6-bcdef",
-	"img/three":    "three-7c9d4b5f6-cdefg",
-	"img/five":     "five-7c9d4b5f6-defgh",
-	"img/six-a":    "six-6f8e9d0a1-crash",
-	"img/six-b":    "six-6f8e9d0a1-pulls",
-	"img/lone":     "lone-7c9d4b5f6-efghi",
-	"img/seven":    "seven-7c9d4b5f6-fghij",
-	"img/eight":    "eight-7c9d4b5f6-ghijk",
+// The heartbeat check's inputs, which the fixture does not carry: a fixed
+// clock, scan's 40s default threshold, and a lease renewed 10s ago for
+// every node whose scan_reason is empty. A node with scan_reason
+// "no kubelet lease" gets no lease; a NotReady node needs none, because
+// Assess only checks the lease of a Ready node.
+var kvNow = time.Date(2026, time.September, 26, 12, 0, 0, 0, time.UTC)
+
+const kvThreshold = 40 * time.Second
+
+func kvCond(t corev1.NodeConditionType, status, reason, msg string) corev1.NodeCondition {
+	return corev1.NodeCondition{Type: t, Status: corev1.ConditionStatus(status), Reason: reason, Message: msg}
 }
 
-// goldenCluster, goldenSummary, goldenServiceIssues and goldenPlatformLine
-// carry the same fixture values the pre-rescope capture used for
-// contract/golden/input.json's cluster, summary, platform_line and
-// service_issues (docs/superpowers/plans/2026-08-22-kubeagent-verdict.md,
-// kubeagent repo, Task 3 Step 2): a degraded 2/3-node cluster, a CPU/memory
-// summary with no live metrics, and one ClusterIP service with zero ready
-// endpoints. Those sections of the prompt keep today's bytes; only the
-// candidates/evidence sections below are new. svchealth.Issue has both a
-// Type and a Problem field at v1.24.0; BuildInventoryPrompt prints Type, so
-// the fixture's NoReadyEndpoints value goes in Type, exactly where the
-// pre-rescope capture had it.
-func goldenCluster() clusterhealth.ClusterHealth {
-	return clusterhealth.ClusterHealth{
-		Verdict:    "Degraded",
-		NodesReady: 2,
-		NodesTotal: 3,
-		NodeIssues: []string{"worker-2 NotReady (KubeletNotReady)"},
+// kvScanNode is the node as the scan listed it. Its Ready condition follows
+// scan_reason; the other three are healthy. It is never cordoned either:
+// Spec.Unschedulable stays false, even for a node whose fresh read finds a
+// cordon (kvFreshNode). So Assess prints no MemoryPressure, DiskPressure,
+// PIDPressure or SchedulingDisabled line here, and the byte-equal check says
+// nothing about them. Spec 4 owns scan-time node state.
+func kvScanNode(n kvNode) (corev1.Node, error) {
+	ready := kvReadyTrue
+	switch n.ScanReason {
+	case "NotReady":
+		ready = kvReadyFalse
+	case "", "no kubelet lease":
+	default:
+		return corev1.Node{}, fmt.Errorf("node %s: scan_reason %q is not one the fixture supports", n.Name, n.ScanReason)
 	}
+	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: n.Name}}
+	node.Status.Conditions = []corev1.NodeCondition{kvMemoryOK, kvDiskOK, kvPIDOK, ready}
+	return node, nil
 }
 
-func goldenSummary() *resources.Summary {
-	return &resources.Summary{
-		CPU: resources.Line{
-			Allocatable: "6", Requests: "4200m", RequestsPct: 70,
-			Limits: "5400m", LimitsPct: 90,
-		},
-		Memory: resources.Line{
-			Allocatable: "12Gi", Requests: "9Gi", RequestsPct: 75,
-			Limits: "11Gi", LimitsPct: 91,
-		},
+// kvFreshNode is the node a fresh describe finds, with the conditions in
+// the order the Python _node_conditions gives them.
+func kvFreshNode(name string, f kvFresh) (*corev1.Node, error) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	node.Spec.Unschedulable = f.Unschedulable
+	disk := kvDiskOK
+	if f.DiskPressure {
+		disk = kvDiskPressure
 	}
-}
-
-func goldenServiceIssues() []svchealth.Issue {
-	return []svchealth.Issue{
-		{Namespace: "shop", Name: "api", Type: "NoReadyEndpoints", Detail: "service has 0 ready endpoints"},
+	switch f.Ready {
+	case "missing":
+	case "True":
+		node.Status.Conditions = []corev1.NodeCondition{kvMemoryOK, disk, kvPIDOK, kvReadyTrue}
+	case "False":
+		if f.ReadyReason != kvReadyFalse.Reason || f.ReadyMessage != kvReadyFalse.Message {
+			return nil, fmt.Errorf("node %s: Ready=False must carry %s / %q", name, kvReadyFalse.Reason, kvReadyFalse.Message)
+		}
+		node.Status.Conditions = []corev1.NodeCondition{kvMemoryOK, disk, kvPIDOK, kvReadyFalse}
+	default:
+		return nil, fmt.Errorf("node %s: fresh ready %q is not True, False or missing", name, f.Ready)
 	}
-}
-
-func goldenPlatformLine() string { return "" }
-
-func pullFinding(ns, pod, issue, image string) diagnose.Finding {
-	return diagnose.Finding{
-		Pod:      ns + "/" + pod,
-		Issue:    issue,
-		Reason:   "image pull keeps failing",
-		Evidence: `Failed to pull image "` + image + `"`,
-		Image:    image,
+	for _, tn := range f.Taints {
+		if len(tn) != 3 {
+			return nil, fmt.Errorf("node %s: a taint is [key, value, effect]", name)
+		}
+		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{Key: tn[0], Value: tn[1], Effect: corev1.TaintEffect(tn[2])})
 	}
+	return node, nil
 }
 
-func pendingFinding(ns, pod string) diagnose.Finding {
-	return diagnose.Finding{
-		Pod:      ns + "/" + pod,
-		Issue:    "Pending",
-		Reason:   "pod is not scheduled",
-		Evidence: "0/7 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+func kvFreshPVC(p kvPVC) *corev1.PersistentVolumeClaim {
+	pvc := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: p.Namespace, Name: p.Name}}
+	if p.Fresh.StorageClass != "" {
+		sc := p.Fresh.StorageClass
+		pvc.Spec.StorageClassName = &sc
 	}
+	pvc.Spec.VolumeName = p.Fresh.Volume
+	pvc.Status.Phase = corev1.PersistentVolumeClaimPhase(p.Fresh.Phase)
+	return pvc
 }
 
-func crashFinding(ns, pod string) diagnose.Finding {
-	return diagnose.Finding{
-		Pod:      ns + "/" + pod,
-		Issue:    "CrashLoopBackOff",
-		Reason:   "container keeps exiting",
-		Evidence: "back-off 5m0s restarting failed container",
+// kvEvents turns one object's fixture events into Event objects. The names
+// are zero-padded because the fake tracker lists by name: e01 before e02
+// keeps the fixture's order.
+func kvEvents(ns, object string, evs []kvEvent) []runtime.Object {
+	var out []runtime.Object
+	for i, e := range evs {
+		out = append(out, &corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: ns, Name: fmt.Sprintf("%s.e%02d", object, i+1)},
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Namespace: ns, Name: object},
+			Reason:         e.Reason,
+			Message:        e.Message,
+			Count:          e.Count,
+		})
 	}
+	return out
 }
 
-func puller(ns, name, issue, node string) inventory.Workload {
-	image := regHost + "/" + ns + "/" + name + ":1.0"
-	pod := pods[ns+"/"+name]
-	return inventory.Workload{
-		Namespace: ns, Name: name, Kind: "Deployment",
-		Ready: 0, Desired: 1, Status: "Progressing",
-		Findings: []diagnose.Finding{pullFinding(ns, pod, issue, image)},
-		Pods:     []inventory.PodRow{{Name: pod, Node: node}},
+func kvScanWorkload(fw kvWorkload) inventory.Workload {
+	w := inventory.Workload{
+		Namespace: fw.Namespace, Name: fw.Name, Kind: fw.Kind,
+		Desired: fw.Desired, Ready: fw.Ready, Status: fw.Status, Restarts: fw.Restarts,
 	}
+	for _, p := range fw.Pods {
+		w.Pods = append(w.Pods, inventory.PodRow{Name: p.Name, Node: p.Node})
+	}
+	for _, f := range fw.Findings {
+		w.Findings = append(w.Findings, diagnose.Finding{
+			Pod: f.Pod, Issue: f.Issue, Reason: f.Reason, Evidence: f.Evidence,
+			Container: f.Container, Image: f.Image,
+		})
+	}
+	return w
 }
 
-func captureWorkloads() []inventory.Workload {
-	frontendImage := regHost + "/web/frontend:2.1"
-	frontendPods := []inventory.PodRow{
-		{Name: pods["web/frontend"], Node: "worker-1"},
-		{Name: "frontend-5b8d7f6c9-r4t5y", Node: "worker-3"},
-		{Name: "frontend-5b8d7f6c9-u6i7o", Node: "worker-5"},
-		{Name: "frontend-5b8d7f6c9-p8a9s", Node: "worker-6"},
-		{Name: "frontend-5b8d7f6c9-d0f1g", Node: "worker-7"},
-	}
-	six := inventory.Workload{
-		Namespace: "img", Name: "six", Kind: "Deployment",
-		Ready: 0, Desired: 2, Status: "Progressing",
-		Findings: []diagnose.Finding{
-			crashFinding("img", pods["img/six-a"]),
-			pullFinding("img", pods["img/six-b"], "ImagePullBackOff", regHost+"/img/six:1.0"),
-		},
-		Pods: []inventory.PodRow{
-			{Name: pods["img/six-a"], Node: "worker-4"},
-			{Name: pods["img/six-b"], Node: "worker-4"},
-		},
-	}
-	lone := puller("img", "lone", "ImagePullBackOff", "worker-4")
-	lone.Findings[0].Image = "mirror.invalid/img/lone:1.0"
-	lone.Findings[0].Evidence = `Failed to pull image "mirror.invalid/img/lone:1.0"`
-	return []inventory.Workload{
-		{
-			Namespace: "web", Name: "frontend", Kind: "Deployment",
-			Ready: 0, Desired: 5, Status: "Progressing",
-			Findings: []diagnose.Finding{pullFinding("web", pods["web/frontend"], "ImagePullBackOff", frontendImage)},
-			Pods:     frontendPods,
-		},
-		{
-			Namespace: "db", Name: "postgres", Kind: "StatefulSet",
-			Ready: 0, Desired: 1, Status: "Progressing",
-			Findings: []diagnose.Finding{pendingFinding("db", pods["db/postgres"])},
-			Pods:     []inventory.PodRow{{Name: pods["db/postgres"], Node: "worker-4"}},
-		},
-		{
-			Namespace: "db", Name: "cache", Kind: "StatefulSet",
-			Ready: 0, Desired: 1, Status: "Progressing",
-			Findings: []diagnose.Finding{pendingFinding("db", pods["db/cache"])},
-			Pods:     []inventory.PodRow{{Name: pods["db/cache"], Node: "worker-2"}},
-		},
-		{
-			Namespace: "db", Name: "search", Kind: "StatefulSet",
-			Ready: 0, Desired: 1, Status: "Progressing",
-			Findings: []diagnose.Finding{pendingFinding("db", pods["db/search"])},
-			Pods:     []inventory.PodRow{{Name: pods["db/search"], Node: "worker-4"}},
-		},
-		puller("img", "one", "ImagePullBackOff", "worker-4"),
-		puller("img", "two", "ErrImagePull", "worker-4"),
-		puller("img", "three", "ImagePullBackOff", "worker-4"),
-		puller("img", "five", "ImagePullBackOff", "worker-4"),
-		six,
-		lone,
-		puller("img", "seven", "ImagePullBackOff", "worker-4"),
-		puller("img", "eight", "ImagePullBackOff", "worker-4"),
-	}
+// kvForbidden is a refused read whose Error() is exactly msg, which is what
+// redact.Error then passes through.
+func kvForbidden(msg string) error {
+	return &apierrors.StatusError{ErrStatus: metav1.Status{
+		Status: metav1.StatusFailure, Code: http.StatusForbidden,
+		Reason: metav1.StatusReasonForbidden, Message: msg,
+	}}
 }
 
-func capturePodPVCs() map[string][]string {
-	return map[string][]string{
-		"db/" + pods["db/postgres"]: {"aux-0", "aux-1", "aux-2", "data-0"},
-		"db/" + pods["db/cache"]:    {"cache-0"},
-		"db/" + pods["db/search"]:   {"search-0"},
+// ---------------------------------------------------------------------------
+// The log stand-in: a clientset that is the fake everywhere except
+// Pods(ns).GetLogs, which goes to a real client pointed at an httptest
+// server.
+
+type kvLogClient struct {
+	*fake.Clientset
+	core kvLogCore
+}
+
+func (c kvLogClient) CoreV1() corev1client.CoreV1Interface { return c.core }
+
+type kvLogCore struct {
+	corev1client.CoreV1Interface
+	real corev1client.CoreV1Interface
+}
+
+func (c kvLogCore) Pods(ns string) corev1client.PodInterface {
+	return kvLogPods{PodInterface: c.CoreV1Interface.Pods(ns), real: c.real.Pods(ns)}
+}
+
+func (c kvLogCore) RESTClient() rest.Interface {
+	panic("a read needs a real RESTClient; the capture serves none")
+}
+
+type kvLogPods struct {
+	corev1client.PodInterface
+	real corev1client.PodInterface
+}
+
+func (p kvLogPods) GetLogs(name string, opts *corev1.PodLogOptions) *rest.Request {
+	return p.real.GetLogs(name, opts)
+}
+
+// ---------------------------------------------------------------------------
+// The dumps. Records are fields joined by one tab, ending in a newline. A
+// value that can hold a newline goes in a block: "block\t<name>\t<N>\n",
+// the N raw bytes, then "\n". tests/fixtures/gather_go/README.md is the
+// contract.
+
+type kvDump struct {
+	t *testing.T
+	b strings.Builder
+}
+
+func (d *kvDump) rec(fields ...string) {
+	d.t.Helper()
+	for _, f := range fields {
+		if strings.ContainsAny(f, "\t\n\r") {
+			d.t.Fatalf("dump field %q holds a tab or a line break", f)
+		}
 	}
+	d.b.WriteString(strings.Join(fields, "\t"))
+	d.b.WriteString("\n")
 }
 
-func capturePVCIssues() []pvchealth.Issue {
-	issue := func(name, reason, class string) pvchealth.Issue {
-		return pvchealth.Issue{Namespace: "db", Name: name, Phase: "Pending",
-			Reason: reason, Detail: "waiting for a volume", StorageClass: class}
+func (d *kvDump) block(name, body string) {
+	d.t.Helper()
+	d.rec("block", name, strconv.Itoa(len(body)))
+	d.b.WriteString(body)
+	d.b.WriteString("\n")
+}
+
+// kvRead is one read the gather makes, as the harness's mirror of its walk
+// predicts it: the label, what kind of read it is, and the object.
+type kvRead struct {
+	label     string
+	kind      string // events | node | pvc | log
+	ns, name  string
+	container string
+}
+
+// kvAction is what the gather's walk does with one candidate or one
+// finding: read, deduped, ruled_out, no_object, registry, skip, or budget.
+// ref is the 1-based trail index of the read it made or reused, 0 for none.
+type kvAction struct {
+	action string
+	ref    int
+}
+
+// kvWalk mirrors gatherEvidence's loop (gather.go:57-156 at v1.24.0) check
+// for check, so the dumps can say what happened to each candidate and each
+// finding. The test fails unless the mirror's reads equal the trail the
+// real gather returns.
+func kvWalk(scoped []inventory.Workload) (reads []kvRead, cands [][]kvAction, logs [][]kvAction) {
+	seenDescribe := map[string]int{}
+	seenLog := map[string]int{}
+	spent := 0
+	add := func(r kvRead) int {
+		reads = append(reads, r)
+		spent++
+		return len(reads)
 	}
-	return []pvchealth.Issue{
-		issue("aux-0", "ProvisioningFailed", "fast-ssd"),
-		issue("aux-1", "ProvisioningFailed", "fast-ssd"),
-		issue("aux-2", "ProvisioningFailed", "fast-ssd"),
-		issue("aux-3", "ProvisioningFailed", "fast-ssd"),
-		issue("aux-4", "ProvisioningFailed", "fast-ssd"),
-		issue("data-0", "FailedBinding", "fast-ssd"),
-		issue("cache-0", "ProvisionerNotResponding", "standard"),
-		issue("search-0", "ProvisionerNotResponding", "standard"),
+	for _, w := range scoped {
+		ca := make([]kvAction, len(w.RootCauseTrace))
+		la := make([]kvAction, len(w.Findings))
+		for i := range ca {
+			ca[i] = kvAction{action: "budget"}
+		}
+		for i := range la {
+			la[i] = kvAction{action: "budget"}
+		}
+		cands, logs = append(cands, ca), append(logs, la)
+		if spent >= maxToolCalls {
+			continue
+		}
+		name := w.Name
+		if len(w.Findings) > 0 {
+			if p := podPart(w.Findings[0].Pod); p != "" {
+				name = p
+			}
+		}
+		add(kvRead{label: fmt.Sprintf("events %s/%s", w.Namespace, name), kind: "events", ns: w.Namespace, name: name})
+		for i, h := range w.RootCauseTrace {
+			if spent >= maxToolCalls {
+				break
+			}
+			if h.Verdict == inventory.VerdictRuledOut {
+				ca[i] = kvAction{action: "ruled_out"}
+				continue
+			}
+			if h.Object == "" {
+				ca[i] = kvAction{action: "no_object"}
+				continue
+			}
+			if h.Kind != "node" && h.Kind != "pvc" {
+				ca[i] = kvAction{action: "registry"}
+				continue
+			}
+			ns := ""
+			if h.Kind == "pvc" {
+				ns = w.Namespace
+			}
+			key := h.Kind + "/" + ns + "/" + h.Object
+			if ref, ok := seenDescribe[key]; ok {
+				ca[i] = kvAction{action: "deduped", ref: ref}
+				continue
+			}
+			ref := add(kvRead{label: fmt.Sprintf("describe %s %s/%s", h.Kind, ns, h.Object), kind: h.Kind, ns: ns, name: h.Object})
+			seenDescribe[key] = ref
+			ca[i] = kvAction{action: "read", ref: ref}
+		}
+		for i, f := range w.Findings {
+			if spent >= maxToolCalls {
+				break
+			}
+			pod := podPart(f.Pod)
+			if !crashFamily(f.Issue) || f.Container == "" || pod == "" {
+				la[i] = kvAction{action: "skip"}
+				continue
+			}
+			key := w.Namespace + "/" + pod + "/" + f.Container
+			if ref, ok := seenLog[key]; ok {
+				la[i] = kvAction{action: "deduped", ref: ref}
+				continue
+			}
+			ref := add(kvRead{label: fmt.Sprintf("log causes %s/%s container %s", w.Namespace, pod, f.Container), kind: "log", ns: w.Namespace, name: pod, container: f.Container})
+			seenLog[key] = ref
+			la[i] = kvAction{action: "read", ref: ref}
+		}
 	}
+	return reads, cands, logs
 }
 
-func nodeWith(name string, unschedulable bool, conds []corev1.NodeCondition, taints []corev1.Taint) *corev1.Node {
-	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	n.Spec.Unschedulable = unschedulable
-	n.Spec.Taints = taints
-	n.Status.Conditions = conds
-	return n
-}
-
-func ready(status corev1.ConditionStatus, reason, msg string) corev1.NodeCondition {
-	return corev1.NodeCondition{Type: corev1.NodeReady, Status: status, Reason: reason, Message: msg}
-}
-
-func pvcWith(name string, phase corev1.PersistentVolumeClaimPhase, class, volume string) *corev1.PersistentVolumeClaim {
-	p := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: "db", Name: name}}
-	p.Spec.VolumeName = volume
-	if class != "" {
-		c := class
-		p.Spec.StorageClassName = &c
+// kvSections splits the bundle into one body per trail label. Each section
+// is "== <label> ==\n<body>\n\n" (appendRead, gather.go:163-169).
+func kvSections(bundle string, trail []string) ([]string, error) {
+	rest := bundle
+	bodies := make([]string, 0, len(trail))
+	for i, label := range trail {
+		head := "== " + label + " ==\n"
+		if !strings.HasPrefix(rest, head) {
+			return nil, fmt.Errorf("section %d does not open with %q", i+1, head)
+		}
+		rest = rest[len(head):]
+		var end int
+		if i+1 < len(trail) {
+			end = strings.Index(rest, "\n\n== "+trail[i+1]+" ==\n")
+		} else if strings.HasSuffix(rest, "\n\n") {
+			end = len(rest) - 2
+		} else {
+			end = -1
+		}
+		if end < 0 {
+			return nil, fmt.Errorf("section %d (%s) has no end", i+1, label)
+		}
+		bodies = append(bodies, rest[:end])
+		rest = rest[end+2:]
 	}
-	p.Status.Phase = phase
-	return p
-}
-
-func pullEvent(image, tail string) corev1.Event {
-	return corev1.Event{Reason: "Failed", Count: 4,
-		Message: `Failed to pull image "` + image + `": ` + tail}
-}
-
-func captureReads() hypothesis.Reads {
-	notReadyTaint := []corev1.Taint{{Key: "node.kubernetes.io/not-ready", Effect: corev1.TaintEffectNoSchedule}}
-	return hypothesis.Reads{
-		Nodes: map[string]*corev1.Node{
-			"worker-1": nodeWith("worker-1", false,
-				[]corev1.NodeCondition{ready(corev1.ConditionFalse, "KubeletNotReady", "container runtime is down")}, notReadyTaint),
-			"worker-2": nodeWith("worker-2", false,
-				[]corev1.NodeCondition{ready(corev1.ConditionTrue, "KubeletReady", "kubelet is posting ready status")}, nil),
-			"worker-5": nodeWith("worker-5", false,
-				[]corev1.NodeCondition{ready(corev1.ConditionUnknown, "NodeStatusUnknown", "Kubelet stopped posting node status.")}, nil),
-			"worker-6": nodeWith("worker-6", false, nil, nil),
-		},
-		PVCs: map[string]*corev1.PersistentVolumeClaim{
-			"db/aux-0":    pvcWith("aux-0", corev1.ClaimBound, "fast-ssd", "pv-0442"),
-			"db/aux-2":    pvcWith("aux-2", corev1.PersistentVolumeClaimPhase("Released"), "fast-ssd", ""),
-			"db/data-0":   pvcWith("data-0", corev1.ClaimLost, "fast-ssd", "pv-0821"),
-			"db/cache-0":  pvcWith("cache-0", corev1.ClaimPending, "standard", ""),
-			"db/search-0": pvcWith("search-0", corev1.ClaimPending, "standard", ""),
-		},
-		Events: map[string][]corev1.Event{
-			"img/" + pods["img/one"]:      {pullEvent(regHost+"/img/one:1.0", "connection refused")},
-			"img/" + pods["img/two"]:      {pullEvent(regHost+"/img/two:1.0", "i/o timeout")},
-			"img/" + pods["img/three"]:    {pullEvent(regHost+"/img/three:1.0", "unauthorized: authentication required")},
-			"img/" + pods["img/five"]:     {},
-			"img/" + pods["img/six-a"]:    {{Reason: "BackOff", Count: 9, Message: "Back-off restarting failed container"}},
-			"web/" + pods["web/frontend"]: {pullEvent(regHost+"/web/frontend:2.1", "manifest unknown")},
-		},
-		Failed: map[string]string{
-			"node/worker-7":                    `nodes "worker-7" is forbidden`,
-			"pvc/db/aux-1":                      `persistentvolumeclaims "aux-1" is forbidden`,
-			"events/img/" + pods["img/seven"]:   "events is forbidden",
-		},
+	if rest != "" {
+		return nil, fmt.Errorf("%d bytes after the last section", len(rest))
 	}
+	return bodies, nil
 }
+
+// ---------------------------------------------------------------------------
+// The golden JSON files. These shapes are unchanged from the hand-built
+// capture this file replaces.
 
 type readJSON struct {
 	Label   string `json:"label"`
 	Content string `json:"content"`
-}
-
-// captureBundle is the eight reads the prompt shows, in gather order:
-// nodes, then PVCs, then events. describeNode, describePVC and
-// formatEvents live in reader.go (same package; reader.go:238, :250, :312
-// at v1.24.0); open it for their exact signatures and call them with the
-// objects captureReads holds so the content bytes are the gather's own.
-func captureBundle(reads hypothesis.Reads) []readJSON {
-	return []readJSON{
-		{"describe node /worker-1", describeNode(reads.Nodes["worker-1"])},
-		{"describe node /worker-2", describeNode(reads.Nodes["worker-2"])},
-		{"describe pvc db/aux-0", describePVC(reads.PVCs["db/aux-0"])},
-		{"describe pvc db/data-0", describePVC(reads.PVCs["db/data-0"])},
-		{"describe pvc db/cache-0", describePVC(reads.PVCs["db/cache-0"])},
-		{"events img/" + pods["img/one"], formatEvents("img", pods["img/one"], reads.Events["img/"+pods["img/one"]])},
-		{"events img/" + pods["img/five"], formatEvents("img", pods["img/five"], nil)},
-		{"describe node /worker-7", "read failed: " + reads.Failed["node/worker-7"]},
-	}
 }
 
 type candidateJSON struct {
@@ -485,113 +745,837 @@ func writeFile(t *testing.T, dir, name string, data []byte) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+
 func TestCaptureVerdictGolden(t *testing.T) {
 	dir := os.Getenv("KV_GOLDEN_DIR")
 	if dir == "" {
 		t.Skip("KV_GOLDEN_DIR not set")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	fixturePath := os.Getenv("KV_FIXTURE")
+	if fixturePath == "" {
+		t.Fatal("KV_FIXTURE must name tests/fixtures/gather_fixture.yaml")
+	}
+	logsPath := os.Getenv("KV_FIXTURE_LOGS")
+	if logsPath == "" {
+		t.Fatal("KV_FIXTURE_LOGS must name tests/fixtures/gather_fixture_logs.yaml")
+	}
+	// The main fixture writes the golden files and gather_go/; the log
+	// fixture writes gather_go_logs/ and nothing else.
+	if !t.Run("main", func(t *testing.T) { kvCapture(t, fixturePath, dir, "gather_go", true) }) {
+		return
+	}
+	t.Run("logs", func(t *testing.T) { kvCapture(t, logsPath, dir, "gather_go_logs", false) })
+}
+
+// kvCapture runs the pipeline over one fixture and writes its eleven dump
+// files under dir/dumpName. With golden set it also writes the four golden
+// files to dir; without, it checks that the log loop reached every action.
+func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
+	dumpDir := filepath.Join(dir, dumpName)
+	if err := os.MkdirAll(dumpDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ctx := context.Background()
 
-	wl := captureWorkloads()
-	down := []clusterhealth.DownNode{
-		{Name: "worker-1", Reason: "NotReady"},
-		{Name: "worker-2", Reason: "no kubelet lease"},
-		{Name: "worker-3", Reason: "kubelet not heartbeating"},
-		{Name: "worker-5", Reason: "NotReady"},
-		{Name: "worker-6", Reason: "NotReady"},
-		{Name: "worker-7", Reason: "NotReady"},
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	rootcause.Annotate(wl, down)
-	rootcause.AnnotatePVC(wl, capturePodPVCs(), capturePVCIssues())
-	rootcause.AnnotateRegistry(wl)
+	var fx kvFixture
+	if err := yaml.UnmarshalStrict(raw, &fx); err != nil {
+		t.Fatalf("loading %s: %v", fixturePath, err)
+	}
+	if fx.PlatformLine != "" {
+		t.Fatal("platform_line must be empty: the capture has no platform facts to print it from")
+	}
+	asJSON, err := yaml.YAMLToJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dump0 bytes.Buffer
+	if err := json.Indent(&dump0, asJSON, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	dump0.WriteString("\n")
+	writeFile(t, dumpDir, "00-fixture.json", dump0.Bytes())
 
-	reads := captureReads()
-	results := make([]hypothesis.Result, len(wl))
-	for i := range wl {
-		results[i] = hypothesis.Decide(wl[i], reads)
+	summary := &resources.Summary{
+		CPU: resources.Line{Allocatable: fx.Summary.CPU.Allocatable, Requests: fx.Summary.CPU.Requests,
+			RequestsPct: fx.Summary.CPU.RequestsPct, Limits: fx.Summary.CPU.Limits, LimitsPct: fx.Summary.CPU.LimitsPct},
+		Memory: resources.Line{Allocatable: fx.Summary.Memory.Allocatable, Requests: fx.Summary.Memory.Requests,
+			RequestsPct: fx.Summary.Memory.RequestsPct, Limits: fx.Summary.Memory.Limits, LimitsPct: fx.Summary.Memory.LimitsPct},
+		MetricsAvailable: fx.Summary.MetricsAvailable,
+	}
+	var serviceIssues []svchealth.Issue
+	for _, s := range fx.ServiceIssues {
+		serviceIssues = append(serviceIssues, svchealth.Issue{Namespace: s.Namespace, Name: s.Name, Type: s.Type, Detail: s.Detail})
+	}
+
+	// The cluster: scan-time nodes and leases for Assess, fresh objects for
+	// the fake, and the refused reads for the reactors.
+	var (
+		objects       []runtime.Object
+		scanNodes     []corev1.Node
+		leases        []coordinationv1.Lease
+		refusedNodes  = map[string]string{}
+		refusedPVCs   = map[string]string{}
+		refusedEvents = map[string]string{}
+		fxNodes       = map[string]kvNode{}
+		fxPVCs        = map[string]kvPVC{}
+	)
+	nodes := append([]kvNode(nil), fx.Nodes...)
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
+	for _, n := range nodes {
+		fxNodes[n.Name] = n
+		sn, err := kvScanNode(n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scanNodes = append(scanNodes, sn)
+		if n.ScanReason == "" {
+			renew := metav1.NewMicroTime(kvNow.Add(-10 * time.Second))
+			leases = append(leases, coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "kube-node-lease", Name: n.Name},
+				Spec:       coordinationv1.LeaseSpec{RenewTime: &renew},
+			})
+		}
+		switch n.Fresh.How {
+		case "read":
+			fn, err := kvFreshNode(n.Name, n.Fresh)
+			if err != nil {
+				t.Fatal(err)
+			}
+			objects = append(objects, fn)
+		case "read_failed":
+			refusedNodes[n.Name] = n.Fresh.Message
+		default:
+			t.Fatalf("node %s: fresh how %q is not read or read_failed", n.Name, n.Fresh.How)
+		}
+	}
+	var pvcIssues []pvchealth.Issue
+	for _, p := range fx.PVCs {
+		fxPVCs[p.Namespace+"/"+p.Name] = p
+		pvcIssues = append(pvcIssues, pvchealth.Issue{Namespace: p.Namespace, Name: p.Name, Phase: "Pending",
+			Reason: p.ScanReason, Detail: "waiting for a volume", StorageClass: p.Fresh.StorageClass})
+		switch p.Fresh.How {
+		case "read":
+			objects = append(objects, kvFreshPVC(p))
+		case "read_failed":
+			refusedPVCs[p.Namespace+"/"+p.Name] = p.Fresh.Message
+		default:
+			t.Fatalf("pvc %s/%s: fresh how %q is not read or read_failed", p.Namespace, p.Name, p.Fresh.How)
+		}
+	}
+
+	// The workloads, their pods' claims, events and log text.
+	var workloads []inventory.Workload
+	fxByKey := map[string]kvWorkload{}
+	podPVCs := map[string][]string{}
+	logText := map[string]string{}       // "ns/pod/container"
+	refusedLogs := map[string]bool{}     // "ns/pod/container"
+	logFinding := map[string]kvFinding{} // "ns/pod/container" -> its first finding
+	for _, fw := range fx.Workloads {
+		if _, dup := fxByKey[fw.key()]; dup {
+			t.Fatalf("workload %s appears twice", fw.key())
+		}
+		fxByKey[fw.key()] = fw
+		workloads = append(workloads, kvScanWorkload(fw))
+		eventsPod := fw.Name
+		if len(fw.Findings) > 0 {
+			eventsPod = podPart(fw.Findings[0].Pod)
+		}
+		if fw.Pod != eventsPod {
+			t.Fatalf("%s: pod is %q, but its events pod is %q", fw.key(), fw.Pod, eventsPod)
+		}
+		for _, p := range fw.Pods {
+			if len(p.Claims) > 0 {
+				podPVCs[fw.Namespace+"/"+p.Name] = append([]string(nil), p.Claims...)
+			}
+		}
+		for _, f := range fw.Findings {
+			if !strings.HasPrefix(f.Pod, fw.Namespace+"/") {
+				t.Fatalf("%s: finding pod %q is outside the namespace", fw.key(), f.Pod)
+			}
+			reads := crashFamily(f.Issue) && f.Container != ""
+			if reads != (f.LogRead != "") || (!reads && (f.Log != "" || f.LogRefused)) {
+				t.Fatalf("%s: %s on %s: log, log_refused and log_read belong on a crash-family finding with a container, and only there", fw.key(), f.Issue, f.Pod)
+			}
+			if f.LogRefused && f.Log != "" {
+				t.Fatalf("%s: %s on %s: a refused log read serves no log", fw.key(), f.Issue, f.Pod)
+			}
+			if reads {
+				key := fw.Namespace + "/" + podPart(f.Pod) + "/" + f.Container
+				if prev, seen := logFinding[key]; seen && (prev.Log != f.Log || prev.LogRefused != f.LogRefused || prev.LogRead != f.LogRead) {
+					t.Fatalf("%s: two findings on %s disagree on its log", fw.key(), key)
+				}
+				logFinding[key] = f
+				logText[key] = f.Log
+				if f.LogRefused {
+					refusedLogs[key] = true
+				}
+			}
+		}
+		if fw.EventsFailed != "" {
+			if len(fw.Events) > 0 {
+				t.Fatalf("%s: events and events_failed are both set", fw.key())
+			}
+			refusedEvents[fw.Namespace+"/"+fw.Pod] = fw.EventsFailed
+		}
+		objects = append(objects, kvEvents(fw.Namespace, fw.Pod, fw.Events)...)
+		for _, d := range fw.DecoyEvents {
+			if d.Object == fw.Pod {
+				t.Fatalf("%s: a decoy names the events pod itself", fw.key())
+			}
+			objects = append(objects, kvEvents(fw.Namespace, d.Object, d.Events)...)
+		}
+	}
+
+	// The fake clientset and its reactors.
+	cs := fake.NewSimpleClientset(objects...)
+	served := map[string][]corev1.Event{} // "ns/name" -> what the events reactor returned
+	cs.PrependReactor("list", "events", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		name, ok := a.(k8stesting.ListAction).GetListRestrictions().Fields.RequiresExactMatch("involvedObject.name")
+		if !ok {
+			t.Errorf("an events list without an involvedObject.name selector")
+			return true, nil, fmt.Errorf("no involvedObject.name selector")
+		}
+		key := a.GetNamespace() + "/" + name
+		if msg, refused := refusedEvents[key]; refused {
+			return true, nil, kvForbidden(msg)
+		}
+		obj, err := cs.Tracker().List(corev1.SchemeGroupVersion.WithResource("events"),
+			corev1.SchemeGroupVersion.WithKind("Event"), a.GetNamespace())
+		if err != nil {
+			return true, nil, err
+		}
+		out := &corev1.EventList{}
+		for _, e := range obj.(*corev1.EventList).Items {
+			if e.InvolvedObject.Name == name {
+				out.Items = append(out.Items, e)
+			}
+		}
+		served[key] = out.Items
+		return true, out, nil
+	})
+	cs.PrependReactor("get", "nodes", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if msg, refused := refusedNodes[a.(k8stesting.GetAction).GetName()]; refused {
+			return true, nil, kvForbidden(msg)
+		}
+		return false, nil, nil
+	})
+	cs.PrependReactor("get", "persistentvolumeclaims", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if msg, refused := refusedPVCs[a.GetNamespace()+"/"+a.(k8stesting.GetAction).GetName()]; refused {
+			return true, nil, kvForbidden(msg)
+		}
+		return false, nil, nil
+	})
+
+	logsServed := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/"), "/")
+		if len(parts) != 4 || parts[1] != "pods" || parts[3] != "log" {
+			t.Errorf("unexpected request to the log server: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		q := r.URL.Query()
+		if q.Get("previous") != "true" || q.Get("tailLines") != "25" {
+			t.Errorf("log read %s asks for previous=%q tailLines=%q", r.URL.Path, q.Get("previous"), q.Get("tailLines"))
+		}
+		key := parts[0] + "/" + parts[2] + "/" + q.Get("container")
+		text, ok := logText[key]
+		if !ok {
+			t.Errorf("no fixture log for %s/%s container %s", parts[0], parts[2], q.Get("container"))
+			http.NotFound(w, r)
+			return
+		}
+		logsServed++
+		if refusedLogs[key] {
+			// The API server's own answer to a refused read: a 403 with a
+			// Status body, which client-go turns into a Forbidden error.
+			status := metav1.Status{
+				TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
+				Status:   metav1.StatusFailure, Code: http.StatusForbidden, Reason: metav1.StatusReasonForbidden,
+				Message: fmt.Sprintf("pods %q is forbidden: cannot get resource \"pods/log\"", parts[2]),
+			}
+			body, err := json.Marshal(status)
+			if err != nil {
+				t.Errorf("encoding the refusal of %s: %v", key, err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(body)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(text))
+	}))
+	defer srv.Close()
+	real, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := kvLogClient{Clientset: cs, core: kvLogCore{CoreV1Interface: cs.CoreV1(), real: real.CoreV1()}}
+
+	// The scan, in scan.go's order (internal/scan/scan.go:749, :793, :815-818).
+	assessed := append([]inventory.Workload(nil), workloads...)
+	sort.Slice(assessed, func(i, j int) bool {
+		a, b := assessed[i], assessed[j]
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.Kind < b.Kind
+	})
+	health := clusterhealth.Assess(scanNodes, clusterhealth.Heartbeat{Leases: leases, Now: kvNow, Threshold: kvThreshold}, nil, assessed)
+	prioritized := inventory.Prioritize(workloads, inventory.Opts{})
+	wl := prioritized.Workloads
+	rootcause.Annotate(wl, health.DownNodes)
+	rootcause.AnnotatePVC(wl, podPVCs, pvcIssues)
+	rootcause.AnnotateRegistry(wl)
+	confidence.Annotate(wl)
+
+	// Local verdict mode (local.go:210-225).
+	scoped := flaggedScope(wl)
+	trail, bundle, reads := gatherEvidence(ctx, client, scoped)
+	results := make([]hypothesis.Result, len(scoped))
+	for i, w := range scoped {
+		results[i] = hypothesis.Decide(w, reads)
 	}
 	shared := hypothesis.Shared(results)
+	prompt := buildVerdictPrompt(health, summary, nil, serviceIssues, scoped, results, bundle)
 
-	// The prompt shows the first ten workloads: the gather's cap.
-	scoped, scopedResults := wl[:10], results[:10]
-	bundle := captureBundle(reads)
-	var b strings.Builder
-	var trail []string
-	spent := 0
-	for _, r := range bundle {
-		appendRead(&b, &trail, &spent, r.Label, r.Content)
-	}
-	cluster := goldenCluster()
-	summary := goldenSummary()
-	issues := goldenServiceIssues()
-	prompt := buildVerdictPrompt(cluster, summary, nil, issues, scoped, scopedResults, b.String())
-	writeFile(t, dir, "user_message.txt", []byte(prompt))
-	writeFile(t, dir, "system_prompt.txt", []byte(verdictSystemPrompt))
+	// ---- Self-checks. ----
 
-	// input.json: today's keys, plus the five new ones. The cluster,
-	// summary, platform_line, service_issues and findings blocks use the
-	// same conversion the old template used (see the note above the code).
-	type workloadJSON struct {
-		Namespace      string           `json:"namespace"`
-		Name           string           `json:"name"`
-		Kind           string           `json:"kind"`
-		Ready          int              `json:"ready"`
-		Desired        int              `json:"desired"`
-		Status         string           `json:"status"`
-		Restarts       int              `json:"restarts"`
-		Confidence     string           `json:"confidence"`
-		Findings       []map[string]any `json:"findings"`
-		Candidates     []candidateJSON  `json:"candidates"`
-		Decided        bool             `json:"decided"`
-		DecidedCause   string           `json:"decided_cause"`
-		DecidedOutcome string           `json:"decided_outcome"`
+	// The scan saw the nodes the fixture says it saw.
+	var wantDown []string
+	for _, n := range nodes {
+		if n.ScanReason != "" {
+			wantDown = append(wantDown, n.Name+" "+n.ScanReason)
+		}
 	}
-	input := map[string]any{
-		"cluster":        clusterJSON(cluster),
-		"summary":        summaryJSON(summary),
-		"platform_line":  goldenPlatformLine(),
-		"service_issues": serviceIssuesJSON(issues),
-		"reads":          bundle,
+	var gotDown []string
+	for _, d := range health.DownNodes {
+		gotDown = append(gotDown, d.Name+" "+d.Reason)
 	}
-	var wj []workloadJSON
-	for i, w := range scoped {
-		r := scopedResults[i]
-		wj = append(wj, workloadJSON{
-			Namespace: w.Namespace, Name: w.Name, Kind: w.Kind,
-			Ready: int(w.Ready), Desired: int(w.Desired), Status: w.Status,
-			Restarts: int(w.Restarts), Confidence: w.RootCauseConfidence,
-			Findings: findingsJSON(w, w.Findings), Candidates: candidatesJSON(w, r),
-			Decided: r.Decided, DecidedCause: r.Cause, DecidedOutcome: string(r.Outcome),
-		})
+	if strings.Join(gotDown, ",") != strings.Join(wantDown, ",") {
+		t.Fatalf("down nodes: fixture %q, Assess %q", wantDown, gotDown)
 	}
-	input["workloads"] = wj
-	data, err := json.MarshalIndent(input, "", "  ")
+
+	// The node list is the named nodes plus healthy unnamed ones, T = max(3, named+1).
+	named := map[string]bool{}
+	for _, d := range health.DownNodes {
+		named[d.Name] = true
+	}
+	for _, l := range trail {
+		if n, ok := strings.CutPrefix(l, "describe node /"); ok {
+			named[n] = true
+		}
+	}
+	if want := max(3, len(named)+1); len(nodes) != want {
+		t.Fatalf("%d nodes, want max(3, %d named + 1) = %d", len(nodes), len(named), want)
+	}
+	for _, n := range nodes {
+		if !named[n.Name] && n.ScanReason != "" {
+			t.Fatalf("node %s is unnamed but not healthy", n.Name)
+		}
+	}
+
+	// An attribution names the fixture's pod.
+	for _, w := range wl {
+		fw := fxByKey[w.Namespace+"/"+w.Name+"/"+w.Kind]
+		for _, h := range w.RootCauseTrace {
+			if strings.HasPrefix(h.Reason, "pod ") && !strings.HasPrefix(h.Reason, "pod "+fw.Pod+" ") {
+				t.Fatalf("%s: %q names a pod other than %q", fw.key(), h.Reason, fw.Pod)
+			}
+		}
+	}
+
+	// The mirror walk makes exactly the reads the gather made.
+	mirror, candActs, logActs := kvWalk(scoped)
+	var mirrorLabels []string
+	for _, r := range mirror {
+		mirrorLabels = append(mirrorLabels, r.label)
+	}
+	if strings.Join(mirrorLabels, "\n") != strings.Join(trail, "\n") {
+		t.Fatalf("mirror walk reads\n%s\nbut the gather read\n%s", strings.Join(mirrorLabels, "\n"), strings.Join(trail, "\n"))
+	}
+
+	// Each section of the bundle is what its read returns, recomputed.
+	bodies, err := kvSections(bundle, trail)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, dir, "input.json", append(data, '\n'))
+	logRead := map[string]string{} // "ns/pod/container" -> log_read
+	for _, fw := range fx.Workloads {
+		for _, f := range fw.Findings {
+			if f.LogRead != "" {
+				logRead[fw.Namespace+"/"+podPart(f.Pod)+"/"+f.Container] = f.LogRead
+			}
+		}
+	}
+	contents := make([]string, len(mirror))
+	cuts := 0
+	for i, r := range mirror {
+		key := r.ns + "/" + r.name
+		var c string
+		switch r.kind {
+		case "events":
+			if msg, refused := refusedEvents[key]; refused {
+				c = "read failed: " + msg
+			} else {
+				c = formatEvents(r.ns, r.name, reads.Events[key])
+			}
+		case "node":
+			if msg, refused := refusedNodes[r.name]; refused {
+				c = "read failed: " + msg
+			} else {
+				c = describeNode(reads.Nodes[r.name])
+			}
+		case "pvc":
+			if msg, refused := refusedPVCs[key]; refused {
+				c = "read failed: " + msg
+			} else {
+				c = describePVC(reads.PVCs[key])
+			}
+		case "log":
+			c = logRead[key+"/"+r.container]
+		}
+		if len(c) > maxReadBytes {
+			// A read over the cap must be cut on a line and hold only
+			// ASCII: past a cut that lands mid-character, Go and the port
+			// differ by design.
+			for j := 0; j < len(c); j++ {
+				if c[j] >= 0x80 {
+					t.Fatalf("read %d (%s) is %d bytes and not ASCII; a read over %d must be ASCII", i+1, r.label, len(c), maxReadBytes)
+				}
+			}
+			if strings.LastIndexByte(c[:maxReadBytes], '\n') <= 0 {
+				t.Fatalf("read %d (%s) is %d bytes with no line break inside the first %d", i+1, r.label, len(c), maxReadBytes)
+			}
+			cuts++
+		}
+		if got := strings.TrimRight(capContent(c), "\n"); got != bodies[i] {
+			t.Fatalf("read %d (%s): bundle holds\n%q\nrecomputed\n%q", i+1, r.label, bodies[i], got)
+		}
+		contents[i] = c
+	}
+	// The main fixture keeps every read under the cap; the log fixture cuts
+	// exactly one, on purpose.
+	wantCuts := 1
+	if golden {
+		wantCuts = 0
+	}
+	if cuts != wantCuts {
+		t.Fatalf("%d reads were cut at %d bytes, want %d", cuts, maxReadBytes, wantCuts)
+	}
 
-	fx := fixtureJSON{
-		Kubeagent: map[string]string{"tag": kvTag, "commit": kvCommit},
-		Shared:    shared, Reads: bundle,
+	// Stand-in 3: each events read returned its own pod's events, in the
+	// fixture's order, and two workloads' reads differ.
+	distinct := map[string]bool{}
+	for _, r := range mirror {
+		if r.kind != "events" {
+			continue
+		}
+		key := r.ns + "/" + r.name
+		if _, refused := refusedEvents[key]; refused {
+			continue
+		}
+		var want []kvEvent
+		for _, fw := range fx.Workloads {
+			if fw.Namespace == r.ns && fw.Pod == r.name {
+				want = fw.Events
+			}
+		}
+		got := served[key]
+		if len(got) != len(want) {
+			t.Fatalf("events of %s: served %d, fixture %d", key, len(got), len(want))
+		}
+		for i, e := range got {
+			if e.InvolvedObject.Name != r.name || e.Reason != want[i].Reason || e.Message != want[i].Message || e.Count != want[i].Count {
+				t.Fatalf("events of %s: item %d is %s %q, fixture %q", key, i, e.InvolvedObject.Name, e.Message, want[i].Message)
+			}
+		}
+		distinct[formatEvents(r.ns, r.name, got)] = true
 	}
-	if fx.Shared == nil {
-		fx.Shared = []string{}
+	if len(distinct) < 2 {
+		t.Fatal("fewer than two workloads' events reads differ: the events reactor is not filtering")
 	}
+
+	// Stand-in 2: every fixture log_read is what kubeagent makes of the log
+	// the httptest server serves.
+	gatherLogs := logsServed
+	for _, fw := range fx.Workloads {
+		for _, f := range fw.Findings {
+			if f.LogRead == "" {
+				continue
+			}
+			pod := podPart(f.Pod)
+			text, ok, err := collect.PreviousLogs(ctx, client, fw.Namespace, pod, f.Container)
+			if got := logCauseResult("", fw.Namespace, pod, f.Container, text, ok, err).Content; got != f.LogRead {
+				t.Fatalf("log_read of %s container %s: fixture %q, kubeagent %q", f.Pod, f.Container, f.LogRead, got)
+			}
+		}
+	}
+	if logsServed == gatherLogs {
+		t.Fatal("the log self-check read nothing through the httptest server")
+	}
+
+	// ---- The golden files. ----
+
+	// The main fixture's run writes them; the log fixture's writes none.
+	if golden {
+		writeFile(t, dir, "user_message.txt", []byte(prompt))
+		writeFile(t, dir, "system_prompt.txt", []byte(verdictSystemPrompt))
+		bundleReads := make([]readJSON, len(mirror))
+		for i, r := range mirror {
+			bundleReads[i] = readJSON{Label: r.label, Content: contents[i]}
+		}
+
+		// input.json: today's keys, plus the five new ones. The cluster,
+		// summary, platform_line, service_issues and findings blocks use the
+		// same conversion the old template used (see the note above the code).
+		type workloadJSON struct {
+			Namespace      string           `json:"namespace"`
+			Name           string           `json:"name"`
+			Kind           string           `json:"kind"`
+			Ready          int              `json:"ready"`
+			Desired        int              `json:"desired"`
+			Status         string           `json:"status"`
+			Restarts       int              `json:"restarts"`
+			Confidence     string           `json:"confidence"`
+			Findings       []map[string]any `json:"findings"`
+			Candidates     []candidateJSON  `json:"candidates"`
+			Decided        bool             `json:"decided"`
+			DecidedCause   string           `json:"decided_cause"`
+			DecidedOutcome string           `json:"decided_outcome"`
+		}
+		input := map[string]any{
+			"cluster":        clusterJSON(health),
+			"summary":        summaryJSON(summary),
+			"platform_line":  fx.PlatformLine,
+			"service_issues": serviceIssuesJSON(serviceIssues),
+			"reads":          bundleReads,
+		}
+		var wj []workloadJSON
+		for i, w := range scoped {
+			r := results[i]
+			wj = append(wj, workloadJSON{
+				Namespace: w.Namespace, Name: w.Name, Kind: w.Kind,
+				Ready: w.Ready, Desired: w.Desired, Status: w.Status,
+				Restarts: w.Restarts, Confidence: w.RootCauseConfidence,
+				Findings: findingsJSON(w, w.Findings), Candidates: candidatesJSON(w, r),
+				Decided: r.Decided, DecidedCause: r.Cause, DecidedOutcome: string(r.Outcome),
+			})
+		}
+		input["workloads"] = wj
+		data, err := json.MarshalIndent(input, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, dir, "input.json", append(data, '\n'))
+
+		// rules_golden.json: the scoped workloads, the only ones local verdict
+		// mode decides, with Shared over their results.
+		rg := fixtureJSON{
+			Kubeagent: map[string]string{"tag": fx.Kubeagent.Tag, "commit": fx.Kubeagent.Commit},
+			Shared:    shared, Reads: bundleReads,
+		}
+		if rg.Shared == nil {
+			rg.Shared = []string{}
+		}
+		for i, w := range scoped {
+			pod, issue, image := firstPod(w)
+			rg.Workloads = append(rg.Workloads, fixtureWorkloadJSON{
+				Namespace: w.Namespace, Name: w.Name, Pod: pod, Issue: issue, Image: image,
+				Candidates: candidatesJSON(w, results[i]), Result: resultToJSON(results[i]),
+			})
+		}
+		data, err = json.MarshalIndent(rg, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, dir, "rules_golden.json", append(data, '\n'))
+	}
+
+	// ---- The stage dumps. ----
+
+	rowOf := map[string]int{}
 	for i, w := range wl {
-		pod, issue, image := firstPod(w)
-		fx.Workloads = append(fx.Workloads, fixtureWorkloadJSON{
-			Namespace: w.Namespace, Name: w.Name, Pod: pod, Issue: issue, Image: image,
-			Candidates: candidatesJSON(w, results[i]), Result: resultToJSON(results[i]),
-		})
+		rowOf[w.Namespace+"/"+w.Name+"/"+w.Kind] = i + 1
 	}
-	data, err = json.MarshalIndent(fx, "", "  ")
+	inScope := map[string]bool{}
+	for _, w := range scoped {
+		inScope[w.Namespace+"/"+w.Name+"/"+w.Kind] = true
+	}
+	yn := strconv.FormatBool
+	num := strconv.Itoa
+	refStr := func(a kvAction) string {
+		if a.ref == 0 {
+			return ""
+		}
+		return num(a.ref)
+	}
+	blockOf := func(d *kvDump, ref int) {
+		d.block("content", bodies[ref-1])
+	}
+
+	// 1: the order.
+	d1 := &kvDump{t: t}
+	for i, w := range wl {
+		scope := "unscoped"
+		if inScope[w.Namespace+"/"+w.Name+"/"+w.Kind] {
+			scope = "scoped"
+		}
+		d1.rec("row", num(i+1), w.Namespace, w.Name, w.Kind, num(w.Priority), scope)
+	}
+	d1.rec("hidden_restarts", num(prioritized.HiddenRestarts))
+	d1.rec("hidden_cron", num(prioritized.HiddenCron))
+	var dropped []kvWorkload
+	for _, fw := range fx.Workloads {
+		if rowOf[fw.key()] == 0 {
+			dropped = append(dropped, fw)
+		}
+	}
+	sort.Slice(dropped, func(i, j int) bool {
+		a, b := dropped[i], dropped[j]
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.Kind < b.Kind
+	})
+	for _, fw := range dropped {
+		d1.rec("dropped", fw.Namespace, fw.Name, fw.Kind)
+	}
+
+	// 2: the events reads; 4: node describes; 5: PVC describes; 7: the trail.
+	d2, d4, d5, d7 := &kvDump{t: t}, &kvDump{t: t}, &kvDump{t: t}, &kvDump{t: t}
+	for i, r := range mirror {
+		ref := i + 1
+		d7.rec(num(ref), r.label)
+		key := r.ns + "/" + r.name
+		switch r.kind {
+		case "events":
+			if msg, failed := reads.Failed["events/"+key]; failed {
+				d2.rec("events", num(ref), r.ns, r.name, "failed", "", msg)
+			} else {
+				evs := reads.Events[key]
+				d2.rec("events", num(ref), r.ns, r.name, "ok", num(len(evs)), "")
+				for _, e := range evs {
+					d2.rec("event", e.Reason, e.Message, strconv.FormatInt(int64(e.Count), 10))
+				}
+			}
+			blockOf(d2, ref)
+		case "node":
+			if msg, failed := reads.Failed["node/"+r.name]; failed {
+				d4.rec("node", num(ref), r.name, "failed", msg)
+			} else {
+				d4.rec("node", num(ref), r.name, "ok", "")
+			}
+			blockOf(d4, ref)
+		case "pvc":
+			if msg, failed := reads.Failed["pvc/"+key]; failed {
+				d5.rec("pvc", num(ref), r.ns, r.name, "failed", msg)
+			} else {
+				d5.rec("pvc", num(ref), r.ns, r.name, "ok", "")
+			}
+			blockOf(d5, ref)
+		}
+	}
+
+	// 3: the candidate walk; 6: the log reads.
+	d3, d6 := &kvDump{t: t}, &kvDump{t: t}
+	for _, dn := range health.DownNodes {
+		d3.rec("down", dn.Name, dn.Reason)
+	}
+	for i, w := range scoped {
+		row := num(rowOf[w.Namespace+"/"+w.Name+"/"+w.Kind])
+		d3.rec("workload", row, w.Namespace, w.Name, w.RootCause, w.RootCauseConfidence)
+		for j, h := range w.RootCauseTrace {
+			a := candActs[i][j]
+			d3.rec("candidate", h.Kind, h.Object, string(h.Verdict), a.action, refStr(a), h.Cause, h.Reason)
+		}
+		for j, f := range w.Findings {
+			a := logActs[i][j]
+			d6.rec("log", row, w.Namespace, podPart(f.Pod), f.Container, f.Issue, a.action, refStr(a))
+			if a.action == "read" {
+				blockOf(d6, a.ref)
+			}
+		}
+	}
+
+	// 8: the bundle.
+	d8 := &kvDump{t: t}
+	d8.block("bundle", bundle)
+
+	// 9: what the rules see, and what they decide.
+	d9 := &kvDump{t: t}
+	sortedKeys := func(m map[string]bool) []string {
+		var ks []string
+		for k := range m {
+			ks = append(ks, k)
+		}
+		sort.Strings(ks)
+		return ks
+	}
+	nodeKeys, pvcKeys, eventKeys, failedKeys := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for k := range reads.Nodes {
+		nodeKeys[k] = true
+	}
+	for k := range reads.PVCs {
+		pvcKeys[k] = true
+	}
+	for k := range reads.Events {
+		eventKeys[k] = true
+	}
+	for k := range reads.Failed {
+		failedKeys[k] = true
+	}
+	for _, k := range sortedKeys(nodeKeys) {
+		d9.rec("read_node", k)
+	}
+	for _, k := range sortedKeys(pvcKeys) {
+		d9.rec("read_pvc", k)
+	}
+	for _, k := range sortedKeys(eventKeys) {
+		d9.rec("read_events", k, num(len(reads.Events[k])))
+	}
+	for _, k := range sortedKeys(failedKeys) {
+		d9.rec("failed", k, reads.Failed[k])
+	}
+	for i, r := range results {
+		w := scoped[i]
+		d9.rec("result", num(rowOf[w.Namespace+"/"+w.Name+"/"+w.Kind]), r.Workload, yn(r.Decided), string(r.Outcome), r.Cause, r.Evidence, r.GroupKey, r.GroupText)
+		for _, dc := range r.Decisions {
+			d9.rec("decision", dc.Candidate.Kind, dc.Candidate.Object, string(dc.Outcome), dc.Candidate.Cause, dc.Evidence)
+		}
+	}
+
+	// 10: the cluster block, the shared-cause lines and the prompt.
+	d10 := &kvDump{t: t}
+	d10.rec("cluster", health.Verdict, num(health.NodesReady), num(health.NodesTotal))
+	for _, s := range health.NodeIssues {
+		d10.rec("node_issue", s)
+	}
+	for _, s := range health.SystemIssues {
+		d10.rec("system_issue", s)
+	}
+	for _, s := range shared {
+		d10.rec("shared", s)
+	}
+	d10.block("prompt", prompt)
+
+	for _, f := range []struct {
+		name string
+		d    *kvDump
+	}{
+		{"01-order.txt", d1}, {"02-events.txt", d2}, {"03-candidates.txt", d3},
+		{"04-nodes.txt", d4}, {"05-pvcs.txt", d5}, {"06-logs.txt", d6},
+		{"07-trail.txt", d7}, {"08-bundle.txt", d8}, {"09-decide.txt", d9},
+		{"10-prompt.txt", d10},
+	} {
+		writeFile(t, dumpDir, f.name, []byte(f.d.b.String()))
+	}
+
+	// Dump 10's prompt is the prompt this run built, byte for byte: for the
+	// main fixture, user_message.txt as written to disk.
+	want := []byte(prompt)
+	if golden {
+		um, err := os.ReadFile(filepath.Join(dir, "user_message.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = um
+	}
+	d10b, err := os.ReadFile(filepath.Join(dumpDir, "10-prompt.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, dir, "rules_golden.json", append(data, '\n'))
-	t.Logf("wrote 4 files under %s; %d workloads in the fixture, %d in the prompt, %d shared lines",
-		dir, len(wl), len(scoped), len(shared))
+	head := fmt.Sprintf("block\tprompt\t%d\n", len(want))
+	i := bytes.Index(d10b, []byte(head))
+	if i < 0 || !bytes.Equal(d10b[i+len(head):], append(append([]byte(nil), want...), '\n')) {
+		if golden {
+			t.Fatal("10-prompt.txt's prompt block is not user_message.txt")
+		}
+		t.Fatal("10-prompt.txt's prompt block is not the prompt this run built")
+	}
+
+	if golden {
+		t.Logf("wrote 4 golden files under %s and 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d shared lines",
+			dir, dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), len(shared))
+		return
+	}
+
+	// The log fixture exists for the log loop: dump 6 must hold every
+	// action it can take, and the log reads every answer logCauseResult
+	// can give.
+	readIssues := map[string]bool{}
+	has := map[string]bool{}
+	for i, w := range scoped {
+		for j, f := range w.Findings {
+			a := logActs[i][j]
+			switch {
+			case a.action == "read":
+				readIssues[f.Issue] = true
+				key := w.Namespace + "/" + podPart(f.Pod) + "/" + f.Container
+				if !refusedLogs[key] && redact.Addresses(logText[key]) != logText[key] {
+					has["read of a log holding an address"] = true
+				}
+			case a.action == "skip" && !crashFamily(f.Issue):
+				has["skip: not crash-family"] = true
+			case a.action == "skip" && f.Container == "":
+				has["skip: no container"] = true
+			case a.action == "budget" && crashFamily(f.Issue):
+				has["budget on a crash-family finding"] = true
+			default:
+				has[a.action] = true
+			}
+		}
+	}
+	if len(readIssues) >= 2 {
+		has["read of two crash-family issues"] = true
+	}
+	for i, r := range mirror {
+		if r.kind != "log" {
+			continue
+		}
+		c := contents[i]
+		switch {
+		case strings.HasPrefix(c, "log cause: "):
+			has["log cause"] = true
+		case strings.HasSuffix(c, " has no classifiable output"):
+			has["log with no classifiable output"] = true
+		case strings.HasSuffix(c, " was refused: this identity lacks the pods/log get permission"):
+			has["refused log read"] = true
+		case strings.HasPrefix(c, "no previous-instance log for "):
+			has["no previous-instance log"] = true
+		}
+	}
+	if cuts == 1 && strings.Contains(bundle, "\n"+truncationMarker+"\n") {
+		has["read cut on a line"] = true
+	}
+	for _, need := range []string{
+		"read of two crash-family issues", "deduped", "skip: not crash-family", "skip: no container",
+		"budget on a crash-family finding", "log cause", "log with no classifiable output",
+		"read of a log holding an address", "refused log read", "no previous-instance log",
+		"read cut on a line",
+	} {
+		if !has[need] {
+			t.Fatalf("the log fixture never reaches %q", need)
+		}
+	}
+	logReads := 0
+	for _, r := range mirror {
+		if r.kind == "log" {
+			logReads++
+		}
+	}
+	t.Logf("wrote 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d of them log reads",
+		dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), logReads)
 }

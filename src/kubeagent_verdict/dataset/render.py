@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import re
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import names, rules
@@ -21,11 +22,10 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # render.py's public surface. Each step that adds a new function or a new
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
-__all__ = ["apply_budget", "bind", "check_prompt_size", "draw_ending", "drop", "header_for",
-           "object_reads", "prompt_meta", "refute", "registry_events_read",
-           "render_workload", "unverify", "workload_meta"]
+__all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
+           "draw_ending", "drop", "header_for", "prompt_meta", "refute",
+           "unverify", "workload_meta"]
 
-MAX_READS = 8
 MAX_PROMPT_BYTES = 64 * 1024
 
 # The closed set of Option-A endings draw_ending() may pick, per kind. Each
@@ -42,14 +42,32 @@ ENDINGS = {
     "registry": ("refuted", "auth", "no_event"),
 }
 
-# Nine always-ruled-out PVC decoys `truncated` appends to overflow the 8-read
-# budget. Never drawn by any rng (fresh.how="not_read" — draw_ending is never
-# called on them), so no seed's draw sequence moves when they are added.
+# Nine always-ruled-out PVC decoys. `truncated` appends all nine to push the
+# winner's line past kubeagent's 8-candidate cap, and `attributed` adds the
+# first on a coin. Unmounted, so the rules rule each one out and the gather
+# never reads it. Never drawn by any rng (fresh.how="not_read" — draw_ending
+# is never called on them), so no seed's draw sequence moves when they are
+# added.
 PAD_PVC_OBJECTS = tuple(
     o.Object(kind="pvc", name=pad_name, scan_reason="ProvisioningFailed",
              placement="unmounted", fresh=o.Fresh(how="not_read"), intent="decoy")
     for pad_name in names.PAD_PVCS
 )
+
+# `positional_probe`'s first candidate, per winner kind. It is live, so the
+# rules attribute it, and its fresh read refutes it, so they pass over it
+# and decide the winner. Each sorts before any winner of its kind:
+# worker-1 is the first node name (the builder moves a row's own worker-1
+# to worker-2), and a pad sorts before every drawn PVC. The claim's scan
+# reason is one of pvchealth's six (internal/pvchealth/pvchealth.go:27);
+# "Pending" is a phase, not a reason.
+POSITIONAL_DECOYS = {
+    "node": o.Object(kind="node", name=names.NODES[0], scan_reason="NotReady", placement="on",
+                     fresh=o.Fresh(ready="True"), intent="decoy"),
+    "pvc": o.Object(kind="pvc", name=names.PAD_PVCS[0], scan_reason="ProvisioningFailed",
+                    placement="mounted",
+                    fresh=o.Fresh(phase="Bound", storage_class="standard"), intent="decoy"),
+}
 
 
 def bind(obj: o.Object, names: dict) -> o.Object:
@@ -85,102 +103,37 @@ def draw_ending(obj: o.Object, rng: random.Random) -> o.Object:
     return unverify(obj, choice)
 
 
-_PHASE = {"registry": 0, "node": 1, "pvc": 2}
+# The endings `deciding_ending` may give a winner, per kind. "declared"
+# keeps the object as the entry wrote it; every other name is a `how`
+# unverify() takes. There is no registry row: a single-workload row never
+# clears the registry threshold, so no registry is ever a winner.
+DECIDING_ENDINGS = {
+    "node": ("declared", "lease", "read_failed"),
+    "pvc": ("declared", "read_failed"),
+}
 
 
-def apply_budget(
-    objects: tuple[o.Object, ...],
-    *,
-    workload_order: tuple[int, ...],
-    entry_or_scenario_key: str,
-    allow_overflow: bool = False,
-) -> tuple[o.Object, ...]:
-    """Reorder into gather order, then apply the 8-read budget.
+def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
+    """Draw the ending of a job-1 row's winner, one `rng.choice`.
 
-    Walks `objects` in kubeagent's own gather order — registry events
-    first, then node describes, then PVC describes, ties broken by
-    `workload_order[i]` — and returns them in that order. Any object past
-    the 8th (MAX_READS) has its `fresh` replaced with `Fresh(how="not_read")`,
-    matching what a real gather does when the read budget runs out before
-    it reaches an object. An `intent="cause"` object that would be starved
-    this way raises ValueError, since a scenario that silently loses its
-    own cause's evidence is almost always an authoring mistake — pass
-    `allow_overflow=True` for the one builder that starves the cause on
-    purpose.
+    The winner must still decide the row, so the choice is between the
+    object as declared and the two unverified shapes the rules keep:
+    `lease` (a node that is Ready but has no kubelet lease) and
+    `read_failed` (the describe failed). The declared object is a choice
+    only when the rules confirm it; a declared fresh read that refutes it
+    would leave the row undecided. `obj` is judged as given, placement
+    included, so an object the rules rule out gets no ending that decides.
     """
-    order = sorted(range(len(objects)),
-                    key=lambda i: (_PHASE[objects[i].kind], workload_order[i]))
-    ordered = tuple(objects[i] for i in order)
-    out = []
-    for idx, obj in enumerate(ordered):
-        if idx < MAX_READS:
-            out.append(obj)
-            continue
-        if obj.intent == "cause" and not allow_overflow:
-            raise ValueError(
-                f"entry {entry_or_scenario_key}: the {MAX_READS}-read budget "
-                f"would leave {obj.kind}/{obj.name} (intent=cause) unread; "
-                "pass allow_overflow=True if that is the point"
-            )
-        out.append(dataclasses.replace(obj, fresh=o.Fresh(how="not_read")))
-    return tuple(out)
-
-
-def registry_events_read(
-    obj: o.Object,
-    *,
-    ns: str,
-    pod: str,
-    image: str,
-    own_line: str | None = None,
-) -> c.EvidenceRead:
-    """Build the `events {ns}/{pod}` read for a registry object.
-
-    Mirrors kubeagent's own formatEvents: no literal (the "no_event"
-    ending) reads as "no events for ns/pod"; any other literal reads as
-    one "Failed:" line naming it. `own_line`, when given, appends a SECOND
-    "Failed:" line built from it, after the object's own line — this is
-    the contradiction_probe shape, where the events read carries both the
-    unverified-auth literal (first, so classifyPullEvents settles on
-    "auth") and the entry's own image-error literal (second, the cause the
-    read still points at).
-    """
-    label = f"events {ns}/{pod}"
-    if obj.fresh.literal == "" and own_line is None:
-        return c.EvidenceRead(label=label, content=f"no events for {ns}/{pod}")
-    content = (
-        f"events for {ns}/{pod}:\n"
-        f'  Failed: Failed to pull image "{image}": {obj.fresh.literal} (x4)\n'
-    )
-    if own_line is not None:
-        content += f'  Failed: Failed to pull image "{image}": {own_line} (x4)\n'
-    return c.EvidenceRead(label=label, content=content)
-
-
-def object_reads(
-    objects: tuple[o.Object, ...],
-    *,
-    ns: str,
-    pod: str,
-    image: str = "",
-) -> tuple[c.EvidenceRead, ...]:
-    """Turn ended objects into the EvidenceRead tuple a prompt renders.
-
-    Node and PVC objects reuse rules.read_text unchanged. Registry objects
-    go through registry_events_read (image is only used for those). An
-    object with fresh.how == "not_read" produces no read — the read
-    budget never reached it, so there is nothing to show.
-    """
-    reads = []
-    for obj in objects:
-        if obj.fresh.how == "not_read":
-            continue
-        if obj.kind == "registry":
-            reads.append(registry_events_read(obj, ns=ns, pod=pod, image=image))
-            continue
-        label, content = rules.read_text(obj, ns=ns, pod=pod)
-        reads.append(c.EvidenceRead(label=label, content=content))
-    return tuple(reads)
+    if obj.kind not in DECIDING_ENDINGS:
+        raise ValueError(f"no deciding ending for a {obj.kind}: {obj.name}")
+    choices = DECIDING_ENDINGS[obj.kind]
+    declared = rules.decide(rules.attribute((obj,), ns="", pod="", issue=""))
+    if declared.outcome != "confirmed":
+        choices = choices[1:]
+    choice = rng.choice(choices)
+    if choice == "declared":
+        return obj
+    return unverify(obj, choice)
 
 
 # kubeagent's `confidence.ForRootCause` (internal/confidence/confidence.go:36-47
@@ -206,61 +159,6 @@ def header_for(candidates: tuple[c.Candidate, ...]) -> str:
         if attributed[0].cause.startswith(prefix):
             return level
     return ""
-
-
-def render_workload(
-    objects: tuple[o.Object, ...],
-    *,
-    ns: str,
-    name: str,
-    pod: str,
-    image: str,
-    issue: str,
-    kind: str,
-    status: str,
-    rng: random.Random | None = None,
-) -> tuple[c.Workload, tuple[c.EvidenceRead, ...], rules.Result]:
-    """Assemble a partial Workload, its reads, and the rules.Result.
-
-    `objects` must already carry each object's final drawn ending — this
-    function does not call bind/draw_ending/apply_budget; the builder runs
-    those before handing objects in here. `rng` is accepted for signature
-    symmetry with this module's other helpers but is unused: every draw
-    already happened upstream.
-
-    The returned Workload fills only the fields this module owns —
-    namespace, name, kind, status, candidates, decided, decided_cause,
-    decided_outcome, and confidence (the trace header, via `header_for`).
-    findings, network_policies, rollout, ready, and desired stay at their
-    dataclass defaults; a caller building a full prompt-ready Workload
-    merges those in separately.
-    """
-    candidates = rules.attribute(objects, ns=ns, pod=pod, issue=issue)
-    result = rules.decide(candidates)
-    decisions = {d.candidate: d for d in result.decisions}
-    contract_candidates = tuple(
-        c.Candidate(
-            cause=cand.cause,
-            verdict=cand.verdict,
-            reason=cand.reason,
-            fresh_read_outcome=(
-                decisions[cand.cause].outcome if cand.cause in decisions else ""
-            ),
-            fresh_read_evidence=(
-                decisions[cand.cause].evidence if cand.cause in decisions else ""
-            ),
-        )
-        for cand in candidates
-    )
-    reads = object_reads(objects, ns=ns, pod=pod, image=image)
-    workload = c.Workload(
-        namespace=ns, name=name, kind=kind, ready=0, desired=0, status=status,
-        restarts=0, findings=(), candidates=contract_candidates,
-        decided=result.decided, decided_cause=result.cause,
-        decided_outcome=result.outcome,
-        confidence=header_for(contract_candidates),
-    )
-    return workload, reads, result
 
 
 def workload_meta(result: rules.Result, *, expected_cause: str,
@@ -324,3 +222,121 @@ def check_prompt_size(prompt: str, *, entry_or_scenario_key: str) -> None:
             f"entry {entry_or_scenario_key}: prompt is {size} bytes, over "
             f"the {MAX_PROMPT_BYTES}-byte cap"
         )
+
+
+# The cluster-health block. A port of kubeagent's `clusterhealth.Assess`
+# (internal/clusterhealth/clusterhealth.go at v1.24.0), fed from what the
+# prompt already shows, because the dataset has no node list.
+#
+# The dataset tells one NotReady story: the kubelet reports KubeletNotReady
+# because the container runtime is down. The NodeReady condition's reason
+# and message kubeagent would read for that node are objects.NOT_READY_REASON
+# and NOT_READY_MESSAGE, the same text the node describe prints.
+_NO_LEASE = "no kubelet lease"  # clusterhealth.go:140
+_SYSTEM_NAMESPACE = "kube-system"  # clusterhealth.go:18
+_MIN_NODES = 3
+# A node candidate's cause, `node <name> (<reason>)` (rootcause/rootcause.go:44).
+_NODE_CAUSE = re.compile(r"^node ([^ ()]+) \((.+)\)$")
+# The gather's label for a node describe: its namespace is empty, so the
+# label reads `describe node /<name>` (investigate/gather.go:132).
+_DESCRIBE_NODE = "describe node /"
+
+
+def _trim_line(s: str, limit: int) -> str:
+    """A port of `trimLine` (clusterhealth.go:218-229): the first line,
+    stripped, cut to `limit` runes plus an ellipsis when it is longer."""
+    i = s.find("\n")
+    if i >= 0:
+        s = s[:i]
+    s = s.strip()
+    if len(s) > limit:
+        return s[:limit] + "…"
+    return s
+
+
+def _not_ready_issue(reason: str, message: str) -> str:
+    """A port of `notReadyIssue` (clusterhealth.go:197-216): `NotReady`,
+    plus the condition's reason and its trimmed message when they are
+    there. kubeagent passes both through `safetext.Line` first
+    (clusterhealth.go:181); the caller here does the same or passes
+    constants."""
+    s = "NotReady"
+    m = _trim_line(message, 120)
+    if reason and m:
+        s += ": " + reason + " — " + m
+    elif reason:
+        s += ": " + reason
+    elif m:
+        s += ": " + m
+    return s
+
+
+def _flagged(w: c.Workload) -> bool:
+    """A port of `Workload.Flagged` (inventory/inventory.go:102-104)."""
+    return len(w.findings) > 0 or w.ready < w.desired or w.status == "Failed"
+
+
+def cluster_health(workloads: tuple[c.Workload, ...],
+                   reads: tuple[c.EvidenceRead, ...]) -> c.ClusterHealth | None:
+    """The cluster-health verdict kubeagent would compute for this prompt.
+
+    kubeagent calls a cluster Degraded when it has any node issue or any
+    system issue (clusterhealth.go:104-108). Here:
+
+    - A node issue is a node candidate, `node <name> (<reason>)`, of any
+      verdict. kubeagent makes one candidate per down node on every
+      flagged workload (rootcause.go:36-44), so the candidates name every
+      down node. That includes a candidate the 8-candidate cap later hides.
+      Reason `NotReady` prints `<name> NotReady: KubeletNotReady —
+      container runtime is down`; reason `no kubelet lease` prints
+      `<name> no kubelet lease` (clusterhealth.go:71, :84, :140). Any
+      other reason raises ValueError: the dataset has no block text for it.
+    - A node named both ways is NotReady. kubeagent checks the lease only
+      on a Ready node (clusterhealth.go:73-82).
+    - A system issue is a flagged kube-system workload:
+      `kube-system/<name> <ready>/<desired> <status>`, or
+      `kube-system/<name> <status>` for a Job or CronJob
+      (clusterhealth.go:93-103), in kubeagent's workload order
+      (inventory/inventory.go:534-547).
+
+    The node count is T = max(3, named nodes + 1). The named nodes are the
+    node candidates' names and the names in `describe node /<name>` read
+    labels; the +1 is a healthy node the prompt never names. R = T minus
+    the NotReady nodes. A node with no kubelet lease is still Ready
+    (clusterhealth.go:73-74).
+
+    With no node issue and no system issue the cluster is Healthy and
+    kubeagent prints no block, so this returns None.
+    """
+    reasons: dict[str, set[str]] = {}
+    for w in workloads:
+        for cand in w.candidates:
+            m = _NODE_CAUSE.match(cand.cause)
+            if m:
+                reasons.setdefault(m.group(1), set()).add(m.group(2))
+    system = []
+    flagged = [w for w in workloads if w.namespace == _SYSTEM_NAMESPACE and _flagged(w)]
+    for w in sorted(flagged, key=lambda w: (w.name, w.kind)):
+        if w.kind in ("Job", "CronJob"):
+            system.append(f"{w.namespace}/{w.name} {w.status}")
+        else:
+            system.append(f"{w.namespace}/{w.name} {w.ready}/{w.desired} {w.status}")
+    if not reasons and not system:
+        return None
+    named = set(reasons) | {r.label[len(_DESCRIBE_NODE):] for r in reads
+                            if r.label.startswith(_DESCRIBE_NODE)}
+    total = max(_MIN_NODES, len(named) + 1)
+    node_issues = []
+    for name in sorted(reasons):
+        unknown = reasons[name] - {"NotReady", _NO_LEASE}
+        if unknown:
+            raise ValueError(f"node {name}: no cluster-health text for reason "
+                             f"{min(unknown)!r}")
+        if "NotReady" in reasons[name]:
+            node_issues.append(name + " " + _not_ready_issue(o.NOT_READY_REASON,
+                                                             o.NOT_READY_MESSAGE))
+        else:
+            node_issues.append(name + " " + _NO_LEASE)
+    not_ready = sum(1 for rs in reasons.values() if "NotReady" in rs)
+    return c.ClusterHealth(degraded=True, nodes_ready=total - not_ready, nodes_total=total,
+                           node_issues=tuple(node_issues), system_issues=tuple(system))

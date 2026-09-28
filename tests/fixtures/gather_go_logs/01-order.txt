@@ -1,0 +1,6 @@
+row	1	shop	api	Deployment	2	scoped
+row	2	shop	cart	Deployment	2	scoped
+row	3	shop	checkout	StatefulSet	2	scoped
+row	4	shop	search	Deployment	2	scoped
+hidden_restarts	0
+hidden_cron	0

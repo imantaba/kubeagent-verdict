@@ -17,6 +17,10 @@ Keep this in step with the Go source. tests/test_remediation.py anchors the
 covered arms against contract/golden/, which is captured from the real binary
 rather than transcribed from the Go, so a drift in the anchored arms is caught
 without trusting this file's author.
+
+A prompt does not carry `suggest`'s command as it is. kubeagent names the pod
+`<pod>` first (internal/explain/explain.go:148-171), and `suggest_for` is that
+step. A prompt builder calls `suggest_for`, never `suggest`.
 """
 from dataclasses import dataclass
 
@@ -89,6 +93,25 @@ def suggest(issue: str, *, ns: str, pod: str, container: str = "",
         return Suggestion("the rollout is wedged — inspect the workload's pods and its "
                           "events", _events(ns, pod))
     return Suggestion("inspect the object for details", _describe(ns, pod))
+
+
+def suggest_for(issue: str, *, ns: str, pod: str, container: str = "", kind: str = "",
+                workload: str) -> Suggestion:
+    """Return the suggestion kubeagent's prompt carries for this finding.
+
+    Port of `suggestionFor` (internal/explain/explain.go:148-171). A
+    controller's pod name is drawn per replica and explains nothing, so the
+    command names `<pod>` instead. The namespace, the verb and the container
+    stay. A finding on the workload object itself keeps its name: RolloutStuck
+    names the controller, and the prompt already names it.
+
+    `ns` is the namespace of both the finding and its workload. The Go compares
+    `ns/pod` with `ns/workload` and also masks a pod with no namespace part;
+    here the namespace is always split out, so that branch has no Python form.
+    """
+    if pod and pod != workload:
+        pod = "<pod>"
+    return suggest(issue, ns=ns, pod=pod, container=container, kind=kind)
 
 
 #: Every next_step string suggest() can return. The fidelity guard in

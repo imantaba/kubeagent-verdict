@@ -1,0 +1,4 @@
+workload	1	shop	api		
+workload	2	shop	cart		
+workload	3	shop	checkout		
+workload	4	shop	search		

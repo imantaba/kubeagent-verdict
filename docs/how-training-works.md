@@ -98,9 +98,14 @@ twin. They are the whole subject of Part 2.
 
 The generator then splits everything into three piles:
 
-- **train** — 6,496 questions. The model studies these.
-- **validation** — 655 questions. Held back during development.
-- **test** — 252 questions. **The exam.** The model must never see these.
+- **train** — 6,457 questions. The model studies these.
+- **validation** — 721 questions. Held back during development.
+- **test** — 249 questions. **The exam.** The model must never see these.
+
+(Those are the counts in `out/dataset-0928`'s manifest, built on
+2026-09-28 with `--seed 17 --size 8000`. It replaced `out/dataset-0926`
+that day, and the three counts did not move. Before 2026-09-26 the three
+piles were 6,496, 655 and 252.)
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -151,12 +156,14 @@ The dataset has grown since the first timed run. As of 2026-09-02, two epochs
 over 4,292 questions, nudging once per 16 questions, worked out to **536
 nudges** ("optimizer steps"), and that run was timed start to finish at
 **17h42m** — a stopwatch reading, not a floor. Today's train split is bigger:
-`out/dataset-0924`'s manifest counts 6,496 rows, and
+`out/dataset-0928`'s manifest counts 6,457 rows (the same as
+`out/dataset-0926`, which it replaced on 2026-09-28), and
 [train/config.py](../src/kubeagent_verdict/train/config.py) still pins 2
-epochs and `grad_accum` 16, so the same arithmetic now gives 6,496 × 2 / 16 =
-**812 nudges**. At the same per-nudge speed as the 2026-09-02 run, that is an
+epochs and `grad_accum` 16, so the same arithmetic now gives 6,457 × 2 / 16 =
+about **807 nudges**. At the same per-nudge speed as the 2026-09-02 run, that is an
 estimate of **about 27 hours**, not a new measurement — plan for overnight,
-not an afternoon. Two earlier versions of this line were
+not an afternoon. (On 2026-09-24 the train split was 6,496 rows, which gave
+812 nudges and the same estimate.) Two earlier versions of this line were
 wrong in the same direction — "several hours" first, then "upwards of 15 hours"
 offered as a floor because nothing had yet been timed end to end. The attempt
 that stopped at 12h19m when the machine lost power was not a run in trouble: it
@@ -191,21 +198,21 @@ check fails, nothing produced is trusted.
 
 ### Step 4: the exam (`kv-eval`)
 
-We serve the finished model locally and ask it all 252 test questions, then
+We serve the finished model locally and ask it all 249 test questions, then
 score every answer automatically.
 
-The 252 questions are not one exam — they are thirteen, and several are traps
+The 249 questions are not one exam — they are thirteen, and several are traps
 built specifically to catch a model that is cheating rather than reasoning:
 
 | Slice | Rows | What it catches | Job |
 |---|---|---|---|
-| `positional_probe` | 19 | A model that always picks the **first** candidate. The right answer is placed last. | 1 or 2 |
-| `misattribution_probe` | 19 | A model that leans on the candidate menu instead of naming its own cause. Every candidate is ruled out, so there is no tag to trust. | 2 |
-| `multi_misattribution_probe` | 19 | Every candidate menu attributes a decoy that a fresh read refutes, with two workloads at once — so trusting the tag anywhere in a multi-workload prompt still loses. | 1 or 2, plus 3 |
+| `positional_probe` | 17 | A model that always picks the **first** candidate. The right answer is placed last. | 1, always decided |
+| `misattribution_probe` | 20 | A model that leans on the candidate menu instead of naming its own cause. Every candidate is ruled out, so there is no tag to trust. | 2 |
+| `multi_misattribution_probe` | 20 | Two workloads at once. 34 of the 40 candidate menus attribute a decoy that a fresh read refutes, and the other 6 rule out every candidate — so trusting the tag anywhere in a multi-workload prompt still loses. | 2, plus 3 |
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
 | `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
-| `contradiction_probe` | 19 | Evidence that contradicts itself. | 1, always decided |
-| the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 156 | Ordinary competence on the seven single-workload question types (all but `multi` and the `shared_origin` pair) | 1 or 2 |
+| `contradiction_probe` | 17 | Evidence that contradicts itself. | 1, always decided |
+| the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 155 | Ordinary competence on the seven single-workload question types (all but `multi` and the `shared_origin` pair) | 1 or 2 |
 
 The job column says which pass bar reads a slice's rows, now that
 kubeagent v1.24.0 decides some of them before the model ever answers.
@@ -223,7 +230,9 @@ because each one caught a real cheat that had already fooled us:
    the longest option scores well without reading anything. This gate measures
    the difference between "cases where length helps" and "cases where length
    misleads" — if it is wide, the model is counting words and the decoy rate
-   above means nothing.
+   above means nothing. (The 15 of 19 is the catalog before 2026-09-26.
+   Since then the rules pick every winner, in kubeagent's own words, and
+   that count has not been measured again.)
 4. **Overconfidence rate.** Of the causes it got *wrong*, how many did it still
    mark `high` confidence? A model that is confidently wrong is worse than one
    that says `low`.
@@ -572,6 +581,9 @@ to**. Rendered bytes moved on rows that already existed, `misattribution_probe`
 among them, and the exam fell from 263 rows to 252. A score from before that
 day and a score from after it are not the same measurement and do not compare
 row for row.
+
+On 2026-09-26 the exam was rebuilt again, at 249 rows, and a score from
+before that day does not compare with one after.
 
 ---
 

@@ -91,169 +91,6 @@ def test_draw_ending_registry_matches_seed_1_sequence():
     assert drawn[5].fresh.literal == "unauthorized"
 
 
-def _node_decoy(n):
-    return o.Object(kind="node", name=f"worker-{n}", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="True"))
-
-
-def test_apply_budget_marks_a_decoy_past_the_budget_not_read():
-    objects = tuple(_node_decoy(i) for i in range(8)) + (
-        o.Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                  placement="unmounted", fresh=o.Fresh(how="read", phase="Pending")),
-    )
-    out = render.apply_budget(objects, workload_order=(0,) * 9,
-                               entry_or_scenario_key="e1")
-    assert len(out) == 9
-    assert out[8].kind == "pvc"
-    assert out[8].fresh.how == "not_read"
-    assert out[8].fresh.phase == ""
-    assert out[0].fresh.how == "read"
-
-
-def test_apply_budget_raises_when_a_cause_would_be_starved():
-    cause = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                      placement="mounted", fresh=o.Fresh(how="read", phase="Pending"),
-                      intent="cause")
-    objects = tuple(_node_decoy(i) for i in range(8)) + (cause,)
-    try:
-        render.apply_budget(objects, workload_order=(0,) * 9,
-                             entry_or_scenario_key="e1")
-        raise AssertionError("expected ValueError")
-    except ValueError as err:
-        assert str(err) == (
-            "entry e1: the 8-read budget would leave pvc/data-0 "
-            "(intent=cause) unread; pass allow_overflow=True if that is "
-            "the point"
-        )
-
-
-def test_apply_budget_allow_overflow_starves_the_cause_on_purpose():
-    cause = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                      placement="mounted", fresh=o.Fresh(how="read", phase="Pending"),
-                      intent="cause")
-    objects = tuple(_node_decoy(i) for i in range(8)) + (cause,)
-    out = render.apply_budget(objects, workload_order=(0,) * 9,
-                               entry_or_scenario_key="e1", allow_overflow=True)
-    assert out[8].kind == "pvc"
-    assert out[8].fresh.how == "not_read"
-
-
-def test_apply_budget_reorders_registry_before_node_before_pvc():
-    node = _node_decoy(0)
-    pvc = o.Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                    placement="unmounted", fresh=o.Fresh(how="read", phase="Pending"))
-    registry = o.Object(kind="registry", name="registry.example.com", scan_reason="3",
-                         placement="", fresh=o.Fresh(how="read", literal="manifest unknown"))
-    out = render.apply_budget((pvc, node, registry), workload_order=(0, 0, 0),
-                               entry_or_scenario_key="e1")
-    assert [obj.kind for obj in out] == ["registry", "node", "pvc"]
-
-
-def _registry(literal):
-    return o.Object(kind="registry", name="registry.example.com", scan_reason="3",
-                     placement="", fresh=o.Fresh(how="read", literal=literal))
-
-
-def test_registry_events_read_literal_shape():
-    read = render.registry_events_read(_registry("manifest unknown"), ns="shop",
-                                        pod="api-0", image="registry.example.com/api:1")
-    assert read.label == "events shop/api-0"
-    assert read.content == (
-        'events for shop/api-0:\n'
-        '  Failed: Failed to pull image "registry.example.com/api:1": manifest unknown (x4)\n'
-    )
-
-
-def test_registry_events_read_no_event_shape():
-    read = render.registry_events_read(_registry(""), ns="shop", pod="api-0",
-                                        image="registry.example.com/api:1")
-    assert read.label == "events shop/api-0"
-    assert read.content == "no events for shop/api-0"
-
-
-def test_registry_events_read_contradiction_probe_two_lines():
-    read = render.registry_events_read(_registry("unauthorized"), ns="shop", pod="api-0",
-                                        image="registry.example.com/api:1",
-                                        own_line="manifest unknown")
-    assert read.content == (
-        'events for shop/api-0:\n'
-        '  Failed: Failed to pull image "registry.example.com/api:1": unauthorized (x4)\n'
-        '  Failed: Failed to pull image "registry.example.com/api:1": manifest unknown (x4)\n'
-    )
-
-
-def test_object_reads_uses_rules_read_text_for_node_and_pvc():
-    node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="False"))
-    pvc = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                    placement="mounted",
-                    fresh=o.Fresh(how="read", phase="Pending",
-                                   storage_class="standard", volume=""))
-    reads = render.object_reads((node, pvc), ns="shop", pod="api-0")
-    assert reads[0].label == "describe node /worker-1"
-    assert reads[0].content == "node worker-1: unschedulable=false\n"
-    assert reads[1].label == "describe pvc shop/data-0"
-    assert reads[1].content == (
-        "pvc shop/data-0: phase=Pending storageClass=standard volume=\n"
-    )
-
-
-def test_object_reads_skips_not_read_objects():
-    starved = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                        placement="mounted", fresh=o.Fresh(how="not_read"))
-    assert render.object_reads((starved,), ns="shop", pod="api-0") == ()
-
-
-def test_object_reads_delegates_registry_to_registry_events_read():
-    reg = _registry("manifest unknown")
-    reads = render.object_reads((reg,), ns="shop", pod="api-0",
-                                 image="registry.example.com/api:1")
-    assert reads[0] == render.registry_events_read(
-        reg, ns="shop", pod="api-0", image="registry.example.com/api:1"
-    )
-
-
-def test_render_workload_builds_candidates_reads_and_result():
-    node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="False"),
-                     intent="cause")
-    workload, reads, result = render.render_workload(
-        (node,), ns="shop", name="api", pod="api-0",
-        image="registry.example.com/api:1", issue="CrashLoopBackOff",
-        kind="Deployment", status="degraded",
-    )
-    assert workload.namespace == "shop"
-    assert workload.name == "api"
-    assert workload.kind == "Deployment"
-    assert workload.status == "degraded"
-    assert len(workload.candidates) == 1
-    cand = workload.candidates[0]
-    assert cand.cause == "node worker-1 (NotReady)"
-    assert cand.verdict == "attributed"
-    assert cand.fresh_read_outcome == "confirmed"
-    assert cand.fresh_read_evidence == "Ready condition is False now"
-    assert workload.decided is True
-    assert workload.decided_cause == "node worker-1 (NotReady)"
-    assert workload.decided_outcome == "confirmed"
-    assert len(reads) == 1
-    assert reads[0].label == "describe node /worker-1"
-    assert result.cause == "node worker-1 (NotReady)"
-    assert workload.confidence == "high"
-
-
-def test_render_workload_prints_no_header_when_every_candidate_is_ruled_out():
-    node = o.Object(kind="node", name="worker-1", scan_reason="NotReady",
-                     placement="off", fresh=o.Fresh(how="read", ready="False"),
-                     intent="decoy")
-    workload, _reads, _result = render.render_workload(
-        (node,), ns="shop", name="api", pod="api-0",
-        image="registry.example.com/api:1", issue="CrashLoopBackOff",
-        kind="Deployment", status="degraded",
-    )
-    assert workload.candidates[0].verdict == "ruled_out"
-    assert workload.confidence == ""
-
-
 # ------------------------------------------------------------- header_for
 #
 # A port of kubeagent v1.24.0's `confidence.ForRootCause`
@@ -362,3 +199,71 @@ def test_check_prompt_size_raises_over_the_cap():
             f"entry e1: prompt is {len(big)} bytes, over the "
             f"{render.MAX_PROMPT_BYTES}-byte cap"
         )
+
+
+def _ending(obj, drawn):
+    """Name the ending `deciding_ending` gave `obj`."""
+    if drawn == obj:
+        return "declared"
+    if drawn.fresh.how == "read_failed":
+        return "read_failed"
+    assert drawn.scan_reason == "no kubelet lease", drawn
+    return "lease"
+
+
+def _decide(obj):
+    return rules.decide(rules.attribute((obj,), ns="shop", pod="api-0", issue="OOMKilled"))
+
+
+_DOWN_NODE = o.Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                      fresh=o.NODE_NOT_READY, intent="cause")
+_PENDING_PVC = o.Object(kind="pvc", name="data-0", scan_reason="MissingStorageClass",
+                        placement="mounted",
+                        fresh=o.Fresh(phase="Pending", storage_class="fast-ssd"), intent="cause")
+
+
+@pytest.mark.parametrize("obj, endings", [
+    (_DOWN_NODE, {"declared", "lease", "read_failed"}),
+    (_PENDING_PVC, {"declared", "read_failed"}),
+])
+def test_deciding_ending_draws_every_ending_and_each_one_decides(obj, endings):
+    rng = random.Random(7)
+    seen = set()
+    for _ in range(200):
+        drawn = render.deciding_ending(obj, rng)
+        seen.add(_ending(obj, drawn))
+        assert _decide(drawn).decided, drawn
+    assert seen == endings
+
+
+def test_deciding_ending_keeps_the_declared_node_only_because_it_confirms():
+    assert _decide(_DOWN_NODE).outcome == "confirmed"
+    rng = random.Random(7)
+    drawn = [render.deciding_ending(_DOWN_NODE, rng) for _ in range(200)]
+    for d in drawn:
+        if d == _DOWN_NODE:
+            assert _decide(d).outcome == "confirmed"
+    assert _DOWN_NODE in drawn
+
+
+def test_deciding_ending_never_keeps_a_declared_fresh_that_does_not_confirm():
+    ready = o.Object(kind="node", name="worker-2", scan_reason="NotReady", placement="on",
+                     fresh=o.Fresh(ready="True"), intent="cause")
+    bound = o.Object(kind="pvc", name="data-0", scan_reason="MissingStorageClass",
+                     placement="mounted", fresh=o.Fresh(phase="Bound"), intent="cause")
+    # A refuted candidate never wins, so the row is undecided and only its
+    # decision says why.
+    assert [d.outcome for d in _decide(ready).decisions] == ["refuted"]
+    assert [d.outcome for d in _decide(bound).decisions] == ["refuted"]
+    rng = random.Random(7)
+    node_seen = {_ending(ready, render.deciding_ending(ready, rng)) for _ in range(200)}
+    pvc_seen = {_ending(bound, render.deciding_ending(bound, rng)) for _ in range(200)}
+    assert node_seen == {"lease", "read_failed"}
+    assert pvc_seen == {"read_failed"}
+
+
+def test_deciding_ending_refuses_a_registry():
+    reg = o.Object(kind="registry", name="registry.example.com", scan_reason="2",
+                   placement="", fresh=o.Fresh(literal="dial tcp"))
+    with pytest.raises(ValueError, match="no deciding ending for a registry"):
+        render.deciding_ending(reg, random.Random(7))

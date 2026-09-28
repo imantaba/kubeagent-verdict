@@ -20,11 +20,11 @@ def _manifest(dirpath: Path, **fields) -> Path:
 
     The five scalar defaults are out/dataset/manifest.json's real values, so a
     test that overrides one field varies exactly what it says it varies. The
-    shape is deliberately NOT the real manifest's: that carries eight
-    top-level keys, and `case_counts` and `test_case_counts` are absent here,
-    while `corpus_files` lists one file rather than four. Nothing under test
-    reads any of the three, and a test needing a key this omits passes it
-    through **fields.
+    shape is deliberately NOT the real manifest's: that carries nine
+    top-level keys, and `case_counts`, `test_case_counts` and
+    `checker_violations` are absent here, while `corpus_files` lists one file
+    rather than four. Nothing under test reads any of the four, and a test
+    needing a key this omits passes it through **fields.
     """
     m = {"seed": 17, "size": 5500, "train": 4155, "val": 432, "test": 253,
          "corpus_files": ["chaos-corpus-v1.34-kind.jsonl"]}

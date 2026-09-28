@@ -46,7 +46,11 @@ def _gold_results(examples: list, *, grade_job2: bool = True) -> list[dict]:
     grades the training pool by keyword: 4,880 train and 532 val job-2
     workloads carry a named expected cause and no keywords (measured
     2026-09-24 against `out/dataset-0924`; the job-2 generator fix moved
-    this count from the 0923 bank's 4,823/589), and `score.evaluate`
+    this count from the 0923 bank's 4,823/589; 2026-09-26 (faithful
+    prompts): `out/dataset-0926` counts 4,900 train and 512 val, every one
+    in a `shared_origin` or `shared_origin_decoy` row; 2026-09-28 (final
+    review): `out/dataset-0928`, which replaced it, counts the same), and
+    `score.evaluate`
     refuses such a corpus rather than scoring it zero.
     Job 2 on those pools is measured by `_job2_gate` below, over the
     population spec section 10 gate 1 defines. The exam passes nothing and
@@ -136,7 +140,43 @@ def test_oracle_job1_is_perfect_on_train():
     # `own_cause` 10% -> 13%, `wrong_attribution` 10% -> 14%; the row
     # counts change, and so does every later rng draw) -- 3081 to 3120.
     # Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3120}
+    # 2026-09-26 (faithful prompts): the catalog now uses the text kubeagent
+    # prints. Five impossible PVC decoys became node decoys or went away,
+    # and restarts start at 3, so those entries draw from the rng a
+    # different number of times; every later name moves, and so does the
+    # group-hash split (841 val rows before the held-out drop, not 736). The
+    # case mix is unchanged. 3120 -> 3072. Rate unchanged.
+    # 2026-09-26 (faithful prompts): the `attributed`, `truncated` and
+    # `injection` rows now rotate over the 17 entries the rules decide, not
+    # all 19, and build their prompt from the evidence gather. A new entry
+    # (`pvc-unbound-unschedulable`) joins the catalog. Every later rng draw
+    # moves, and so does the split. 3072 -> 3030. Rate unchanged.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` now runs over the
+    # 17 entries the rules decide, so the exam's groups changed and
+    # `drop_held_out` drops different training rows. No training row is
+    # built differently. The exam lost `node-cordon-diskfull:edge/worker`,
+    # which lets one `own_cause` row back in (job 2), and gained
+    # `pvc-unbound-unschedulable:billing/gateway`, which drops one
+    # `wrong_attribution` row (job 2) and one `multi` row with two decided
+    # workloads (job 1). 3030 -> 3028. Rate unchanged.
+    # 2026-09-26 (faithful prompts): the `multi` rows moved onto the gather.
+    # The node list grew from three workers to five, so every name drawn
+    # after a node draw moves, and so do the groups and the split (6424
+    # train rows -> 6415, 727 val rows -> 749). A `multi` row now redraws
+    # any workload that shares a workload, a node or a claim with one
+    # already in the row, and the worker-containerd-stop self-pair takes
+    # the last counted `multi` slot, so a build has exactly `size` rows.
+    # 3028 -> 3058. Rate unchanged.
+    # 2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    # restarts from 6, not 1, because its finding text fixes restartCount=6
+    # and kubeagent's workload line sums its containers' restarts. The
+    # restart count is the last field `names.draw` draws, so no other field
+    # of that draw changes, but `randint(6, 40)` sometimes throws away a raw
+    # draw that `randint(1, 40)` kept. From the first such draw on every
+    # later name moves, and so do the groups and the split (kept rows: 6415
+    # train -> 6457, 749 val -> 721). The case mix is unchanged. 3058 ->
+    # 3074. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3074}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -144,21 +184,47 @@ def test_oracle_job1_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 289 to 355. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 355 to 357. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 357 to 309. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 309}
+    # 2026-09-26 (faithful prompts): same reason as train; the split moved
+    # and val grew. 309 -> 356. Rate unchanged.
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    # as train. 356 -> 319. Rate unchanged.
+    # 2026-09-26 (faithful prompts): `multi` rows on the gather and five
+    # workers, same reason as train; val grew. 319 -> 376. Rate unchanged.
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as train; the split moved. 376 -> 387. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 387}
 
 
 def test_oracle_job2_gate_is_perfect_on_train():
     # Re-measured 2026-09-19, same reason. 3121 to 2975. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 2975 to 3000. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 3000 to 3030. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3030}
+    # 2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    # for job 1. 3030 -> 2859. Rate unchanged.
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    # as job 1. 2859 -> 2999. Rate unchanged.
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as job 1; the split moved. 2999 -> 3017. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3017}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
     # Re-measured 2026-09-19, same reason. 352 to 304. Rate unchanged.
     # Re-measured 2026-09-24, job-2 generator fix. 304 to 321. Rate unchanged.
     # Re-measured 2026-09-24 again, case mix. 321 to 298. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 298}
+    # 2026-09-26 (faithful prompts): same reason. 298 -> 315. Rate unchanged.
+    # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason.
+    # 315 -> 336. Rate unchanged.
+    # 2026-09-26 (faithful prompts): the exam lost
+    # `oversized-job-unschedulable:web/checkout`, so `drop_held_out` lets
+    # four `own_cause` val rows in that group back in, one job-2 workload
+    # each. 336 -> 340. Rate unchanged.
+    # 2026-09-26 (faithful prompts): `multi` rows on the gather and five
+    # workers, same reason as job 1; the split moved. 340 -> 321. Rate
+    # unchanged. (Train stays at 2999 by chance.)
+    # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
+    # reason as job 1; the split moved. 321 -> 326. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 326}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -173,8 +239,23 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
 
     Re-measured 2026-09-24 again (case mix, same reason as job 1 above)
     -- 2324 to 2785. Most of the rise is the extra `own_cause` and
-    `wrong_attribution` rows, which are keyword-graded. Rate still 1.0."""
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2785}
+    `wrong_attribution` rows, which are keyword-graded. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 2785 -> 2621. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 2621 -> 2748. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): `multi` rows on the gather and five
+    workers, same reason as job 1 above. 2748 -> 2747. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above. 2747 -> 2766. Rate still
+    1.0."""
+    # 2026-09-26 (faithful prompts): see the docstring. 2748 -> 2747.
+    # 2026-09-26 (faithful prompts): see the docstring. 2747 -> 2766.
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2766}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -201,13 +282,53 @@ def test_oracle_job3_is_perfect_on_train():
 
     Re-measured 2026-09-24 again (case mix, same reason as job 1 above) --
     2803 to 2832: `shared` 192 to 195, `none` 2610 to 2636. Rate still
-    1.0."""
+    1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 2832 -> 2736: `shared` 195 -> 183, `none` 2636 ->
+    2552, `separate` still 1. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 2736 -> 2793: `shared` 183 -> 190, `none` 2552 ->
+    2590, `separate` 1 -> 13. All 12 new `separate` rows are `multi` rows
+    that pair the new `pvc-unbound-unschedulable` entry (its PVC
+    confirmed) with `worker-containerd-stop` (its node confirmed): two
+    confirmed causes, and no shared one. The 13th is still two
+    `worker-containerd-stop` workloads on different nodes. Rate still
+    1.0.
+
+    2026-09-26 (faithful prompts): the exam's `contradiction_probe` groups
+    changed, so `drop_held_out` drops the one `multi` row in the new
+    `pvc-unbound-unschedulable:billing/gateway` group, labeled `none` (see
+    job 1 above). 2793 -> 2792: `none` 2590 -> 2589. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): `multi` rows on the gather and five
+    workers, same reason as job 1 above. 2792 -> 2766: `shared` 190 ->
+    186, `separate` 13 -> 11, `none` 2589 -> 2569. The 11 `separate` rows
+    still pair `pvc-unbound-unschedulable` (its PVC confirmed) with
+    `worker-containerd-stop` (its node confirmed). The self-pair row is
+    `separate` too, but one of its two workloads
+    (`worker-containerd-stop:media/scheduler`) is an exam
+    `wrong_attribution` row's identity, so `drop_held_out` drops it.
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above. 2766 -> 2830: `shared`
+    186 -> 194, `separate` 11 -> 13, `none` 2569 -> 2623. 12 of the 13
+    `separate` rows still pair `pvc-unbound-unschedulable` (its PVC
+    confirmed) with `worker-containerd-stop` (its node confirmed). The 13th
+    is the self-pair row: it drew new names that no exam row holds, so
+    `drop_held_out` keeps it now. Rate still 1.0."""
     board = score.scoreboard(list(_train_results()))
+    # 2026-09-26 (faithful prompts): see the docstring. 2792 -> 2766;
+    # shared 190 -> 186, separate 13 -> 11, none 2589 -> 2569.
+    # 2026-09-26 (faithful prompts): see the docstring. 2766 -> 2830;
+    # shared 186 -> 194, separate 11 -> 13, none 2569 -> 2623.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2832,
-        "by_label": {"shared": {"rate": 1.0, "n": 195},
-                     "separate": {"rate": 1.0, "n": 1},
-                     "none": {"rate": 1.0, "n": 2636}}}
+        "rate": 1.0, "n": 2830,
+        "by_label": {"shared": {"rate": 1.0, "n": 194},
+                     "separate": {"rate": 1.0, "n": 13},
+                     "none": {"rate": 1.0, "n": 2623}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -216,13 +337,38 @@ def test_oracle_job3_is_perfect_on_val():
     every one -- re-measured 2026-09-19, Task 9 (22 rows then).
 
     Re-measured 2026-09-24 (case mix, same reason as job 1 above) -- 336 to
-    296: `shared` 22 to 19, `none` 314 to 277. Rate still 1.0."""
+    296: `shared` 22 to 19, `none` 314 to 277. Rate still 1.0.
+
+    2026-09-26 (faithful prompts): the rng stream and the split moved, as
+    for job 1 above. 296 -> 351: `shared` 19 -> 31, `none` 277 -> 320.
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather, same reason
+    as job 1 above. 351 -> 313: `shared` 31 -> 24, `none` 320 -> 288,
+    `separate` 0 -> 1 (a `pvc-unbound-unschedulable` workload next to a
+    `worker-containerd-stop` one, as on the train side). Rate still
+    1.0.
+
+    2026-09-26 (faithful prompts): `multi` rows on the gather and five
+    workers, same reason as job 1 above. 313 -> 346: `shared` 24 -> 28,
+    `none` 288 -> 318, `separate` 1 -> 0. No `separate` row lands in val
+    at this seed, so its rate is None; the train side still has 11.
+    Rate still 1.0.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, same reason as job 1 above; val shrank. 346 -> 308:
+    `shared` 28 -> 20, `none` 318 -> 288, `separate` still 0. Rate still
+    1.0."""
     board = score.scoreboard(list(_val_results()))
+    # 2026-09-26 (faithful prompts): see the docstring. 313 -> 346;
+    # shared 24 -> 28, separate 1 -> 0, none 288 -> 318.
+    # 2026-09-26 (faithful prompts): see the docstring. 346 -> 308;
+    # shared 28 -> 20, separate 0 -> 0, none 318 -> 288.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 296,
-        "by_label": {"shared": {"rate": 1.0, "n": 19},
+        "rate": 1.0, "n": 308,
+        "by_label": {"shared": {"rate": 1.0, "n": 20},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 277}}}
+                     "none": {"rate": 1.0, "n": 288}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -240,28 +386,108 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
 
     Re-measured 2026-09-24 again (case mix: the `multi` share is unchanged,
     but every `multi` row draws new names, so the split moves) -- 1227 to
-    1226 in train, 145 to 132 in val. Still perfect."""
+    1226 in train, 145 to 132 in val. Still perfect.
+
+    2026-09-26 (faithful prompts): the `multi` share is unchanged again,
+    but the rng stream moved (five PVC decoys became node decoys or went
+    away), so the names and the split moved -- 1226 -> 1240 in train, 132 -> 118 in val. Still
+    perfect.
+
+    2026-09-26 (faithful prompts): job-1 rows on the gather. The `multi`
+    share is unchanged, but the rng stream moved and a new entry joined
+    the pool, so the names and the split moved -- 1240 -> 1161 in train,
+    118 -> 109 in val. Still perfect.
+
+    2026-09-26 (faithful prompts): the exam's `contradiction_probe` groups
+    changed, so `drop_held_out` drops one `multi` train row with two decided
+    workloads (see job 1 above) -- 1161 -> 1159 in train; val unchanged at
+    109. Still perfect.
+
+    2026-09-26 (faithful prompts): `multi` rows are built on the gather.
+    Their gold cause is the rules' own decision over the gathered reads,
+    the node list grew to five workers, and a row redraws any workload
+    that clashes with one already in it, so more workloads decide and the
+    split moved (see job 1 above) -- 1159 -> 1188 in train, 109 -> 140 in
+    val. Still perfect.
+
+    2026-09-26 (faithful prompts): coredns-corefile-broken draws its
+    restarts from 6, so the rng stream and the split moved (see job 1
+    above) -- 1188 -> 1207 in train, 140 -> 163 in val. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
-    assert multi_job1(_train_results()) == (1226.0, 1226)
-    assert multi_job1(_val_results()) == (132.0, 132)
+    # 2026-09-26 (faithful prompts): see the docstring. (1240.0, 1240) ->
+    # (1161.0, 1161); (118.0, 118) -> (109.0, 109).
+    # 2026-09-26 (faithful prompts): see the docstring. (1161.0, 1161) ->
+    # (1159.0, 1159).
+    # 2026-09-26 (faithful prompts): see the docstring. (1159.0, 1159) ->
+    # (1188.0, 1188); (109.0, 109) -> (140.0, 140).
+    # 2026-09-26 (faithful prompts): see the docstring. (1188.0, 1188) ->
+    # (1207.0, 1207); (140.0, 140) -> (163.0, 163).
+    assert multi_job1(_train_results()) == (1207.0, 1207)
+    assert multi_job1(_val_results()) == (163.0, 163)
 
 
-def test_exam_oracle_job1_misses_only_contradiction_probe():
+def test_exam_oracle_job1_is_perfect():
     """spec section 10 gate 2: the frozen exam's own job1, oracle-read.
-    138 of 157 pass; the 19 misses are exactly the `contradiction_probe`
+    138 of 156 pass; the 18 misses are exactly the `contradiction_probe`
     rows, a case whose gold reply is engineered to contradict what job1
     grades by design -- not a shared-origin regression. No `multi`,
-    `shared_origin_probe` or `shared_origin_decoy_probe` row misses."""
+    `shared_origin_probe` or `shared_origin_decoy_probe` row misses.
+
+    2026-09-26 (faithful prompts): the `oversized` entry's node decoy now
+    sits on another node, so kubeagent rules it out. Its
+    `contradiction_probe` row has no attributed candidate any more; it is
+    undecided, so it moved from job 1 to job 2. 157 -> 156 graded, 19 -> 18
+    misses; the 138 passes do not move.
+
+    2026-09-26 (faithful prompts): job-1 rows are built on the gather now.
+    `attributed` fell from 53 rows to 22, and the corpus rows the rules do
+    not decide became `own_cause` rows, which are job 2. `truncated`,
+    `injection` and `positional_probe` fell from 19 rows to 17. The
+    `node-cordon-diskfull` `contradiction_probe` row also left job 1: its
+    node object now names a node the pod is not on, so the rules rule it
+    out and the row is undecided. 156 -> 118
+    graded, 138 -> 101 passes, 18 -> 17 misses -- still exactly the
+    `contradiction_probe` rows.
+
+    2026-09-26 (faithful prompts): `contradiction_probe` rows are built on
+    the gather and answer the rules' cause, so job 1 grades them like any
+    other decided row and they pass. The 17 old job-1 rows are replaced by
+    17 new ones. 118 graded, 101 -> 118 passes, 17 -> 0 misses: a model that
+    answers each row with that row's gold content scores every job-1
+    workload.
+
+    2026-09-26 (faithful prompts): the node list grew from three workers
+    to five, so two shared-origin stories drew differently. In the
+    `networkpolicy-deny-all` probe row and its decoy twin, two victims
+    that were undecided are now decided on a node their pod runs on (+4
+    job 1). In the `node-disk-pressure` probe row and its decoy twin, the
+    drawn victims changed and one decided victim per row is now undecided
+    (-2 job 1). The `multi_misattribution_probe` rows stay all job 2.
+    118 -> 120 graded, all 120 pass, still no misses."""
     exam, results = _exam()
     scores = [s for r in results for s in r["job1_scores"]]
-    assert (len(scores), sum(scores)) == (157, 138.0)
+    # 2026-09-26 (faithful prompts): oversized's contradiction row left
+    # job 1. 157 -> 156; passes stay 138.
+    # 2026-09-26 (faithful prompts): see the docstring. (156, 138.0) ->
+    # (118, 101.0).
+    # 2026-09-26 (faithful prompts): contradiction rows answer the rules'
+    # cause. (118, 101.0) -> (118, 118.0)
+    # 2026-09-26 (faithful prompts): five workers moved two shared-origin
+    # stories' draws; see the docstring. (118, 118.0) -> (120, 120.0)
+    assert (len(scores), sum(scores)) == (120, 120.0)
     misses = [e.case for e, r in zip(exam, results)
              if sum(r["job1_scores"]) < len(r["job1_scores"])]
-    assert len(misses) == 19
-    assert set(misses) == {"contradiction_probe"}
+    # 2026-09-26 (faithful prompts): same reason. 19 -> 18.
+    # 2026-09-26 (faithful prompts): node-cordon-diskfull's row left job 1
+    # too. 18 -> 17.
+    # 2026-09-26 (faithful prompts): contradiction rows pass. 17 -> 0
+    assert misses == []
+    contradiction = [s for e, r in zip(exam, results) if e.case == "contradiction_probe"
+                     for s in r["job1_scores"]]
+    assert contradiction == [1.0] * 17
 
 
 def test_exam_oracle_job3_is_perfect():
@@ -271,14 +497,18 @@ def test_exam_oracle_job3_is_perfect():
     `FROZEN_SLICE_SHA256` / `EVAL_SET_SHA256` over them would bank the error.
     It reads 1.0 -- 5 of 5 `shared`-labeled rows (the three origin-object
     stories' `shared_origin_probe` halves) and 34 of 34 `none`-labeled
-    rows."""
+    rows.
+
+    2026-09-26 (faithful prompts): the new `pvc-unbound-unschedulable`
+    entry adds one `multi_misattribution_probe` row, labeled `none`. 39 ->
+    40 rows, `none` 34 -> 35. Still 1.0."""
     _, results = _exam()
     board = score.scoreboard(list(results))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 39,
+        "rate": 1.0, "n": 40,
         "by_label": {"shared": {"rate": 1.0, "n": 5},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 34}}}
+                     "none": {"rate": 1.0, "n": 35}}}
 
 
 def test_exam_oracle_job2_is_perfect():
@@ -293,7 +523,31 @@ def test_exam_oracle_job2_is_perfect():
 
     Re-measured 2026-09-24 (job-2 generator fix: the exam's `none_of_these`
     slice is 8 thin-evidence rows, not 19) -- 153 to 142. Still perfect.
+
+    2026-09-26 (faithful prompts): the `oversized` `contradiction_probe`
+    row is now undecided (its node decoy is ruled out), so it joined job 2
+    -- 142 to 143. Still perfect.
+
+    2026-09-26 (faithful prompts): job-1 rows are built on the gather.
+    31 corpus rows the rules do not decide became `own_cause` rows (+31).
+    The new `pvc-unbound-unschedulable` entry adds its `own_cause`,
+    `empty_candidates`, `wrong_attribution` and `misattribution_probe`
+    rows and one two-workload `multi_misattribution_probe` row (+6).
+    `node-cordon-diskfull`'s `contradiction_probe` row is now undecided
+    (+1). 143 -> 181. Still perfect.
+
+    2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    the entries the rules decide, so the two undecided rows
+    (`node-cordon-diskfull` and `oversized-job-unschedulable`) are gone.
+    181 -> 179. Still perfect.
+
+    2026-09-26 (faithful prompts): the same two shared-origin stories that
+    moved job 1 (see `test_exam_oracle_job1_is_perfect`): four victims
+    left job 2 and two joined it. The `multi_misattribution_probe` rows are
+    built on the gather and keep their 40 job-2 workloads. 179 -> 177.
+    Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 142}
+    # 2026-09-26 (faithful prompts): see the docstring. 179 -> 177.
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 177}

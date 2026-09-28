@@ -49,13 +49,27 @@ class Fresh:
     how: str = "read"          # read | read_failed | not_read
     message: str = ""          # the failed-read message, when how == read_failed
     ready: str = ""            # node: True | False | Unknown | missing
+    ready_reason: str = ""     # node: the Ready=False condition's reason (NOT_READY_REASON)
+    ready_message: str = ""    # node: the Ready=False condition's message (NOT_READY_MESSAGE)
     unschedulable: bool = False
-    extra: tuple[str, ...] = ()  # node: extra condition/taint lines, gather format
+    disk_pressure: bool = False  # node: the kubelet reports DiskPressure=True
+    taints: tuple[tuple[str, str, str], ...] = ()  # node: (key, value, effect), in order
     phase: str = ""            # pvc: Bound | Pending | Lost | anything else
     storage_class: str = ""
     volume: str = ""
     literal: str = ""          # registry: one of PULL_LITERALS, or "" for no event
     wrong_pod: bool = False    # registry: the events read hit a different pod
+
+
+# The one Ready=False story the dataset tells: the kubelet reports
+# KubeletNotReady because the container runtime is down. This is the
+# kubelet's own fixed text for that case (kubelet pkg/kubelet/runtime.go:129).
+# Every NotReady node object carries it, and the node describe and the
+# cluster-health block both read it from here.
+NOT_READY_REASON = "KubeletNotReady"
+NOT_READY_MESSAGE = "container runtime is down"
+NODE_NOT_READY = Fresh(ready="False", ready_reason=NOT_READY_REASON,
+                       ready_message=NOT_READY_MESSAGE)
 
 
 @dataclass(frozen=True)
@@ -94,6 +108,10 @@ def validate(obj: Object) -> None:
             raise _err(obj, f"placement must be one of {NODE_PLACEMENTS}")
         if f.how == "read" and f.ready not in NODE_READY:
             raise _err(obj, f"ready must be one of {NODE_READY}")
+        if (f.ready_reason or f.ready_message) and f.ready != "False":
+            raise _err(obj, "ready_reason and ready_message are only for a Ready=False node")
+        if f.disk_pressure and f.ready == "missing":
+            raise _err(obj, "disk_pressure needs a node that reports conditions")
     elif obj.kind == "pvc":
         if obj.scan_reason not in PVC_SCAN_REASONS:
             raise _err(obj, f"scan_reason must be one of {PVC_SCAN_REASONS}")
@@ -112,10 +130,16 @@ def validate(obj: Object) -> None:
 
 
 def refute(obj: Object) -> Object:
-    """The healthy ending: the fresh read says the object is fine."""
+    """The healthy ending: the fresh read says the object is fine.
+
+    A node comes back Ready, so its Ready=False text goes. Its cordon, disk
+    pressure and taints stay: they are not what the NotReady scan reason
+    claimed.
+    """
     if obj.kind == "node":
         return replace(obj, scan_reason="NotReady",
-                       fresh=replace(obj.fresh, how="read", message="", ready="True"))
+                       fresh=replace(obj.fresh, how="read", message="", ready="True",
+                                     ready_reason="", ready_message=""))
     if obj.kind == "pvc":
         return replace(obj, fresh=replace(obj.fresh, how="read", message="", phase="Bound"))
     return replace(obj, fresh=replace(obj.fresh, how="read", message="",
@@ -133,7 +157,8 @@ def unverify(obj: Object, how: str) -> Object:
         return replace(obj, fresh=Fresh(how="read_failed", message=message))
     if obj.kind == "node" and how == "lease":
         return replace(obj, scan_reason="no kubelet lease",
-                       fresh=replace(obj.fresh, how="read", message="", ready="True"))
+                       fresh=replace(obj.fresh, how="read", message="", ready="True",
+                                     ready_reason="", ready_message=""))
     if obj.kind == "registry" and how == "auth":
         return replace(obj, fresh=replace(obj.fresh, how="read", message="",
                                           literal="unauthorized", wrong_pod=False))

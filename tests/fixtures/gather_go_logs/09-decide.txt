@@ -1,0 +1,7 @@
+read_events	shop/api-7d4b9c6f5-k8m2p	32
+read_events	shop/cart-6b8f5d7c4-r9t3w	3
+read_events	shop/checkout-0	1
+result	1	shop/api	false					
+result	2	shop/cart	false					
+result	3	shop/checkout	false					
+result	4	shop/search	false					

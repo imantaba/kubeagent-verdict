@@ -6,7 +6,7 @@ import re
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, catalog, generate, names
+from kubeagent_verdict.dataset import cases, catalog, gather, generate, names
 from kubeagent_verdict.evals import score
 
 BANNED = (
@@ -98,6 +98,36 @@ def test_corpus_test_set_derives_from_committed_rows():
         assert ex.meta["source"]["distro"] in {"kind", "k3s"}
 
 
+def test_corpus_rows_the_rules_do_not_decide_take_their_own_cause():
+    """A corpus row whose entry the rules do not decide cannot be an
+    `attributed` row: there is no rule cause to be its gold. It becomes an
+    `own_cause` row for the same entry and keeps its source."""
+    exs = generate.corpus_test_set()
+    job1 = {e.key for e in catalog.job1_entries()}
+    rerouted = [ex for ex in exs if ex.meta["entry"] not in job1]
+    assert collections.Counter(ex.meta["entry"] for ex in rerouted) == {
+        "deployment-bad-image-tag": 24, "node-cordon-diskfull": 4,
+        "oversized-job-unschedulable": 3}
+    for ex in rerouted:
+        assert ex.case == ex.meta["case"] == "own_cause"
+        assert "decided by rules:" not in ex.user
+        assert ex.meta["source"]["fault"]
+    for ex in exs:
+        if ex.meta["entry"] in job1:
+            assert ex.case == "attributed"
+
+
+def test_job1_cases_rotate_over_the_entries_the_rules_decide():
+    """Training, held-out and probe rows alike: a job-1 case names only an
+    entry the rules decide, and every such entry gets its turn."""
+    job1 = {e.key for e in catalog.job1_entries()}
+    job1_cases = {"attributed", "truncated", "injection", "positional_probe"}
+    rows = generate.generate(seed=17, size=600) + generate.test_set()
+    for case in job1_cases:
+        seen = {ex.meta["entry"] for ex in rows if ex.case == case}
+        assert seen == job1, case
+
+
 def test_drop_held_out_removes_colliding_groups():
     exs = generate.generate(seed=17, size=60)
     fake_test = [exs[0]]  # pretend the first example's group is a test fixture
@@ -170,13 +200,23 @@ def test_every_probe_row_carries_a_decoy_that_is_not_the_answer():
 def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
     from kubeagent_verdict.dataset import catalog, generate
     probes = generate.probe_sets()
-    trainable = [e for e in catalog.trainable() if e.losers]
-    head = probes[:2 * len(trainable)]
-    assert [ex.case for ex in head] == ["positional_probe", "misattribution_probe"] * len(
-        trainable)
+    # 2026-09-26 (faithful prompts): `positional_probe` is built only for the
+    # entries the rules decide, so the head is no longer a strict
+    # positional/misattribution alternation: an entry the rules do not decide
+    # gives its misattribution row alone. 2 x 19 rows -> 17 + 20
+    job1 = {e.key for e in catalog.job1_entries()}
+    expected = []
+    for e in catalog.trainable():
+        if not e.objects:
+            continue
+        if e.key in job1:
+            expected.append(("positional_probe", e.key))
+        expected.append(("misattribution_probe", e.key))
+    head = probes[:len(expected)]
+    assert [(ex.case, ex.meta["entry"]) for ex in head] == expected
     # Each new slice is a LAYER appended after the last, never interleaved, so
     # every row a previous scoreboard scored keeps its index.
-    tail = probes[2 * len(trainable):]
+    tail = probes[len(expected):]
     assert tail, "no multi probe rows were generated"
     seen, order = [], []
     for ex in tail:
@@ -191,9 +231,12 @@ def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
 def test_contradiction_probe_is_appended_last_one_row_per_entry():
     from kubeagent_verdict.dataset import catalog, generate
     probes = generate.probe_sets()
-    trainable = [e for e in catalog.trainable() if e.losers and e.contradiction]
     tail = [ex for ex in probes if ex.case == "contradiction_probe"]
-    assert len(tail) == len(trainable)
+    # 2026-09-26 (faithful prompts): one row per entry the rules decide, in
+    # catalog order, where it was one per entry with a scripted contradiction
+    # 19 -> 17
+    assert [ex.meta["entry"] for ex in tail] == [e.key for e in catalog.job1_entries()]
+    assert len(tail) == 17
     # Appended, never interleaved: every earlier probe row keeps its position, so
     # a scoreboard banked against the previous test file still lines up. The run
     # is no longer the LAST rows in the file — the two shared-origin slices were
@@ -205,11 +248,13 @@ def test_contradiction_probe_is_appended_last_one_row_per_entry():
     assert cases[first:first + len(tail)] == ["contradiction_probe"] * len(tail)
     assert set(cases[first + len(tail):]) == {"shared_origin_probe",
                                               "shared_origin_decoy_probe"}
+    # The rules decide every row, so the gold is the rules' cause, never
+    # none_of_these, and the row has no decoy: its one candidate is the cause.
     for ex in tail:
-        assert ex.meta["expected_cause"] == c.NONE_OF_THESE
-        decoys = next(iter(ex.meta["decoy_by_workload"].values()))
-        for decoy in decoys:
-            assert decoy in ex.user
+        (wm,) = ex.meta["workloads"].values()
+        assert ex.meta["expected_cause"] == wm["decided_cause"] != c.NONE_OF_THESE
+        assert list(ex.meta["decoy_by_workload"].values()) == [[]]
+        assert "decoy_cause" not in ex.meta
 
 
 def test_multi_probe_rows_carry_two_distinct_workloads():
@@ -249,9 +294,11 @@ def test_provenance_scan_reaches_every_catalog_entry():
     """Coverage, not just patterns: a denylist only guards text it renders.
 
     `generate(seed=17, size=60)` samples cases at random, so it renders
-    `own_cause` for just 6 of the 19 trainable entries and `contradiction` for
-    9 — the rest of that prose is never scanned at all, however many patterns
-    the denylist grows. `test_set()` renders every trainable entry once per
+    `own_cause` for just 7 of the 20 trainable entries, and
+    `contradiction_events` for none: only `contradiction_probe` prints them,
+    and that slice is built for the exam alone. The rest of that prose is
+    never scanned at all, however many patterns the denylist grows.
+    `test_set()` renders every trainable entry once per
     case, which is what makes the test above a real guard rather than a spot
     check. This fails if that coverage regresses.
     """
@@ -264,13 +311,19 @@ def test_provenance_scan_reaches_every_catalog_entry():
             by_case.setdefault(ex.case, set()).add(entry)
 
     # `own_cause` is the only case that renders an entry's `own_cause` text;
-    # `contradiction_probe` is the only one that renders its `contradiction`
-    # text. Full coverage on these two is what carries every entry's
-    # per-entry prose through the scan.
-    for case in ("own_cause", "contradiction_probe"):
-        assert by_case.get(case) == trainable, (
-            f"{case} renders {len(by_case.get(case, ()))} of {len(trainable)} "
-            f"trainable entries; missing {sorted(trainable - by_case.get(case, set()))}"
+    # `contradiction_probe` is the only one that renders its
+    # `contradiction_events`. Full coverage on these two is what carries every
+    # entry's per-entry prose through the scan.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` covers every entry
+    # the rules decide, where it covered every entry with a scripted
+    # contradiction. The three entries it no longer covers have no
+    # `contradiction_events` to render.
+    with_text = {"own_cause": trainable,
+                 "contradiction_probe": {e.key for e in catalog.job1_entries()}}
+    for case, want in with_text.items():
+        assert by_case.get(case) == want, (
+            f"{case} renders {len(by_case.get(case, ()))} of {len(want)} "
+            f"entries with that text; missing {sorted(want - by_case.get(case, set()))}"
         )
     assert set().union(*by_case.values()) == trainable
 
@@ -306,24 +359,43 @@ def test_test_set_slice_counts_are_pinned():
     the probe slices after the block moved up 11 places. A scoreboard
     banked before that date does not line up row for row with this exam;
     the frozen-slice and eval-set hashes moved with it.
+
+    2026-09-26 broke it again, for the faithful prompts. Job-1 rows are
+    built on the gather, so the four job-1 cases lost their rows for the
+    three entries the rules do not decide, the corpus rows for those
+    entries became `own_cause` rows, and a new entry joined every
+    per-entry case. Rows moved from the first corpus row onward.
     """
     counts = collections.Counter(ex.case for ex in generate.test_set())
+    # 2026-09-26 (faithful prompts): job-1 rows are built on the gather, so
+    # `attributed`, `truncated`, `injection` and `positional_probe` exist only
+    # for the 17 entries the rules decide; the 31 corpus rows whose entry the
+    # rules do not decide ask for the entry's own cause instead; and the new
+    # entry `pvc-unbound-unschedulable` adds one row to each per-entry case.
+    # attributed 53 -> 22, own_cause 19 -> 51, truncated 19 -> 17,
+    # injection 19 -> 17, positional_probe 19 -> 17, empty_candidates,
+    # wrong_attribution, misattribution_probe and multi_misattribution_probe
+    # 19 -> 20
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    # the 17 entries the rules decide 19 -> 17
     assert dict(counts) == {
-        "attributed": 53,
-        "contradiction_probe": 19,
-        "empty_candidates": 19,
-        "injection": 19,
-        "misattribution_probe": 19,
-        "multi_misattribution_probe": 19,
+        "attributed": 22,
+        "contradiction_probe": 17,
+        "empty_candidates": 20,
+        "injection": 17,
+        "misattribution_probe": 20,
+        "multi_misattribution_probe": 20,
         "none_of_these": 8,
-        "own_cause": 19,
-        "positional_probe": 19,
+        "own_cause": 51,
+        "positional_probe": 17,
         "shared_origin_decoy_probe": 10,
         "shared_origin_probe": 10,
-        "truncated": 19,
-        "wrong_attribution": 19,
+        "truncated": 17,
+        "wrong_attribution": 20,
     }
-    assert sum(counts.values()) == 252
+    # 2026-09-26 (faithful prompts): the case moves above 252 -> 251
+    # 2026-09-26 (faithful prompts): `contradiction_probe` 19 -> 17, so 251 -> 249
+    assert sum(counts.values()) == 249
 
 
 def test_the_job2_keyword_exposure_is_pinned_per_case():
@@ -359,6 +431,33 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     workloads, all fully derivable -- the victim's own local cause or the
     scenario's shared cause is always printed on that workload's own
     candidate menu. 114 + 20 = 134 graded, 56 + 20 = 76 derivable.
+
+    Re-pinned on 2026-09-26 for the faithful prompts. A row with a node
+    candidate now opens with kubeagent's cluster-health block, and its
+    NotReady line ends "container runtime is down". That prints
+    `worker-containerd-stop`'s keyword "runtime" on five workloads whose
+    prompt did not print it before: one each in `own_cause`,
+    `wrong_attribution` and `misattribution_probe`, and two in
+    `multi_misattribution_probe`. "node" was already printed on all five.
+    76 + 5 = 81 derivable; the 134 graded do not move.
+
+    Re-pinned again on 2026-09-26, when the catalog began using the
+    detector and kubelet text kubeagent really prints. Eleven entries got
+    new keyword pairs, each chosen from a line the prompt shows, and the
+    finding and event lines now carry kubeagent's own words. That makes the
+    other 53 graded workloads derivable too: 9 more in each of `own_cause`,
+    `empty_candidates`, `wrong_attribution` and `misattribution_probe`, and
+    17 more in `multi_misattribution_probe`. 81 + 53 = 134 of 134. Every
+    job-2 keyword is now on screen, so only the grader guard keeps a bot
+    that pastes prompt words from scoring.
+
+    Re-pinned again on 2026-09-26, when the `multi` rows moved onto the
+    gather and `names.NODES` grew from three workers to five. The larger
+    node pool moves every name draw, and two shared-origin scenario rows
+    (each built twice, once per probe case) drew new victims. Each probe
+    case has one undecided workload fewer, so 171 -> 169 graded, all 169
+    still derivable. The spec expected 171; the two lost workloads are job 1
+    now, which is why job 1 reads 120 rather than 118.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -371,18 +470,55 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
         graded[ex.case] += measured
         by_case[ex.case] += derivable
 
-    assert dict(graded) == {"own_cause": 19, "empty_candidates": 19,
-                            "wrong_attribution": 19, "misattribution_probe": 19,
-                            "multi_misattribution_probe": 38,
-                            "shared_origin_probe": 4,
-                            "shared_origin_decoy_probe": 16}
-    assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10,
-                             "wrong_attribution": 9, "misattribution_probe": 9,
-                             "multi_misattribution_probe": 19,
-                             "shared_origin_probe": 4,
-                             "shared_origin_decoy_probe": 16}
-    assert sum(graded.values()) == 134
-    assert sum(by_case.values()) == 76
+    # 2026-09-26 (faithful prompts): the 31 rerouted corpus rows are
+    # `own_cause`, and `pvc-unbound-unschedulable` adds one workload to each
+    # per-entry case and two to the multi probe: own_cause 19 -> 51,
+    # empty_candidates, wrong_attribution and misattribution_probe 19 -> 20,
+    # multi_misattribution_probe 38 -> 40
+    # 2026-09-26 (faithful prompts): `names.NODES` grew to five workers and two
+    # shared-origin scenario rows drew new victims; each probe case has one
+    # undecided workload fewer. shared_origin_probe 4 -> 3,
+    # shared_origin_decoy_probe 16 -> 15. `multi_misattribution_probe` reads
+    # through the gather now and keeps its 40.
+    assert dict(graded) == {"own_cause": 51, "empty_candidates": 20,
+                            "wrong_attribution": 20, "misattribution_probe": 20,
+                            "multi_misattribution_probe": 40,
+                            "shared_origin_probe": 3,
+                            "shared_origin_decoy_probe": 15}
+    # 2026-09-26 (faithful prompts): the cluster-health block prints "runtime" on
+    # five worker-containerd-stop workloads: own_cause 9 -> 10, wrong_attribution
+    # 9 -> 10, misattribution_probe 9 -> 10, multi_misattribution_probe 19 -> 21
+    # 2026-09-26 (faithful prompts): eleven new keyword pairs sit on lines the
+    # prompt shows, and the catalog prints kubeagent's own detector and kubelet
+    # text, so every graded workload is now derivable: own_cause,
+    # empty_candidates, wrong_attribution and misattribution_probe 10 -> 19,
+    # multi_misattribution_probe 21 -> 38
+    # 2026-09-26 (faithful prompts): every new graded workload is derivable
+    # too, the new entry's "claim" and "volume" included: own_cause 19 -> 51,
+    # empty_candidates, wrong_attribution and misattribution_probe 19 -> 20,
+    # multi_misattribution_probe 38 -> 40
+    # 2026-09-26 (faithful prompts): the same two workloads leave job 2, and
+    # every graded workload is still derivable: shared_origin_probe 4 -> 3,
+    # shared_origin_decoy_probe 16 -> 15
+    assert dict(by_case) == {"own_cause": 51, "empty_candidates": 20,
+                             "wrong_attribution": 20, "misattribution_probe": 20,
+                             "multi_misattribution_probe": 40,
+                             "shared_origin_probe": 3,
+                             "shared_origin_decoy_probe": 15}
+    # 2026-09-26 (faithful prompts): the rerouted corpus rows and the new entry
+    # 134 -> 171
+    # 2026-09-26 (faithful prompts): `names.NODES` grew to five workers, and
+    # one undecided shared-origin victim per probe case is decided now.
+    # 171 -> 169
+    assert sum(graded.values()) == 169
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    # 2026-09-26 (faithful prompts): kubeagent's own text and the new keyword
+    # pairs 81 -> 134
+    # 2026-09-26 (faithful prompts): the rerouted corpus rows and the new entry,
+    # all derivable 134 -> 171
+    # 2026-09-26 (faithful prompts): the same two shared-origin workloads leave
+    # job 2. Still 100%. 171 -> 169
+    assert sum(by_case.values()) == 169
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():
@@ -393,7 +529,8 @@ def test_multi_probe_builder_rejects_colliding_workloads():
     The check lives in the builder, so every caller gets it — including any
     future one that does not know to look.
     """
-    entry = next(e for e in catalog.trainable() if e.losers)
+    entry = next(e for e in catalog.trainable() if e.objects)
+    assert entry.key == "memory-limit-oomkill"
     n = names.draw(random.Random(0))
     with pytest.raises(ValueError, match="distinct workloads"):
         cases.multi_misattribution_probe([(entry, n), (entry, n)], random.Random(0))
@@ -429,10 +566,14 @@ def test_generate_stops_at_first_error_and_writes_nothing(tmp_path, monkeypatch)
 
 
 def test_generate_appends_one_training_only_separate_multi_row():
-    """The training-only separate prompt is one extra multi() call, appended once, not
-    part of the CASE_MIX-counted 11 multi rows -- pairs worker-containerd-stop with
-    itself at two different (ns, node) draws so the two workloads decide different
-    causes and rules.label comes out 'separate'."""
+    """The training-only separate prompt pairs worker-containerd-stop with
+    itself at two different (ns, node) draws, so the two workloads decide
+    different causes and rules.label comes out 'separate'.
+
+    2026-09-26 (faithful prompts): it used to be one row on top of the
+    CASE_MIX-counted `multi` rows, so `generate(seed, size)` built size + 1
+    rows. It now takes the last counted `multi` slot.
+    """
     from kubeagent_verdict.dataset import generate
 
     rows = generate.generate(seed=5, size=200)
@@ -444,6 +585,21 @@ def test_generate_appends_one_training_only_separate_multi_row():
     workloads = list(ex.meta["workloads"].values())
     assert len(workloads) == 2
     assert workloads[0]["decided_cause"] != workloads[1]["decided_cause"]
+
+
+@pytest.mark.parametrize("size", [5, 10, 100, 800])
+def test_generate_builds_exactly_size_rows(size):
+    """The worker-containerd-stop self-pair takes the last counted `multi`
+    slot, so a build has exactly `size` rows. At size 5 there is no `multi`
+    slot and no self-pair; at size 10 the self-pair is the one `multi` row."""
+    rows = generate.generate(seed=17, size=size)
+    assert len(rows) == size
+    multi = [ex for ex in rows if ex.case == "multi"]
+    assert len(multi) == generate.counts_for(size)["multi"]
+    doubled = [ex for ex in multi if ex.group.count("worker-containerd-stop:") == 2]
+    assert len(doubled) == min(1, len(multi))
+    if doubled:
+        assert multi[-1] is doubled[0]
 
 
 def test_job_population_counts_match_the_pinned_exam_shape():
@@ -476,10 +632,33 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # printed 157 and 153, so those are the pinned literals, not R40's
     # rounded figures. job2 fell from 153 to 142 on 2026-09-24: the job-2
     # generator fix cut the `none_of_these` slice from 19 rows to 8.
-    assert job1 == 157
-    assert job2 == 142
-    assert job3_prompts == 39
-    assert job3_labels == {"shared": 5, "separate": 0, "none": 34}
+    # 2026-09-26 (faithful prompts): `oversized`'s node decoy now sits off the
+    # pod's node, so kubeagent rules it out; its `contradiction_probe` row has
+    # no attributed candidate and moves from job 1 to job 2. job1 157 -> 156,
+    # job2 142 -> 143.
+    # 2026-09-26 (faithful prompts): job-1 rows are built on the gather. The 31
+    # corpus rows the rules do not decide become `own_cause` (job 2); the four
+    # job-1 cases drop the rows of the three undecided entries; the new entry
+    # adds a row to every per-entry case; and node-cordon-diskfull's node is
+    # ruled out, so its `contradiction_probe` row moves to job 2.
+    # job1 156 -> 118, job2 143 -> 181. job 3 gains the new entry's multi
+    # probe row, labelled "none": 39 -> 40, none 34 -> 35.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built on the
+    # gather and only for the 17 entries the rules decide. Its 17 job-1 rows
+    # are replaced by 17 job-1 rows, and its two job-2 rows (node-cordon-diskfull
+    # and oversized-job-unschedulable) are gone. job1 118 -> 118, job2 181 -> 179.
+    # 2026-09-26 (faithful prompts): `names.NODES` grows from three workers to
+    # five, so every name draw moves. Two shared-origin scenario rows draw
+    # new victims, and each is built twice (`shared_origin_probe` and its
+    # healthy twin). In each copy of the three-victim row one decided victim
+    # becomes undecided, and in each copy of the two-victim row both victims
+    # draw a node decoy the rules now decide. The `multi_misattribution_probe`
+    # rows moved onto the gather and stay all job 2. job1 118 -> 120,
+    # job2 179 -> 177; job 3 does not move.
+    assert job1 == 120
+    assert job2 == 177
+    assert job3_prompts == 40
+    assert job3_labels == {"shared": 5, "separate": 0, "none": 35}
 
 
 def test_every_declared_down_node_appears_ruled_out_on_every_other_workload():
@@ -560,9 +739,10 @@ def test_registry_fresh_read_literal_is_a_substring_of_the_events_read():
     prompt's `candidates` section, and an `events for <ns>/<pod>` read, in
     its `evidence` section (what `classifyPullEvents` actually scans).
     `rules._check_registry` always writes the candidate line's literal
-    verbatim after the fixed phrase `a pull event shows a ... error:`, and
-    `render.registry_events_read` writes the same `obj.fresh.literal` into
-    the events read's `Failed:` line -- so whatever literal a candidate line
+    verbatim after the fixed phrase `a pull event shows a ... error:`. The
+    literal comes from the gather's `_classify_pull_events`, which finds it
+    in the pod's own events, and the events read is `gather.format_events`
+    over those same events -- so whatever literal a candidate line
     names has to appear in the evidence section too (case-insensitively), or
     a model reading only the events text would reach a different answer than
     the candidate menu claims. The two sections are found by the real
@@ -594,17 +774,34 @@ def test_no_pull_event_line_has_no_events_for_in_it():
     never a literal a `Failed:` line would carry -- the DECISION's second
     invariant, checked directly rather than as a byproduct of the substring
     check above.
+
+    2026-09-26 (faithful prompts): the `multi` rows read through the
+    gather now, and the gather's events read is `gather.format_events`
+    over the pod's own events. `multi` still draws a registry decoy's
+    ending, but the gather reads the events instead of printing the
+    ending. Every catalog entry declares events, so no generated row
+    prints `no events for` any more (0 in the exam and the training
+    build), and the old "some row must print it" check could only fail.
+    The sweep keeps the invariant for any row that does print it, and the
+    one shape that prints it -- a pulling pod with no events -- is built
+    through the two gather functions the rows use: its read says
+    `no events for` and the registry rule finds no literal in it.
     """
-    rows = generate.test_set()
-    saw_no_event = False
+    # 2026-09-26 (faithful prompts): the registry entry is not one the rules
+    # decide, so no exam row draws an ending for it any more (12 exam rows
+    # did: 10 `attributed`, 1 `truncated`, 1 `injection`). Training `multi`
+    # rows still draw it, so the check reads the training build as well.
+    rows = generate.test_set() + generate.generate(seed=17, size=8000)
     for e in rows:
-        prompt = e.user
-        if "no events for" in prompt:
-            saw_no_event = True
-            for line in prompt.splitlines():
-                if "no events for" in line:
-                    assert "Failed:" not in line
-    assert saw_no_event, "the exam must carry at least one no_event registry ending"
+        for line in e.user.splitlines():
+            if "no events for" in line:
+                assert "Failed:" not in line
+    # 2026-09-26 (faithful prompts): see the docstring. No row prints the
+    # read now, so the shape is built directly.
+    read = gather.format_events("shop", "web-abc", ())
+    assert read == "no events for shop/web-abc"
+    assert "Failed:" not in read
+    assert gather._classify_pull_events(()) == ""
 
 
 # ------------------------------------------- the decided line in the prompt
@@ -657,38 +854,55 @@ def test_every_job1_workload_prints_its_decided_line_and_no_job2_one_does():
                 decided_total += 1
             else:
                 assert key not in lines, (e.meta["case"], key)
-    assert decided_total == 157
+    # 2026-09-26 (faithful prompts): `oversized`'s `contradiction_probe` row is
+    # undecided now (its node decoy is ruled out). 157 -> 156
+    # 2026-09-26 (faithful prompts): the job-1 population above moved with the
+    # job-1 rows. 156 -> 118
+    # 2026-09-26 (faithful prompts): four shared-origin rows drew new victims
+    # when `names.NODES` grew to five workers. 118 -> 120
+    assert decided_total == 120
 
 
 def test_every_decoy_probe_row_names_its_decoy_cause():
     """The length-gap decider reads `decoy_cause` off the row meta.
 
     Without the key the decider has no population at all: both of its
-    slices come out empty and it can only print `not measured`. The four
+    slices come out empty and it can only print `not measured`. The three
     probe builders that carry one row-level decoy name it again, and the
     multi-workload probe names one decoy per workload, the way the base
     revision did.
     """
     rows = generate.test_set()
     named = collections.Counter(e.meta["case"] for e in rows if e.meta.get("decoy_cause"))
-    assert dict(named) == {"wrong_attribution": 19, "positional_probe": 19,
-                           "misattribution_probe": 19, "contradiction_probe": 19}
+    # 2026-09-26 (faithful prompts): `positional_probe` is built only for the
+    # 17 entries the rules decide, and the new entry adds a row to the two
+    # per-entry cases: wrong_attribution 19 -> 20, positional_probe 19 -> 17,
+    # misattribution_probe 19 -> 20
+    # 2026-09-26 (faithful prompts): a `contradiction_probe` row has one
+    # candidate, the rules' cause, so it names no decoy 19 -> 0
+    assert dict(named) == {"wrong_attribution": 20, "positional_probe": 17,
+                           "misattribution_probe": 20}
     for e in rows:
         if not e.meta.get("decoy_cause"):
             continue
         key = next(iter(e.meta["workloads"]))
         assert e.meta["decoy_cause"] == e.meta["decoy_by_workload"][key][0]
     multi = [e for e in rows if e.meta["case"] == "multi_misattribution_probe"]
-    assert len(multi) == 19
+    # 2026-09-26 (faithful prompts): the new entry joins the pairing 19 -> 20
+    assert len(multi) == 20
     for e in multi:
         assert e.meta["decoy_causes"] == [v[0] for v in e.meta["decoy_by_workload"].values()]
 
 
 def test_the_length_gap_decider_has_rows_in_both_slices():
-    """57 of the 252 exam rows carry both a decoy cause and an expected cause
+    """57 of the 249 exam rows carry both a decoy cause and an expected cause
     that is not `none_of_these`, which is what the length gap is measured
     over. Both slices have to be non-empty: a decider with one empty slice
     reads `not measured` and tells a release reviewer nothing.
+
+    The 57 did not move when the `contradiction_probe` rows came to be
+    decided by the rules: the old rows expected `none_of_these`, and the new
+    ones name no decoy, so neither kind is in the count.
     """
     rows = [generate.to_row(e) for e in generate.test_set()]
     results = score.evaluate(rows, lambda messages: "")
@@ -748,27 +962,137 @@ def _evidence_labels(user: str) -> list[str]:
     return re.findall(r"^== (.+) ==$", section, flags=re.MULTILINE)
 
 
+def _pod_of(label: str, ns: str, name: str) -> bool:
+    """True when a read label names a pod of workload ns/name."""
+    return re.search(rf"(^| ){re.escape(ns)}/{re.escape(name)}-[^-/ ]+-[^-/ ]+( |$)",
+                     label) is not None
+
+
 def test_every_crash_family_workload_in_a_multi_row_keeps_its_log_read():
-    """kubeagent reads the previous log of every crash-family workload.
-    A multi-workload row gives each workload at most two reads and the row
-    at most 8, so a log read appended after two object reads, or a plain
-    `[:8]`, would silently lose it. Checked on every `multi` training row
-    and every `multi_misattribution_probe` exam row."""
+    """kubeagent reads the previous log of every crash-family workload,
+    unless its budget of 8 reads runs out first. Checked on every `multi`
+    training row and every `multi_misattribution_probe` exam row.
+
+    2026-09-26 (faithful prompts): a multi row's reads come from one
+    gather, which walks the workloads in report order and stops at the
+    budget. A log is now missing only when the row spent all 8 reads and
+    the walk never got past that workload.
+    """
     rows = [ex for ex in generate.generate(seed=17, size=8000) if ex.case == "multi"]
     rows += [ex for ex in generate.test_set() if ex.case == "multi_misattribution_probe"]
-    checked = 0
+    checked = cut = 0
     for ex in rows:
         labels = _evidence_labels(ex.user)
         assert len(labels) <= c.MAX_TOOL_CALLS, ex.group
-        for part in ex.group.split("+"):
-            key, workload = part.split(":")
+        parts = [part.split(":") for part in ex.group.split("+")]
+        for i, (key, workload) in enumerate(parts):
             if key not in cases.LOG_READS:
                 continue
             ns, name = workload.split("/")
-            pattern = re.compile(rf"log causes {re.escape(ns)}/{re.escape(name)}-[^-]+-[^-]+ container \S+")
-            assert any(pattern.fullmatch(label) for label in labels), (ex.group, part)
+            pattern = re.compile(
+                rf"log causes {re.escape(ns)}/{re.escape(name)}-[^-]+-[^-]+ container \S+")
             checked += 1
-    assert checked > 0
+            if any(pattern.fullmatch(label) for label in labels):
+                continue
+            cut += 1
+            assert len(labels) == c.MAX_TOOL_CALLS, (ex.group, workload)
+            for _key, later in parts[i + 1:]:
+                lns, lname = later.split("/")
+                assert not any(_pod_of(label, lns, lname) for label in labels), (
+                    ex.group, workload, later)
+    assert checked > cut > 0
+
+
+@pytest.fixture(scope="module")
+def multi_rows():
+    """Every `multi` row of generate(17, 800), then every
+    `multi_misattribution_probe` row of the exam."""
+    rows = [ex for ex in generate.generate(seed=17, size=800) if ex.case == "multi"]
+    return rows + [ex for ex in generate.test_set() if ex.case == "multi_misattribution_probe"]
+
+
+def _section(user: str, name: str) -> list[str]:
+    return user.split(f"== BEGIN {name} ==\n")[1].split(f"== END {name} ==")[0].splitlines()
+
+
+def _entry(lines: list[str], workload: str) -> list[str]:
+    """The lines of one workload's entry: its `- ns/name (` line and the
+    indented lines under it."""
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"- {workload} ("))
+    end = next((i for i in range(start + 1, len(lines)) if not lines[i].startswith(" ")),
+               len(lines))
+    return lines[start:end]
+
+
+def test_every_workload_of_a_multi_row_prints_its_finding(multi_rows):
+    """IS-1: kubeagent prints each flagged workload's finding under its
+    inventory line. A multi row used to print only the header line."""
+    for ex in multi_rows:
+        inventory = _section(ex.user, "inventory")
+        for workload in ex.meta["workloads"]:
+            assert any(line.startswith("    issue: ") for line in _entry(inventory, workload)), (
+                ex.group, workload)
+
+
+_CONSIDERED_NODE = re.compile(r"considered node (\S+) \(([^)]+)\)")
+
+
+def test_a_multi_row_shows_each_node_with_one_scan_reason(multi_rows):
+    """IS-19: one node has one scan reason in one scan. Two workloads on
+    one node used to show that node NotReady under one workload and with no
+    kubelet lease under the other."""
+    for ex in multi_rows:
+        reasons = collections.defaultdict(set)
+        for m in _CONSIDERED_NODE.finditer("\n".join(_section(ex.user, "candidates"))):
+            reasons[m.group(1)].add(m.group(2))
+        assert all(len(r) == 1 for r in reasons.values()), (ex.group, dict(reasons))
+
+
+def test_a_multi_row_reads_each_object_once_within_the_budget(multi_rows):
+    """kubeagent spends at most 8 reads on a scan and describes each object
+    once. The one read outside the gather is a multi row's healthy shared
+    read, first in the evidence."""
+    for ex in multi_rows:
+        labels = _evidence_labels(ex.user)
+        assert len(labels) <= c.MAX_TOOL_CALLS, ex.group
+        gathered = labels[1:] if "origin_read_label" in ex.meta else labels
+        assert len(set(gathered)) == len(gathered), (ex.group, gathered)
+
+
+def test_a_multi_rows_origin_label_is_the_read_it_prints(multi_rows):
+    """A multi row's healthy shared read is printed first, and the meta
+    names it by the label the prompt prints, with no `{node}` or `{ns}`
+    left in it."""
+    with_origin = 0
+    for ex in multi_rows:
+        if "origin_read_label" not in ex.meta:
+            continue
+        with_origin += 1
+        label = ex.meta["origin_read_label"]
+        assert "{" not in label, (ex.group, label)
+        assert _evidence_labels(ex.user)[0] == label, ex.group
+    assert with_origin > 0
+
+
+def test_every_job2_multi_workload_can_be_answered_from_its_own_block(multi_rows):
+    """A job-2 workload of a multi row asks for its own cause only when its
+    own printed lines -- inventory entry, candidate entry, its reads -- hold
+    every keyword of that cause. Otherwise the gold is none_of_these."""
+    checked = collections.Counter()
+    for ex in multi_rows:
+        own = score._own_blocks(ex.user, ex.meta["workloads"])
+        for workload, wm in ex.meta["workloads"].items():
+            if wm["job"] != 2:
+                continue
+            if wm["expected_cause"] == c.NONE_OF_THESE:
+                checked["none_of_these"] += 1
+                continue
+            joined = "\n".join(own[workload])
+            missing = [k for k in wm["own_cause_keywords"]
+                       if score._norm_cause(k) not in joined]
+            assert wm["own_cause_keywords"] and not missing, (ex.group, workload, missing)
+            checked["own"] += 1
+    assert checked["own"] > 0
 
 
 _CANDIDATE_HEAD = re.compile(r"^- (\S+) \(\w+\)(?: \[confidence: (\w+)\])?:$")

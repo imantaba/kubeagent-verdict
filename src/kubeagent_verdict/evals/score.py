@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.evals.contract_check import contract_check
@@ -191,13 +192,160 @@ def _is_job2_keyword_graded(meta_workload: dict,
                 and own_cause_keywords)
 
 
+# The grader guard. Job 2 marks a cause right when every keyword is in it, so
+# a reply can collect the keywords without judging anything: paste the lines
+# the prompt printed about the workload, or name the real cause next to a
+# decoy. Two checks zero such a reply. G2: the cause holds a decoy. G3b: the
+# cause holds a full printed line of the workload's own block.
+#
+# Both read the RAW cause, normalized by `_norm_cause` and nothing else. No
+# 512-rune cap and no `_clean_rationale`: a capped cause cuts off the lines
+# a paste puts after rune 512, and capping first was measured to let the
+# paste bot through.
+#
+# Job 1 is not guarded. On `shared_origin_probe` rows `decoy_by_workload`
+# lists the job-1 workload's decided cause, and that IS the job-1 gold
+# answer, so G2 on job 1 would zero the right answer.
+
+_SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
+_READ_LABEL = re.compile(r"^== (.+) ==$")
+# The read that opens a workload's gather group: kubeagent reads the events
+# of the workload's pod first (internal/investigate/gather.go:75-90 at v1.24.0).
+_GATHER_GROUP_LABEL = re.compile(r"^events \S+/\S+$")
+
+
+def _read_owner(label: str, workloads: list[str]) -> str | None:
+    """The workload an evidence read's label names, or None.
+
+    Each whitespace token shaped `ns/x` names workload `ns/name` when `x` is
+    the name or starts with `name-` (a pod of it). When two workloads match,
+    the longer name wins, so `web/api-gw-5c6b` goes to `web/api-gw`, not to
+    `web/api`.
+
+    A name is not an owner on its own: a claim called `cache-0` starts with
+    `cache-` too. So `_own_blocks` asks this only of a label that opens a
+    gather group, or of a label in a trail that has no gather group.
+    """
+    owner = None
+    for token in label.split():
+        ns, slash, x = token.partition("/")
+        if not slash:
+            continue
+        for w in workloads:
+            wns, _, name = w.partition("/")
+            named = wns == ns and (x == name or x.startswith(name + "-"))
+            if named and (owner is None or len(w) > len(owner)):
+                owner = w
+    return owner
+
+
+def _own_blocks(prompt: str, workloads: Iterable[str]) -> dict[str, frozenset[str]]:
+    """Each workload's own printed lines, normalized by `_norm_cause`, with
+    empty results dropped. Every workload gets a key; one the prompt never
+    prints gets an empty set.
+
+    A workload's own lines are:
+    - its inventory entry: the line starting `- {w} (` and the lines under
+      it that start with a space;
+    - its candidate entry, by the same rule;
+    - its evidence reads: its gather group, when the trail has one, or else
+      the reads from a label that names it up to the next label that names
+      another workload.
+
+    An entry ends at the next line starting `- ` or at any line that does not
+    start with a space.
+
+    kubeagent reads one workload's events, describes and logs before the
+    next workload's (`gatherEvidence`, internal/investigate/gather.go:71-155
+    at v1.24.0). So each workload's gather group opens with an `events
+    <ns>/<pod>` read, and every read up to the next `events` read is in that
+    group: `describe node /worker-1`, `describe pvc web/cache-0`, `log causes
+    ...`. The group's owner is the workload the `events` label names (see
+    `_read_owner`), or nobody when it names no flagged workload. No other
+    label in the group can move the owner, so a claim named `cache-0` in
+    `web/indexer`'s group stays `web/indexer`'s even when `web/cache` is
+    flagged too.
+
+    A trail with no `events` read yet (the tool loop's labels on a
+    shared-origin row, or the one healthy-origin read printed before the
+    gather) has no group. There every label that names a workload moves the
+    owner, by `_read_owner`'s name rule, and a read whose label names no
+    workload stays with the workload before it.
+
+    Lines before the first entry, or before the first read that names a
+    workload, belong to nobody. So do lines outside the three sections.
+    """
+    names = list(workloads)
+    lines: dict[str, set[str]] = {w: set() for w in names}
+    section = None
+    current = None
+    grouped = False
+    for line in prompt.split("\n"):
+        mark = _SECTION_MARK.match(line)
+        if mark:
+            section = mark.group(2) if mark.group(1) == "BEGIN" else None
+            current = None
+            grouped = False
+            continue
+        if section in ("inventory", "candidates"):
+            if line.startswith("- "):
+                current = next((w for w in names if line.startswith(f"- {w} (")), None)
+            elif not line.startswith(" "):
+                current = None
+        elif section == "evidence":
+            label = _READ_LABEL.match(line)
+            if label and _GATHER_GROUP_LABEL.match(label.group(1)):
+                grouped = True
+                current = _read_owner(label.group(1), names)
+            elif label and not grouped:
+                current = _read_owner(label.group(1), names) or current
+        else:
+            continue
+        if current is not None:
+            normalized = _norm_cause(line)
+            if normalized:
+                lines[current].add(normalized)
+    return {w: frozenset(own) for w, own in lines.items()}
+
+
+def _workload_decoys(meta: dict, workload: str) -> list[str]:
+    """The decoys one workload can name: its own `decoy_by_workload` entries,
+    then the row's `decoy_causes` (or `[decoy_cause]` when that is empty).
+    Empty values are dropped. The decoy gate and G2 both read this list, so
+    they cannot disagree about what a decoy is."""
+    own = (meta.get("decoy_by_workload") or {}).get(workload) or []
+    row = meta.get("decoy_causes") or [meta.get("decoy_cause")]
+    return [d for d in [*own, *row] if d]
+
+
+def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -> bool:
+    """Whether the grader guard zeroes this job-2 cause.
+
+    G2: the normalized cause holds a normalized decoy. G3b: it holds one of
+    `own_lines`, which are already normalized (what `_own_blocks` returns).
+    An empty decoy or line is skipped: an empty string sits inside every
+    cause.
+    """
+    c = _norm_cause(cause)
+    if any(n and n in c for n in (_norm_cause(d) for d in decoys if d)):
+        return True
+    return any(line and line in c for line in own_lines)
+
+
 def job2(meta_workload: dict, reply_row: dict | None,
-         own_cause_keywords: list[str], *, workload: str = "") -> float:
+         own_cause_keywords: list[str], *, workload: str = "",
+         decoys: Iterable[str] = (), own_lines: Iterable[str] = ()) -> float:
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
     story's own cause -- all of `own_cause_keywords` appear in the reply's
     cause, matched as substrings after lowercasing both sides -- or, on a
     `none_of_these` workload, when the reply's cause is exactly that. 0.0
     otherwise, including a missing row or reply.
+
+    The grader guard runs first and scores 0.0 when the cause holds one of
+    `decoys` (G2) or one of `own_lines` (G3b). It runs before the keyword
+    rule because a pasted block or a hedge carries the keywords too, and
+    the keyword rule alone would mark it right. With no `decoys` and no
+    `own_lines`, nothing is guarded: that is the unguarded score.
 
     Raises `UngradableWorkload` for a named-cause workload with no keywords,
     BEFORE looking at the reply: that is a statement about the corpus, and a
@@ -205,6 +353,8 @@ def job2(meta_workload: dict, reply_row: dict | None,
     """
     _require_job2_gradable(workload, meta_workload, own_cause_keywords)
     if reply_row is None:
+        return 0.0
+    if _job2_guarded(str(reply_row.get("cause", "")), decoys, own_lines):
         return 0.0
     got_cause = str(reply_row.get("cause", "")).strip().lower()
     if meta_workload.get("expected_cause") == NONE_OF_THESE:
@@ -430,6 +580,11 @@ def _norm_cause(s: str) -> str:
 # job-2 score incomparable, so it waits for evidence a model is actually
 # clearing job 2 while failing elsewhere. This number is what would supply that
 # evidence.
+#
+# It counts words the prompt prints, not lines a reply pastes. The grader
+# guard, `_job2_guarded`, is what stops a reply that pastes them (2026-09-26,
+# faithful prompts: 169 of the exam's 169 keyword-graded workloads have every
+# keyword on screen).
 
 
 def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
@@ -478,11 +633,16 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
     keys (see `cli.py`). The oracle's train/val dataset self-check is the
     other, where 4,880 train and 532 val job-2 workloads carry a named cause
     and no keywords (measured 2026-09-24 against `out/dataset-0924`; the
-    job-2 generator fix moved this count from the 0923 bank's 4,823/589):
+    job-2 generator fix moved this count from the 0923 bank's 4,823/589;
+    2026-09-26 (faithful prompts): `out/dataset-0926` counts 4,900 train and
+    512 val, every one in a `shared_origin` or `shared_origin_decoy` row;
+    2026-09-28 (final review): `out/dataset-0928`, which replaced it, counts
+    the same):
     nothing grades the training pool by keyword, and `tests/test_oracle.py`'s
     `_job2_gate` already scores job 2 over its own population. Curating 217
-    more pairs to satisfy a grader that never reads them is the cost this
-    parameter exists to avoid.
+    more pairs (the count before 2026-09-26; not measured again since) to
+    satisfy a grader that never reads them is the cost this parameter
+    exists to avoid.
     """
     # The validation pre-pass. A malformed row is a fixture bug, not a model
     # failure, and it must never spend a chat_fn call finding that out: every
@@ -510,6 +670,16 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             by_workload = {r.get("workload"): r for r in doc["verdicts"]
                            if isinstance(r, dict)}
         meta = row.get("meta", {})
+        # The grader guard's inputs, once per row and once per job-2
+        # workload. `job2` and the cause_hits count below both read them, so
+        # `cause_acc` and job 2 agree on every all-job-2 row. Not graded on
+        # job 2, nothing is computed and nothing is guarded.
+        guards: dict[str, dict] = {}
+        if grade_job2:
+            own_blocks = _own_blocks(prompt, meta.get("workloads") or {})
+            guards = {w: {"decoys": _workload_decoys(meta, w), "own_lines": own_blocks[w]}
+                      for w, wm in (meta.get("workloads") or {}).items()
+                      if wm.get("job") == 2}
         cause_hits, conf_hits, total = 0, 0, len(expected["verdicts"])
         # Confidence grades on the verdicts the model got WRONG. A grade the
         # model never emitted (workload omitted) is absent, not a pass.
@@ -523,7 +693,10 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             # one, not only on the two cases that used to be named.
             wm = (meta.get("workloads") or {}).get(exp["workload"]) or {}
             keywords = wm.get("own_cause_keywords") or []
-            if wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
+            guard = guards.get(exp["workload"])
+            if guard is not None and _job2_guarded(str(got.get("cause", "")), **guard):
+                matched = False
+            elif wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
                 matched = all(str(k).lower() in str(got.get("cause", "")).lower()
                               for k in keywords)
             else:
@@ -562,6 +735,8 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # rows set, which can sit next to an unrelated (or empty)
         # `decoy_by_workload` entry for the same workload. A workload's real
         # decoy list is the union of both, so naming either kind counts.
+        # `_workload_decoys` builds that union; the grader guard's G2 reads
+        # the same list.
         #
         # A workload absent from the reply, or whose combined decoy list is
         # empty, contributes nothing to decoy_hits -- refusing is not
@@ -570,15 +745,13 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
-        row_decoys = [d for d in (meta.get("decoy_causes")
-                                  or [meta.get("decoy_cause")]) if d]
         # Per-workload keys first, in their own order, then any flagged
         # workload `decoy_by_workload` never mentioned -- sorted, so the scan
         # order does not depend on set-iteration order between runs.
         extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
         decoy_hits: list[bool] = []
         for workload in [*per_workload_decoys, *extra_workloads]:
-            decoys = per_workload_decoys.get(workload, []) + row_decoys
+            decoys = _workload_decoys(meta, workload)
             if not decoys:
                 continue
             got = by_workload.get(workload)
@@ -590,6 +763,9 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # entries, so "pick the longer candidate" scores ~83% on both
         # adversarial probe slices while reading nothing -- see the longer
         # comment this carried before this task, unchanged in spirit.
+        # (2026-09-26, faithful prompts: 15 of 19 is the catalog before that
+        # day. The rules now pick every winner, and the split has not been
+        # measured again.)
         decoy_cause = meta.get("decoy_cause")
         exp_cause = meta.get("expected_cause")
         length_helps = None
@@ -615,7 +791,7 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         job1_scores = [job1(wm, by_workload.get(w))
                        for w, wm in workloads.items() if wm.get("job") == 1]
         job2_scores = ([job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [],
-                             workload=w)
+                             workload=w, **guards[w])
                         for w, wm in workloads.items() if wm.get("job") == 2]
                        if grade_job2 else [])
         row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))
@@ -705,7 +881,8 @@ def length_gap(helps: dict, misleads: dict) -> tuple[float | None, bool | None]:
     SIGNED, not absolute. The failure this decider exists to catch is a word
     counter, and a word counter scores HIGH where length points at the true
     cause and LOW where it points at the decoy -- the winning cause is the
-    longer phrase in 15 of 19 catalog entries. A model that scores *better* on
+    longer phrase in 15 of 19 catalog entries (the catalog before 2026-09-26;
+    not measured again since). A model that scores *better* on
     the misleading rows has ruled that shortcut out, so a negative gap passes.
     An `abs()` bar would instead fail it for scoring well on the harder slice,
     where the overall denominator is now 1 row: the misleads rate can only

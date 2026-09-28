@@ -103,8 +103,18 @@ def test_cousin_probe_is_not_in_the_exam():
     # with any exam row, and the exam's row count does not move.
     # 263 to 252 on 2026-09-24: the job-2 generator fix cut the exam's
     # `none_of_these` slice from 19 rows to 8. The cousin probe added none.
+    # 2026-09-26 (faithful prompts): `truncated`, `injection` and
+    # `positional_probe` are built only for the 17 entries the rules decide,
+    # not all 19 (-6); the new `pvc-unbound-unschedulable` entry adds one
+    # row to each of five other cases (+5); and 31 corpus rows moved from
+    # `attributed` to `own_cause` (no count change). The cousin probe still
+    # added none. 252 -> 251.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    # the 17 entries the rules decide, not the 19 with a scripted
+    # contradiction: three entries' rows go and the new entry's row comes.
+    # The cousin probe still added none. 251 -> 249.
     exam = generate.test_set()
-    assert len(exam) == 252
+    assert len(exam) == 249
     exam_origins = {ex.meta.get("origin") for ex in exam
                     if ex.case in ("shared_origin_probe",
                                    "shared_origin_decoy_probe")}

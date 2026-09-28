@@ -1,0 +1,16 @@
+row	1	app	api	Deployment	2	scoped
+row	2	db	orders	StatefulSet	2	scoped
+row	3	img	seven	Deployment	2	scoped
+row	4	img	six	Deployment	2	scoped
+row	5	img	solo	Deployment	2	scoped
+row	6	img	three	Deployment	2	scoped
+row	7	img	two	Deployment	2	scoped
+row	8	kube-system	coredns	Deployment	2	scoped
+row	9	store	cache	StatefulSet	2	scoped
+row	10	web	frontend	Deployment	2	scoped
+row	11	web	shop	Deployment	2	unscoped
+row	12	web	worker	Deployment	2	unscoped
+hidden_restarts	1
+hidden_cron	0
+dropped	store	metrics	Deployment
+dropped	web	static	Deployment

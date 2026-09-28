@@ -58,7 +58,10 @@ a source:
    slug from kubeagent's chaos harness (17 slugs) plus one entry per
    known-issues kind not already covered by a slug (11 more, for 16 kinds
    total, since several kinds and slugs overlap), 19 of the 28 catalog
-   entries used to generate training examples. Each entry declares the
+   entries used to generate training examples. (That is v0.1.0's catalog:
+   19 of 28. Since 2026-09-26 the catalog has 29 entries, 20 of them
+   trainable; the 29th, `pvc-unbound-unschedulable`, covers no slug and
+   no kind.) Each entry declares the
    inventory findings that fault produces, the candidate list the
    deterministic pass would offer, evidence-line templates, and the
    correct verdict — and an entry's evidence templates may only claim
@@ -84,6 +87,10 @@ generated corpus: one runs over a train/val batch, a second over
 and a third asserts the scanned corpus actually renders every trainable
 catalog entry, because a sampled 60-example batch renders `own_cause` for
 only 6 of the 19 entries and a denylist cannot guard prose it never emits.
+(2026-09-28: measured again, the same way, by counting the entries the
+batch's `own_cause` rows name. At the branch base `4c954fe` it was 7 of
+19, in a batch that held 61 rows, not 60; the "6 of 19" was written on
+2026-08-24. Today it is 7 of the 20 trainable entries, in a batch of 60.)
 An earlier version of this paragraph recorded the test-set rows as
 unchecked. That was accurate when written; the gap has since been closed,
 and the coverage assertion is what keeps it closed.
@@ -158,7 +165,8 @@ metric lies.
 - **`length helps` and `length misleads` mean nothing read separately —
   read them together or not at all.** In 15 of the 19 trainable catalog
   entries the correct cause happens to be the longer candidate phrase
-  (mean 9.0 words against 6.4 for the losing candidate), so a model that
+  (mean 9.0 words against 6.4 for the losing candidate; measured on the
+  catalog before 2026-09-26, see docs/design.md), so a model that
   has learned nothing but "pick the longer option" scores high on
   `length helps` for free. The same word-counting model scores near zero
   on `length misleads`, where the longer phrase is the wrong one. A model
@@ -213,8 +221,10 @@ metric lies.
 
 ## Known limitations
 
-Every one of the 19 trainable catalog entries appears in the training
-set, the validation set, and the corpus-derived test set — the generator
+Every one of the 19 trainable catalog entries (v0.1.0's catalog: 19 of
+28; 29 entries, 20 trainable, since 2026-09-26, and all 20 appear in
+every split of `out/dataset-0928`) appears in the training set, the
+validation set, and the corpus-derived test set — the generator
 cycles through all trainable entries for every curriculum case, and only
 specific held-out (entry, workload) combinations, not whole entries, are
 excluded from training. The eval therefore does not test entry-level
@@ -437,7 +447,8 @@ measurement instead of hiding it.
 
 Separately, the catalog carries a known length cue in its phrasing: in 15
 of the 19 trainable entries the winning cause is written as the longer of
-the two candidate phrases (mean 9.0 words against 6.4). This is not a
+the two candidate phrases (mean 9.0 words against 6.4; measured on the
+catalog before 2026-09-26, see docs/design.md). This is not a
 training bug to be silently corrected: a correct root cause names a
 specific mechanism while a plausible wrong answer names a category, so the
 right answer tends to be the longer sentence in real reports too, and
@@ -713,6 +724,9 @@ Seven limits on this reading, carried from the design that scored it:
    34 of 39 — 0.8718 against a 0.9 bar, five rows short, and still fails. The
    design spec states this same figure and calls it a failure by design: the
    bar is built to catch exactly this bot, not a margin to worry about.
+   (2026-09-26: the exam was rebuilt. On the new exam this bot scores 35 of
+   40 — 0.875. It still misses the five `shared` rows, and it still fails.
+   The 34 of 39 above is the exam before that day.)
 5. 0908 was trained on the v1.23.0 prompt shape. It never saw a fresh-read or
    decided line in training.
 6. The misleads slice is 1 row of 57. Whenever a run's `length helps` clears
@@ -759,6 +773,25 @@ Seven limits on this reading, carried from the design that scored it:
    did not exploit the exposure — its job-2 number simply cannot prove it
    read anything.
 
+   (2026-09-26: since this day the grader zeroes a job-2 answer that
+   contains a whole line of the workload's own block, or that names a decoy
+   cause. It checks the raw reply, before the 512-rune cap. The bot that
+   hands the prompt back now scores 0. Without that guard it would score
+   169 of 177 — 0.9548 — on the rebuilt exam, far over the 0.7 bar, and the
+   test that pinned 0.497 now pins both of those numbers. The "56 of the
+   76" above is out of date too. The prompt now prints kubeagent's own
+   text, which names the cause, so every keyword-graded answer is on
+   screen: 134 of 134 when that text landed, and 169 of 169 on the rebuilt
+   exam. The keywords no longer hold a copier down. The guard holds a
+   verbatim copy down: it scores 0. Every number above in this limit,
+   0908's included, was measured before the guard.)
+
+   (2026-09-28, final review: this note used to say "The guard does", as if
+   the guard held every copier down. It does not. A near-copy is a known
+   gap. A bot that copies its own lines and cuts the first word off each
+   one keeps no whole line, so the guard never fires, and it scores 147 of
+   177 = 0.8305 on job 2, over the 0.7 bar. See known limit 11 below.)
+
 ## Known limits of the training data and the exam
 
 These are known limits of the training data and the exam this build uses.
@@ -789,7 +822,10 @@ against these.
    apply if the origin were healthy. That field is never printed into the
    prompt; the mismatch is a fact about the code, not something a model
    can read.
-4. **The exam's row 252 says "3 workloads failing to pull" and shows 2.**
+4. **The exam's row 238 (row 252 before 2026-09-26) says "3 workloads
+   failing to pull" and shows 2.** (2026-09-28: row 238 counting from 1,
+   index 237, in `out/dataset-0928/test.jsonl`, a `shared_origin_probe`
+   row.)
    The rule's cause string names a fixed count from the story: "3
    workloads failing to pull". This probe row flags only 2 of those 3
    workloads, so the count written into the text and the count of rows a
@@ -867,3 +903,45 @@ against these.
    special case where this invented text also happens to contradict
    something the prompt does print (`Unknown` against `False`); this is
    the general case, and the bigger fact.
+10. **One story's answer names disk pressure its prompt never shows.**
+    (Added 2026-09-26.) `node-cordon-diskfull`'s own cause, rationale and
+    keywords still say the node reports disk pressure. Since 2026-09-26 no
+    line of that workload's own block shows it: the made-up event text is
+    gone, and so is the one node read that printed `DiskPressure=True`. Its
+    keywords, `node` and `pod`, both sit on the finding line, so grading
+    does not move. But the answer teaches a fact the prompt does not hold.
+    That is 10 exam rows, and 213 train and 13 val rows in
+    `out/dataset-0926`. (2026-09-28: the same in `out/dataset-0928`, which
+    replaced it that day.) A later design (Spec 4) owns the fix.
+11. **The job-2 guard stops a verbatim copy, not a near-copy.** (Added
+    2026-09-28.) Job 2 zeroes an answer in two cases: it names one of the
+    row's decoys (G2), or it holds a whole line of the workload's own
+    block (G3b). A bot that pastes its own lines back scores 0. Now cut
+    the first word off each pasted line: no whole line is left, so G3b
+    never fires. That bot pastes each job-2 workload's own inventory
+    entry and its own reads, each line one word short. On the exam it
+    scores 147 of 177 job-2 workloads = 0.8305, with the guard on and
+    with it off. That is over the job-2 bar of 0.7, and the bot judges
+    nothing. So a job-2 score over the bar does not prove on its own that
+    a model judged the evidence. A test pins the number
+    (`tests/test_score.py`,
+    `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`).
+    A stronger G3b changes the grader, so it needs a change to the spec.
+    A later design (Spec 4) owns it.
+12. **A right bad-image-tag answer scores 0 if it names the registry
+    host.** (Added 2026-09-28.) The bad-image-tag rows print the
+    candidate `registry registry.example.com` and rule it out, so it is
+    that workload's decoy, and G2 zeroes any answer that contains a
+    decoy. The gold answer, "the image tag does not exist in the
+    registry", passes. Add the host — "… in the registry
+    registry.example.com" — and the decoy's words now sit inside a right
+    answer, so G2 zeroes it. On the exam, 30 of the 177 job-2 workloads
+    have that gold answer, and 29 of them carry the decoy (the 30th, on
+    an `empty_candidates` row, has none). The gold reply with the host
+    added scores 148 of 177 = 0.8362, where the plain gold reply scores
+    177 of 177. Plan ruling 37 accepted this decoy because the gold
+    answer passes, and that still holds. A test pins the number
+    (`tests/test_score.py`,
+    `test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2`).
+    A narrower G2 changes the grader, so it needs a change to the spec. A
+    later design (Spec 4) owns it.

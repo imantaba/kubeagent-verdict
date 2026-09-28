@@ -1,9 +1,9 @@
 """The duplication guard: evidence text shared between eval and training.
 
 Group keys cannot see this shape of contamination -- two rows with different
-identities and byte-identical evidence. That is contradiction_probe's
-structural confound, and until now it was prose in a docstring
-(cases.py:282-300). This makes it a machine-checked fact.
+identities and byte-identical evidence. That was contradiction_probe's
+structural confound, first written as prose in a docstring. This makes it
+a machine-checked fact.
 
 Two design decisions, both forced by measurement rather than assumed:
 
@@ -24,9 +24,9 @@ for a similarity metric and a similarity threshold is a number nobody can
 defend. Masked-exact needs no threshold and is a set lookup.
 
 The counts below are PINNED, not bounded. A pinned count detects sharing
-disappearing as well as appearing -- so when contradiction_probe's confound
-is closed, 17/19 becomes 0/19, this fails, and the entry gets deleted
-deliberately rather than remembered. Same discipline as a golden file: a
+disappearing as well as appearing -- a count that falls fails this as loudly
+as one that rises, and the new number gets re-declared deliberately rather
+than remembered. Same discipline as a golden file: a
 curriculum change that moves these fails the test and the new numbers get
 re-declared on purpose.
 """
@@ -58,14 +58,73 @@ POD = re.compile(r"<NAME>-[a-z0-9]{3,}(?:-[a-z0-9]{3,})?")
 DECLARED = {
     # Reuses attributed's reads by design -- the candidate menu is the only
     # perturbation, which IS the whole measurement. Costs nothing.
-    "positional_probe": (20, 20),
+    # 2026-09-26 (faithful prompts): (20, 20) -> (18, 19). One read went:
+    # `worker-containerd-stop` lost its PVC decoy (a mounted, Pending claim
+    # cannot sit on a pod past scheduling), so its row renders one read, not
+    # two. One read stopped matching by chance: the
+    # `deployment-bad-image-tag` exam row lives in namespace `auth`, so the
+    # mask turns "unauthorized" into "un<NS>orized". A kept training row in
+    # `auth` used to render the same read; the rng stream moved and none
+    # does now. Every other read is still reused, including the node
+    # describes, which now print kubeagent's four conditions.
+    # 2026-09-26 (faithful prompts): (18, 19) -> (55, 56). The slice is built
+    # on the gather now, for the 17 entries the rules decide: 17 rows, each
+    # reading its pod's events, the refuted decoy's describe and the
+    # winner's read (a describe, a failed read, or nothing for a lease
+    # ending), plus the log read for the crash family. These are the reads
+    # an `attributed` row of the same entry makes, and the node decoy's
+    # describe is the healthy describe most training rows render, so 55 are
+    # reused. The miss is the claim decoy's describe, `pvc <ns>/aux-0:
+    # phase=Bound storageClass=standard`: no training row mounts `aux-0`,
+    # so none reads it.
+    # 2026-09-26 (faithful prompts): (55, 56) -> (54, 56). The slice builds
+    # the same reads. The node list grew from three workers to five, which
+    # moved every later training draw, and one events read stopped matching
+    # by chance: an `init-crashloop` row's BackOff line for container
+    # `init-migrate` at (x5). No kept training row draws that container with
+    # that count now. The `aux-0` miss stays. 55 - 1 = 54.
+    # 2026-09-26 (faithful prompts): (54, 56) -> (55, 56). The slice builds
+    # the same reads. coredns-corefile-broken now draws its restarts from 6,
+    # which moved every later training draw, and the `init-crashloop`
+    # BackOff read for `init-migrate` at (x5) matches a kept training row
+    # again by chance. The `aux-0` miss stays. 54 + 1 = 55.
+    "positional_probe": (55, 56),
     # Since 2026-09-24 this probe builds `own_cause`'s ruled-out prompt: no
     # object reads, and one log read on each of the five crash-family
     # entries. All five are reused, from `own_cause` and `wrong_attribution`
     # training rows, by design: the probe asks the same question those rows
     # train. The other fourteen rows render no reads. It read (14, 20) when
     # its menu still carried describe reads.
-    "misattribution_probe": (5, 5),
+    # 2026-09-26 (faithful prompts): every row reads its pod's events first,
+    # as kubeagent does for every workload it scopes, so each of the 19 rows
+    # gains one read. 18 are reused: the events text is one template per
+    # entry, and the mask blanks the row's ns, name and pod. The miss is
+    # `deployment-bad-image-tag`'s: its pull events print the drawn image,
+    # whose tag the mask does not blank. The five log reads are still
+    # reused. (5, 5) -> (23, 24)
+    # 2026-09-26 (faithful prompts): (23, 24) -> (23, 25). The new entry
+    # `pvc-unbound-unschedulable` adds one row and its events read, which is
+    # reused. Three matches moved by chance, as the job-1 rows now rotate
+    # over 17 entries and every later training draw moved: the
+    # `init-crashloop` and `restart-loop` events reads each matched one
+    # `none_of_these` training row that drew the same container and restart
+    # count, and no kept row does now; `deployment-bad-image-tag`'s pull
+    # events, the old miss, now match a training row that drew the same tag.
+    # 23 + 1 - 2 + 1 = 23.
+    # 2026-09-26 (faithful prompts): (23, 25) -> (24, 25). The slice builds
+    # the same reads; the five-worker node list moved every training draw,
+    # and three matches moved by chance. The two old misses, an
+    # `init-crashloop` and a `restart-loop` events read, now each match a
+    # kept training row. `deployment-bad-image-tag`'s pull events miss
+    # again: they print the drawn tag (`v2.8.4`), which the mask does not
+    # blank, and no kept row drew it. 23 + 2 - 1 = 24.
+    # 2026-09-26 (faithful prompts): (24, 25) -> (23, 25). The slice builds
+    # the same reads. coredns-corefile-broken now draws its restarts from 6,
+    # which moved every later training draw, and one match went by chance:
+    # the `restart-loop` events read, a BackOff line for container `main` at
+    # (x6), matches no kept training row now. The
+    # `deployment-bad-image-tag` miss stays. 24 - 1 = 23.
+    "misattribution_probe": (23, 25),
     # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
     # reads its first object read and then its clear log read, the read
     # kubeagent makes for every crash-family workload; any other constituent
@@ -74,7 +133,32 @@ DECLARED = {
     # read is one template per entry, and crash-family training rows render
     # it too. The one miss is the same events read as before. It read
     # (39, 40) when every constituent took its first two object reads.
-    "multi_misattribution_probe": (47, 48),
+    # 2026-09-26 (faithful prompts): (47, 48) -> (47, 50). The new entry
+    # joins the pairing at the end, so the pair that wrapped round,
+    # `volume-mount-error` with `memory-limit-oomkill` (3 reads, all hits),
+    # became two pairs with `pvc-unbound-unschedulable` (2 and 3 reads, 4
+    # hits). The miss is the new entry's refuted describe, `pvc <ns>/data-0:
+    # phase=Bound storageClass=fast-ssd`, which no kept row renders under
+    # that row's mask. The other pull events read of
+    # `deployment-bad-image-tag` stopped matching: only that entry's
+    # `attributed` and `truncated` training rows rendered it, and the rules
+    # do not decide that entry, so neither case trains it now.
+    # 47 - 3 - 1 + 4 = 47.
+    # 2026-09-26 (faithful prompts): (47, 50) -> (80, 84). The slice is built
+    # on the gather now: one gather over the whole row, which reads each
+    # workload's pod events (40 reads, not 2), the describes of its refuted
+    # menu (34, not 38), and the log read of each crash-family workload
+    # (10). 80 are reused: the events text is one template per entry, and
+    # the healthy node describe is the one most training rows render. The
+    # 4 misses: `deployment-bad-image-tag`'s pull events print the drawn tag,
+    # which the mask does not blank; a `restart-loop` workload in namespace
+    # `web` whose container is also `web`, so the mask turns the container
+    # into `<NS>` and no kept row matches that line at (x5); and two refuted
+    # `pvc-unbound-unschedulable` claim describes (`pvc <ns>/data-0:
+    # phase=Bound storageClass=fast-ssd`), which no kept row renders under
+    # that row's mask. One of the two sits in namespace `data`, so the mask
+    # also turns its `data-0` into `<NS>-0`. 84 - 4 = 80.
+    "multi_misattribution_probe": (80, 84),
     # THIS ROW WAS THE POINT OF THE INSTRUMENT. It was written to catch this
     # slice reusing none_of_these_case's read text, which is why the slice
     # cannot catch a model reciting an entry-lookup table. Negative control v4
@@ -97,7 +181,30 @@ DECLARED = {
     # reads 17/19. The build size moving to 8000, this task's own change,
     # does not touch it: it already read 17/19 at size 5500 with the same
     # mix and pool, so the size is not what moved this row.
-    "contradiction_probe": (19, 38),
+    # 2026-09-26 (faithful prompts): (19, 38) -> (20, 37). One read went:
+    # `worker-containerd-stop` lost its PVC decoy, and with it the
+    # "persistentvolumeclaims ... is forbidden" read, which was a hit. Two
+    # contradiction lines are reused now, where none was before. A node
+    # describe now prints kubeagent's four conditions with the kubelet's
+    # stock messages, so the healthy describe that contradicts
+    # `worker-containerd-stop`'s and `node-cordon-diskfull`'s scan finding
+    # is byte for byte the ordinary healthy describe most training rows
+    # render. That is the confound this row watches, measured, not closed:
+    # the contradiction now lives only in the scan finding beside the read.
+    # 19 - 1 + 2 = 20.
+    # 2026-09-26 (faithful prompts): (20, 37) -> (24, 39). The slice is built
+    # on the gather now, for the 17 entries the rules decide: 17 rows, not
+    # 19. Each row reads its pod's events, with the entry's contradiction
+    # events after its own; the describe of the one object it names, which
+    # ends on its lease (16 nodes) or on a failed read (the claim); and the
+    # log read for the five crash-family entries. 17 + 17 + 5 = 39. All 17
+    # describes are hits: the healthy node describe is the one most
+    # training rows render, and the failed claim read is too. All 5 log
+    # reads are hits. Of the 17 events reads, the 2 with no contradiction
+    # events (`worker-containerd-stop`, `pvc-unbound-unschedulable`) are
+    # hits, and the 15 that carry a contradiction line are the 15 misses:
+    # no training row prints those lines. 17 + 5 + 2 = 24.
+    "contradiction_probe": (24, 39),
     # THIS ROW WAS THE POINT OF THE ALLOWLIST at 0/34: its rows come from
     # dataset.propagation, not the catalog, so an eval scenario itself is
     # never trained on. That is still true. What moved is generic PVC
@@ -196,15 +303,20 @@ def _fake(user: str) -> generate.Example:
 # asserts the REFUSAL, not a value, because hashing an undelimited row would
 # silently score zero reads.
 #
-# An EMPTY block is reachable, and has been since 2026-09-24: a ruled-out
-# row outside the crash family has no object read and no log read, so it
-# renders "(none)". Measured at SEED/SIZE: 746 of 7151 kept rows and 30 of
-# 252 test rows, 14 of them in the DECLARED `misattribution_probe` slice.
-# (kubeagent would still show its per-workload events read there; adding
-# that read to the generator is later work.) Such a row has no reads, so it
-# adds nothing to the trained set and nothing to a slice's count. The
-# `assert pairs` in the allowlist test still fails a slice that goes wholly
-# empty.
+# An EMPTY block renders "(none)". From 2026-09-24 a ruled-out row outside
+# the crash family rendered one: no object read and no log read. Since
+# 2026-09-26 every undecided row reads its pod's events first, as kubeagent
+# does, so none is empty. Measured at SEED/SIZE: 0 of 7107 kept rows and 0
+# of 252 test rows, down from 746 and 30. Job-1 rows read through the gather
+# too since later on 2026-09-26, and it still holds: 0 of 7148 kept rows and
+# 0 of 251 test rows. The contradiction rows moved to the gather on
+# 2026-09-26 too, and it still holds: 0 of 7151 kept rows and 0 of 249 test
+# rows. The `multi` rows moved to the gather on 2026-09-26 as well, and it
+# still holds: 0 of 7164 kept rows and 0 of 249 test rows. Such a row would
+# have no reads, so
+# it would add nothing to the trained set and nothing to a slice's count.
+# The `assert pairs` in the allowlist test still fails a slice that goes
+# wholly empty.
 def test_reads_refuses_a_row_with_no_delimited_evidence_block():
     with pytest.raises(AssertionError, match="no delimited evidence block"):
         _reads(_fake("a user turn that never opens an evidence section"))

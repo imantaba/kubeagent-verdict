@@ -1,0 +1,8 @@
+1	events app/api-6d5f7c8b9-k2m4p
+2	describe node /worker-1
+3	describe node /worker-7
+4	events db/orders-0
+5	describe pvc db/aux-0
+6	describe pvc db/aux-1
+7	describe pvc db/data-0
+8	events img/seven-7c9d4b5f6-fghij

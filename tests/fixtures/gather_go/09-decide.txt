@@ -1,0 +1,35 @@
+read_node	worker-1
+read_pvc	db/aux-0
+read_pvc	db/data-0
+read_events	app/api-6d5f7c8b9-k2m4p	3
+read_events	db/orders-0	2
+failed	events/img/seven-7c9d4b5f6-fghij	events is forbidden
+failed	node/worker-7	nodes "worker-7" is forbidden
+failed	pvc/db/aux-1	persistentvolumeclaims "aux-1" is forbidden
+result	1	app/api	true	confirmed	node worker-1 (NotReady)	Ready condition is False now	node/worker-1	node worker-1 (NotReady)
+decision	node	worker-1	confirmed	node worker-1 (NotReady)	Ready condition is False now
+decision	node	worker-7	unverified	node worker-7 (NotReady)	fresh read failed: nodes "worker-7" is forbidden
+decision	registry	registry.invalid	confirmed	registry registry.invalid	a pull event shows a connection error: dial tcp
+result	2	db/orders	true	confirmed	node worker-1 (NotReady)	Ready condition is False now	node/worker-1	node worker-1 (NotReady)
+decision	node	worker-1	confirmed	node worker-1 (NotReady)	Ready condition is False now
+decision	pvc	aux-0	refuted	PVC aux-0 (ProvisioningFailed)	phase is Bound now
+decision	pvc	aux-1	unverified	PVC aux-1 (ProvisioningFailed)	fresh read failed: persistentvolumeclaims "aux-1" is forbidden
+decision	pvc	data-0	confirmed	PVC data-0 (FailedBinding)	phase is Lost
+decision	registry	registry.invalid	refuted	registry registry.invalid	a pull event shows an image error: manifest unknown; this pull fails for this image, not the host
+result	3	img/seven	true	unverified	registry registry.invalid (6 workloads failing to pull)	fresh read failed: events is forbidden		
+decision	registry	registry.invalid	unverified	registry registry.invalid (6 workloads failing to pull)	fresh read failed: events is forbidden
+result	4	img/six	true	unverified	registry registry.invalid (6 workloads failing to pull)	events of the pulling pod were not read		
+decision	registry	registry.invalid	unverified	registry registry.invalid (6 workloads failing to pull)	events of the pulling pod were not read
+result	5	img/solo	false					
+result	6	img/three	true	unverified	registry registry.invalid (6 workloads failing to pull)	not re-read: the read budget was spent first		
+decision	registry	registry.invalid	unverified	registry registry.invalid (6 workloads failing to pull)	not re-read: the read budget was spent first
+result	7	img/two	true	unverified	registry registry.invalid (6 workloads failing to pull)	not re-read: the read budget was spent first		
+decision	registry	registry.invalid	unverified	registry registry.invalid (6 workloads failing to pull)	not re-read: the read budget was spent first
+result	8	kube-system/coredns	false					
+result	9	store/cache	true	unverified	PVC cache-0 (ProvisionerNotResponding)	not re-read: the read budget was spent first		
+decision	pvc	cache-0	unverified	PVC cache-0 (ProvisionerNotResponding)	not re-read: the read budget was spent first
+decision	pvc	cache-1	unverified	PVC cache-1 (ProvisionerNotResponding)	not re-read: the read budget was spent first
+result	10	web/frontend	true	unverified	node worker-2 (no kubelet lease)	not re-read: the read budget was spent first		
+decision	node	worker-2	unverified	node worker-2 (no kubelet lease)	not re-read: the read budget was spent first
+decision	pvc	assets-0	unverified	PVC assets-0 (ProvisioningFailed)	not re-read: the read budget was spent first
+decision	registry	registry.invalid	unverified	registry registry.invalid	not re-read: the read budget was spent first

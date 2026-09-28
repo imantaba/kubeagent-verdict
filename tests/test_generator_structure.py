@@ -137,17 +137,31 @@ def test_held_out_cases_all_reach_the_test_set():
     assert not missing, f"held-out cases absent from the test set: {sorted(missing)}"
 
 
-def test_probe_sets_selects_on_objects_not_losers():
-    """probe_sets() gates positional_probe/misattribution_probe/contradiction_probe/
-    multi_misattribution_probe eligibility on entry.objects, never entry.losers.
-    entry.contradiction stays a separate guard for contradiction_probe."""
+def test_probe_sets_reads_no_catalog_field_that_is_gone():
+    """probe_sets() picks its entries by `e.objects` and by
+    `catalog.job1_entries()`, never by a field the catalog no longer has.
+    `contradiction_probe`'s loop runs over the entries the rules decide,
+    with no gate of its own: the scripted text it once gated on is gone."""
+    import dataclasses
     import inspect
+    import textwrap
 
-    from kubeagent_verdict.dataset import generate
+    from kubeagent_verdict.dataset import catalog
 
     src = inspect.getsource(generate.probe_sets)
-    assert ".losers" not in src, (
-        "probe_sets must select entries by e.objects, not e.losers "
-        "(entry.contradiction stays a separate guard)")
+    tree = ast.parse(textwrap.dedent(src))
+    fields = {f.name for f in dataclasses.fields(catalog.CatalogEntry)}
+    read = {node.attr for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id in ("e", "entry", "other")}
+    assert read and read <= fields, sorted(read - fields)
     assert ".objects" in src
-    assert ".contradiction" in src
+
+    loops = [node for node in ast.walk(tree) if isinstance(node, ast.For)
+             and any(isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                     and call.func.attr == "contradiction_probe"
+                     for call in ast.walk(node))]
+    assert len(loops) == 1, "refusing: contradiction_probe is not called from one for loop"
+    (loop,) = loops
+    assert ast.unparse(loop.iter) == "catalog.job1_entries()"
+    assert not any(isinstance(node, (ast.If, ast.Continue)) for node in ast.walk(loop))
