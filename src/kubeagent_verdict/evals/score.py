@@ -635,7 +635,9 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
     and no keywords (measured 2026-09-24 against `out/dataset-0924`; the
     job-2 generator fix moved this count from the 0923 bank's 4,823/589;
     2026-09-26 (faithful prompts): `out/dataset-0926` counts 4,900 train and
-    512 val, every one in a `shared_origin` or `shared_origin_decoy` row):
+    512 val, every one in a `shared_origin` or `shared_origin_decoy` row;
+    2026-09-28 (final review): `out/dataset-0928`, which replaced it, counts
+    the same):
     nothing grades the training pool by keyword, and `tests/test_oracle.py`'s
     `_job2_gate` already scores job 2 over its own population. Curating 217
     more pairs (the count before 2026-09-26; not measured again since) to

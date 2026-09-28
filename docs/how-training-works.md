@@ -102,9 +102,10 @@ The generator then splits everything into three piles:
 - **validation** — 721 questions. Held back during development.
 - **test** — 249 questions. **The exam.** The model must never see these.
 
-(Those are the counts in `out/dataset-0926`'s manifest, built on
-2026-09-26 with `--seed 17 --size 8000`. Before that day the three piles
-were 6,496, 655 and 252.)
+(Those are the counts in `out/dataset-0928`'s manifest, built on
+2026-09-28 with `--seed 17 --size 8000`. It replaced `out/dataset-0926`
+that day, and the three counts did not move. Before 2026-09-26 the three
+piles were 6,496, 655 and 252.)
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -155,7 +156,8 @@ The dataset has grown since the first timed run. As of 2026-09-02, two epochs
 over 4,292 questions, nudging once per 16 questions, worked out to **536
 nudges** ("optimizer steps"), and that run was timed start to finish at
 **17h42m** — a stopwatch reading, not a floor. Today's train split is bigger:
-`out/dataset-0926`'s manifest counts 6,457 rows, and
+`out/dataset-0928`'s manifest counts 6,457 rows (the same as
+`out/dataset-0926`, which it replaced on 2026-09-28), and
 [train/config.py](../src/kubeagent_verdict/train/config.py) still pins 2
 epochs and `grad_accum` 16, so the same arithmetic now gives 6,457 × 2 / 16 =
 about **807 nudges**. At the same per-nudge speed as the 2026-09-02 run, that is an

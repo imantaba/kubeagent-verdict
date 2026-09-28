@@ -480,7 +480,9 @@ truncated or thin → low), so calibration is trained, not guessed.
   "trust the `attributed` tag" is a strategy the training data never once
   contradicts in that shape. (2026-09-26: this no longer holds, and the
   618 labels in the next bullet already broke it on 2026-09-24. Measured
-  on `out/dataset-0926`, `multi` gives train and val 2,170 workloads, and
+  on `out/dataset-0926` — and again on `out/dataset-0928`, which replaced
+  it on 2026-09-28, with the same counts — `multi` gives train and val
+  2,170 workloads, and
   3,111 before `drop_held_out`. In train, 444 of its 1,651 `attributed`
   tags sit on a decoy that a fresh read refutes, each on a job-2 workload
   whose answer is its own cause. In val it is 48 of 211.) Both
@@ -517,7 +519,9 @@ truncated or thin → low), so calibration is trained, not guessed.
   Spec 3 closed it on 2026-09-26. Since then a `multi` block prints each
   workload's finding lines, and its reads come from one gather over the
   whole row: 8 reads, or 7 when a healthy-origin read takes the first
-  slot. Counted the same way in `out/dataset-0926/train.jsonl`, `multi`
+  slot. Counted the same way in `out/dataset-0926/train.jsonl` (and in
+  `out/dataset-0928/train.jsonl`, which replaced it on 2026-09-28, with
+  the same counts), `multi`
   rows carry 717 job-2 workloads: 626 at `high` and 91 at `medium`, and
   none answers `none_of_these`. All 717 are keyword-graded, and all 717
   show every keyword in their own block. So 0 `multi` labels name a cause

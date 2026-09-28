@@ -233,7 +233,12 @@ the why is recorded.
   banked before this change is retired. The banked exam the
   prompt-stability test reads is now `out/dataset-0926/test.jsonl` (built
   with `--seed 17 --size 8000`: 6,457 train rows, 721 val rows, 249 test
-  rows).
+  rows). (2026-09-28: `out/dataset-0928` replaced `out/dataset-0926` that
+  day, with the same three counts; see the 2026-09-28 entry. The counts
+  below were measured again on `out/dataset-0928` and on the code of that
+  day, and none moved: the job 1 / 2 / 3 populations, the bot table, the
+  35 of 104 seed `multi` rows with a healthy-origin read, the multi
+  curriculum, the thin-row rule and the `node-cordon-diskfull` rows.)
 
   Why. The old generators typed many prompt lines by hand, and some of
   those lines were ones kubeagent never sends. Now every row gets its reads

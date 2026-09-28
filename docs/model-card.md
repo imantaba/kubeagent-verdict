@@ -897,7 +897,8 @@ against these.
     keywords, `node` and `pod`, both sit on the finding line, so grading
     does not move. But the answer teaches a fact the prompt does not hold.
     That is 10 exam rows, and 213 train and 13 val rows in
-    `out/dataset-0926`. A later design (Spec 4) owns the fix.
+    `out/dataset-0926`. (2026-09-28: the same in `out/dataset-0928`, which
+    replaced it that day.) A later design (Spec 4) owns the fix.
 11. **The job-2 guard stops a verbatim copy, not a near-copy.** (Added
     2026-09-28.) Job 2 zeroes an answer in two cases: it names one of the
     row's decoys (G2), or it holds a whole line of the workload's own
