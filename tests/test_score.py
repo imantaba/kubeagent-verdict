@@ -2589,8 +2589,14 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     `contradiction_probe` workload (`oversized-job-unschedulable`) is
     undecided now, so job 2 counts 143, not 142. With no guard this bot
     now scores 134/143 = 0.9371, above JOB2_BAR. The guarded rate is still
-    0.0. From here on the guard alone keeps a bot that reads nothing
-    under the bar.
+    0.0. From here on the guard alone holds a verbatim paste to 0.
+
+    2026-09-28 (final review): the sentence above used to say the guard
+    alone keeps any bot that reads nothing under the bar. That was too
+    strong. It holds a verbatim paste to 0, but a near-copy is a known gap:
+    the same own lines with the first word of each line cut score 147 of
+    177 = 0.8305 with the guard on, over JOB2_BAR. See
+    `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`.
 
     2026-09-26 (faithful prompts), when the job-1 rows moved onto the
     evidence gather: 31 exam rows whose entry has no job-1 rule ask become
@@ -2747,6 +2753,100 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     # workloads leave (171, 179) -> (169, 177), 0.9553 -> 0.9548
     assert (sum(unguarded), len(unguarded)) == (169, 177)
     assert round(sum(unguarded) / len(unguarded), 4) == 0.9548
+
+
+def _label_names(label: str, names: list[str]) -> str | None:
+    """The flagged workload a read label names: a token `ns/x` where `x` is
+    the workload's name or starts with `name-`. The longest name wins."""
+    best = None
+    for token in label.split():
+        ns, slash, x = token.partition("/")
+        for w in names:
+            wns, _, short = w.partition("/")
+            hit = bool(slash) and wns == ns and (x == short or x.startswith(short + "-"))
+            if hit and (best is None or len(w) > len(best)):
+                best = w
+    return best
+
+
+def _own_reads(prompt: str, name: str, names: list[str]) -> list[str]:
+    """One workload's own evidence reads: the reads of the gather group its
+    `events` read opens, up to the next `events` read. A trail with no
+    `events` read yet goes by the names in its labels. The tests' own small
+    loop, so the trimmed-paste bot does not grade `score._own_blocks` with
+    itself."""
+    body = prompt.split("== BEGIN evidence ==\n", 1)[1].split("\n== END evidence ==", 1)[0]
+    reads, owner, grouped = [], None, False
+    for line in body.split("\n"):
+        label = re.match(r"^== (.+) ==$", line)
+        if label and label.group(1).startswith("events "):
+            grouped, owner = True, _label_names(label.group(1), names)
+        elif label and not grouped:
+            owner = _label_names(label.group(1), names) or owner
+        if owner == name:
+            reads.append(line)
+    return reads
+
+
+def _trimmed_paste_bot(rows: list[dict]):
+    """Answers every flagged workload with its own inventory entry and its
+    own evidence reads, with the first word of each line cut off, joined by
+    newlines. It is the paste bot cut down to one workload, and cut just
+    enough that no whole line is left. It reads nothing."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        prompt = messages[1]["content"]
+        names = list(by_prompt[prompt]["meta"]["workloads"])
+        verdicts = []
+        for name in names:
+            lines = _own_entry(prompt, "inventory", name) + _own_reads(prompt, name, names)
+            verdicts.append({"workload": name,
+                             "cause": "\n".join(" ".join(line.split()[1:]) for line in lines),
+                             "confidence": "medium",
+                             "rationale": "restating this workload's own lines, trimmed"})
+        return json.dumps({"verdicts": verdicts,
+                           "summary": "see the verdicts above for details"})
+
+    return chat_fn
+
+
+def test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard():
+    """This is a known gap. A bot that reads nothing clears JOB2_BAR by
+    copying its own lines with one word cut from each.
+
+    The bot takes each workload's own inventory entry and its own evidence
+    reads, and drops the first word of every line. G3b zeroes a cause only
+    when it holds a whole line of the workload's own block, so it never
+    fires: no whole line is left. The keywords are still there, so job 2
+    marks the cause right. The guard takes nothing away from this bot. It
+    scores 147 of 177 with the guard and 147 of 177 without it, 0.8305,
+    above JOB2_BAR (0.7). A verbatim paste of the same lines scores 0 (see
+    the paste and echo tests above), so the guard holds a verbatim copy
+    down, and not a near-copy.
+
+    Closing the gap needs a stronger G3b, such as matching part of a line.
+    That changes what the grader promises, so it is a spec amendment, and
+    Spec 4 owns it. Until then, a job-2 rate near 0.83 does not show on its
+    own that a model reads the evidence.
+
+    Measured 2026-09-28 (final review). If a change moves this number, the
+    gap moved. Re-pin it and say why; if G3b got stronger, this test's
+    last bar check is the one to flip.
+    """
+    rows = _corpus_rows()
+    bot = _trimmed_paste_bot(rows)
+    board = score.scoreboard(score.evaluate(rows, bot))
+    unguarded = _unguarded_job2_scores(rows, bot)
+
+    # The guarded pair: 147 of 177 with the guard on.
+    assert board["jobs"]["job2"] == {"rate": 0.8305, "n": 177}
+    assert round(board["jobs"]["job2"]["rate"] * board["jobs"]["job2"]["n"]) == 147
+    # The unguarded pair: the same 147 of 177. The guard zeroes none of them.
+    assert (sum(unguarded), len(unguarded)) == (147, 177)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.8305
+    # The gap itself: this bot is over the bar.
+    assert board["jobs"]["job2"]["rate"] >= score.JOB2_BAR
 
 
 def _name_the_decoy_bot(rows: list[dict]):
