@@ -22,7 +22,7 @@ import re
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, catalog, generate, names, render
+from kubeagent_verdict.dataset import cases, catalog, gather, generate, names, render
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset import rules as r
 
@@ -217,8 +217,11 @@ def test_the_typed_node_describes_are_what_read_text_prints():
         assert e.contradiction.format(**NAMES) == r.read_text(healthy, ns=N.ns, pod=N.pod)[1], key
 
 
-def test_the_empty_candidates_row_shows_the_disk_pressure_describe():
-    user = cases.empty_candidates(_entry("node-cordon-diskfull"), N).user
+def test_the_refuted_row_shows_the_disk_pressure_describe():
+    # An empty_candidates row has no candidate, so nothing to describe
+    # (internal/investigate/gather.go:92-133 reads only a candidate's
+    # object). The refuted row describes its attributed node.
+    user = cases.wrong_attribution(_entry("node-cordon-diskfull"), N).user
     assert ("== describe node /worker-2 ==\n"
             "node worker-2: unschedulable=true\n"
             + MEMORY_OK + DISK_PRESSURE + PID_OK + READY_TRUE
@@ -318,8 +321,8 @@ def test_the_oversized_job_contradiction_carries_the_preemption_suffix():
 
 
 def test_the_cordoned_node_events_read_carries_the_preemption_suffix():
-    _, content = _entry("node-cordon-diskfull").reads[1]
-    assert content.format(**NAMES) == (
+    w = cases.gather_workload(_entry("node-cordon-diskfull"), N, ())
+    assert gather.format_events(N.ns, N.pod, w.events) == (
         "events for shop/api-7f9c4d5b6-x2x9k:\n"
         "  FailedScheduling: 0/3 nodes are available: 1 node(s) were unschedulable, "
         "2 node(s) had untolerated taint(s)." + PREEMPTION + " (x6)\n")
@@ -330,6 +333,82 @@ def test_the_volume_mount_events_read_is_the_kubelet_text():
     assert ("  FailedMount: Unable to attach or mount volumes: unmounted volumes=[data], "
             "unattached volumes=[], failed to process volumes=[]: timed out waiting for the "
             "condition (x5)\n") in user
+
+
+# --- the events field ---------------------------------------------------------------
+#
+# An entry's events are (reason, message, count) templates in the order
+# kubeagent lists them (internal/investigate/reader.go:300-310 keeps the API
+# order), and `gather.format_events` prints them (reader.go:312-322).
+
+# The three entries whose old events read was kubectl-table text. Each row
+# became one tuple: the reason is the REASON column, the message is the text
+# after `pod/{pod} `, as written, and a row counts 1. Two rows with the same
+# reason and message are one event, counted once per row: probe-failure's
+# two Unhealthy rows are one event at x2. The rows keep their written order.
+TABLE_FORM = {
+    "memory-limit-oomkill": (
+        "events for shop/api-7f9c4d5b6-x2x9k:\n"
+        "  BackOff: back-off restarting failed container app (x1)\n"
+        "  Pulled: container image already present on machine (x1)\n"),
+    "deployment-bad-image-tag": (
+        "events for shop/api-7f9c4d5b6-x2x9k:\n"
+        '  Failed: Failed to pull image "registry.example.com/shop/api:v1.2.3": not found (x1)\n'
+        "  Failed: Error: ErrImagePull (x1)\n"
+        '  BackOff: Back-off pulling image "registry.example.com/shop/api:v1.2.3" (x1)\n'),
+    "probe-failure": (
+        "events for shop/api-7f9c4d5b6-x2x9k:\n"
+        "  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 500 (x2)\n"),
+}
+
+
+def _old_events_read(e: catalog.CatalogEntry) -> str:
+    (content,) = [content for label, content in e.reads if label.startswith("events ")]
+    return content.format(**NAMES)
+
+
+def test_the_events_print_the_old_read_byte_for_byte():
+    """Where the old read was already kubeagent's form, the tuples print it
+    exactly. The namespace and pod come from the old read's own first line:
+    coredns-corefile-broken's says kube-system."""
+    kubeagent_form = set()
+    for e in catalog.trainable():
+        old = _old_events_read(e)
+        if not old.startswith("events for "):
+            continue
+        kubeagent_form.add(e.key)
+        ns, pod = old.split(":\n", 1)[0].removeprefix("events for ").split("/")
+        w = cases.gather_workload(e, N, ())
+        assert gather.format_events(ns, pod, w.events) == old, e.key
+    assert {e.key for e in catalog.trainable()} - kubeagent_form == set(TABLE_FORM)
+
+
+@pytest.mark.parametrize("key", sorted(TABLE_FORM))
+def test_a_table_form_read_becomes_kubeagents_form(key):
+    w = cases.gather_workload(_entry(key), N, ())
+    assert gather.format_events(N.ns, N.pod, w.events) == TABLE_FORM[key]
+
+
+def test_every_trainable_entry_declares_its_events():
+    assert [e.key for e in catalog.trainable() if not e.events] == []
+
+
+def test_every_event_count_formats_to_an_int():
+    """A count is an int, or a template that formats to one: the three
+    restart-counting BackOff lines print the drawn restart count."""
+    templated = set()
+    for e in catalog.trainable():
+        for _reason, _message, count in e.events:
+            if isinstance(count, str):
+                templated.add(e.key)
+                assert int(count.format(**NAMES)) >= 1, e.key
+            else:
+                assert type(count) is int and count >= 1, e.key
+        for _reason, _message, count in cases.gather_workload(e, N, ()).events:
+            assert type(count) is int, e.key
+    assert templated == {"crashloop-pod", "init-crashloop", "restart-loop"}
+    w = cases.gather_workload(_entry("crashloop-pod"), N, ())
+    assert [count for _r, _m, count in w.events] == [N.restarts]
 
 
 # --- restarts -------------------------------------------------------------------

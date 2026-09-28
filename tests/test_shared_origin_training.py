@@ -890,7 +890,21 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 # banked against the old bytes is retired.
 # e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1 ->
 # e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa
-FROZEN_SLICE_SHA256 = "e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa"
+#
+# 2026-09-26 (faithful prompts): the undecided rows now take their reads and
+# candidates from the ported gather. 71 of the 242 rows change their user
+# message, all in the five undecided cases: `own_cause`,
+# `wrong_attribution` and `misattribution_probe` 19 each, `none_of_these`
+# 8, `empty_candidates` 6. Each reads its pod's events first, as kubeagent
+# does. A refuted row's ruled-out node no longer gets a describe.
+# `deployment-bad-image-tag`'s refuted row now shows its registry ruled out,
+# since one failing workload does not reach the threshold of 2. That row is
+# the only meta change: its `decoy_cause` and `decoy_by_workload` now name
+# `registry registry.example.com`, the cause its candidate line prints. No
+# system message, gold answer, label or `flagged` list moves.
+# e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0fc7f6fa ->
+# 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b
+FROZEN_SLICE_SHA256 = "24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -971,7 +985,14 @@ FROZEN_SLICE_SHA256 = "e9d3ba75a00fbeac9f50749fa432908874320d650a9783a7ab0171cc0
 # digest moves only because the frozen slice inside it does.
 # d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31 ->
 # f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb
-EVAL_SET_SHA256 = "f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb"
+#
+# 2026-09-26 (faithful prompts): the undecided rows moved onto the gather,
+# which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not undecided catalog rows and do not
+# move, so this digest moves only because the frozen slice inside it does.
+# f4be6c578dd5756eb0d0d279bbe25b7dba24d75696443b7daac66f3cde9323eb ->
+# f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee
+EVAL_SET_SHA256 = "f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee"
 
 
 def _digest(rows) -> str:

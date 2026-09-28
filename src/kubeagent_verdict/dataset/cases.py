@@ -14,9 +14,9 @@ from typing import NamedTuple
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
+from kubeagent_verdict.dataset import gather, render, rules
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import propagation as prop
-from kubeagent_verdict.dataset import render, rules
 from kubeagent_verdict.dataset.catalog import CatalogEntry
 from kubeagent_verdict.dataset.generate import Example
 from kubeagent_verdict.dataset.names import Names
@@ -85,14 +85,12 @@ def _suggestion(issue: str, n: Names, key: str = "") -> rem.Suggestion:
     the data — it would make the line mean one thing in training and another at
     serve time. See src/kubeagent_verdict/remediation.py.
 
-    kubeagent names the init container on an Init:* finding, so the --previous
-    log command it builds addresses that container and not the app one. Any
-    other finding names the entry's own container (`_LOG_CONTAINER`), keyed
-    by the catalog entry's `key`.
+    The --previous log command it builds addresses the finding's own
+    container, which `_finding_container` names from the issue and the
+    catalog entry's `key`.
     """
-    container = (n.init_container if issue.startswith("Init:")
-                 else _LOG_CONTAINER.get(key, n.container))
-    return rem.suggest(issue, ns=n.ns, pod=n.pod, container=container)
+    return rem.suggest(issue, ns=n.ns, pod=n.pod,
+                       container=_finding_container(issue, n, key))
 
 
 def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Finding:
@@ -161,6 +159,19 @@ LOG_READS: dict[str, tuple[str, str | None]] = {
 _LOG_CONTAINER = {"coredns-corefile-broken": "coredns"}
 
 
+def _finding_container(issue: str, n: Names, key: str) -> str:
+    """The container kubeagent names on this entry's finding.
+
+    An Init:* finding names the init container. Any other finding names the
+    entry's own container: `_LOG_CONTAINER`, else the drawn `n.container`.
+    The suggested fix's --previous command, the previous-log read and the
+    gather's finding all take it from here, so they name the same one.
+    """
+    if issue.startswith("Init:"):
+        return n.init_container
+    return _LOG_CONTAINER.get(key, n.container)
+
+
 def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None:
     """The previous-log read kubeagent makes for this entry, or None.
 
@@ -176,11 +187,39 @@ def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None
     clear, thin = LOG_READS[e.key]
     if evidence == "thin" and thin is None:
         raise ValueError(f"{e.key} has no thin log read")
-    container = _LOG_CONTAINER.get(e.key, n.container)
+    container = _finding_container(e.issue, n, e.key)
     content = clear if evidence == "clear" else thin
     return c.EvidenceRead(
         label=f"log causes {n.ns}/{n.pod} container {container}",
         content=content.format(ns=n.ns, pod=n.pod, container=container))
+
+
+def _events(e: CatalogEntry, n: Names) -> tuple[tuple[str, str, int], ...]:
+    """The entry's events, filled in with these names. A count template
+    is formatted, then made an int."""
+    return tuple((_fmt(reason, n), _fmt(message, n),
+                  int(_fmt(count, n)) if isinstance(count, str) else count)
+                 for reason, message, count in e.events)
+
+
+def gather_workload(e: CatalogEntry, n: Names, objects: tuple, *,
+                    evidence: str = "clear") -> gather.GatherWorkload:
+    """The gather's view of this entry's workload under these names.
+
+    `objects` is the menu, already bound to `n` and ended. The events come
+    from the entry's templates. The one finding is the entry's own: its pod
+    is "ns/pod", its container is `_finding_container`'s, and its image is
+    the row's `n.image`. Its log is the body `LOG_READS` gives for
+    `evidence` ("clear" or "thin"), or None outside the crash family.
+    """
+    log = _log_read(e, n, evidence)
+    finding = gather.GatherFinding(
+        issue=e.issue, pod=f"{n.ns}/{n.pod}",
+        container=_finding_container(e.issue, n, e.key),
+        log_read=log.content if log is not None else None, image=n.image)
+    return gather.GatherWorkload(
+        namespace=n.ns, name=n.name, pod=n.pod, issue=e.issue, objects=tuple(objects),
+        events=_events(e, n), findings=(finding,))
 
 
 def _multi_reads(e: CatalogEntry, n: Names,
@@ -455,8 +494,9 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
 
     No rng: nothing here is drawn. kubeagent prints candidates in trace
     order, and the answer is on no candidate line, so order gives nothing
-    away. No read budget either: every entry declares at most two objects,
-    already in gather order.
+    away. The reads, the fresh lines and the decided line are the gather's:
+    the events of the workload's pod, a describe per live node or PVC
+    candidate, then the crash family's log.
     """
     if not e.objects:
         raise ValueError(f"{case} needs at least one object: {e.key}")
@@ -471,15 +511,12 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
     if thin and e.key not in THIN_ENTRIES:
         raise ValueError(f"{e.key} is not a thin entry")
     menu = _MENUS[shape](n, e.objects)
-    raw = rules.attribute(menu, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)  # never decided: refuted and ruled out alone never win
-    candidates = _to_contract_candidates(raw, result)
+    res = gather.gather([gather_workload(e, n, menu, evidence=evidence)])
+    # Never decided: refuted and ruled out alone never win.
+    (candidates,), (result,) = res.candidates, res.results
     w = _workload(e, n, candidates, render.header_for(candidates), result=result,
                   with_log_cause=not thin)
-    reads = tuple(object_reads(menu, ns=n.ns, pod=n.pod)) if shape == "refuted" else ()
-    log = _log_read(e, n, evidence)
-    reads += (log,) if log else ()
-    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), res.reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     if thin:
         cause, conf, keywords = c.NONE_OF_THESE, "low", []
@@ -534,10 +571,14 @@ def misattribution_probe(e: CatalogEntry, n: Names) -> Example:
     """EVAL-ONLY: every candidate ruled out. Where the prompt names the cause,
     it is most often in the workload's own finding lines (for example
     "OOMKilled ... exit code 137"), not in a read. Over the 19 test rows:
-    3 carry a `log cause:` finding line. 5 carry a log read; 2 of those
-    name the cause (crashloop-pod, which also has the finding line, and
+    3 carry a `log cause:` finding line. Every row reads its pod's events
+    first, as kubeagent does. 5 of those reads hold every keyword of the
+    entry's own cause (deployment-bad-image-tag, worker-containerd-stop,
+    oversized-job-unschedulable, create-container-config-error and
+    volume-attach-error). 5 rows also carry a log read; 2 of those name the
+    cause (crashloop-pod, which also has the finding line, and
     coredns-corefile-broken, where the read is the only place) and 3 name
-    none. 14 carry no read at all.
+    none.
 
     It builds the same prompt as `own_cause_case`; only the case name, the
     wording of the gold answer and one meta key differ: this row carries
@@ -730,16 +771,21 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
 
     The row answers the entry's own cause at `_confidence(e)`, as every
     clear undecided row does; until 2026-09-24 it answered a flat `medium`.
-    It reads the entry's first read and, for a crash-family entry, the clear
-    log read kubeagent makes for it. No candidates means no header.
+    Its reads are the gather's for a workload with no candidate: the events
+    of its pod and, for a crash-family entry, the clear log read. There is
+    nothing to describe. No candidates means no header.
+
+    The gather refuses a pull finding with no registry: kubeagent always
+    has one (internal/rootcause/rootcause.go:99-139). So a pull entry's
+    registry goes in. Alone in its row it is ruled out, which costs no read,
+    and this row does not show it.
     """
     result = rules.Result(decided=False, cause="", outcome="", evidence="",
                           group_key="", group_text="", decisions=())
     w = _workload(e, n, (), confidence="", result=result)
-    reads = (c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=_fmt(e.reads[0][1], n)),)
-    log = _log_read(e, n, "clear")
-    if log is not None:
-        reads += (log,)
+    names = dataclasses.asdict(n)
+    registries = tuple(bind(obj, names) for obj in e.objects if obj.kind == "registry")
+    reads = gather.gather([gather_workload(e, n, registries)]).reads
     user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     conf = _confidence(e)

@@ -68,6 +68,15 @@ rows. Three `contradiction_probe` workloads now decide on a node decoy
 instead of a PVC one, and the `oversized` one is undecided now, so it
 moves from job 1 to job 2. No row's `flagged` list and no system message
 moves.
+
+Re-pinned again on 2026-09-26, when the undecided job-2 rows began taking
+their reads and candidates from the ported gather. 71 of the 252 user
+messages change, all in the five undecided cases: each row reads its pod's
+events first, as kubeagent does, a ruled-out node gets no describe, and
+`deployment-bad-image-tag`'s refuted row shows its registry ruled out. That
+row's `decoy_cause` and `decoy_by_workload` now name `registry
+registry.example.com`, the cause its candidate line prints; no other meta
+field moves. No gold answer, `flagged` list or system message moves.
 """
 
 from __future__ import annotations
@@ -101,7 +110,11 @@ def view(row):
 # new keyword pairs, and node decoys where PVC decoys could not happen
 # 2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7 ->
 # 00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5
-GRADED_VIEW_SHA256 = "00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5"
+# 2026-09-26 (faithful prompts): the undecided rows read what the gather
+# reads, events first, and show the registry kubeagent rules out
+# 00ee341349ee02ff2635eeee3db508ba7991a3ca980c14a0061bb5bfe031aba5 ->
+# 08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab
+GRADED_VIEW_SHA256 = "08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab"
 
 
 def _digest(views) -> str:

@@ -3,11 +3,12 @@ import dataclasses
 import json
 import pathlib
 import random
+import re
 
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, catalog, render
+from kubeagent_verdict.dataset import cases, catalog, gather, render
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset.render import object_reads
@@ -146,6 +147,34 @@ def test_empty_candidates_answers_at_the_entrys_confidence_and_keeps_the_log_rea
         log = cases._log_read(e, n, "clear")
         if log is not None:
             assert f"== {log.label} ==\n{log.content}" in ex.user, e.key
+
+
+def _evidence_labels(user):
+    """The evidence section's read labels, in order."""
+    section = user.split("== BEGIN evidence ==\n")[1].split("\n== END evidence ==")[0]
+    return re.findall(r"^== (.+) ==$", section, re.MULTILINE)
+
+
+def test_empty_candidates_reads_the_events_and_the_crash_familys_log():
+    """kubeagent reads a workload's events, then a describe per live
+    candidate, then a crash-family log (internal/investigate/gather.go:71-156).
+    With no candidate there is nothing to describe."""
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(25))
+        ex = cases.empty_candidates(e, n)
+        want = [f"events {n.ns}/{n.pod}"]
+        log = cases._log_read(e, n, "clear")
+        if log is not None:
+            want.append(log.label)
+        assert _evidence_labels(ex.user) == want, e.key
+        events = gather.format_events(n.ns, n.pod, cases.gather_workload(e, n, ()).events)
+        assert f"== events {n.ns}/{n.pod} ==\n{events.rstrip()}\n" in ex.user, e.key
+
+
+@pytest.mark.parametrize("key", ["node-cordon-diskfull", "worker-containerd-stop"])
+def test_empty_candidates_no_longer_describes_a_node(key):
+    n = names_mod.draw(random.Random(25))
+    assert "== describe " not in cases.empty_candidates(_entry(key), n).user
 
 
 def test_multi_has_one_row_per_workload():
@@ -701,6 +730,95 @@ def test_crashloop_pods_clear_log_read_names_its_findings_cause():
     assert cases._log_read(e, n, "clear").content == "log cause: " + e.log_cause
 
 
+# The one helper that turns an entry and its drawn names into the gather's
+# workload. Tasks that move other builders onto the gather call it too.
+
+def test_gather_workload_fills_a_plain_entry():
+    e = _entry("probe-failure")
+    n = names_mod.draw(random.Random(5))
+    menu = cases._refuted_menu(n, e.objects)
+    assert cases.gather_workload(e, n, menu) == gather.GatherWorkload(
+        namespace=n.ns, name=n.name, pod=n.pod, issue="ProbeFailure", objects=menu,
+        events=(("Unhealthy",
+                 "Readiness probe failed: HTTP probe failed with statuscode: 500", 2),),
+        findings=(gather.GatherFinding(issue="ProbeFailure", pod=f"{n.ns}/{n.pod}",
+                                       container=n.container, log_read=None,
+                                       image=n.image),))
+
+
+def test_gather_workload_names_the_init_container_on_an_init_finding():
+    e = _entry("init-crashloop")
+    n = names_mod.draw(random.Random(5))
+    w = cases.gather_workload(e, n, ())
+    (f,) = w.findings
+    assert (f.issue, f.container, f.log_read) == (
+        "Init:CrashLoopBackOff", n.init_container, None)
+    assert w.events == ((
+        "BackOff", f"Back-off restarting failed container {n.init_container} in pod {n.pod}",
+        n.restarts),)
+
+
+def test_gather_workload_names_the_coredns_container():
+    e = _entry("coredns-corefile-broken")
+    n = names_mod.draw(random.Random(5))
+    (f,) = cases.gather_workload(e, n, ()).findings
+    assert f.container == "coredns"
+    assert f.log_read == "log cause: configuration parse/validation error"
+
+
+@pytest.mark.parametrize(("evidence", "content"), [
+    ("clear", "log cause: bad command or entrypoint"),
+    ("thin", _NO_CLASSIFIABLE),
+])
+def test_gather_workload_carries_the_crash_familys_log_body(evidence, content):
+    e = _entry("crashloop-pod")
+    n = names_mod.draw(random.Random(5))
+    (f,) = cases.gather_workload(e, n, (), evidence=evidence).findings
+    assert (f.container, f.log_read) == (
+        n.container, content.format(ns=n.ns, pod=n.pod, container=n.container))
+
+
+@pytest.mark.parametrize("key", ["restart-loop", "deployment-bad-image-tag",
+                                 "node-cordon-diskfull"])
+def test_gather_workload_has_no_log_outside_the_crash_family(key):
+    n = names_mod.draw(random.Random(5))
+    (f,) = cases.gather_workload(_entry(key), n, ()).findings
+    assert f.log_read is None
+
+
+def test_gather_workload_takes_the_image_from_the_names():
+    """One image per row: the finding's and the one the events quote."""
+    e = _entry("deployment-bad-image-tag")
+    n = dataclasses.replace(names_mod.draw(random.Random(5)),
+                            image="registry.example.com/web/cart:v9.9.9")
+    w = cases.gather_workload(e, n, ())
+    assert w.findings[0].image == "registry.example.com/web/cart:v9.9.9"
+    assert w.events[0] == (
+        "Failed", 'Failed to pull image "registry.example.com/web/cart:v9.9.9": not found', 1)
+
+
+def test_the_suggestion_and_the_gather_name_the_same_container(monkeypatch):
+    """One function decides the finding's container. The suggested fix's
+    --previous command and the gather's log read both address it."""
+    seen = []
+    real = cases.rem.suggest
+
+    def spy(issue, **kw):
+        seen.append(kw["container"])
+        return real(issue, **kw)
+
+    monkeypatch.setattr(cases.rem, "suggest", spy)
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(5))
+        seen.clear()
+        cases._suggestion(e.issue, n, key=e.key)
+        (f,) = cases.gather_workload(e, n, ()).findings
+        assert seen == [f.container], e.key
+        log = cases._log_read(e, n, "clear")
+        if log is not None:
+            assert log.label.endswith(f" container {f.container}"), e.key
+
+
 # One builder for every undecided job-2 row. kubeagent leaves a workload
 # undecided in two shapes. Refuted: one candidate is attributed and a fresh
 # read refutes it. Ruled out: every candidate is ruled out. The evidence is
@@ -741,20 +859,26 @@ def test_the_ruled_out_shape_has_no_header_no_fresh_read_and_no_object_read():
     assert ": attributed" not in _cand_section(ex.user)
     assert "fresh read:" not in ex.user
     assert _evidence_section(ex.user) == (
+        f"== events {n.ns}/{n.pod} ==\n"
+        f"events for {n.ns}/{n.pod}:\n"
+        f"  BackOff: Back-off restarting failed container {n.container} in pod {n.pod} "
+        f"(x{n.restarts})\n\n"
         f"== log causes {n.ns}/{n.pod} container {n.container} ==\n"
         "log cause: bad command or entrypoint")
 
 
-def test_a_ruled_out_row_outside_the_crash_family_has_an_empty_evidence_section():
-    """kubeagent would still show the per-workload events read here. Every
-    job-2 builder lacks that read; adding it is Spec 3."""
-    ex, _ = _undecided("probe-failure", case="own_cause", shape="ruled_out",
+def test_a_ruled_out_row_outside_the_crash_family_has_only_the_events_read():
+    """kubeagent reads every scoped workload's events, whatever its
+    candidates (internal/investigate/gather.go:71-90)."""
+    ex, n = _undecided("probe-failure", case="own_cause", shape="ruled_out",
                        evidence="clear")
-    assert _evidence_section(ex.user) == "(none)"
+    assert _evidence_section(ex.user) == (
+        f"== events {n.ns}/{n.pod} ==\n"
+        f"events for {n.ns}/{n.pod}:\n"
+        "  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 500 (x2)")
 
 
 @pytest.mark.parametrize(("key", "header"), [
-    ("deployment-bad-image-tag", "medium"),  # a registry cause; the entry says high
     ("networkpolicy-deny-all", "high"),      # a node cause; the entry says medium
     ("probe-failure", "high"),               # a node cause; the entry says medium
     ("restart-loop", "high"),                # a node cause; the entry says medium
@@ -934,6 +1058,108 @@ def test_each_wrapper_is_its_shape_and_evidence():
     for shape in SHAPES:
         assert cases.none_of_these_case(e, n, shape=shape) == \
             built("none_of_these", shape, "thin")
+
+
+# The undecided rows read what kubeagent reads: the events of the workload's
+# pod, a describe per live node or PVC candidate, then the crash family's
+# log (internal/investigate/gather.go:71-156). A ruled-out candidate is
+# never read (gather.go:94-96).
+
+def _labels_for(key, n):
+    container = "coredns" if key == "coredns-corefile-broken" else n.container
+    return {"events": f"events {n.ns}/{n.pod}", "describe": f"describe node /{n.node}",
+            "log": f"log causes {n.ns}/{n.pod} container {container}"}
+
+
+@pytest.mark.parametrize(("key", "case", "shape", "evidence", "kinds"), [
+    ("memory-limit-oomkill", "wrong_attribution", "refuted", "clear",
+     ("events", "describe", "log")),
+    ("probe-failure", "wrong_attribution", "refuted", "clear", ("events", "describe")),
+    ("crashloop-pod", "own_cause", "ruled_out", "clear", ("events", "log")),
+    ("probe-failure", "own_cause", "ruled_out", "clear", ("events",)),
+    ("crashloop-pod", "none_of_these", "refuted", "thin", ("events", "describe", "log")),
+    ("init-crashloop", "none_of_these", "refuted", "thin", ("events", "describe")),
+    ("coredns-corefile-broken", "none_of_these", "ruled_out", "thin", ("events", "log")),
+    ("restart-loop", "none_of_these", "ruled_out", "thin", ("events",)),
+])
+def test_the_undecided_reads_come_in_kubeagents_order(key, case, shape, evidence, kinds):
+    ex, n = _undecided(key, case=case, shape=shape, evidence=evidence)
+    labels = _labels_for(key, n)
+    assert _evidence_labels(ex.user) == [labels[k] for k in kinds]
+
+
+@pytest.mark.parametrize("shape", SHAPES)
+def test_every_undecided_row_reads_the_events_first_and_the_log_last(shape):
+    rank = {"events": 0, "describe": 1, "log": 2}
+    for e in catalog.trainable():
+        n = names_mod.draw(random.Random(5))
+        ex = cases._undecided_example(e, n, case="own_cause", shape=shape, evidence="clear")
+        kinds = [label.split(" ", 1)[0] for label in _evidence_labels(ex.user)]
+        assert kinds[0] == "events" and kinds.count("events") == 1, e.key
+        assert [rank[k] for k in kinds] == sorted(rank[k] for k in kinds), e.key
+        assert ("log" in kinds) == (e.key in cases.LOG_READS), e.key
+        if shape == "ruled_out":
+            assert "describe" not in kinds, e.key
+
+
+def test_the_undecided_candidates_come_from_the_gather(monkeypatch):
+    """The fresh lines are the gather's, paired by `pair_candidates`: the
+    live node gets its refuted read and the ruled-out PVC gets none."""
+    def refused(*_a, **_k):
+        raise AssertionError("_to_contract_candidates is not the undecided rows' path")
+
+    monkeypatch.setattr(cases, "_to_contract_candidates", refused)
+    e = _two_object_entry()
+    pvc = dataclasses.replace(e.objects[1], placement="unmounted")
+    e = dataclasses.replace(e, objects=(e.objects[0], pvc))
+    n = names_mod.draw(random.Random(5))
+    ex = cases.wrong_attribution(e, n)
+    res = gather.gather([cases.gather_workload(e, n, cases._refuted_menu(n, e.objects))])
+    node, claim = res.candidates[0]
+    assert (node.verdict, node.fresh_read_outcome) == ("attributed", "refuted")
+    assert (claim.verdict, claim.fresh_read_outcome, claim.fresh_read_evidence) == (
+        "ruled_out", "", "")
+    section = _cand_section(ex.user)
+    assert (f"    considered {node.cause}: attributed — {node.reason}\n"
+            f"      fresh read: refuted — {node.fresh_read_evidence}\n"
+            f"    considered {claim.cause}: ruled out — {claim.reason}\n") in section
+    assert section.count("fresh read:") == 1
+
+
+def test_the_bad_image_tag_row_shows_a_ruled_out_registry():
+    """The gather counts a registry's pulling workloads over the row
+    (internal/rootcause/rootcause.go:99-139). One workload is below the
+    threshold of 2, so kubeagent rules the registry out and nothing is
+    attributed, refuted or described: no header, no fresh read."""
+    ex, n = _undecided("deployment-bad-image-tag", case="wrong_attribution",
+                       shape="refuted", evidence="clear")
+    assert _cand_section(ex.user) == (
+        f"\n- {n.ns}/{n.name} (Deployment):\n"
+        "    considered registry registry.example.com: ruled out — only workload failing "
+        "to pull from this host; threshold is 2\n")
+    assert _evidence_labels(ex.user) == [f"events {n.ns}/{n.pod}"]
+    assert ex.meta["decoy_cause"] == "registry registry.example.com"
+
+
+# Where a thin row's keywords show up. coredns-corefile-broken's keywords
+# ("coredns", "error") are both on its finding line (container "coredns",
+# last exit 1 (Error)) with or without this change. That is a known gap,
+# pinned here so a fix shows up.
+THIN_SHOWS_EVERY_KEYWORD = {"coredns-corefile-broken"}
+
+
+@pytest.mark.parametrize("key", cases.THIN_ENTRIES)
+@pytest.mark.parametrize("shape", SHAPES)
+def test_a_thin_row_hides_at_least_one_keyword(key, shape):
+    """The events read is in every thin row now, so a keyword may show up.
+    The row still must not show all of them (the grader's rule, all
+    keywords, lowercase)."""
+    e = _entry(key)
+    for seed in range(20):
+        ex, _ = _undecided(key, case="none_of_these", shape=shape, evidence="thin", seed=seed)
+        user = ex.user.lower()
+        shown = all(k.lower() in user for k in e.own_cause_keywords)
+        assert shown == (key in THIN_SHOWS_EVERY_KEYWORD), (key, seed)
 
 
 def test_cap_reads_drops_droppable_reads_from_the_end_and_never_a_kept_one():

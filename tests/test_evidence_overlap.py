@@ -74,7 +74,14 @@ DECLARED = {
     # training rows, by design: the probe asks the same question those rows
     # train. The other fourteen rows render no reads. It read (14, 20) when
     # its menu still carried describe reads.
-    "misattribution_probe": (5, 5),
+    # 2026-09-26 (faithful prompts): every row reads its pod's events first,
+    # as kubeagent does for every workload it scopes, so each of the 19 rows
+    # gains one read. 18 are reused: the events text is one template per
+    # entry, and the mask blanks the row's ns, name and pod. The miss is
+    # `deployment-bad-image-tag`'s: its pull events print the drawn image,
+    # whose tag the mask does not blank. The five log reads are still
+    # reused. (5, 5) -> (23, 24)
+    "misattribution_probe": (23, 24),
     # Same, in the multi shape. Since 2026-09-24 a crash-family constituent
     # reads its first object read and then its clear log read, the read
     # kubeagent makes for every crash-family workload; any other constituent
@@ -216,15 +223,14 @@ def _fake(user: str) -> generate.Example:
 # asserts the REFUSAL, not a value, because hashing an undelimited row would
 # silently score zero reads.
 #
-# An EMPTY block is reachable, and has been since 2026-09-24: a ruled-out
-# row outside the crash family has no object read and no log read, so it
-# renders "(none)". Measured at SEED/SIZE: 746 of 7151 kept rows and 30 of
-# 252 test rows, 14 of them in the DECLARED `misattribution_probe` slice.
-# (kubeagent would still show its per-workload events read there; adding
-# that read to the generator is later work.) Such a row has no reads, so it
-# adds nothing to the trained set and nothing to a slice's count. The
-# `assert pairs` in the allowlist test still fails a slice that goes wholly
-# empty.
+# An EMPTY block renders "(none)". From 2026-09-24 a ruled-out row outside
+# the crash family rendered one: no object read and no log read. Since
+# 2026-09-26 every undecided row reads its pod's events first, as kubeagent
+# does, so none is empty. Measured at SEED/SIZE: 0 of 7107 kept rows and 0
+# of 252 test rows, down from 746 and 30. Such a row would have no reads, so
+# it would add nothing to the trained set and nothing to a slice's count.
+# The `assert pairs` in the allowlist test still fails a slice that goes
+# wholly empty.
 def test_reads_refuses_a_row_with_no_delimited_evidence_block():
     with pytest.raises(AssertionError, match="no delimited evidence block"):
         _reads(_fake("a user turn that never opens an evidence section"))

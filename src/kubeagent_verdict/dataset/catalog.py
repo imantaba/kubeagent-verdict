@@ -38,6 +38,16 @@ class CatalogEntry:
     winner_reason: str = ""
     losers: tuple[tuple[str, str, str], ...] = ()  # (cause, "ruled_out"|"outranked", reason)
     reads: tuple[tuple[str, str], ...] = ()  # (label template, content template)
+    # What the events read of the workload's pod lists: (reason, message,
+    # count) in the order kubeagent lists them, the shape
+    # `gather.GatherWorkload.events` takes. The reason and message are
+    # templates. A count is an int, or a template that formats to one, such
+    # as "{restarts}". Three entries had kubectl-table text in `reads`
+    # instead: each row became one tuple (reason = the REASON column,
+    # message = the text after `pod/{pod} `, count 1), rows with the same
+    # reason and message became one event counted once per row, and the
+    # rows kept their written order.
+    events: tuple[tuple[str, str, int | str], ...] = ()
     rationale: str = ""
     direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
     contradiction: str = ""  # read content that rules the winner out (contradiction_probe)

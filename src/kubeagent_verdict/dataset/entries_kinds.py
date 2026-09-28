@@ -28,6 +28,10 @@ ENTRIES = [
               "42s Warning Unhealthy pod/{pod} Readiness probe failed: HTTP probe failed "
               "with statuscode: 500\n")),
         ),
+        # Two identical table rows (12s and 42s ago): one event, counted twice.
+        events=(
+            ("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 500", 2),
+        ),
         rationale="The probe consistently returns HTTP 500 with no restart or rollout, so the "
                   "application itself is unhealthy behind a running container.",
         direct=False,
@@ -66,6 +70,9 @@ ENTRIES = [
              ("events for {ns}/{pod}:\n"
               '  Failed: Error: StartError: exec: "/app/server": no such file or directory '
               "(x3)\n")),
+        ),
+        events=(
+            ("Failed", 'Error: StartError: exec: "/app/server": no such file or directory', 3),
         ),
         rationale="The kubelet's own StartError waiting message names the missing executable "
                   "path directly, and other pods on the same node start normally, so the image's "
@@ -106,6 +113,11 @@ ENTRIES = [
               "  Failed: Error: CreateContainerConfigError: couldn't find key API_TOKEN in "
               "ConfigMap {ns}/app-config (x2)\n")),
         ),
+        events=(
+            ("Failed",
+             ("Error: CreateContainerConfigError: couldn't find key API_TOKEN in ConfigMap "
+              "{ns}/app-config"), 2),
+        ),
         rationale="The waiting message names the exact key the container needs, and the "
                   "ConfigMap itself is present without that key, so the reference is stale "
                   "rather than the object missing.",
@@ -145,6 +157,10 @@ ENTRIES = [
               "  BackOff: Back-off restarting failed container {init_container} in pod {pod} "
               "(x{restarts})\n")),
         ),
+        events=(
+            ("BackOff", "Back-off restarting failed container {init_container} in pod {pod}",
+             "{restarts}"),
+        ),
         rationale="The init container's previous log classifies as a connection refused on "
                   "every restart, and the pod never gets past PodInitializing, which points at "
                   "the dependency it waits for rather than its own script.",
@@ -182,6 +198,9 @@ ENTRIES = [
              ("events for {ns}/{pod}:\n"
               "  Failed: Error: CreateContainerConfigError: secret migration-creds not found "
               "(x2)\n")),
+        ),
+        events=(
+            ("Failed", "Error: CreateContainerConfigError: secret migration-creds not found", 2),
         ),
         rationale="The waiting message names a Secret that kubectl get secret confirms does not "
                   "exist in the namespace at all, which rules out a missing key inside an "
@@ -222,6 +241,10 @@ ENTRIES = [
               '  Failed: Failed to pull image "registry.example.com/shop/migrate:v0.9.0": '
               "not found (x1)\n")),
         ),
+        events=(
+            ("Failed",
+             'Failed to pull image "registry.example.com/shop/migrate:v0.9.0": not found', 1),
+        ),
         rationale="The pull error names the init image's own tag as missing, and the workload's "
                   "main image pulls successfully from the same registry, so the tag is wrong "
                   "rather than the registry being unreachable.",
@@ -260,6 +283,9 @@ ENTRIES = [
              ("events for {ns}/{pod}:\n"
               '  BackOff: Back-off pulling image "registry.example.com/shop/migrate:v0.9.0" '
               "(x6)\n")),
+        ),
+        events=(
+            ("BackOff", 'Back-off pulling image "registry.example.com/shop/migrate:v0.9.0"', 6),
         ),
         rationale="The kubelet has been backing off the same pull error since the first "
                   "attempt, and the main image pulls fine from the same registry, so the init "
@@ -301,6 +327,9 @@ ENTRIES = [
               "  BackOff: Back-off restarting failed container {init_container} in pod {pod} "
               "(x3)\n")),
         ),
+        events=(
+            ("BackOff", "Back-off restarting failed container {init_container} in pod {pod}", 3),
+        ),
         rationale="The init container is OOMKilled at its own 32Mi limit on every attempt, and "
                   "the node reports no memory pressure, so the limit itself is undersized for "
                   "the migration.",
@@ -340,6 +369,10 @@ ENTRIES = [
              ("events for {ns}/{pod}:\n"
               "  BackOff: Back-off restarting failed container {container} in pod {pod} "
               "(x{restarts})\n")),
+        ),
+        events=(
+            ("BackOff", "Back-off restarting failed container {container} in pod {pod}",
+             "{restarts}"),
         ),
         rationale="The previous-instance log carries a panic trace and the restarts cluster "
                   "around load, and no liveness probe is configured to explain the restarts "
@@ -385,6 +418,11 @@ ENTRIES = [
             ("describe pvc {ns}/{pvc}",
              "pvc {ns}/{pvc}: phase=Bound storageClass=fast-ssd volume=pv-0821\n"),
         ),
+        events=(
+            ("FailedAttachVolume",
+             ("Multi-Attach error for volume {pvc} Volume is already exclusively attached to "
+              "one node and can't be attached to another"), 8),
+        ),
         rationale="The FailedAttachVolume event names Multi-Attach directly, and the PVC still "
                   "describes as Bound while the new node's CSI driver itself reports healthy, "
                   "which points at the stale attachment rather than the driver.",
@@ -425,6 +463,12 @@ ENTRIES = [
               "condition (x5)\n")),
             ("describe pvc {ns}/{pvc}",
              "pvc {ns}/{pvc}: phase=Bound storageClass=fast-ssd volume=pv-0821\n"),
+        ),
+        events=(
+            ("FailedMount",
+             ("Unable to attach or mount volumes: unmounted volumes=[data], unattached "
+              "volumes=[], failed to process volumes=[]: timed out waiting for the condition"),
+             5),
         ),
         rationale="The mount times out repeatedly while the PVC itself already describes as "
                   "Bound and the pod defines no ConfigMap or Secret volume, which points at the "

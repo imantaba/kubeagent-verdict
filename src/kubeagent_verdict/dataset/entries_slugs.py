@@ -27,6 +27,10 @@ ENTRIES = [
              ("44s Warning BackOff pod/{pod} back-off restarting failed container {container}\n"
               "2m Normal Pulled pod/{pod} container image already present on machine\n")),
         ),
+        events=(
+            ("BackOff", "back-off restarting failed container {container}", 1),
+            ("Pulled", "container image already present on machine", 1),
+        ),
         rationale="The container exits 137 with reason OOMKilled on every restart, which points "
                   "at its own memory limit rather than the node.",
         direct=True,
@@ -64,6 +68,11 @@ ENTRIES = [
              ('3m Warning Failed pod/{pod} Failed to pull image "{image}": not found\n'
               "3m Warning Failed pod/{pod} Error: ErrImagePull\n"
               "2m Normal BackOff pod/{pod} Back-off pulling image \"{image}\"\n")),
+        ),
+        events=(
+            ("Failed", 'Failed to pull image "{image}": not found', 1),
+            ("Failed", "Error: ErrImagePull", 1),
+            ("BackOff", 'Back-off pulling image "{image}"', 1),
         ),
         rationale="The pull failure names {image} as not found, so the tag itself is wrong "
                   "rather than the registry being unreachable.",
@@ -134,6 +143,12 @@ ENTRIES = [
               "2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 "
               "Preemption is not helpful for scheduling. (x6)\n")),
         ),
+        events=(
+            ("FailedScheduling",
+             ("0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had untolerated "
+              "taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
+              "scheduling."), 6),
+        ),
         rationale="The node carries unschedulable=true plus a DiskPressure condition and taint, "
                   "and the FailedScheduling event names disk pressure directly, so the node's own "
                   "state explains the pending pod better than a cluster-wide CPU shortage.",
@@ -186,6 +201,10 @@ ENTRIES = [
               '  Unhealthy: Readiness probe failed: Get "{pod}:8080/healthz": dial tcp: '
               "i/o timeout (x9)\n")),
         ),
+        events=(
+            ("Unhealthy",
+             'Readiness probe failed: Get "{pod}:8080/healthz": dial tcp: i/o timeout', 9),
+        ),
         rationale="The probe timeouts start exactly when the deny-all policy is created and hit "
                   "every replica at once, which points at network reachability rather than an "
                   "application defect.",
@@ -227,6 +246,9 @@ ENTRIES = [
               "  BackOff: Back-off restarting failed container coredns in pod {pod} (x14)\n")),
             ("log causes kube-system/{pod} container coredns",
              "log cause: configuration parse/validation error"),
+        ),
+        events=(
+            ("BackOff", "Back-off restarting failed container coredns in pod {pod}", 14),
         ),
         rationale="Both CoreDNS replicas crash the same way on different nodes, and the previous "
                   "log classifies as a configuration parse error, which points at the shared "
@@ -302,6 +324,11 @@ ENTRIES = [
               "  Failed: Error: RunContainerError: failed to create containerd task: context "
               "deadline exceeded (x4)\n")),
         ),
+        events=(
+            ("Failed",
+             ("Error: RunContainerError: failed to create containerd task: context deadline "
+              "exceeded"), 4),
+        ),
         rationale="Node {node} reports NotReady with its runtime down, and the same image runs "
                   "cleanly elsewhere in the cluster, so the node's runtime explains the failure "
                   "rather than the image.",
@@ -366,6 +393,11 @@ ENTRIES = [
               "preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
               "scheduling. (x5)\n")),
         ),
+        events=(
+            ("FailedScheduling",
+             ("0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are "
+              "available: 3 Preemption is not helpful for scheduling."), 5),
+        ),
         rationale="Every node in the scheduler's message is rejected for Insufficient memory and "
                   "none carry SchedulingDisabled, so the request itself does not fit rather than "
                   "nodes being withdrawn.",
@@ -407,6 +439,10 @@ ENTRIES = [
               "(x{restarts})\n")),
             ("log causes {ns}/{pod} container {container}",
              "log cause: bad command or entrypoint"),
+        ),
+        events=(
+            ("BackOff", "Back-off restarting failed container {container} in pod {pod}",
+             "{restarts}"),
         ),
         rationale="The previous log classifies as a bad entrypoint and the image itself pulled "
                   "successfully, so the container's own startup command explains the crash loop.",
