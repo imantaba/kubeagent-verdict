@@ -792,6 +792,69 @@ Seven limits on this reading, carried from the design that scored it:
    one keeps no whole line, so the guard never fires, and it scores 147 of
    177 = 0.8305 on job 2, over the 0.7 bar. See known limit 11 below.)
 
+### 0920 against the Spec 3 exam (2026-09-28)
+
+This is a diagnostic run: step 1 of the Spec 3 run order. It gates
+nothing and ships nothing. Run: `out/eval/0920-exam0928`, served by a
+local `llama-server` from 0920's Q8_0 file (sha256 `f4327d90…`). Exam:
+`test_sha256` `9396e347a2336f4ea08fb0ef5283fbceb37c496f1199096d1cd23bf4e8cea48e`,
+249 of 249 rows scored.
+
+The exam changed, so no number here compares with an earlier one.
+
+| | score | bar | |
+|---|---|---|---|
+| Job 1 | 0.95 (114 of 120) | ≥ 0.9 | met |
+| Job 2 | 0.8136 (144 of 177) | ≥ 0.7 | met |
+| Job 3 | 0.875 (35 of 40) | ≥ 0.9 | missed |
+| Length gap | −0.3125 | ≤ 0.15 | met |
+
+**The question this run answers:** how much of 0920's job-2 score came
+from copying the prompt? Very little. Most right answers are sentences
+0920 learned in training, not text it copied from the prompt.
+
+- **The guard zeroed 0 of 177 answers.** 0920 never pasted a whole line
+  of its block, and it never named a decoy.
+- **134 of the 144 right answers are the catalog's answer sentence, word
+  for word.** 0920 picks a story it was trained on and writes that
+  story's sentence. So in practice job 2 is a pick-the-story test. For 17
+  of the 134, the sentence is also printed in the prompt. For those 17,
+  recall and copying look the same.
+- **5 right answers are part-line copies:** a printed line with its front
+  cut off, for example
+  `container exceeded its memory limit and was killed (container "app", exitCode=137)`.
+  The guard only catches whole lines, so these pass. This is known
+  limit 11.
+- **The last 5 right answers are in the model's own words.** 2 of them
+  name the wrong cause and still pass. For example, "the pod's node is
+  cordoned and reporting Insufficient memory …" is graded right for a
+  memory request no node can fit. The keywords, `memory` and `node`, are
+  common words. Spec 4 owns the weak-keyword item.
+
+**Where it lost points.**
+
+- **Job 2, 33 wrong:**
+  - 16 name the wrong cause.
+  - 13 answer `none_of_these` when the answer is a named cause.
+  - 4 name a cause when the answer is `none_of_these`.
+
+  Four of the wrong causes are one old sentence. 0920 says "the container
+  runtime on the pod's node is not responding". Older training builds
+  used that sentence (`out/dataset` has it on 78 rows; `out/dataset-0928`
+  has it on 0). The catalog now says "containerd on the pod's node is not
+  responding (context deadline exceeded)", and the keywords are
+  `containerd` and `deadline`. A retrain on the new build should fix
+  these four without any other change.
+- **Job 3, 5 wrong:** all 5 are shared-origin rows labelled `none`: 3
+  `shared_origin_probe` and 2 `shared_origin_decoy_probe`. Spec 4
+  rewrites those stories.
+- **Weakest slice:** `wrong_attribution`, cause 0.3 of 20.
+
+**What this changes:** nothing in the plan. Job 2's 0.8136 is a new
+baseline. It shows that 0920 picks the right story most of the time. It
+does not show that 0920 reasons past a story it has seen. Next come
+Spec 4, then 0920 live again, then the retrain.
+
 ## Known limits of the training data and the exam
 
 These are known limits of the training data and the exam this build uses.
