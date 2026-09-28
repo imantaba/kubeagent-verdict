@@ -34,8 +34,11 @@ as `not_read`. A registry declares neither its count nor its fresh state;
 the gather works out both from the row.
 
 The character rules lean on Unicode tables: Python's `unicodedata` here,
-Go's `unicode` there. Python 3.12 and Go 1.26 both ship Unicode 15.0.0, so
-the two agree on every character. Pure: no I/O, no state.
+Go's `unicode` there. Go 1.26 ships Unicode 15.0.0, and so does the venv's
+Python 3.12, so under it the two agree on every character. Not every Python
+does: 3.11 ships 14.0.0 and 3.13 ships 15.1.0, and pyproject.toml admits
+both. tests/test_gather_text.py fails on any Python whose tables are not
+15.0.0. Pure: no I/O, no state.
 """
 from __future__ import annotations
 

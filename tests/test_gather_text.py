@@ -13,6 +13,8 @@ comment cites that line instead.
 """
 from __future__ import annotations
 
+import unicodedata
+
 import pytest
 
 from kubeagent_verdict import contract as c
@@ -42,6 +44,17 @@ CIRCUMFL = "\u0302"   # Mn, combining circumflex
 DOT_BELOW = "\u0323"  # Mn, combining dot below
 # "tiếng Việt" fully decomposed: two marks on each accented vowel.
 VIET = "tie" + CIRCUMFL + ACUTE + "ng Vie" + DOT_BELOW + CIRCUMFL + "t"
+
+
+def test_the_unicode_tables_are_gos():
+    """safetext_line classifies each character with `unicodedata`, and
+    kubeagent's safetext does it with Go's `unicode` package. Go 1.26 ships
+    Unicode 15.0.0 (`unicode.Version`), and so does the venv's Python 3.12.
+    pyproject.toml admits Python 3.11 (14.0.0) and 3.13 (15.1.0) too, and
+    under either one the port can class a character differently from Go."""
+    assert unicodedata.unidata_version == "15.0.0", (
+        f"this Python ships Unicode {unicodedata.unidata_version}; the port matches Go's "
+        "Unicode 15.0.0 tables, so build and test with the venv's Python 3.12")
 
 
 def test_safetext_bounds_are_kubeagents():
