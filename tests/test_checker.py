@@ -200,6 +200,8 @@ BROKEN = {
     "B5": (None, _replace("2/4 nodes Ready.", "3/4 nodes Ready.")),
     "B6": (None, _replace("  - shop/api (NoReadyEndpoints): ", "  - shop/api: ")),
     "B7": (None, _replace("  node worker-2 no kubelet lease\n", "")),
+    "B8": (None, _in_block("img/solo", "\n    considered node worker-2 (no kubelet lease): ruled out — "
+                                       "no pod of this workload is scheduled on it", "")),
     # the candidates
     "C1": (None, _replace("- img/two (Deployment) [confidence: medium]:",
                           "- img/two (StatefulSet) [confidence: medium]:")),
@@ -271,7 +273,9 @@ BROKEN = {
 def test_every_rule_has_a_broken_copy():
     assert set(BROKEN) == set(checker.RULES)
     # 2026-09-26 (faithful prompts): TXT-POD checks the pod slot of a fix command 48 -> 49
-    assert len(checker.RULES) == len(set(checker.RULES)) == 49
+    # 2026-09-28 (final review): B8 checks each block lists the row's down nodes and its
+    # namespace's broken PVCs 49 -> 50
+    assert len(checker.RULES) == len(set(checker.RULES)) == 50
 
 
 def _source(pick, seed_rows) -> tuple:
@@ -342,6 +346,146 @@ def test_the_pod_slot_holds_the_placeholder_or_the_workloads_own_name():
                 "kubectl -n web describe pod api"):
         report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
         assert "TXT-POD" in _fired(report), cmd
+
+
+# --- B8: every block lists the row's down nodes and its namespace's PVCs --
+
+def _block_span(user: str, key: str) -> tuple[int, int]:
+    """Where workload `key`'s candidate block sits in `user`."""
+    section_end = user.index("\n== END candidates ==")
+    start = user.index(f"\n- {key} (", user.index("== BEGIN candidates ==\n"))
+    end = user.find("\n- ", start + 1)
+    return start, section_end if end == -1 or end > section_end else end
+
+
+def _without_cand(user: str, key: str, cause: str) -> str:
+    """`user` with `key`'s candidate line for `cause`, and its fresh lines, gone."""
+    start, end = _block_span(user, key)
+    kept, skip = [], False
+    for ln in user[start:end].split("\n"):
+        if ln.startswith(f"    considered {cause}: "):
+            skip = True
+            continue
+        if skip and ln.startswith("      fresh read: "):
+            continue
+        skip = False
+        kept.append(ln)
+    return user[:start] + "\n".join(kept) + user[end:]
+
+
+_RANK = {"node": 0, "PVC": 1}
+_CONSIDERED_OBJECT = re.compile(r"^    considered (node|PVC|registry) (\S+)")
+
+
+def _with_ruled_out(user: str, key: str, kind: str, name: str, reason: str) -> str:
+    """`user` with `key`'s ruled-out line for node or PVC `name`, where
+    rootcause puts it: nodes by name, then PVCs by name, then the registry."""
+    start, end = _block_span(user, key)
+    lines = user[start:end].split("\n")
+    sentence = checker.NODE_RULED_OUT if kind == "node" else checker.PVC_RULED_OUT
+    at = len(lines)
+    for i, ln in enumerate(lines):
+        m = _CONSIDERED_OBJECT.match(ln)
+        if m and (_RANK.get(m.group(1), 2), m.group(2)) > (_RANK[kind], name):
+            at = i
+            break
+        if ln.startswith("    decided by rules: ") or ln == "    " + checker.TRUNCATION_MARKER:
+            at = i
+            break
+    lines.insert(at, f"    considered {kind} {name} ({reason}): ruled out — {sentence}")
+    return user[:start] + "\n".join(lines) + user[end:]
+
+
+def _own(block, kind: str) -> dict[str, str]:
+    """The block's own objects of `kind`: name -> reason, for each candidate
+    rootcause did not rule out (so one of the workload's pods uses it)."""
+    return {s[1]: s[2] for c in block.cands
+            if c.verdict != "ruled out" and (s := checker._shape(c.cause)) and s[0] == kind}
+
+
+def _owed(user: str, kind: str, pick) -> list[tuple[str, str, str]]:
+    """(block, name, reason) for each `kind` object one workload uses that
+    another block `b` owes a ruled-out line for. `pick(a, b)` says whether
+    block `b` owes one for block `a`'s objects."""
+    blocks = checker._parse(user).blocks
+    return [(b.key, name, reason)
+            for a in blocks for name, reason in sorted(_own(a, kind).items())
+            for b in blocks if b is not a and pick(a, b) and name not in _own(b, kind)]
+
+
+def _one_owed(rows: list[dict], case: str, kind: str, pick) -> dict:
+    """The first `case` row with exactly one owed line, missing or not."""
+    return next(row for row in rows if row["meta"]["case"] == case
+                and len(_owed(row["messages"][1]["content"], kind, pick)) == 1)
+
+
+def _missing_then_added(row: dict, kind: str, pick) -> tuple[tuple, tuple]:
+    """Two copies of `row`: one whose block lacks the line it owes for
+    another workload's `kind` object, and one with the ruled-out line
+    added back."""
+    system, user, assistant, meta = _parts(row)
+    ((key, name, reason),) = _owed(user, kind, pick)
+    word = "node" if kind == "node" else "PVC"
+    missing = _without_cand(user, key, f"{word} {name} ({reason})")
+    added = _with_ruled_out(missing, key, word, name, reason)
+    return (system, missing, assistant, meta), (system, added, assistant, meta)
+
+
+def _any(a, b) -> bool:
+    return True
+
+
+def _same_ns(a, b) -> bool:
+    return a.ns == b.ns
+
+
+def test_b8_catches_a_probe_block_missing_another_workloads_node(exam_rows):
+    """rootcause.Annotate (rootcause.go:24-56) walks every down node for
+    every flagged workload, so a node one workload runs on is a ruled-out
+    candidate on every other. A probe row missing that line is one
+    kubeagent cannot send."""
+    row = _one_owed(exam_rows, "multi_misattribution_probe", "node", _any)
+    missing, added = _missing_then_added(row, "node", _any)
+    assert "B8" in _fired(checker.check(*missing))
+    assert "B8" not in _fired(checker.check(*added))
+
+
+def test_b8_catches_a_same_namespace_block_missing_a_pvc(exam_rows):
+    """rootcause.AnnotatePVC (rootcause.go:177-222) walks every broken PVC
+    in the workload's own namespace, so a claim one workload mounts is a
+    ruled-out candidate on every other workload of that namespace."""
+    row = _one_owed(exam_rows, "multi", "pvc", _same_ns)
+    missing, added = _missing_then_added(row, "pvc", _same_ns)
+    assert "B8" in _fired(checker.check(*missing))
+    assert "B8" not in _fired(checker.check(*added))
+
+
+def test_b8_leaves_a_pvc_in_another_namespace_alone():
+    """A PVC in another namespace is not a candidate (rootcause.go:205-207)."""
+    system, user, assistant, meta = _golden()
+    assert "PVC aux-0" not in user[slice(*_block_span(user, "store/cache"))]
+    assert "B8" not in _fired(checker.check(system, user, assistant, meta))
+
+
+def test_b8_owes_every_block_a_line_for_each_down_node_in_the_health_block():
+    system, user, assistant, meta = _golden()
+    user = user.replace("  node worker-7 NotReady: KubeletNotReady — container runtime is down\n",
+                        "  node worker-7 NotReady: KubeletNotReady — container runtime is down\n"
+                        "  node worker-9 NotReady\n", 1)
+    assert "B8" in _fired(checker.check(system, user, assistant, meta))
+
+
+def test_b8_exempts_a_truncated_block():
+    """A block past the cap of 8 lost lines nobody can name, so it owes none."""
+    system, user, assistant, meta = _golden()
+    worker2 = "node worker-2 (no kubelet lease)"
+    missing = _without_cand(user, "db/orders", worker2)
+    assert "B8" in _fired(checker.check(system, missing, assistant, meta))
+    cut = missing.replace("\n    decided by rules: node worker-1 (NotReady) — confirmed\n- img/seven",
+                          "\n    " + checker.TRUNCATION_MARKER
+                          + "\n    decided by rules: node worker-1 (NotReady) — confirmed\n- img/seven", 1)
+    assert cut != missing
+    assert "B8" not in _fired(checker.check(system, cut, assistant, meta))
 
 
 # --- the exemptions -------------------------------------------------------

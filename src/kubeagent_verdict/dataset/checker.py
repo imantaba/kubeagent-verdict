@@ -1021,6 +1021,59 @@ def _b7(x: _Ctx) -> tuple[int, _Finding]:
     return len(h), out
 
 
+# The health-line issues that make a node a down node, the list rootcause
+# walks (clusterhealth/clusterhealth.go:33-38, :71 and :79). A pressure, a
+# cordon or an absent node is on the health block but is not down.
+_DOWN_ISSUES = ("NotReady", "kubelet not heartbeating", "no kubelet lease")
+
+
+def _b8(x: _Ctx) -> tuple[int, _Finding]:
+    """Every block lists the row's down nodes and its namespace's broken
+    PVCs, on a row with two or more blocks.
+
+    rootcause.Annotate (rootcause/rootcause.go:24-56) walks every down node
+    for every flagged workload and records each one: a node none of the
+    workload's pods runs on is `ruled out — no pod of this workload is
+    scheduled on it` (:47). So every down node, whether the health block
+    names it or another block names it as a candidate, is a candidate in
+    every block. rootcause.AnnotatePVC (:177-222) does the same for every
+    broken PVC in the workload's own namespace, ruling out one its pods do
+    not mount (:214); a PVC in another namespace is not a candidate (:207).
+    It returns early only when no pod in the scan mounts a claim (:178),
+    and a PVC candidate anywhere in the row means some pod does. So every
+    PVC a block of namespace X names is a candidate in every block of
+    namespace X.
+
+    A block that carries the cap marker (investigate/prime.go:85-89) is
+    exempt: the lines past the cap cannot be known."""
+    blocks = x.p.blocks
+    if len(blocks) < 2:
+        return 0, []
+    nodes: set[str] = set()
+    for ln in x.p.health[1:]:
+        m = _HEALTH_NODE.match(ln.text)
+        if m and m.group(2).startswith(_DOWN_ISSUES):
+            nodes.add(m.group(1))
+    pvcs: dict[str, set[str]] = {}
+    for b in blocks:
+        for c in b.cands:
+            s = _shape(c.cause)
+            if s and s[0] == "node":
+                nodes.add(s[1])
+            elif s and s[0] == "pvc":
+                pvcs.setdefault(b.ns, set()).add(s[1])
+    out = []
+    for b in blocks:
+        if b.truncated:
+            continue
+        shown = {(s[0], s[1]) for c in b.cands if (s := _shape(c.cause))}
+        out += [(b.where(b.heading), f"no candidate line for node {name}")
+                for name in sorted(nodes) if ("node", name) not in shown]
+        out += [(b.where(b.heading), f"no candidate line for PVC {b.ns}/{name}")
+                for name in sorted(pvcs.get(b.ns, ())) if ("pvc", name) not in shown]
+    return len(blocks), out
+
+
 # --- the candidates ------------------------------------------------------
 
 def _c1(x: _Ctx) -> tuple[int, _Finding]:
@@ -1967,7 +2020,7 @@ def _ans2(x: _Ctx) -> tuple[int, _Finding]:
 _Rule = Callable[[_Ctx], tuple[int, _Finding]]
 _RULE_FUNCS: dict[str, _Rule] = {
     "A1": _a1, "A2": _a2, "A3": _a3, "A4": _a4, "A5": _a5, "A6": _a6,
-    "B1": _b1, "B2": _b2, "B3": _b3, "B4": _b4, "B5": _b5, "B6": _b6, "B7": _b7,
+    "B1": _b1, "B2": _b2, "B3": _b3, "B4": _b4, "B5": _b5, "B6": _b6, "B7": _b7, "B8": _b8,
     "C1": _c1, "C1-conf": _c1_conf, "C1-cause": _c1_cause, "C2-vocab": _c2_vocab,
     "C2-reason": _c2_reason, "C3": _c3, "C4-order": _c4_order, "C4-dedup": _c4_dedup,
     "C5/D4": _c5_d4,
