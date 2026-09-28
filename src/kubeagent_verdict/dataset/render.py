@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import re
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import names, rules
@@ -21,8 +22,8 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # render.py's public surface. Each step that adds a new function or a new
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
-__all__ = ["apply_budget", "bind", "check_prompt_size", "draw_ending", "drop", "header_for",
-           "object_reads", "prompt_meta", "refute", "registry_events_read",
+__all__ = ["apply_budget", "bind", "check_prompt_size", "cluster_health", "draw_ending", "drop",
+           "header_for", "object_reads", "prompt_meta", "refute", "registry_events_read",
            "render_workload", "unverify", "workload_meta"]
 
 MAX_READS = 8
@@ -324,3 +325,122 @@ def check_prompt_size(prompt: str, *, entry_or_scenario_key: str) -> None:
             f"entry {entry_or_scenario_key}: prompt is {size} bytes, over "
             f"the {MAX_PROMPT_BYTES}-byte cap"
         )
+
+
+# The cluster-health block. A port of kubeagent's `clusterhealth.Assess`
+# (internal/clusterhealth/clusterhealth.go at v1.24.0), fed from what the
+# prompt already shows, because the dataset has no node list.
+#
+# The dataset tells one NotReady story: the kubelet reports KubeletNotReady
+# because the container runtime is down. These are the NodeReady
+# condition's reason and message kubeagent would read for that node.
+_NOT_READY_REASON = "KubeletNotReady"
+_NOT_READY_MESSAGE = "container runtime is down"
+_NO_LEASE = "no kubelet lease"  # clusterhealth.go:140
+_SYSTEM_NAMESPACE = "kube-system"  # clusterhealth.go:18
+_MIN_NODES = 3
+# A node candidate's cause, `node <name> (<reason>)` (rootcause/rootcause.go:44).
+_NODE_CAUSE = re.compile(r"^node ([^ ()]+) \((.+)\)$")
+# The gather's label for a node describe: its namespace is empty, so the
+# label reads `describe node /<name>` (investigate/gather.go:132).
+_DESCRIBE_NODE = "describe node /"
+
+
+def _trim_line(s: str, limit: int) -> str:
+    """A port of `trimLine` (clusterhealth.go:218-229): the first line,
+    stripped, cut to `limit` runes plus an ellipsis when it is longer."""
+    i = s.find("\n")
+    if i >= 0:
+        s = s[:i]
+    s = s.strip()
+    if len(s) > limit:
+        return s[:limit] + "…"
+    return s
+
+
+def _not_ready_issue(reason: str, message: str) -> str:
+    """A port of `notReadyIssue` (clusterhealth.go:197-216): `NotReady`,
+    plus the condition's reason and its trimmed message when they are
+    there. kubeagent passes both through `safetext.Line` first
+    (clusterhealth.go:181); the caller here does the same or passes
+    constants."""
+    s = "NotReady"
+    m = _trim_line(message, 120)
+    if reason and m:
+        s += ": " + reason + " — " + m
+    elif reason:
+        s += ": " + reason
+    elif m:
+        s += ": " + m
+    return s
+
+
+def _flagged(w: c.Workload) -> bool:
+    """A port of `Workload.Flagged` (inventory/inventory.go:102-104)."""
+    return len(w.findings) > 0 or w.ready < w.desired or w.status == "Failed"
+
+
+def cluster_health(workloads: tuple[c.Workload, ...],
+                   reads: tuple[c.EvidenceRead, ...]) -> c.ClusterHealth | None:
+    """The cluster-health verdict kubeagent would compute for this prompt.
+
+    kubeagent calls a cluster Degraded when it has any node issue or any
+    system issue (clusterhealth.go:104-108). Here:
+
+    - A node issue is a node candidate, `node <name> (<reason>)`, of any
+      verdict. kubeagent makes one candidate per down node on every
+      flagged workload (rootcause.go:36-44), so the candidates name every
+      down node. That includes a candidate the 8-candidate cap later hides.
+      Reason `NotReady` prints `<name> NotReady: KubeletNotReady —
+      container runtime is down`; reason `no kubelet lease` prints
+      `<name> no kubelet lease` (clusterhealth.go:71, :84, :140). Any
+      other reason raises ValueError: the dataset has no block text for it.
+    - A node named both ways is NotReady. kubeagent checks the lease only
+      on a Ready node (clusterhealth.go:73-82).
+    - A system issue is a flagged kube-system workload:
+      `kube-system/<name> <ready>/<desired> <status>`, or
+      `kube-system/<name> <status>` for a Job or CronJob
+      (clusterhealth.go:93-103), in kubeagent's workload order
+      (inventory/inventory.go:534-547).
+
+    The node count is T = max(3, named nodes + 1). The named nodes are the
+    node candidates' names and the names in `describe node /<name>` read
+    labels; the +1 is a healthy node the prompt never names. R = T minus
+    the NotReady nodes. A node with no kubelet lease is still Ready
+    (clusterhealth.go:73-74).
+
+    With no node issue and no system issue the cluster is Healthy and
+    kubeagent prints no block, so this returns None.
+    """
+    reasons: dict[str, set[str]] = {}
+    for w in workloads:
+        for cand in w.candidates:
+            m = _NODE_CAUSE.match(cand.cause)
+            if m:
+                reasons.setdefault(m.group(1), set()).add(m.group(2))
+    system = []
+    flagged = [w for w in workloads if w.namespace == _SYSTEM_NAMESPACE and _flagged(w)]
+    for w in sorted(flagged, key=lambda w: (w.name, w.kind)):
+        if w.kind in ("Job", "CronJob"):
+            system.append(f"{w.namespace}/{w.name} {w.status}")
+        else:
+            system.append(f"{w.namespace}/{w.name} {w.ready}/{w.desired} {w.status}")
+    if not reasons and not system:
+        return None
+    named = set(reasons) | {r.label[len(_DESCRIBE_NODE):] for r in reads
+                            if r.label.startswith(_DESCRIBE_NODE)}
+    total = max(_MIN_NODES, len(named) + 1)
+    node_issues = []
+    for name in sorted(reasons):
+        unknown = reasons[name] - {"NotReady", _NO_LEASE}
+        if unknown:
+            raise ValueError(f"node {name}: no cluster-health text for reason "
+                             f"{min(unknown)!r}")
+        if "NotReady" in reasons[name]:
+            node_issues.append(name + " " + _not_ready_issue(_NOT_READY_REASON,
+                                                             _NOT_READY_MESSAGE))
+        else:
+            node_issues.append(name + " " + _NO_LEASE)
+    not_ready = sum(1 for rs in reasons.values() if "NotReady" in rs)
+    return c.ClusterHealth(degraded=True, nodes_ready=total - not_ready, nodes_total=total,
+                           node_issues=tuple(node_issues), system_issues=tuple(system))

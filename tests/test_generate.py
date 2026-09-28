@@ -359,6 +359,15 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     workloads, all fully derivable -- the victim's own local cause or the
     scenario's shared cause is always printed on that workload's own
     candidate menu. 114 + 20 = 134 graded, 56 + 20 = 76 derivable.
+
+    Re-pinned on 2026-09-26 for the faithful prompts. A row with a node
+    candidate now opens with kubeagent's cluster-health block, and its
+    NotReady line ends "container runtime is down". That prints
+    `worker-containerd-stop`'s keyword "runtime" on five workloads whose
+    prompt did not print it before: one each in `own_cause`,
+    `wrong_attribution` and `misattribution_probe`, and two in
+    `multi_misattribution_probe`. "node" was already printed on all five.
+    76 + 5 = 81 derivable; the 134 graded do not move.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -376,13 +385,17 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
                             "multi_misattribution_probe": 38,
                             "shared_origin_probe": 4,
                             "shared_origin_decoy_probe": 16}
-    assert dict(by_case) == {"own_cause": 9, "empty_candidates": 10,
-                             "wrong_attribution": 9, "misattribution_probe": 9,
-                             "multi_misattribution_probe": 19,
+    # 2026-09-26 (faithful prompts): the cluster-health block prints "runtime" on
+    # five worker-containerd-stop workloads: own_cause 9 -> 10, wrong_attribution
+    # 9 -> 10, misattribution_probe 9 -> 10, multi_misattribution_probe 19 -> 21
+    assert dict(by_case) == {"own_cause": 10, "empty_candidates": 10,
+                             "wrong_attribution": 10, "misattribution_probe": 10,
+                             "multi_misattribution_probe": 21,
                              "shared_origin_probe": 4,
                              "shared_origin_decoy_probe": 16}
     assert sum(graded.values()) == 134
-    assert sum(by_case.values()) == 76
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    assert sum(by_case.values()) == 81
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():

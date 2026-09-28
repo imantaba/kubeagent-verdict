@@ -868,7 +868,15 @@ def test_the_eval_set_is_two_hundred_and_fifty_two_rows():
 #   direct entry), and 5 of those 16 also change their user message (one
 #   per crash-family entry). The other 3 are the indirect entries, whose
 #   own confidence is `medium`. No other row moves.
-FROZEN_SLICE_SHA256 = "aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490"
+#
+# 2026-09-26 (faithful prompts): a row with a node candidate now opens its
+# inventory with kubeagent's cluster-health block. 150 of the 242 rows here
+# gain it in the user message and change by exactly that block; no gold
+# answer or meta moves, and no other row does. Every number banked against
+# the old bytes is retired.
+# aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f2f8c490 ->
+# e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1
+FROZEN_SLICE_SHA256 = "e6a2a5091c1ca2cc9edde8dfaf08afe221113e83b72011ea5889927c780684a1"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -935,7 +943,14 @@ FROZEN_SLICE_SHA256 = "aff7cc96aaec86bf7ce7d972632966a2c770adcde9facd4c8ef2b427f
 # same job-2 generator fix that moved `FROZEN_SLICE_SHA256` above (see its
 # 2026-09-24 entry). None of the ten `shared_origin_decoy_probe` rows
 # moves, so this digest moves only because the frozen slice inside it does.
-EVAL_SET_SHA256 = "97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81"
+#
+# 2026-09-26 (faithful prompts): the cluster-health block that moved
+# `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows have
+# no node candidate and do not move, so this digest moves only because the
+# frozen slice inside it does.
+# 97a89e93fc5fdfdfebd0689fb5b74e060b68ba6879236ca12533e33a4ecb9c81 ->
+# d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31
+EVAL_SET_SHA256 = "d6fc0eda06a3a032fb0f827ea5c886df3d1c408e6ff40ac4c17dd0922a466d31"
 
 
 def _digest(rows) -> str:

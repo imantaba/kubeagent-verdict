@@ -1670,11 +1670,17 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     = []` -- and so were never counted here -- now carry a curated pair
     and are, and every one of them is fully exposed (see
     `tests/test_generate.py::test_the_job2_keyword_exposure_is_pinned_per_case`).
+
+    Re-pinned on 2026-09-26 for the faithful prompts: 76 of 134 becomes 81
+    of 134. The cluster-health block's NotReady line ends "container
+    runtime is down", which prints `worker-containerd-stop`'s keyword
+    "runtime" on five workloads whose prompt did not print it before.
     """
     rows = [generate.to_row(ex) for ex in generate.test_set()]
     board = score.scoreboard(score.evaluate(rows, lambda m: ""))
     assert board["overall"]["keyword_graded_n"] == 134
-    assert board["overall"]["keyword_derivable_n"] == 76
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    assert board["overall"]["keyword_derivable_n"] == 81
     # Every counted workload is a job-2 workload, which is what design spec
     # line 547's "over all job-2 rows" asks for.
     counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
@@ -2374,20 +2380,33 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     The 76, 134 and 142 measure the corpus, not the guard, and do not move.
     The margin under JOB2_BAR is now the whole bar. If the guarded rate
     ever reaches JOB2_BAR, stop: a bot that reads nothing passes again.
+
+    2026-09-26 (faithful prompts), later the same day: the corpus moves.
+    A row with a node candidate now opens with kubeagent's cluster-health
+    block, whose NotReady line ends "container runtime is down". That
+    prints "runtime", one of `worker-containerd-stop`'s two keywords, on
+    five workloads whose prompt lacked it, so 76 becomes 81 and the
+    unguarded rate 0.5352 becomes 81/142 = 0.5704. The guarded rate stays
+    0.0: the block sits before the first inventory entry, so it is in no
+    workload's own block, and the bot's pasted prompt still holds every
+    line of the workload's own block.
     """
     rows = _corpus_rows()
     bot = _paste_the_prompt_bot(rows)
     board = score.scoreboard(score.evaluate(rows, bot))
     unguarded = _unguarded_job2_scores(rows, bot)
 
-    assert board["overall"]["keyword_derivable_n"] == 76
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    assert board["overall"]["keyword_derivable_n"] == 81
     assert board["overall"]["keyword_graded_n"] == 134
     assert board["jobs"]["job2"]["n"] == 142
     # 2026-09-26 (faithful prompts): the grader guard zeroes a pasted prompt 0.535 -> 0.0
     assert board["jobs"]["job2"]["rate"] == 0.0
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
-    assert (sum(unguarded), len(unguarded)) == (76, 142)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.5352
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime"
+    # (76, 142) -> (81, 142), 0.5352 -> 0.5704
+    assert (sum(unguarded), len(unguarded)) == (81, 142)
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.5704
 
 
 def _own_entry(prompt: str, section: str, name: str) -> list[str]:
@@ -2669,6 +2688,13 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
     skipped rather than counted here. The full 76-workload population,
     catalog and eval-origin together, is
     `test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt`'s number.
+
+    Re-pinned on 2026-09-26 for the faithful prompts. The cluster-health
+    block prints "runtime" on five `worker-containerd-stop` workloads, so
+    that entry moves from partly exposed (1 of 6) to fully exposed (6 of 6).
+    Still eleven entries: ten fully exposed on 60 workloads, and one,
+    `volume-attach-error`, on a single row. 56 becomes 61, and the
+    scoreboard's 76 becomes 81.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -2696,13 +2722,16 @@ def test_the_exposed_workloads_trace_back_to_eleven_catalog_entries():
             fully.update(declaring[keywords])
             n_fully += n
 
-    assert (len(fully), n_fully) == (9, 54)
-    assert (len(partly), n_partly) == (2, 2)
-    assert n_fully + n_partly == 56
-    # The scoreboard's total is bigger now: the catalog's 56 plus the 20
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" exposes
+    # worker-containerd-stop fully: (9, 54) -> (10, 60), (2, 2) -> (1, 1), 56 -> 61
+    assert (len(fully), n_fully) == (10, 60)
+    assert (len(partly), n_partly) == (1, 1)
+    assert n_fully + n_partly == 61
+    # The scoreboard's total is bigger now: the catalog's 61 plus the 20
     # eval-origin workloads this test deliberately does not count above.
     board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
-    assert board["overall"]["keyword_derivable_n"] == 76
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    assert board["overall"]["keyword_derivable_n"] == 81
     assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
@@ -2795,7 +2824,8 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     after = score.scoreboard(score.evaluate(rewritten, bot))
 
     # The exposure closes, which is the point of the rewrite.
-    assert before["overall"]["keyword_derivable_n"] == 76
+    # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
+    assert before["overall"]["keyword_derivable_n"] == 81
     assert after["overall"]["keyword_derivable_n"] == 0
     assert after["overall"]["keyword_graded_n"] == 134
 

@@ -49,6 +49,11 @@ It moved four times on that branch: once for the catalogue's log-cause
 text, once for the single undecided builder, which also cut the exam from
 263 rows to 252, once for the multi-workload rows' log reads and headers,
 and once for `empty_candidates`' confidence and log read.
+
+Re-pinned on 2026-09-26 for the faithful prompts. A row with a node
+candidate now opens its inventory with kubeagent's cluster-health block,
+so 150 of the 252 user messages gain it. Each of them changes by exactly
+that block; no meta field and no gold answer moves, and no other row does.
 """
 
 from __future__ import annotations
@@ -75,7 +80,10 @@ def view(row):
             "flagged": [v["workload"] for v in gold["verdicts"]]}
 
 
-GRADED_VIEW_SHA256 = "250f2bc2bc6860ec5e04e9574e36b8cf23cea2625961b735bb1a0888914d5b18"
+# 2026-09-26 (faithful prompts): 150 user messages gain the cluster-health block
+# 250f2bc2bc6860ec5e04e9574e36b8cf23cea2625961b735bb1a0888914d5b18 ->
+# 2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7
+GRADED_VIEW_SHA256 = "2833890df618364320a7d3932931ae093c8950c14c24e235bbcced390f5c59a7"
 
 
 def _digest(views) -> str:

@@ -241,7 +241,7 @@ def _answer(rows: list[dict], summary: str) -> str:
     return json.dumps({"verdicts": rows, "summary": summary}, ensure_ascii=False)
 
 
-def _user_message(cluster: c.ClusterHealth | None, summary: c.ResourceSummary | None,
+def _user_message(summary: c.ResourceSummary | None,
                   platform_line: str, service_issues: tuple[c.ServiceIssue, ...],
                   workloads: tuple[c.Workload, ...], reads: tuple[c.EvidenceRead, ...],
                   *, key: str) -> str:
@@ -259,9 +259,14 @@ def _user_message(cluster: c.ClusterHealth | None, summary: c.ResourceSummary | 
     paired entry's key plus its namespace/name, joined across workloads --
     never a placeholder, so the error this raises names exactly which row
     blew the cap.
+
+    It takes no cluster argument. The cluster-health block that opens the
+    inventory comes from `render.cluster_health(workloads, reads)`, so a
+    row shows the block exactly when its own candidates and workloads say
+    kubeagent would print one.
     """
-    user = c.build_user_message(cluster, summary, platform_line, service_issues,
-                                workloads, reads)
+    user = c.build_user_message(render.cluster_health(workloads, reads), summary,
+                                platform_line, service_issues, workloads, reads)
     render.check_prompt_size(user, entry_or_scenario_key=key)
     return user
 
@@ -340,7 +345,7 @@ def _winner_example(e: CatalogEntry, n: Names, cands: tuple[c.Candidate, ...],
     result = rules.Result(decided=True, cause=cause, outcome="confirmed",
                           evidence=rationale, group_key="", group_text="", decisions=())
     w = _workload(e, n, cands, confidence=conf, result=result)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
              "rationale": rationale}]
     summary = (f"{n.ns}/{n.name} is failing: {cause}.\n"
@@ -469,7 +474,7 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
     reads = tuple(object_reads(menu, ns=n.ns, pod=n.pod)) if shape == "refuted" else ()
     log = _log_read(e, n, evidence)
     reads += (log,) if log else ()
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     if thin:
         cause, conf, keywords = c.NONE_OF_THESE, "low", []
@@ -560,7 +565,7 @@ def truncated(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     # when the winning candidate itself was cut by the per-workload cap.
     w = _workload(e, n, tuple(cands), confidence=_confidence(e), result=result)
     reads = object_reads(budgeted, ns=n.ns, pod=n.pod)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": "low",
              "rationale": rationale}]
     summary = f"{n.ns}/{n.name} is probably failing from: {cause}.\nEvidence was truncated; treat with caution."
@@ -689,7 +694,7 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     if not used_registry:
         reads.append(c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=own_line))
     reads = tuple(reads)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
              "confidence": "medium",
              "rationale": "The evidence contradicts every listed candidate rather than "
@@ -724,7 +729,7 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     log = _log_read(e, n, "clear")
     if log is not None:
         reads += (log,)
-    user = _user_message(None, None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
     cause = _fmt(e.own_cause, n)
     conf = _confidence(e)
     rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
@@ -805,7 +810,7 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         results.append(result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     # No origin read and at most 4 workloads of 2 reads each: never over 8.
-    user = _user_message(None, None, "", (), tuple(workloads),
+    user = _user_message(None, "", (), tuple(workloads),
                          _cap_reads(all_reads), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
@@ -1161,7 +1166,7 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
                                     decoy_by_workload=decoy_by_workload)
 
     group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
-    user = _user_message(None, None, "", (), tuple(workloads), tuple(reads), key=group)
+    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
     lines = _shared_origin_summary(
         label, healthy=healthy, count=count, origin=_fmt(p.origin, anchor),
         shared_cause=shared_cause, remedy=_fmt(p.remedy, anchor), rows=rows,
@@ -1538,7 +1543,7 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    user = _user_message(None, None, "", (), tuple(workloads), _cap_reads(all_reads),
+    user = _user_message(None, "", (), tuple(workloads), _cap_reads(all_reads),
                          key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
