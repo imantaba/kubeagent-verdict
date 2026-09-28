@@ -745,7 +745,7 @@ def test_the_roster_reads_exactly_what_the_capture_read():
 # through a function.
 #
 # A fresh node now carries the kubelet's four conditions, as read_text()
-# writes them (contract/capture/kv_capture_test.go.txt:288-316,
+# writes them (contract/capture/kv_capture_test.go.txt:292-320,
 # `kvFreshNode`), so a read node's content is compared as read_text() gives
 # it. The first capture's nodes carried one condition each, which is why
 # this test used to feed describe_node() a stand-in.

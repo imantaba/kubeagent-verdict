@@ -270,7 +270,11 @@ func kvCond(t corev1.NodeConditionType, status, reason, msg string) corev1.NodeC
 }
 
 // kvScanNode is the node as the scan listed it. Its Ready condition follows
-// scan_reason; the other three are healthy.
+// scan_reason; the other three are healthy. It is never cordoned either:
+// Spec.Unschedulable stays false, even for a node whose fresh read finds a
+// cordon (kvFreshNode). So Assess prints no MemoryPressure, DiskPressure,
+// PIDPressure or SchedulingDisabled line here, and the byte-equal check says
+// nothing about them. Spec 4 owns scan-time node state.
 func kvScanNode(n kvNode) (corev1.Node, error) {
 	ready := kvReadyTrue
 	switch n.ScanReason {
