@@ -19,8 +19,11 @@ What the checker reads from `meta`, and nothing else:
 - `meta["case"]`: rows of the four shared-origin cases skip the evidence
   rules and the rules propagation.py's own text fails (EXEMPT_CASES,
   EVIDENCE_RULES, PROPAGATION_TEXT_RULES).
-- `meta["origin_read_label"]`: the healthy-origin read at index 0 skips
-  the rules in HEALTHY_READ_EXEMPT.
+- `meta["origin_read_label"]`: the healthy-origin read at index 0 is left
+  out of the gathered reads (`_Ctx.gathered`) and so out of the per-workload
+  read groups. The rules that walk those, E2-order, E4 and E6-E10 among
+  them, never see it. It still counts toward E1, and E3, E5, the F rules
+  and the TXT rules still read it.
 - the keys of `meta["workloads"]`: ANS-1's workload set.
 - each workload's `own_cause_keywords`: ANS-2.
 
@@ -188,9 +191,6 @@ EVIDENCE_RULES = frozenset({
 PROPAGATION_TEXT_RULES = frozenset({
     "B1", "C1-conf", "C1-cause", "C5/D4", "D1-onefresh", "TXT-IS9", "TXT-IS11",
 })
-# The rules the healthy-origin read skips. It still counts toward E1, and E3,
-# E5, the F rules and the TXT rules still read it.
-HEALTHY_READ_EXEMPT = frozenset({"E2-order", "E4", "E6", "E7", "E8", "E9", "E10"})
 
 
 @dataclass(frozen=True)
@@ -791,7 +791,7 @@ def _a6(x: _Ctx) -> tuple[int, _Finding]:
             return bad(i)
         i += 1
     if i < n and t[i] == "Cluster resources:":
-        if i + 2 >= n + 0 and i + 2 > n:
+        if i + 2 > n:
             return bad(i)
         cpu = _CPU_LINE.match(t[i + 1]) if i + 1 < n else None
         mem = _MEMORY_LINE.match(t[i + 2]) if i + 2 < n else None
@@ -1915,24 +1915,31 @@ def _txt_is17(x: _Ctx) -> tuple[int, _Finding]:
 # The commands of remediation.For that put an object's name in a slot
 # (remediation/remediation.go:21-57): logsCmd :66-72, jobLogsCmd :79-81,
 # describeCmd :83-85, describeCronJobCmd :93-95 and objectEventsCmd :107-109.
-# eventsCmd (:111-113) names a reason, not an object.
+# eventsCmd (:111-113) names a reason, not an object. The flag says whether the
+# arm's finding sits on the workload itself: JobFailed carries the workload's
+# key as its pod (batchhealth/batchhealth.go:113) and picks jobLogsCmd or
+# describeCronJobCmd, and RolloutStuck does too (rollouthealth/rollouthealth.go:125)
+# and picks objectEventsCmd. Every other arm's finding sits on a pod.
 _NAME_SLOT = (
-    re.compile(r"^kubectl -n (\S*) logs (\S+)(?: -c \S+)? --previous$"),
-    re.compile(r"^kubectl -n (\S*) logs job/(\S+)$"),
-    re.compile(r"^kubectl -n (\S*) describe pod (\S+)$"),
-    re.compile(r"^kubectl -n (\S*) describe cronjob (\S+)$"),
-    re.compile(r"^kubectl -n (\S*) get events --field-selector involvedObject\.name=(\S+)$"),
+    (re.compile(r"^kubectl -n (\S*) logs (\S+)(?: -c \S+)? --previous$"), False),
+    (re.compile(r"^kubectl -n (\S*) logs job/(\S+)$"), True),
+    (re.compile(r"^kubectl -n (\S*) describe pod (\S+)$"), False),
+    (re.compile(r"^kubectl -n (\S*) describe cronjob (\S+)$"), True),
+    (re.compile(r"^kubectl -n (\S*) get events --field-selector involvedObject\.name=(\S+)$"), True),
 )
 
 
 def _txt_pod(x: _Ctx) -> tuple[int, _Finding]:
-    """A fix command names the pod `<pod>`. kubeagent masks the pod before it
-    builds the command, since a controller's pod name is drawn per replica
-    and explains nothing (explain/explain.go:148-171, the mask at :165 and
-    :167). A finding on the workload object itself keeps its name: the slot
-    then holds the workload's own namespace and name (explain.go:163). That is
-    RolloutStuck, and a bare pod, which kubeagent makes its own workload
-    (inventory/inventory.go:402)."""
+    """A fix command's name slot holds what suggestionFor leaves there
+    (explain/explain.go:148-171). It swaps the finding's pod for `<pod>`
+    unless the pod is the workload's own identity (:163, the mask at :165 and
+    :167), and it keeps the namespace. So the `-n` value is the workload's own
+    namespace, and the slot is:
+    - the workload's own name, when the finding sits on the workload: a
+      JobFailed or RolloutStuck arm, or any arm of a bare pod, which kubeagent
+      makes its own workload (inventory/inventory.go:402);
+    - `<pod>` otherwise, since a controller's pod name is drawn per replica
+      and explains nothing."""
     out = []
     n = 0
     for e in x.p.entries:
@@ -1940,12 +1947,15 @@ def _txt_pod(x: _Ctx) -> tuple[int, _Finding]:
             if not ln.text.startswith(_FIX_PREFIX):
                 continue
             command = ln.text.split(" | run: ", 1)[-1]
-            m = next((m for arm in _NAME_SLOT if (m := arm.match(command))), None)
-            if m is None:
+            hit = next(((m, on_workload) for arm, on_workload in _NAME_SLOT
+                        if (m := arm.match(command))), None)
+            if hit is None:
                 continue
             n += 1
+            m, on_workload = hit
             ns, slot = m.groups()
-            if slot != "<pod>" and (ns, slot) != (e.ns, e.name):
+            kept = on_workload or e.kind == "Pod"
+            if ns != e.ns or slot != (e.name if kept else "<pod>"):
                 out.append((f"inventory line {ln.no}", ln.text))
     return n, out
 

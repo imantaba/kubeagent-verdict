@@ -327,15 +327,23 @@ def test_a_crash_findings_logs_command_names_its_own_container(seed_rows):
 
 
 def test_the_pod_slot_holds_the_placeholder_or_the_workloads_own_name():
-    """TXT-POD reads every arm that has a name slot. kubeagent keeps a name
-    only when the finding sits on the workload itself (explain.go:162-171):
-    a RolloutStuck finding names the controller, and a bare pod is its own
-    workload. Any other name there is one kubeagent masks."""
+    """TXT-POD reads every arm that has a name slot. suggestionFor swaps the
+    finding's pod for `<pod>` unless the finding sits on the workload itself
+    (explain.go:162-171). RolloutStuck and JobFailed name the workload
+    (objectEventsCmd, jobLogsCmd, describeCronJobCmd), so those arms keep its
+    name. A pod finding on a controller's workload is always swapped, and
+    `-n` is always the workload's own namespace.
+
+    2026-09-28 (final review): `describe pod frontend` passed here, and
+    `<pod>` passed in the RolloutStuck and JobFailed arms. web/frontend is a
+    Deployment, so kubeagent masks its pod, and it never masks a workload's
+    own name. Both now fire."""
     system, user, assistant, meta = _golden()
     assert checker.check(system, user, assistant, meta).inspected["TXT-POD"] == 11
     fix, pod = "kubectl -n web describe pod <pod>", "frontend-5b8d7f6c9-q2w3e"
     for cmd in ("kubectl -n web get events --field-selector involvedObject.name=frontend",
-                "kubectl -n web describe pod frontend",
+                "kubectl -n web logs job/frontend",
+                "kubectl -n web describe cronjob frontend",
                 "kubectl -n web logs <pod> -c app --previous"):
         report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
         assert "TXT-POD" not in _fired(report), cmd
@@ -343,9 +351,81 @@ def test_the_pod_slot_holds_the_placeholder_or_the_workloads_own_name():
                 f"kubectl -n web logs {pod} -c app --previous",
                 f"kubectl -n web logs job/{pod}",
                 f"kubectl -n web describe cronjob {pod}",
-                "kubectl -n web describe pod api"):
+                "kubectl -n web describe pod api",
+                # a Deployment's pod finding: kubeagent swaps even the workload's name
+                "kubectl -n web describe pod frontend",
+                "kubectl -n web logs frontend -c app --previous",
+                # a finding on the workload: kubeagent never swaps its name
+                "kubectl -n web get events --field-selector involvedObject.name=<pod>",
+                "kubectl -n web logs job/<pod>",
+                "kubectl -n web describe cronjob <pod>",
+                # another namespace
+                "kubectl -n shop describe pod <pod>",
+                "kubectl -n shop get events --field-selector involvedObject.name=frontend",
+                "kubectl -n  describe pod <pod>"):
         report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
         assert "TXT-POD" in _fired(report), cmd
+
+
+def test_a_bare_pods_slot_holds_its_own_name():
+    """A bare pod is its own workload (inventory/inventory.go:402), so its
+    finding's pod is the workload and suggestionFor keeps the name."""
+    system, user, assistant, meta = _golden()
+    user = user.replace("- web/frontend (Deployment): ", "- web/frontend (Pod): ", 1)
+    fix = "kubectl -n web describe pod <pod>"
+    for cmd, fires in (("kubectl -n web describe pod frontend", False),
+                       ("kubectl -n web logs frontend -c app --previous", False),
+                       ("kubectl -n web describe pod <pod>", True),
+                       ("kubectl -n web logs <pod> -c app --previous", True),
+                       ("kubectl -n shop describe pod frontend", True)):
+        report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
+        assert ("TXT-POD" in _fired(report)) is fires, cmd
+
+
+# --- TXT-IS15: the lease and rollout arms ---------------------------------
+
+_WORKER_2 = "  node worker-2 no kubelet lease\n"
+_FRONTEND_FIX = ("verify the tag exists and the registry credentials | run: "
+                 "kubectl -n web describe pod <pod>\n")
+
+
+def _is15(user: str) -> tuple[bool, int]:
+    system, _user, assistant, meta = _golden()
+    report = checker.check(system, user, assistant, meta)
+    return "TXT-IS15" in _fired(report), report.inspected["TXT-IS15"]
+
+
+def test_is15_reads_a_lease_age_in_go_duration_form():
+    """clusterhealth.go:144 prints a stale lease as time.Duration.String,
+    rounded to the second: `2m5s`, never `125s` or `2m5.5s`."""
+    _s, user, _a, _m = _golden()
+    assert _WORKER_2 in user
+    _fired0, n0 = _is15(user)
+
+    def lease(age: str) -> str:
+        return user.replace(_WORKER_2,
+                            f"  node worker-2 kubelet not heartbeating (lease {age} stale)\n", 1)
+
+    assert _is15(lease("2m5s")) == (False, n0 + 1)
+    assert _is15(lease("125s")) == (True, n0 + 1)
+    assert _is15(lease("2m5.5s")) == (True, n0 + 1)
+
+
+def test_is15_reads_a_rollout_age_in_human_age_form():
+    """explain.go:212 prints a recent change's age as inventory.HumanAge: one
+    number and one of d, h, m, s, such as `3h`, never `3h0m0s`."""
+    _s, user, _a, _m = _golden()
+    assert _FRONTEND_FIX in user
+    _fired0, n0 = _is15(user)
+
+    def rollout(age: str) -> str:
+        line = (f"    recent change: rolled out to revision 4 {age} ago, image "
+                "registry.invalid/web/frontend:2.0 → registry.invalid/web/frontend:2.1\n")
+        return user.replace(_FRONTEND_FIX, _FRONTEND_FIX + line, 1)
+
+    assert _is15(rollout("3h")) == (False, n0 + 1)
+    assert _is15(rollout("3h0m0s")) == (True, n0 + 1)
+    assert _is15(rollout("03h")) == (True, n0 + 1)
 
 
 # --- B8: every block lists the row's down nodes and its namespace's PVCs --
@@ -505,8 +585,22 @@ def test_the_propagation_text_rules_are_as_ruled():
         "B1", "C1-conf", "C1-cause", "C5/D4", "D1-onefresh", "TXT-IS9", "TXT-IS11"})
 
 
-def test_the_healthy_read_exemption_is_as_ruled():
-    assert checker.HEALTHY_READ_EXEMPT == frozenset({"E2-order", "E4", "E6", "E7", "E8", "E9", "E10"})
+# The evidence rules that walk the gathered reads (`_Ctx.gathered`), which
+# leave out a healthy-origin read at index 0. The checker keeps no list of
+# them: until 2026-09-28 it had one, HEALTHY_READ_EXEMPT, that no code read.
+_SKIPS_THE_HEALTHY_READ = frozenset({"E2-order", "E4", "E6", "E7", "E8", "E9", "E10"})
+
+
+def test_a_healthy_read_is_not_flagged_by_the_rules_that_exempt_it(seed_rows):
+    """Recognised by its label at index 0, the read passes every rule. Drop
+    the label from meta and the same read is one of the gathered reads, and
+    the rules that walk those fail it: it is no workload's events read."""
+    system, user, assistant, meta = _parts(_healthy_row(seed_rows))
+    assert _where(checker.check(system, user, assistant, meta)) == []
+    bare = {k: v for k, v in meta.items() if k != "origin_read_label"}
+    fired = _fired(checker.check(system, user, assistant, bare))
+    assert fired
+    assert fired <= _SKIPS_THE_HEALTHY_READ
 
 
 def test_each_propagation_text_rule_still_fires_with_the_exemption_off(seed_rows):
@@ -551,7 +645,7 @@ def test_a_label_off_by_one_character_is_caught(seed_rows):
     label = meta["origin_read_label"]
     meta = {**meta, "origin_read_label": label[:-1] + ("y" if label[-1] == "x" else "x")}
     fired = _fired(checker.check(system, user, assistant, meta))
-    assert fired & checker.HEALTHY_READ_EXEMPT
+    assert fired & _SKIPS_THE_HEALTHY_READ
 
 
 def test_a_healthy_origin_read_at_index_1_is_caught(seed_rows):
@@ -562,7 +656,7 @@ def test_a_healthy_origin_read_at_index_1_is_caught(seed_rows):
     reads[0], reads[1] = reads[1], reads[0]
     user = head + "== BEGIN evidence ==\n" + "\n\n".join(reads) + "\n== END evidence ==" + tail
     fired = _fired(checker.check(system, user, assistant, meta))
-    assert fired & checker.HEALTHY_READ_EXEMPT
+    assert fired & _SKIPS_THE_HEALTHY_READ
 
 
 def test_meta_none_skips_only_ans1s_meta_clause_and_ans2(seed_rows):
