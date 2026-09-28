@@ -833,6 +833,108 @@ def test_multi_probe_meta_lists_every_decoy():
     assert len(ex.meta["decoy_by_workload"]) == 2
 
 
+# kubeagent's rootcause walks every down node for every flagged workload,
+# and every broken claim in the workload's own namespace
+# (internal/rootcause/rootcause.go: Annotate, AnnotatePVC). A node or claim
+# the workload does not use is still listed, ruled out. Until 2026-09-28 the
+# probe listed only each workload's own objects, which no kubeagent scan
+# prints once a row has two workloads.
+_CONSIDERED = re.compile(r"    considered (node|PVC) (\S+) \(.*?\): "
+                         r"(attributed|ruled out|outranked) — (.*)$")
+
+
+def _cand_blocks(user):
+    """Each workload block's (kind, name, verdict, reason) lines, by workload."""
+    blocks: dict[str, list[tuple[str, str, str, str]]] = {}
+    key = None
+    for ln in _cand_section(user).splitlines():
+        if ln.startswith("- "):
+            key = ln[2:].split(" (", 1)[0]
+            blocks[key] = []
+        elif m := _CONSIDERED.match(ln):
+            blocks[key].append(m.groups())
+    return blocks
+
+
+def _probe_rows():
+    from kubeagent_verdict.dataset import generate
+    return [ex for ex in generate.probe_sets() if ex.case == "multi_misattribution_probe"]
+
+
+def test_multi_probe_lists_every_node_of_the_row_in_every_block():
+    rows = _probe_rows()
+    assert len(rows) == 20
+    for ex in rows:
+        blocks = _cand_blocks(ex.user)
+        assert len(blocks) >= 2, ex.group
+        nodes = {name for lines in blocks.values() for kind, name, _v, _r in lines
+                 if kind == "node"}
+        assert nodes, ex.group
+        for key, lines in blocks.items():
+            assert {name for kind, name, _v, _r in lines if kind == "node"} == nodes, (
+                ex.group, key)
+
+
+def test_multi_probe_rules_out_another_workloads_node():
+    e1, e2 = _two_entries()
+    n1, n2 = _names("shop", "cart", "worker-1"), _names("web", "front", "worker-2")
+    blocks = _cand_blocks(cases.multi_misattribution_probe(
+        [(e1, n1), (e2, n2)], random.Random(7)).user)
+    assert ("node", "worker-2", "ruled out",
+            "no pod of this workload is scheduled on it") in blocks["shop/cart"]
+    assert ("node", "worker-1", "ruled out",
+            "no pod of this workload is scheduled on it") in blocks["web/front"]
+
+
+def _pvc_pairs(cache_ns):
+    """pvc-unbound-unschedulable's claim in `shop`, beside a node workload."""
+    return [(_entry("pvc-unbound-unschedulable"),
+             _names("shop", "db", "worker-1", pvc="data-db")),
+            (_entry("memory-limit-oomkill"),
+             _names(cache_ns, "cache", "worker-2", pvc="data-cache"))]
+
+
+def test_multi_probe_lists_a_same_namespace_claim_in_both_blocks():
+    blocks = _cand_blocks(cases.multi_misattribution_probe(
+        _pvc_pairs("shop"), random.Random(7)).user)
+    pvcs = {key: {name for kind, name, _v, _r in lines if kind == "PVC"}
+            for key, lines in blocks.items()}
+    assert pvcs == {"shop/db": {"data-db"}, "shop/cache": {"data-db"}}
+    assert ("PVC", "data-db", "ruled out",
+            "not mounted by this workload's pods") in blocks["shop/cache"]
+
+
+def test_multi_probe_leaves_a_claim_in_another_namespace_out():
+    blocks = _cand_blocks(cases.multi_misattribution_probe(
+        _pvc_pairs("web"), random.Random(7)).user)
+    assert [ln for ln in blocks["web/cache"] if ln[0] == "PVC"] == []
+
+
+# The probe's decoys, measured on the builder before it listed other
+# workloads' nodes and claims (2026-09-28). A decoy is a workload's OWN
+# refuted candidate: the ruled-out lines for the others' objects are not
+# bait, and nodes sort first, so `d[0]` would otherwise turn into one.
+_PROBE_DECOYS_SHA256 = "0c98f224f2a34cfca359cad40efc94d2d5bcb17f578a3e352330546f9e032b9f"
+
+
+def test_multi_probe_decoys_are_unchanged_by_the_foreign_lines():
+    import hashlib
+    view = [[ex.group, ex.meta["decoy_by_workload"], ex.meta["decoy_causes"]]
+            for ex in _probe_rows()]
+    blob = json.dumps(view, sort_keys=True, ensure_ascii=False).encode()
+    assert hashlib.sha256(blob).hexdigest() == _PROBE_DECOYS_SHA256
+
+
+def test_multi_probe_decoys_name_only_the_workloads_own_objects():
+    ex = cases.multi_misattribution_probe(_pvc_pairs("shop"), random.Random(7))
+    decoys = ex.meta["decoy_by_workload"]
+    assert [d.split(" (")[0] for d in decoys["shop/db"]] == ["PVC data-db"]
+    assert [d.split(" (")[0] for d in decoys["shop/cache"]] == ["node worker-2"]
+    # One per workload, in report order: shop/cache sorts before shop/db.
+    assert [d.split(" (")[0] for d in ex.meta["decoy_causes"]] == [
+        "node worker-2", "PVC data-db"]
+
+
 # ------------------------------------------- multi rows on the gather
 
 def _heads(text):

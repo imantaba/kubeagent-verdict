@@ -676,6 +676,10 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
                    meta=meta)
 
 
+# The first word of a node or claim candidate's cause (`rules.attribute`).
+_CAUSE_WORD = {"node": "node", "pvc": "PVC"}
+
+
 def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                                rng: random.Random) -> Example:
     """EVAL-ONLY: `wrong_attribution`'s transform, in the multi-workload shape.
@@ -697,10 +701,17 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
 
     The row is built like `multi`: the workloads in report order, each with
     its own finding lines, and one gather that reads for the whole row
-    under the budget of 8 reads. Each header is the one kubeagent's
-    confidence rule gives the attributed cause, and the answer keeps the
-    entry's own confidence. A workload the budget never reached has no
-    reads to judge its cause from, so the row refuses it.
+    under the budget of 8 reads. Each workload's candidates also list every
+    other workload's node, and every other workload's claim in its own
+    namespace, ruled out, as kubeagent's rootcause does (see
+    `_foreign_objects`). Each header is the one kubeagent's confidence rule
+    gives the attributed cause, and the answer keeps the entry's own
+    confidence. A workload the budget never reached has no reads to judge
+    its cause from, so the row refuses it.
+
+    The decoys are each workload's OWN refuted candidates. A ruled-out line
+    for another workload's object is not bait, and nodes sort first, so it
+    is left out of `decoy_by_workload` and of the row's `decoy_causes`.
     """
     if not 2 <= len(pairs) <= 4:
         raise ValueError("multi_misattribution_probe takes 2-4 workloads")
@@ -714,12 +725,15 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     clash = multi_clash([n for _e, n in pairs])
     if clash:
         raise ValueError(f"multi_misattribution_probe needs {clash}")
-    res = gather.gather([gather_workload(e, n, _refuted_menu(n, e.objects))
-                         for e, n in pairs])
+    own = [_refuted_menu(n, e.objects) for e, n in pairs]
+    foreign = [_foreign_objects(pairs, own, i) for i in range(len(pairs))]
+    res = gather.gather([gather_workload(e, n, own[i] + foreign[i])
+                         for i, (e, n) in enumerate(pairs)])
     workloads, rows = [], []
     workloads_meta: dict[str, dict] = {}
     decoy_by_workload: dict[str, list[str]] = {}
-    for (e, n), candidates, result in zip(pairs, res.candidates, res.results):
+    for (e, n), others, candidates, result in zip(pairs, foreign, res.candidates,
+                                                   res.results):
         key = f"{n.ns}/{n.name}"
         if _starved(n, res.reads):
             raise ValueError(f"multi_misattribution_probe: the read budget never reached {key}")
@@ -730,7 +744,9 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                      "confidence": _confidence(e), "rationale": _fmt(e.rationale, n)})
         workloads_meta[key] = workload_meta(result, expected_cause=cause,
                                             own_cause_keywords=list(e.own_cause_keywords))
-        decoy_by_workload[key] = [cand.cause for cand in candidates]
+        not_own = {f"{_CAUSE_WORD[obj.kind]} {obj.name}" for obj in others}
+        decoy_by_workload[key] = [cand.cause for cand in candidates
+                                  if cand.cause.split(" (", 1)[0] not in not_own]
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     user = _user_message(None, "", (), tuple(workloads), res.reads, key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
@@ -1359,6 +1375,32 @@ def _thin_multi(e: CatalogEntry, n: Names, w: c.Workload, result: rules.Result,
     own = (inventory[inventory.index(f"- {n.ns}/{n.name} ("):]
            + c.render_candidates((w,))).lower()
     return not all(k.lower() in own for k in e.own_cause_keywords)
+
+
+def _foreign_objects(pairs: list[tuple[CatalogEntry, Names]], own: list[tuple],
+                     i: int) -> tuple:
+    """The other workloads' objects that pair `i`'s candidate list still names.
+
+    kubeagent's rootcause walks every down node for every flagged workload,
+    and a node none of the workload's pods runs on is `ruled out — no pod of
+    this workload is scheduled on it` (rootcause.go Annotate, :24-56). It
+    walks every broken claim in the workload's own namespace the same way,
+    and one its pods do not mount is `ruled out — not mounted by this
+    workload's pods` (AnnotatePVC, :177-222). A claim in another namespace
+    is skipped.
+
+    So pair `i` gets every other pair's node object with placement "off",
+    and every other pair's claim in its own namespace with placement
+    "unmounted". Each is the other pair's own copy, so one object has one
+    fresh state everywhere the prompt shows it. `multi_clash` has already
+    ruled out two pairs sharing a node, or a claim in one namespace.
+    """
+    ns = pairs[i][1].ns
+    return tuple(
+        dataclasses.replace(obj, placement="off" if obj.kind == "node" else "unmounted")
+        for j, objs in enumerate(own) if j != i
+        for obj in objs
+        if obj.kind == "node" or (obj.kind == "pvc" and pairs[j][1].ns == ns))
 
 
 def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
