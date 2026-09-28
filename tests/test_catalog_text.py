@@ -604,11 +604,12 @@ def test_worker_containerd_stop_names_containerd_in_its_own_cause():
 
 def test_the_coredns_command_names_the_coredns_container():
     # internal/remediation/remediation.go:21, 25, 44: the --previous log
-    # command addresses the finding's own container.
+    # command addresses the finding's own container. The pod is `<pod>`, as
+    # kubeagent's prompt names it (internal/explain/explain.go:162-171).
     user = cases.attributed(_entry("coredns-corefile-broken"), N, random.Random(0)).user
-    assert f"| run: kubectl -n shop logs {N.pod} -c coredns --previous\n" in user
+    assert "| run: kubectl -n shop logs <pod> -c coredns --previous\n" in user
     user = cases.attributed(_entry("crashloop-pod"), N, random.Random(0)).user
-    assert f"| run: kubectl -n shop logs {N.pod} -c app --previous\n" in user
+    assert "| run: kubectl -n shop logs <pod> -c app --previous\n" in user
 
 
 # --- P1: the decoys a pod past scheduling can have ----------------------------------

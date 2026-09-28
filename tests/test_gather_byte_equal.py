@@ -17,8 +17,9 @@ The split of work:
 - This file only builds the input and formats the lines. The one rule it
   ports itself is `inventory.Prioritize`'s filter and sort
   (`_prioritize`), because nothing in `src/` orders a scan's workloads.
-- It builds each finding's suggestion with the pod named `<pod>`, as
-  kubeagent's prompt does (`suggestionFor`, internal/explain/explain.go:162-171).
+- It builds each finding's suggestion with `remediation.suggest_for`, the
+  port of kubeagent's `suggestionFor` (internal/explain/explain.go:148-171),
+  so the dumps check that the prompt names `<pod>` where kubeagent does.
 
 Log classification happens on the Go side only. A finding's `log_read` is
 the body kubeagent made of its log text, and Python copies it as it is. So
@@ -145,16 +146,19 @@ def test_the_loader_refuses_an_unknown_key():
 _PROBLEM, _RESTART, _CRON = 2, 3, 4  # inventory/inventory.go:587-591
 
 
-def _suggested(issue: str, ns: str, container: str) -> rem.Suggestion:
-    """The suggestion the prompt carries. The pod is `<pod>`: every fixture
-    finding names a pod, not the workload itself (explain.go:162-171)."""
-    return rem.suggest(issue, ns=ns, pod="<pod>", container=container)
+def _suggested(f: dict, w: dict) -> rem.Suggestion:
+    """The suggestion the prompt carries, from the finding's own pod and the
+    workload it hangs off (explain.go:148-171)."""
+    ns, pod = f["pod"].split("/", 1)
+    assert ns == w["namespace"], f["pod"]
+    return rem.suggest_for(f["issue"], ns=ns, pod=pod, container=f["container"],
+                           workload=w["name"])
 
 
 def _prompt_findings(w: dict) -> tuple[c.Finding, ...]:
     out = []
     for f in w["findings"]:
-        sug = _suggested(f["issue"], w["namespace"], f["container"])
+        sug = _suggested(f, w)
         out.append(c.Finding(f["issue"], f["reason"], f["evidence"], sug.next_step, sug.command))
     return tuple(out)
 

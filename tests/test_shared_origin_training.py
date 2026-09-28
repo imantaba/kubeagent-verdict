@@ -1003,7 +1003,16 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # against the old bytes is retired.
 # b71ec0b940aae861dd1fcc7008340b48db7250dafd075a7084ba910f5f8138e1 ->
 # 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1
-FROZEN_SLICE_SHA256 = "99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1"
+#
+# 2026-09-26 (faithful prompts): the suggested fix line names the pod
+# `<pod>`, as kubeagent's prompt does (internal/explain/explain.go:148-171).
+# A drawn pod name is never the workload's own, so every fix command in the
+# slice changes: all 239 rows move, and each changes only in its fix lines,
+# 273 commands in all. No group, gold answer, meta or system message moves.
+# Every number banked against the old bytes is retired.
+# 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1 ->
+# 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6
+FROZEN_SLICE_SHA256 = "9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1122,7 +1131,14 @@ FROZEN_SLICE_SHA256 = "99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3
 # inside it does.
 # 31b599744777e430b51fe7ab8235891db869e62fbc2860d832bb19f67f87072e ->
 # 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4
-EVAL_SET_SHA256 = "423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4"
+#
+# 2026-09-26 (faithful prompts): the fix line names the pod `<pod>`, which
+# moved `FROZEN_SLICE_SHA256` above. The ten `shared_origin_decoy_probe` rows
+# move too, for the same reason: their 24 fix commands name `<pod>` now.
+# Only their fix lines change; no gold answer or meta moves.
+# 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4 ->
+# 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f
+EVAL_SET_SHA256 = "85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f"
 
 
 def _digest(rows) -> str:

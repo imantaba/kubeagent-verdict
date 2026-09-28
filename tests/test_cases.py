@@ -1289,21 +1289,23 @@ def test_gather_workload_takes_the_image_from_the_names():
 
 def test_the_suggestion_and_the_gather_name_the_same_container(monkeypatch):
     """One function decides the finding's container. The suggested fix's
-    --previous command and the gather's log read both address it."""
+    --previous command and the gather's log read both address it. The
+    suggestion goes through `suggest_for`, the port of kubeagent's
+    `suggestionFor`, with the row's workload."""
     seen = []
-    real = cases.rem.suggest
+    real = cases.rem.suggest_for
 
     def spy(issue, **kw):
-        seen.append(kw["container"])
+        seen.append((kw["container"], kw["workload"]))
         return real(issue, **kw)
 
-    monkeypatch.setattr(cases.rem, "suggest", spy)
+    monkeypatch.setattr(cases.rem, "suggest_for", spy)
     for e in catalog.trainable():
         n = names_mod.draw(random.Random(5))
         seen.clear()
         cases._suggestion(e.issue, n, key=e.key)
         (f,) = cases.gather_workload(e, n, ()).findings
-        assert seen == [f.container], e.key
+        assert seen == [(f.container, n.name)], e.key
         log = cases._log_read(e, n, "clear")
         if log is not None:
             assert log.label.endswith(f" container {f.container}"), e.key

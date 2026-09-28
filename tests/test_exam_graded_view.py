@@ -137,6 +137,12 @@ workloads' `decided_cause`. Six workloads change job: job 1 goes from 118
 to 120 and job 2 from 179 to 177 (see `test_oracle.py`). `expected_cause`
 and `expected_confidence` still sit on 209 and 219 rows. No system
 message moves.
+
+Re-pinned again on 2026-09-26, when the suggested fix line began naming
+the pod `<pod>`, as kubeagent's prompt does. All 249 user messages change,
+and only in their fix lines: each of the 297 fix commands names `<pod>`
+where it named a drawn pod. No meta field, `flagged` list, gold answer or
+system message moves.
 """
 
 from __future__ import annotations
@@ -192,7 +198,11 @@ def view(row):
 # kubeagent can print; no flagged list, gold or meta moves
 # 65c37203ece9e1d4e11fe98fe43609be7f607a0c0e2fe93625bffe1aa27ea77d ->
 # 4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b
-GRADED_VIEW_SHA256 = "4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b"
+# 2026-09-26 (faithful prompts): every fix command names the pod <pod>, as
+# kubeagent's prompt does; no flagged list, gold or meta moves
+# 4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b ->
+# 3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c
+GRADED_VIEW_SHA256 = "3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c"
 
 
 def _digest(views) -> str:

@@ -85,10 +85,12 @@ def _suggestion(issue: str, n: Names, key: str = "") -> rem.Suggestion:
 
     The --previous log command it builds addresses the finding's own
     container, which `_finding_container` names from the issue and the
-    catalog entry's `key`.
+    catalog entry's `key`. It names the pod `<pod>`, as kubeagent's prompt
+    does (`remediation.suggest_for`): a drawn pod name is never the
+    workload's own.
     """
-    return rem.suggest(issue, ns=n.ns, pod=n.pod,
-                       container=_finding_container(issue, n, key))
+    return rem.suggest_for(issue, ns=n.ns, pod=n.pod,
+                           container=_finding_container(issue, n, key), workload=n.name)
 
 
 def _finding(e: CatalogEntry, n: Names, with_log_cause: bool = True) -> c.Finding:

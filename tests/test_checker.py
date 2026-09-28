@@ -260,6 +260,8 @@ BROKEN = {
     "TXT-IS14": (_has(_RESTART_LOOP), _regex(_RESTART_LOOP, r"\g<1>2\g<2>")),
     "TXT-IS15": (_has(_DETECTOR_AGE), _regex(_DETECTOR_AGE, r"\g<1>90s\g<3>")),
     "TXT-IS17": (None, _replace("logs <pod> -c coredns --previous", "logs <pod> --previous")),
+    "TXT-POD": (None, _replace("kubectl -n web describe pod <pod>",
+                               "kubectl -n web describe pod frontend-5b8d7f6c9-q2w3e")),
     # the answer
     "ANS-1": (None, _set_verdict("app/api", "cause", "node worker-2 (no kubelet lease)")),
     "ANS-2": (_has_own_keywords, _add_keyword),
@@ -268,7 +270,8 @@ BROKEN = {
 
 def test_every_rule_has_a_broken_copy():
     assert set(BROKEN) == set(checker.RULES)
-    assert len(checker.RULES) == len(set(checker.RULES)) == 48
+    # 2026-09-26 (faithful prompts): TXT-POD checks the pod slot of a fix command 48 -> 49
+    assert len(checker.RULES) == len(set(checker.RULES)) == 49
 
 
 def _source(pick, seed_rows) -> tuple:
@@ -317,6 +320,28 @@ def test_a_crash_findings_logs_command_names_its_own_container(seed_rows):
     broken = _CRASH_FIX.sub(r"\g<1>sidecar\g<3>", user, count=1)
     assert broken != user
     assert "TXT-IS17" in _fired(checker.check(system, broken, assistant, meta))
+
+
+def test_the_pod_slot_holds_the_placeholder_or_the_workloads_own_name():
+    """TXT-POD reads every arm that has a name slot. kubeagent keeps a name
+    only when the finding sits on the workload itself (explain.go:162-171):
+    a RolloutStuck finding names the controller, and a bare pod is its own
+    workload. Any other name there is one kubeagent masks."""
+    system, user, assistant, meta = _golden()
+    assert checker.check(system, user, assistant, meta).inspected["TXT-POD"] == 11
+    fix, pod = "kubectl -n web describe pod <pod>", "frontend-5b8d7f6c9-q2w3e"
+    for cmd in ("kubectl -n web get events --field-selector involvedObject.name=frontend",
+                "kubectl -n web describe pod frontend",
+                "kubectl -n web logs <pod> -c app --previous"):
+        report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
+        assert "TXT-POD" not in _fired(report), cmd
+    for cmd in (f"kubectl -n web get events --field-selector involvedObject.name={pod}",
+                f"kubectl -n web logs {pod} -c app --previous",
+                f"kubectl -n web logs job/{pod}",
+                f"kubectl -n web describe cronjob {pod}",
+                "kubectl -n web describe pod api"):
+        report = checker.check(system, user.replace(fix, cmd, 1), assistant, meta)
+        assert "TXT-POD" in _fired(report), cmd
 
 
 # --- the exemptions -------------------------------------------------------

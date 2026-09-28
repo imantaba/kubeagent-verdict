@@ -1859,6 +1859,44 @@ def _txt_is17(x: _Ctx) -> tuple[int, _Finding]:
     return n, out
 
 
+# The commands of remediation.For that put an object's name in a slot
+# (remediation/remediation.go:21-57): logsCmd :66-72, jobLogsCmd :79-81,
+# describeCmd :83-85, describeCronJobCmd :93-95 and objectEventsCmd :107-109.
+# eventsCmd (:111-113) names a reason, not an object.
+_NAME_SLOT = (
+    re.compile(r"^kubectl -n (\S*) logs (\S+)(?: -c \S+)? --previous$"),
+    re.compile(r"^kubectl -n (\S*) logs job/(\S+)$"),
+    re.compile(r"^kubectl -n (\S*) describe pod (\S+)$"),
+    re.compile(r"^kubectl -n (\S*) describe cronjob (\S+)$"),
+    re.compile(r"^kubectl -n (\S*) get events --field-selector involvedObject\.name=(\S+)$"),
+)
+
+
+def _txt_pod(x: _Ctx) -> tuple[int, _Finding]:
+    """A fix command names the pod `<pod>`. kubeagent masks the pod before it
+    builds the command, since a controller's pod name is drawn per replica
+    and explains nothing (explain/explain.go:148-171, the mask at :165 and
+    :167). A finding on the workload object itself keeps its name: the slot
+    then holds the workload's own namespace and name (explain.go:163). That is
+    RolloutStuck, and a bare pod, which kubeagent makes its own workload
+    (inventory/inventory.go:402)."""
+    out = []
+    n = 0
+    for e in x.p.entries:
+        for ln in e.subs:
+            if not ln.text.startswith(_FIX_PREFIX):
+                continue
+            command = ln.text.split(" | run: ", 1)[-1]
+            m = next((m for arm in _NAME_SLOT if (m := arm.match(command))), None)
+            if m is None:
+                continue
+            n += 1
+            ns, slot = m.groups()
+            if slot != "<pod>" and (ns, slot) != (e.ns, e.name):
+                out.append((f"inventory line {ln.no}", ln.text))
+    return n, out
+
+
 # --- the answer ----------------------------------------------------------
 
 _VERDICT_KEYS = {"workload", "cause", "confidence", "rationale"}
@@ -1939,6 +1977,7 @@ _RULE_FUNCS: dict[str, _Rule] = {
     "F1": _f1, "F2": _f2, "F3": _f3,
     "TXT-IS8": _txt_is8, "TXT-IS9": _txt_is9, "TXT-IS11": _txt_is11,
     "TXT-IS14": _txt_is14, "TXT-IS15": _txt_is15, "TXT-IS17": _txt_is17,
+    "TXT-POD": _txt_pod,
     "ANS-1": _ans1, "ANS-2": _ans2,
 }
 RULES: tuple[str, ...] = tuple(_RULE_FUNCS)

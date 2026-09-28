@@ -52,23 +52,33 @@ def test_every_rendered_suggestion_is_one_kubeagent_can_emit(rendered):
 # slot is the exact caller bug this shape check exists to catch.
 NAME = r"[a-z0-9][a-z0-9.-]*"
 
+# The issues whose finding sits on the workload object itself, so kubeagent's
+# prompt keeps the name (internal/explain/explain.go:162-171): a JobFailed
+# finding names the Job or the CronJob (remediation.go:74-81, 87-95), a
+# RolloutStuck finding the controller (remediation.go:97-109). Every other arm
+# addresses a pod, and the prompt names it `<pod>`.
+OBJECT_ISSUES = ("JobFailed", "RolloutStuck")
+
 
 def _command_shapes() -> set[re.Pattern[str]]:
-    """Every command `remediation.suggest` can build, as an anchored regex.
+    """Every command kubeagent's prompt can carry, as an anchored regex.
 
-    Rendered with sentinel names and then substituted, so the shape comes from
-    the mirror itself rather than from a second hand-written list that could
-    drift away from it. Both container variants are generated because the
-    empty one drops the `-c` flag.
+    Rendered with sentinel names through `remediation.suggest_for` and then
+    substituted, so the shape comes from the source itself rather than from a
+    second hand-written list that could drift away from it. Both container
+    variants are generated because the empty one drops the `-c` flag. A
+    pod-addressed arm keeps `<pod>` as it is: a real pod name there is a
+    command kubeagent never sends.
     """
     out = set()
     for issue in ISSUES:
+        pod = "WORKLOAD" if issue in OBJECT_ISSUES else "POD"
         for kind in ("", "CronJob"):
             for container in ("", "CTR"):
-                cmd = r.suggest(issue, ns="NS", pod="POD", container=container,
-                                kind=kind).command
+                cmd = r.suggest_for(issue, ns="NS", pod=pod, container=container,
+                                    kind=kind, workload="WORKLOAD").command
                 pat = re.escape(cmd)
-                for sentinel in ("NS", "POD", "CTR"):
+                for sentinel in ("NS", "WORKLOAD", "CTR"):
                     pat = pat.replace(sentinel, NAME)
                 out.add(re.compile("^" + pat + "$"))
     return out
@@ -80,4 +90,32 @@ def test_every_rendered_command_is_one_kubeagent_can_build(rendered):
                   if not any(p.match(m.group(2)) for p in shapes)})
     assert not bad, (
         f"{len(bad)} command(s) kubeagent never builds reached a prompt: "
+        + "; ".join(repr(b) for b in bad[:5]))
+
+
+def test_a_real_pod_name_is_not_a_shape_kubeagent_can_build():
+    # Guards the guard: the shapes must refuse the pod name kubeagent masks.
+    shapes = _command_shapes()
+    for cmd in ("kubectl -n shop describe pod web-7d9f-abcde",
+                "kubectl -n shop logs cart-6b8d94f7c5-q2xzt -c cart --previous"):
+        assert not any(p.match(cmd) for p in shapes), cmd
+    for cmd in ("kubectl -n shop describe pod <pod>",
+                "kubectl -n shop logs <pod> -c cart --previous",
+                "kubectl -n shop get events --field-selector involvedObject.name=web"):
+        assert any(p.match(cmd) for p in shapes), cmd
+
+
+# The two arms that address a pod by name (remediation.go:66-72 and :83-85).
+POD_SLOT = re.compile(r"^kubectl -n \S+ (?:logs (?!job/)|describe pod )(\S+)")
+
+
+def test_every_pod_addressed_command_names_the_pod_placeholder(rendered):
+    # kubeagent's prompt names `<pod>` where a command addresses a pod
+    # (explain.go:162-171). A generated pod name never equals its workload's
+    # (names.pod_name adds two suffixes), so no generated command keeps one.
+    slots = [s.group(1) for m in rendered if (s := POD_SLOT.match(m.group(2)))]
+    assert len(slots) > 1000
+    bad = sorted({s for s in slots if s != "<pod>"})
+    assert not bad, (
+        f"{len(bad)} pod name(s) reached a suggested fix command: "
         + "; ".join(repr(b) for b in bad[:5]))
