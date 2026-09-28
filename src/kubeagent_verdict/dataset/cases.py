@@ -1405,12 +1405,15 @@ def _foreign_objects(pairs: list[tuple[CatalogEntry, Names]], own: list[tuple],
 
 def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
                    rng: random.Random) -> list[tuple]:
-    """Per pair: this pair's own objects (decoys Option-A drawn; the one cause-intent
-    object a pair may declare, worker-containerd-stop's node, stays confirmed as
-    declared -- never drawn), plus every OTHER pair's own node object, ruled out
-    (placement='off') because this workload's pod is not on it (fact 1). Reuses the
-    other pair's already-drawn copy so one physical node carries one Fresh state
-    everywhere it appears in the prompt."""
+    """Per pair: this pair's own objects (decoys Option-A drawn; a cause-intent
+    object, such as worker-containerd-stop's node or pvc-unbound-unschedulable's
+    claim, stays confirmed as declared -- never drawn), plus the other pairs'
+    objects kubeagent still lists for this workload (fact 1, `_foreign_objects`):
+    every OTHER pair's node, ruled out (placement='off') because this workload's
+    pod is not on it, and every OTHER pair's claim in this pair's namespace,
+    ruled out (placement='unmounted') because its pods do not mount it. Reuses
+    the other pair's already-drawn copy so one physical object carries one Fresh
+    state everywhere it appears in the prompt."""
     own: list[tuple] = []
     for e, n in pairs:
         names_dict = dataclasses.asdict(n)
@@ -1418,14 +1421,7 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
             render.draw_ending(render.bind(obj, names_dict), rng)
             if obj.intent == "decoy" else render.bind(obj, names_dict)
             for obj in e.objects))
-    combined = []
-    for i in range(len(pairs)):
-        foreign_nodes = tuple(
-            dataclasses.replace(fo, placement="off")
-            for j, objs in enumerate(own) if j != i
-            for fo in objs if fo.kind == "node")
-        combined.append(own[i] + foreign_nodes)
-    return combined
+    return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]
 
 
 def _is_node_story(p: prop.Propagation) -> bool:

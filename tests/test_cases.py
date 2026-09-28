@@ -720,7 +720,8 @@ def test_contradiction_probe_never_answers_none_of_these():
 def test_multi_objects_injects_foreign_nodes_ruled_out():
     """Fact 1: each pair's combined objects gain the OTHER pair's declared node
     object(s), placement forced to 'off' (ruled out -- this workload's pod is not
-    on that node)."""
+    on that node), and the other pair's claim when the two share a namespace
+    (the tests below)."""
     node_entries = [e for e in catalog.trainable()
                     if any(o.kind == "node" and o.placement == "on" for o in e.objects)]
     assert len(node_entries) >= 2, "need at least 2 catalog entries with a node object"
@@ -736,8 +737,43 @@ def test_multi_objects_injects_foreign_nodes_ruled_out():
     foreign_in_1 = [obj for obj in combined[1] if obj.kind == "node" and obj.placement == "off"]
     assert len(foreign_in_0) == e2_node_count
     assert len(foreign_in_1) == e1_node_count
-    assert len(combined[0]) == len(e1.objects) + e2_node_count
-    assert len(combined[1]) == len(e2.objects) + e1_node_count
+    # 2026-09-28 (final review): a claim joins the list too, when the two
+    # workloads share a namespace. These two declare no claim, so the
+    # count adds 0 whichever namespaces they drew.
+    same_ns = n1.ns == n2.ns
+    e1_pvc_count = sum(1 for obj in e1.objects if obj.kind == "pvc") if same_ns else 0
+    e2_pvc_count = sum(1 for obj in e2.objects if obj.kind == "pvc") if same_ns else 0
+    assert len(combined[0]) == len(e1.objects) + e2_node_count + e2_pvc_count
+    assert len(combined[1]) == len(e2.objects) + e1_node_count + e1_pvc_count
+
+
+def test_multi_objects_adds_a_same_namespace_claim_ruled_out():
+    """kubeagent's AnnotatePVC walks every broken claim in the workload's
+    own namespace, and one its pods do not mount is ruled out. So a
+    workload gets the other workload's claim, unmounted, when the two share
+    a namespace. It is the other workload's own copy, so the claim has one
+    fresh state everywhere it appears."""
+    pairs = _pvc_pairs("shop")
+    combined = cases._multi_objects(pairs, random.Random(11))
+    (own,) = [obj for obj in combined[0] if obj.kind == "pvc"]
+    (foreign,) = [obj for obj in combined[1] if obj.kind == "pvc"]
+    assert own.name == "data-db" and own.placement == "mounted"
+    assert foreign == dataclasses.replace(own, placement="unmounted")
+
+
+def test_multi_objects_leaves_a_claim_in_another_namespace_out():
+    combined = cases._multi_objects(_pvc_pairs("web"), random.Random(11))
+    assert [obj for obj in combined[1] if obj.kind == "pvc"] == []
+
+
+def test_multi_lists_a_same_namespace_claim_in_both_blocks():
+    ex = cases.multi(_pvc_pairs("shop"), random.Random(11))
+    blocks = _cand_blocks(ex.user)
+    pvcs = {key: {name for kind, name, _v, _r in lines if kind == "PVC"}
+            for key, lines in blocks.items()}
+    assert pvcs == {"shop/db": {"data-db"}, "shop/cache": {"data-db"}}
+    assert ("PVC", "data-db", "ruled out",
+            "not mounted by this workload's pods") in blocks["shop/cache"]
 
 
 def test_multi_derives_job_and_label_from_the_objects():
