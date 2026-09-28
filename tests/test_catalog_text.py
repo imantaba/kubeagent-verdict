@@ -15,6 +15,7 @@ The tests assert the rendered prompt text, not only the catalog field.
 """
 from __future__ import annotations
 
+import collections
 import dataclasses
 import random
 import re
@@ -41,6 +42,7 @@ DISK_PRESSURE = "  condition DiskPressure=True (KubeletHasDiskPressure): kubelet
 PID_OK = ("  condition PIDPressure=False (KubeletHasSufficientPID): "
           "kubelet has sufficient PID available\n")
 READY_TRUE = "  condition Ready=True (KubeletReady): kubelet is posting ready status\n"
+READY_DESCRIBE = "node worker-2: unschedulable=false\n" + MEMORY_OK + DISK_OK + PID_OK + READY_TRUE
 # pkg/kubelet/runtime.go:129
 READY_FALSE = "  condition Ready=False (KubeletNotReady): container runtime is down\n"
 
@@ -206,15 +208,18 @@ def test_every_not_ready_catalog_node_carries_the_kubelet_text():
     assert all(obj.fresh == o.NODE_NOT_READY for obj in not_ready)
 
 
-def test_the_typed_node_describes_are_what_read_text_prints():
+def test_the_contradiction_rows_node_describe_is_what_read_text_prints():
+    """A node ended on its lease is Ready, so its describe is a healthy
+    node's, byte for byte. The cordoned node's own describe is pinned by
+    test_the_cordoned_disk_pressure_node_prints_its_story; no row shows it."""
     healthy = _node(o.Fresh(ready="True"), name=N.node)
-    for key in ("node-cordon-diskfull", "worker-containerd-stop"):
-        e = _entry(key)
-        label, content = e.reads[0]
-        (node,) = [obj for obj in e.objects if obj.kind == "node"]
-        want = r.read_text(render.bind(node, NAMES), ns=N.ns, pod=N.pod)
-        assert (label.format(**NAMES), content.format(**NAMES)) == want, key
-        assert e.contradiction.format(**NAMES) == r.read_text(healthy, ns=N.ns, pod=N.pod)[1], key
+    label, content = r.read_text(healthy, ns=N.ns, pod=N.pod)
+    for e in catalog.job1_entries():
+        for node in (obj for obj in e.objects if obj.kind == "node"):
+            ended = o.unverify(render.bind(node, NAMES), "lease")
+            assert r.read_text(ended, ns=N.ns, pod=N.pod) == (label, content), e.key
+            user = cases.contradiction_probe(e, N).user
+            assert f"== {label} ==\n{content}" in user, e.key
 
 
 def test_the_cordoned_node_is_ruled_out_and_never_described():
@@ -229,10 +234,55 @@ def test_the_cordoned_node_is_ruled_out_and_never_described():
 
 
 def test_the_contradiction_row_shows_a_ready_describe():
+    # worker-containerd-stop has no contradicting event line: its lease
+    # ending is the contradiction, a node the kubelet says is Ready.
     user = cases.contradiction_probe(_entry("worker-containerd-stop"), N).user
     assert ("== describe node /worker-2 ==\n"
             "node worker-2: unschedulable=false\n"
             + MEMORY_OK + DISK_OK + PID_OK + READY_TRUE) in user
+
+
+def test_the_contradiction_menu_ends_a_node_on_its_lease_and_a_claim_on_a_failed_read():
+    """Every node the row reads ends on its lease, and every claim it reads
+    ends on a refused describe. Both leave the rules' decision standing,
+    unverified. No job-1 entry has a registry: kubeagent rules a lone
+    registry out (its threshold is two workloads), so no row reads one."""
+    kinds = collections.Counter(obj.kind for e in catalog.job1_entries() for obj in e.objects)
+    assert kinds == {"node": 16, "pvc": 1}
+    for e in catalog.job1_entries():
+        user = cases.contradiction_probe(e, N).user
+        for obj in e.objects:
+            if obj.kind == "node":
+                assert ("    considered node worker-2 (no kubelet lease): attributed — "
+                        "pod api-7f9c4d5b6-x2x9k is scheduled on it\n"
+                        "      fresh read: unverified — Ready condition is True, but the "
+                        "kubelet lease was not re-read\n") in user, e.key
+                assert f"== describe node /worker-2 ==\n{READY_DESCRIBE}" in user, e.key
+            else:
+                failed = 'persistentvolumeclaims "data-0" is forbidden'
+                assert ("    considered PVC data-0 (MissingStorageClass): attributed — "
+                        "pod api-7f9c4d5b6-x2x9k mounts it\n"
+                        f"      fresh read: unverified — fresh read failed: {failed}\n"
+                        ) in user, e.key
+                assert f"== describe pvc shop/data-0 ==\nread failed: {failed}\n" in user, e.key
+
+
+def test_no_contradiction_row_shows_a_node_described_twice():
+    """One read per label. The cordoned node's row used to show the node
+    cordoned, then healthy, under the same label; that row is gone."""
+    rows = [ex for ex in generate.probe_sets() if ex.case == "contradiction_probe"]
+    assert [ex.meta["entry"] for ex in rows] == [e.key for e in catalog.job1_entries()]
+    for ex in rows:
+        labels = re.findall(r"^== (describe node /.+) ==$", ex.user, re.MULTILINE)
+        assert len(labels) == len(set(labels)), (ex.meta["entry"], labels)
+
+
+@pytest.mark.parametrize("key", ["networkpolicy-deny-all", "probe-failure", "restart-loop"])
+def test_the_contradiction_row_keeps_kubeagents_header(key):
+    # internal/confidence/confidence.go:36-47: an attributed node is `high`.
+    user = cases.contradiction_probe(_entry(key), N).user
+    assert re.findall(r"^- shop/api \(\w+\)( \[confidence: \w+\])?:$", user, re.MULTILINE) == [
+        " [confidence: high]"]
 
 
 # --- K3 and K5: the finding lines ---------------------------------------------
@@ -319,12 +369,6 @@ def test_the_oversized_job_events_read_carries_the_preemption_suffix():
             + PREEMPTION + " (x5)\n") in user
 
 
-def test_the_oversized_job_contradiction_carries_the_preemption_suffix():
-    user = cases.contradiction_probe(_entry("oversized-job-unschedulable"), N).user
-    assert ("  FailedScheduling: 0/3 nodes are available: 3 node(s) were unschedulable."
-            + PREEMPTION + " (x5)\n") in user
-
-
 def test_the_cordoned_node_events_read_carries_the_preemption_suffix():
     w = cases.gather_workload(_entry("node-cordon-diskfull"), N, ())
     assert gather.format_events(N.ns, N.pod, w.events) == (
@@ -393,33 +437,48 @@ TABLE_FORM = {
 }
 
 
-def _old_events_read(e: catalog.CatalogEntry) -> str:
-    (content,) = [content for label, content in e.reads if label.startswith("events ")]
-    return content.format(**NAMES)
-
-
-def test_the_events_print_the_old_read_byte_for_byte():
-    """Where the old read was already kubeagent's form, the tuples print it
-    exactly. The namespace and pod come from the old read's own first line:
-    coredns-corefile-broken's says kube-system. An entry written after the
-    old reads has none to compare."""
-    with_reads = [e for e in catalog.trainable() if e.reads]
-    kubeagent_form = set()
-    for e in with_reads:
-        old = _old_events_read(e)
-        if not old.startswith("events for "):
-            continue
-        kubeagent_form.add(e.key)
-        ns, pod = old.split(":\n", 1)[0].removeprefix("events for ").split("/")
-        w = cases.gather_workload(e, N, ())
-        assert gather.format_events(ns, pod, w.events) == old, e.key
-    assert {e.key for e in with_reads} - kubeagent_form == set(TABLE_FORM)
-
-
 @pytest.mark.parametrize("key", sorted(TABLE_FORM))
 def test_a_table_form_read_becomes_kubeagents_form(key):
     w = cases.gather_workload(_entry(key), N, ())
     assert gather.format_events(N.ns, N.pod, w.events) == TABLE_FORM[key]
+
+
+# The two contradicting lines that were kubectl-table text, converted by
+# the same rules: the REASON column, the MESSAGE column as written, and a
+# count of 1 per row, in the written order. They print after the entry's
+# own lines, in the one events read. Neither BackOff message's tail nor
+# the Killing message's "(node … shutting down)" is kubelet text; they
+# keep their words.
+CONTRADICTION_TABLE_FORM = {
+    "memory-limit-oomkill": (
+        "  BackOff: back-off restarting failed container app in pod api-7f9c4d5b6-x2x9k: "
+        "last state terminated with exit code 1 (Error), node reports ample allocatable "
+        "memory (x1)\n"),
+    "probe-failure": (
+        "  Started: Started container app (x1)\n"
+        "  Killing: Stopping container app (node worker-2 shutting down) (x1)\n"),
+}
+
+
+@pytest.mark.parametrize("key", sorted(CONTRADICTION_TABLE_FORM))
+def test_a_table_form_contradiction_becomes_kubeagents_form(key):
+    user = cases.contradiction_probe(_entry(key), N).user
+    events = TABLE_FORM[key] + CONTRADICTION_TABLE_FORM[key]
+    assert f"== events shop/api-7f9c4d5b6-x2x9k ==\n{events}\n" in user
+
+
+def test_the_coredns_contradiction_prints_in_the_rows_own_namespace():
+    """The old line was written for kube-system. It now prints in the one
+    events read, which kubeagent labels with the workload's own namespace
+    and pod (internal/investigate/reader.go:302)."""
+    user = cases.contradiction_probe(_entry("coredns-corefile-broken"), N).user
+    assert ("== events shop/api-7f9c4d5b6-x2x9k ==\n"
+            "events for shop/api-7f9c4d5b6-x2x9k:\n"
+            "  BackOff: Back-off restarting failed container coredns in pod "
+            "api-7f9c4d5b6-x2x9k (x14)\n"
+            "  Killing: Stopping container coredns (node worker-2 shutting down) (x1)\n\n"
+            ) in user
+    assert "kube-system/" not in user
 
 
 def test_every_trainable_entry_declares_its_events():
@@ -442,6 +501,15 @@ def test_every_event_count_formats_to_an_int():
     assert templated == {"crashloop-pod", "init-crashloop", "restart-loop"}
     w = cases.gather_workload(_entry("crashloop-pod"), N, ())
     assert [count for _r, _m, count in w.events] == [N.restarts]
+
+
+def test_the_restart_loop_contradiction_counts_the_drawn_restarts():
+    """restart-loop's Liveness line counts the drawn restarts, as its old
+    line did (x{restarts}), and prints the count as an int."""
+    (event,) = _entry("restart-loop").contradiction_events
+    assert event[2] == "{restarts}"
+    user = cases.contradiction_probe(_entry("restart-loop"), N).user
+    assert "  Unhealthy: Liveness probe failed: HTTP probe failed with statuscode: 503 (x14)\n" in user
 
 
 # --- restarts -------------------------------------------------------------------

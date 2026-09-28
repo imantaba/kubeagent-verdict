@@ -22,13 +22,11 @@ from kubeagent_verdict.dataset.names import Names
 from kubeagent_verdict.dataset.render import (
     PAD_PVC_OBJECTS,
     POSITIONAL_DECOYS,
-    apply_budget,
     bind,
     deciding_ending,
     object_reads,
     prompt_meta,
     refute,
-    registry_events_read,
     unverify,
     workload_meta,
 )
@@ -194,12 +192,17 @@ def _log_read(e: CatalogEntry, n: Names, evidence: str) -> c.EvidenceRead | None
         content=content.format(ns=n.ns, pod=n.pod, container=container))
 
 
-def _events(e: CatalogEntry, n: Names) -> tuple[tuple[str, str, int], ...]:
-    """The entry's events, filled in with these names. A count template
-    is formatted, then made an int."""
+def _event_tuples(events: tuple, n: Names) -> tuple[tuple[str, str, int], ...]:
+    """Event templates filled in with these names. A count template is
+    formatted, then made an int."""
     return tuple((_fmt(reason, n), _fmt(message, n),
                   int(_fmt(count, n)) if isinstance(count, str) else count)
-                 for reason, message, count in e.events)
+                 for reason, message, count in events)
+
+
+def _events(e: CatalogEntry, n: Names) -> tuple[tuple[str, str, int], ...]:
+    """The entry's events, filled in with these names."""
+    return _event_tuples(e.events, n)
 
 
 def gather_workload(e: CatalogEntry, n: Names, objects: tuple, *,
@@ -337,22 +340,6 @@ def _to_contract_candidates(candidates: tuple, result: rules.Result) -> tuple[c.
                                fresh_read_outcome=dec.outcome if dec else "",
                                fresh_read_evidence=dec.evidence if dec else ""))
     return tuple(out)
-
-
-def _decoy_result(e: CatalogEntry, n: Names,
-                  menu: tuple) -> tuple[tuple[c.Candidate, ...], rules.Result]:
-    """Apply the read budget to a bound menu of objects, then turn it into
-    (candidates, result) via `rules.attribute`/`rules.decide`. The returned
-    candidates are already `contract.Candidate`s, converted through
-    `_to_contract_candidates`, ready to hand to `_workload`. Only
-    `contradiction_probe` still calls this; every other single-workload
-    builder gets its candidates from the gather.
-    """
-    budgeted = apply_budget(menu, workload_order=(0,) * len(menu),
-                            entry_or_scenario_key=e.key)
-    raw = rules.attribute(budgeted, ns=n.ns, pod=n.pod, issue=e.issue)
-    result = rules.decide(raw)
-    return _to_contract_candidates(raw, result), result
 
 
 def _rule_summary(n: Names, cause: str) -> str:
@@ -663,112 +650,45 @@ def positional_probe(e: CatalogEntry, n: Names, rng: random.Random) -> Example:
     return ex
 
 
-def _contradiction_menu(n: Names, objects: tuple) -> tuple[tuple, tuple]:
-    """Bind every declared object, then unverify each one with a fixed,
-    kind-specific "how" that always contradicts. Returns (bound, unverified)
-    so the caller can still read each object's own declared `fresh.literal`
-    off `bound` for the registry own-line contradiction shape.
+def _contradiction_menu(n: Names, objects: tuple) -> tuple:
+    """Bind every declared object, then end each one on a fixed,
+    kind-specific fresh read: a node on its lease, a claim on a failed
+    read, a registry on an auth error. Each leaves the rules' decision
+    standing, but unverified.
     """
     names = dataclasses.asdict(n)
     endings = {"node": "lease", "pvc": "read_failed", "registry": "auth"}
-    bound = tuple(bind(obj, names) for obj in objects)
-    unverified = tuple(unverify(obj, endings[obj.kind]) for obj in bound)
-    return bound, unverified
+    return tuple(unverify(bind(obj, names), endings[obj.kind]) for obj in objects)
 
 
 def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
-    """EVAL-ONLY: tag, position and phrase length all point away from the answer.
+    """EVAL-ONLY: an event line argues against the rules, and the answer
+    keeps to the rules.
 
-    The three probes above perturb only the candidate menu. Each entry's
-    issue/reason/evidence finding block is byte-identical across every case
-    built from that entry, and no catalog entry is ever held out — all
-    nineteen appear in train, val and test alike. So a model that ignores the
-    menu completely and recites a memorised entry-to-winner lookup table,
-    keyed on that untouched finding block, scores 1.0 cause accuracy on all
-    three probes with a decoy rate of 0.0 and the narrowest possible length
-    split. Every existing release decider reads clean for it.
+    The row is built like `attributed`'s, on the gather. Its one object is
+    ended on a fresh read that cannot confirm it: a node on its lease (the
+    describe shows a healthy, Ready node) and a claim on a failed read.
+    The entry's `contradiction_events` print after its own events, in the
+    one events read, and seem to point somewhere else. The rules still
+    attribute the object and decide it, unverified, so the prompt carries
+    its `decided by rules:` line.
 
-    This row was built to be the one that cannot be answered that way: the
-    reads contradict the catalog winner (as in `none_of_these`), the decoy
-    leads and carries `attributed` (as in `multi_misattribution_probe`), and
-    the correct answer — "none of these" — is on no candidate line, so it can
-    be neither copied nor pointed at.
+    The gold is the rules' decision: `result.cause`, `_rule_rationale`,
+    the entry's confidence, and the one-line rule summary. The row has one
+    candidate, and it is the cause, so it names no decoy.
 
-    IT DOES NOT DO THAT. The claim is retracted here rather than deleted,
-    because the measurement is worth more than the intention. Negative control
-    v4 scored the known-broken first tune on this slice: 1.0 cause, 0.0 decoy
-    — a clean pass by a model proven elsewhere to follow the `attributed` tag
-    79% of the time, emitting the expected rationale and summary VERBATIM. The
-    confound was that this builder reused `none_of_these_case`'s read
-    construction exactly — same label, same `e.contradiction` content — and
-    `none_of_these` was 15% of the curriculum, so the contradiction sentence
-    was itself a memorised trigger for a memorised answer template.
-    `none_of_these` rows stopped carrying the contradiction sentence on
-    2026-09-16 (e2eb459). Since 2026-09-24 (5a58915) they are built from thin
-    evidence on four entries, answer at low confidence, and no longer share
-    the rationale — but they still share this row's gold summary sentence (no
-    other training case carries it), and 18 of the 19 rows here carry a
-    describe-node read that a `none_of_these` training row also renders (the
-    other one, `deployment-bad-image-tag`, reads only its registry events):
-    18 of contradiction_probe's 37 reads under the overlap guard's name mask
-    (19 byte for byte; `networkpolicy-deny-all`'s own workload is named
-    `worker`, so the guard's mask also rewrites its node read's `worker-3`,
-    dropping it from the masked count). Measured 2026-09-26. It was 14 rows
-    and 13 of 38 reads before five PVC decoys that could not happen became
-    node decoys or went away, and before a node describe printed its four
-    kubelet conditions. Holding the adversarial menu roughly
-    fixed and changing only the read text moves cause accuracy from 0.1579
-    (`misattribution_probe`) and 0.4737 (`wrong_attribution`) to 1.0 here. The
-    menu is what this row perturbs, and the menu is what such a model never
-    reads.
+    What the slice checks: that the answer keeps to the rules' decision
+    when a fresh read and an event line pull the other way. An entry the
+    rules do not decide raises `ValueError`.
 
-    So: an index-copier, a tag-copier and a word counter do score zero here,
-    and that much the slice is kept for. An entry-lookup table does not. No
-    slice built from this catalog can rule one out while every entry appears
-    in training — that needs held-out entries and a retrain, which v0.1.0 does
-    not have. Do not read a pass here as evidence that the model reasons.
+    It cannot tell a model that reads from one that recites: every entry
+    is in train, val and test, so a model that learned each entry's answer
+    passes here too.
     """
     if not e.objects:
         raise ValueError(f"contradiction_probe needs at least one object: {e.key}")
-    if not e.contradiction:
-        raise ValueError(f"contradiction_probe needs a contradiction read: {e.key}")
-    bound, menu = _contradiction_menu(n, e.objects)
-    candidates, result = _decoy_result(e, n, menu)
-    # The header is kubeagent's rule for the attributed candidate, as in
-    # `_undecided_example`. A decoy placed off the pod's node is ruled out,
-    # so no candidate is attributed and kubeagent prints no header.
-    w = _workload(e, n, candidates, render.header_for(candidates), result=result)
-    own_line = _fmt(e.contradiction, n)
-    used_registry = False
-    reads = []
-    for bound_obj, obj in zip(bound, menu):
-        if obj.kind == "registry":
-            reads.append(registry_events_read(obj, ns=n.ns, pod=n.pod, image=n.image,
-                                               own_line=bound_obj.fresh.literal))
-            used_registry = True
-        else:
-            reads.extend(object_reads((obj,), ns=n.ns, pod=n.pod))
-    if not used_registry:
-        reads.append(c.EvidenceRead(label=_fmt(e.reads[0][0], n), content=own_line))
-    reads = tuple(reads)
-    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": c.NONE_OF_THESE,
-             "confidence": "medium",
-             "rationale": "The evidence contradicts every listed candidate rather than "
-                          "supporting one."}]
-    summary = (f"{n.ns}/{n.name} is failing, but the evidence rules out the listed causes.\n"
-               "A closer look at the workload is needed.")
-    key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=c.NONE_OF_THESE, own_cause_keywords=[])
-    decoys = [cand.cause for cand in candidates]
-    meta = {"case": "contradiction_probe", "entry": e.key,
-            "expected_cause": c.NONE_OF_THESE,
-            "expected_confidence": "medium"}
-    meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: decoys}))
-    meta.update(_row_decoy(decoys))
-    return Example(case="contradiction_probe", group=f"{e.key}:{n.ns}/{n.name}",
-                   system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),
-                   meta=meta)
+    return _job1_example(e, n, _contradiction_menu(n, e.objects), "contradiction_probe",
+                         extra_events=_event_tuples(e.contradiction_events, n))
 
 
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:

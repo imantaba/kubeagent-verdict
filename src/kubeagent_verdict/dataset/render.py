@@ -22,11 +22,10 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # render.py's public surface. Each step that adds a new function or a new
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
-__all__ = ["apply_budget", "bind", "check_prompt_size", "cluster_health", "deciding_ending",
+__all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
            "draw_ending", "drop", "header_for", "object_reads", "prompt_meta", "refute",
            "registry_events_read", "render_workload", "unverify", "workload_meta"]
 
-MAX_READS = 8
 MAX_PROMPT_BYTES = 64 * 1024
 
 # The closed set of Option-A endings draw_ending() may pick, per kind. Each
@@ -137,71 +136,26 @@ def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
     return unverify(obj, choice)
 
 
-_PHASE = {"registry": 0, "node": 1, "pvc": 2}
-
-
-def apply_budget(
-    objects: tuple[o.Object, ...],
-    *,
-    workload_order: tuple[int, ...],
-    entry_or_scenario_key: str,
-) -> tuple[o.Object, ...]:
-    """Reorder into gather order, then apply the 8-read budget.
-
-    Walks `objects` in kubeagent's own gather order — registry events
-    first, then node describes, then PVC describes, ties broken by
-    `workload_order[i]` — and returns them in that order. Any object past
-    the 8th (MAX_READS) has its `fresh` replaced with `Fresh(how="not_read")`,
-    matching what a real gather does when the read budget runs out before
-    it reaches an object. An `intent="cause"` object that would be starved
-    this way raises ValueError, since a scenario that silently loses its
-    own cause's evidence is almost always an authoring mistake.
-    """
-    order = sorted(range(len(objects)),
-                    key=lambda i: (_PHASE[objects[i].kind], workload_order[i]))
-    ordered = tuple(objects[i] for i in order)
-    out = []
-    for idx, obj in enumerate(ordered):
-        if idx < MAX_READS:
-            out.append(obj)
-            continue
-        if obj.intent == "cause":
-            raise ValueError(
-                f"entry {entry_or_scenario_key}: the {MAX_READS}-read budget "
-                f"would leave {obj.kind}/{obj.name} (intent=cause) unread"
-            )
-        out.append(dataclasses.replace(obj, fresh=o.Fresh(how="not_read")))
-    return tuple(out)
-
-
 def registry_events_read(
     obj: o.Object,
     *,
     ns: str,
     pod: str,
     image: str,
-    own_line: str | None = None,
 ) -> c.EvidenceRead:
     """Build the `events {ns}/{pod}` read for a registry object.
 
     Mirrors kubeagent's own formatEvents: no literal (the "no_event"
     ending) reads as "no events for ns/pod"; any other literal reads as
-    one "Failed:" line naming it. `own_line`, when given, appends a SECOND
-    "Failed:" line built from it, after the object's own line — this is
-    the contradiction_probe shape, where the events read carries both the
-    unverified-auth literal (first, so classifyPullEvents settles on
-    "auth") and the entry's own image-error literal (second, the cause the
-    read still points at).
+    one "Failed:" line naming it.
     """
     label = f"events {ns}/{pod}"
-    if obj.fresh.literal == "" and own_line is None:
+    if obj.fresh.literal == "":
         return c.EvidenceRead(label=label, content=f"no events for {ns}/{pod}")
     content = (
         f"events for {ns}/{pod}:\n"
         f'  Failed: Failed to pull image "{image}": {obj.fresh.literal} (x4)\n'
     )
-    if own_line is not None:
-        content += f'  Failed: Failed to pull image "{image}": {own_line} (x4)\n'
     return c.EvidenceRead(label=label, content=content)
 
 
@@ -271,7 +225,7 @@ def render_workload(
     """Assemble a partial Workload, its reads, and the rules.Result.
 
     `objects` must already carry each object's final drawn ending — this
-    function does not call bind/draw_ending/apply_budget; the builder runs
+    function does not call bind/draw_ending; the builder runs
     those before handing objects in here. `rng` is accepted for signature
     symmetry with this module's other helpers but is unused: every draw
     already happened upstream.

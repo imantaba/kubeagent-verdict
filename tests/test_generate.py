@@ -231,9 +231,12 @@ def test_multi_probe_is_appended_without_disturbing_the_existing_probes():
 def test_contradiction_probe_is_appended_last_one_row_per_entry():
     from kubeagent_verdict.dataset import catalog, generate
     probes = generate.probe_sets()
-    trainable = [e for e in catalog.trainable() if e.losers and e.contradiction]
     tail = [ex for ex in probes if ex.case == "contradiction_probe"]
-    assert len(tail) == len(trainable)
+    # 2026-09-26 (faithful prompts): one row per entry the rules decide, in
+    # catalog order, where it was one per entry with a scripted contradiction
+    # 19 -> 17
+    assert [ex.meta["entry"] for ex in tail] == [e.key for e in catalog.job1_entries()]
+    assert len(tail) == 17
     # Appended, never interleaved: every earlier probe row keeps its position, so
     # a scoreboard banked against the previous test file still lines up. The run
     # is no longer the LAST rows in the file — the two shared-origin slices were
@@ -245,11 +248,13 @@ def test_contradiction_probe_is_appended_last_one_row_per_entry():
     assert cases[first:first + len(tail)] == ["contradiction_probe"] * len(tail)
     assert set(cases[first + len(tail):]) == {"shared_origin_probe",
                                               "shared_origin_decoy_probe"}
+    # The rules decide every row, so the gold is the rules' cause, never
+    # none_of_these, and the row has no decoy: its one candidate is the cause.
     for ex in tail:
-        assert ex.meta["expected_cause"] == c.NONE_OF_THESE
-        decoys = next(iter(ex.meta["decoy_by_workload"].values()))
-        for decoy in decoys:
-            assert decoy in ex.user
+        (wm,) = ex.meta["workloads"].values()
+        assert ex.meta["expected_cause"] == wm["decided_cause"] != c.NONE_OF_THESE
+        assert list(ex.meta["decoy_by_workload"].values()) == [[]]
+        assert "decoy_cause" not in ex.meta
 
 
 def test_multi_probe_rows_carry_two_distinct_workloads():
@@ -289,9 +294,11 @@ def test_provenance_scan_reaches_every_catalog_entry():
     """Coverage, not just patterns: a denylist only guards text it renders.
 
     `generate(seed=17, size=60)` samples cases at random, so it renders
-    `own_cause` for just 6 of the 19 trainable entries and `contradiction` for
-    9 — the rest of that prose is never scanned at all, however many patterns
-    the denylist grows. `test_set()` renders every trainable entry once per
+    `own_cause` for just 7 of the 20 trainable entries, and
+    `contradiction_events` for none: only `contradiction_probe` prints them,
+    and that slice is built for the exam alone. The rest of that prose is
+    never scanned at all, however many patterns the denylist grows.
+    `test_set()` renders every trainable entry once per
     case, which is what makes the test above a real guard rather than a spot
     check. This fails if that coverage regresses.
     """
@@ -304,14 +311,15 @@ def test_provenance_scan_reaches_every_catalog_entry():
             by_case.setdefault(ex.case, set()).add(entry)
 
     # `own_cause` is the only case that renders an entry's `own_cause` text;
-    # `contradiction_probe` is the only one that renders its `contradiction`
-    # text. Full coverage on these two is what carries every entry's
-    # per-entry prose through the scan.
-    # 2026-09-26 (faithful prompts): `pvc-unbound-unschedulable` declares no
-    # `contradiction`, so `contradiction_probe` covers every entry that has
-    # that text to render, not every trainable entry.
+    # `contradiction_probe` is the only one that renders its
+    # `contradiction_events`. Full coverage on these two is what carries every
+    # entry's per-entry prose through the scan.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` covers every entry
+    # the rules decide, where it covered every entry with a scripted
+    # contradiction. The three entries it no longer covers have no
+    # `contradiction_events` to render.
     with_text = {"own_cause": trainable,
-                 "contradiction_probe": {e.key for e in catalog.trainable() if e.contradiction}}
+                 "contradiction_probe": {e.key for e in catalog.job1_entries()}}
     for case, want in with_text.items():
         assert by_case.get(case) == want, (
             f"{case} renders {len(by_case.get(case, ()))} of {len(want)} "
@@ -368,9 +376,11 @@ def test_test_set_slice_counts_are_pinned():
     # injection 19 -> 17, positional_probe 19 -> 17, empty_candidates,
     # wrong_attribution, misattribution_probe and multi_misattribution_probe
     # 19 -> 20
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    # the 17 entries the rules decide 19 -> 17
     assert dict(counts) == {
         "attributed": 22,
-        "contradiction_probe": 19,
+        "contradiction_probe": 17,
         "empty_candidates": 20,
         "injection": 17,
         "misattribution_probe": 20,
@@ -384,7 +394,8 @@ def test_test_set_slice_counts_are_pinned():
         "wrong_attribution": 20,
     }
     # 2026-09-26 (faithful prompts): the case moves above 252 -> 251
-    assert sum(counts.values()) == 251
+    # 2026-09-26 (faithful prompts): `contradiction_probe` 19 -> 17, so 251 -> 249
+    assert sum(counts.values()) == 249
 
 
 def test_the_job2_keyword_exposure_is_pinned_per_case():
@@ -497,7 +508,8 @@ def test_multi_probe_builder_rejects_colliding_workloads():
     The check lives in the builder, so every caller gets it — including any
     future one that does not know to look.
     """
-    entry = next(e for e in catalog.trainable() if e.losers)
+    entry = next(e for e in catalog.trainable() if e.objects)
+    assert entry.key == "memory-limit-oomkill"
     n = names.draw(random.Random(0))
     with pytest.raises(ValueError, match="distinct workloads"):
         cases.multi_misattribution_probe([(entry, n), (entry, n)], random.Random(0))
@@ -591,8 +603,12 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # ruled out, so its `contradiction_probe` row moves to job 2.
     # job1 156 -> 118, job2 143 -> 181. job 3 gains the new entry's multi
     # probe row, labelled "none": 39 -> 40, none 34 -> 35.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built on the
+    # gather and only for the 17 entries the rules decide. Its 17 job-1 rows
+    # are replaced by 17 job-1 rows, and its two job-2 rows (node-cordon-diskfull
+    # and oversized-job-unschedulable) are gone. job1 118 -> 118, job2 181 -> 179.
     assert job1 == 118
-    assert job2 == 181
+    assert job2 == 179
     assert job3_prompts == 40
     assert job3_labels == {"shared": 5, "separate": 0, "none": 35}
 
@@ -787,7 +803,7 @@ def test_every_decoy_probe_row_names_its_decoy_cause():
     """The length-gap decider reads `decoy_cause` off the row meta.
 
     Without the key the decider has no population at all: both of its
-    slices come out empty and it can only print `not measured`. The four
+    slices come out empty and it can only print `not measured`. The three
     probe builders that carry one row-level decoy name it again, and the
     multi-workload probe names one decoy per workload, the way the base
     revision did.
@@ -798,8 +814,10 @@ def test_every_decoy_probe_row_names_its_decoy_cause():
     # 17 entries the rules decide, and the new entry adds a row to the two
     # per-entry cases: wrong_attribution 19 -> 20, positional_probe 19 -> 17,
     # misattribution_probe 19 -> 20
+    # 2026-09-26 (faithful prompts): a `contradiction_probe` row has one
+    # candidate, the rules' cause, so it names no decoy 19 -> 0
     assert dict(named) == {"wrong_attribution": 20, "positional_probe": 17,
-                           "misattribution_probe": 20, "contradiction_probe": 19}
+                           "misattribution_probe": 20}
     for e in rows:
         if not e.meta.get("decoy_cause"):
             continue
@@ -813,10 +831,14 @@ def test_every_decoy_probe_row_names_its_decoy_cause():
 
 
 def test_the_length_gap_decider_has_rows_in_both_slices():
-    """57 of the 251 exam rows carry both a decoy cause and an expected cause
+    """57 of the 249 exam rows carry both a decoy cause and an expected cause
     that is not `none_of_these`, which is what the length gap is measured
     over. Both slices have to be non-empty: a decider with one empty slice
     reads `not measured` and tells a release reviewer nothing.
+
+    The 57 did not move when the `contradiction_probe` rows came to be
+    decided by the rules: the old rows expected `none_of_these`, and the new
+    ones name no decoy, so neither kind is in the count.
     """
     rows = [generate.to_row(e) for e in generate.test_set()]
     results = score.evaluate(rows, lambda messages: "")

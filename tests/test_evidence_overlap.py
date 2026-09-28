@@ -1,9 +1,9 @@
 """The duplication guard: evidence text shared between eval and training.
 
 Group keys cannot see this shape of contamination -- two rows with different
-identities and byte-identical evidence. That is contradiction_probe's
-structural confound, and until now it was prose in a docstring
-(cases.py:282-300). This makes it a machine-checked fact.
+identities and byte-identical evidence. That was contradiction_probe's
+structural confound, first written as prose in a docstring. This makes it
+a machine-checked fact.
 
 Two design decisions, both forced by measurement rather than assumed:
 
@@ -24,9 +24,9 @@ for a similarity metric and a similarity threshold is a number nobody can
 defend. Masked-exact needs no threshold and is a set lookup.
 
 The counts below are PINNED, not bounded. A pinned count detects sharing
-disappearing as well as appearing -- so when contradiction_probe's confound
-is closed, 17/19 becomes 0/19, this fails, and the entry gets deleted
-deliberately rather than remembered. Same discipline as a golden file: a
+disappearing as well as appearing -- a count that falls fails this as loudly
+as one that rises, and the new number gets re-declared deliberately rather
+than remembered. Same discipline as a golden file: a
 curriculum change that moves these fails the test and the new numbers get
 re-declared on purpose.
 """
@@ -154,7 +154,19 @@ DECLARED = {
     # render. That is the confound this row watches, measured, not closed:
     # the contradiction now lives only in the scan finding beside the read.
     # 19 - 1 + 2 = 20.
-    "contradiction_probe": (20, 37),
+    # 2026-09-26 (faithful prompts): (20, 37) -> (24, 39). The slice is built
+    # on the gather now, for the 17 entries the rules decide: 17 rows, not
+    # 19. Each row reads its pod's events, with the entry's contradiction
+    # events after its own; the describe of the one object it names, which
+    # ends on its lease (16 nodes) or on a failed read (the claim); and the
+    # log read for the five crash-family entries. 17 + 17 + 5 = 39. All 17
+    # describes are hits: the healthy node describe is the one most
+    # training rows render, and the failed claim read is too. All 5 log
+    # reads are hits. Of the 17 events reads, the 2 with no contradiction
+    # events (`worker-containerd-stop`, `pvc-unbound-unschedulable`) are
+    # hits, and the 15 that carry a contradiction line are the 15 misses:
+    # no training row prints those lines. 17 + 5 + 2 = 24.
+    "contradiction_probe": (24, 39),
     # THIS ROW WAS THE POINT OF THE ALLOWLIST at 0/34: its rows come from
     # dataset.propagation, not the catalog, so an eval scenario itself is
     # never trained on. That is still true. What moved is generic PVC
@@ -259,7 +271,9 @@ def _fake(user: str) -> generate.Example:
 # does, so none is empty. Measured at SEED/SIZE: 0 of 7107 kept rows and 0
 # of 252 test rows, down from 746 and 30. Job-1 rows read through the gather
 # too since later on 2026-09-26, and it still holds: 0 of 7148 kept rows and
-# 0 of 251 test rows. Such a row would have no reads, so
+# 0 of 251 test rows. The contradiction rows moved to the gather on
+# 2026-09-26 too, and it still holds: 0 of 7151 kept rows and 0 of 249 test
+# rows. Such a row would have no reads, so
 # it would add nothing to the trained set and nothing to a slice's count.
 # The `assert pairs` in the allowlist test still fails a slice that goes
 # wholly empty.

@@ -34,27 +34,30 @@ class CatalogEntry:
     log_cause: str = ""
     recommendation: str = ""  # closes the ANSWER's summary; never a prompt field
     resources: tuple[str, str, str, str] | None = None  # mem req, mem limit, cpu req, cpu limit
-    winner_cause: str = ""
-    winner_reason: str = ""
-    losers: tuple[tuple[str, str, str], ...] = ()  # (cause, "ruled_out"|"outranked", reason)
-    reads: tuple[tuple[str, str], ...] = ()  # (label template, content template)
     # What the events read of the workload's pod lists: (reason, message,
     # count) in the order kubeagent lists them, the shape
     # `gather.GatherWorkload.events` takes. The reason and message are
     # templates. A count is an int, or a template that formats to one, such
-    # as "{restarts}". Three entries had kubectl-table text in `reads`
-    # instead: each row became one tuple (reason = the REASON column,
+    # as "{restarts}". Three entries were first written as kubectl-table
+    # text: each row became one tuple (reason = the REASON column,
     # message = the text after `pod/{pod} `, count 1), rows with the same
     # reason and message became one event counted once per row, and the
     # rows kept their written order.
     events: tuple[tuple[str, str, int | str], ...] = ()
+    # More events for the same pod, in the same shape, that only a
+    # `contradiction_probe` row lists. They print after `events`, in the
+    # one events read, and seem to argue against the rules' cause. They
+    # change nothing the rules read, so the row's answer is still the
+    # rules' cause. Only entries the rules decide have them, and two of
+    # those have none: worker-containerd-stop's node already describes as
+    # healthy and Ready on its lease ending, and pvc-unbound-unschedulable
+    # was never written with one.
+    contradiction_events: tuple[tuple[str, str, int | str], ...] = ()
     rationale: str = ""
     direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
-    contradiction: str = ""  # read content that rules the winner out (contradiction_probe)
     own_cause: str = ""  # the cause phrase when the winner is omitted from candidates
     own_cause_keywords: tuple[str, ...] = ()
     grounding: tuple[str, ...] = ()  # substrings that must appear in this slug's corpus assertions
-    degraded: bool = False
     network_policies: tuple[str, ...] = ()
     service_issue: tuple[str, str] | None = None  # (type, detail template)
     notes: str = ""
@@ -87,12 +90,12 @@ def trainable() -> tuple[CatalogEntry, ...]:
 
 
 # The trainable entries the rules decide in a single-workload row: the
-# job-1 rows (attributed, injection, positional_probe, truncated) draw
-# only from these. Listed, not computed, so a catalog edit that changes
-# the set fails tests/test_catalog.py instead of quietly moving the
-# rotation. The three trainable entries left out cannot decide:
-# deployment-bad-image-tag's registry counts one workload against a
-# threshold of 2, and node-cordon-diskfull's and
+# job-1 rows (attributed, injection, positional_probe, truncated,
+# contradiction_probe) draw only from these. Listed, not computed, so a
+# catalog edit that changes the set fails tests/test_catalog.py instead of
+# quietly moving the rotation. The three trainable entries left out cannot
+# decide: deployment-bad-image-tag's registry counts one workload against
+# a threshold of 2, and node-cordon-diskfull's and
 # oversized-job-unschedulable's nodes hold no pod of the workload.
 _JOB1_KEYS = frozenset({
     "memory-limit-oomkill", "networkpolicy-deny-all", "coredns-corefile-broken",

@@ -450,7 +450,7 @@ def test_ruled_out_menu_forces_registry_decoy_below_threshold():
     assert rules.decide(raw).decided is False
 
 
-def test_contradiction_probe_raises_on_empty_objects_not_losers():
+def test_contradiction_probe_raises_on_empty_objects():
     e = _entry("worker-containerd-stop")
     stripped = dataclasses.replace(e, objects=())
     n = names_mod.draw(random.Random(13))
@@ -469,34 +469,126 @@ def test_multi_misattribution_probe_raises_on_empty_objects_not_losers():
         cases.multi_misattribution_probe(pairs, random.Random(4))
 
 
-def test_contradiction_probe_defeats_every_known_shortcut():
-    entry = _entry("memory-limit-oomkill")
+# How contradiction_probe ends each kind of object: a node is Ready but its
+# kubelet lease was not re-read, and a claim's describe is refused. Both
+# leave the rules' decision standing, unverified.
+_CONTRADICTION_ENDINGS = {"node": "lease", "pvc": "read_failed"}
+
+
+def _contradiction_result(e, n):
+    """The rules' decision for the entry's own objects, bound to `n` and
+    ended the way contradiction_probe ends them. Event lines do not change
+    what the rules decide, so the entry's own events are enough here."""
+    bound = tuple(render.bind(obj, dataclasses.asdict(n)) for obj in e.objects)
+    menu = tuple(o.unverify(obj, _CONTRADICTION_ENDINGS[obj.kind]) for obj in bound)
+    (result,) = gather.gather([cases.gather_workload(e, n, menu)]).results
+    return result
+
+
+def _contradiction_names(e):
+    """The names probe_sets draws for this entry's contradiction row."""
+    from kubeagent_verdict.dataset import generate
+
+    return generate._draw(e, generate._entry_rng("contradiction-probe", e.key))
+
+
+def _event_lines(e, n, events):
+    """`events` filled in with these names and printed the way
+    `format_events` prints them, one line each, with no header."""
+    names = dataclasses.asdict(n)
+    tuples = tuple((reason.format(**names), message.format(**names),
+                    int(count.format(**names)) if isinstance(count, str) else count)
+                   for reason, message, count in events)
+    return gather.format_events(n.ns, n.pod, tuples).split("\n", 1)[1]
+
+
+def _evidence_reads(user):
+    """The evidence section as (label, content) pairs, in order."""
+    section = user.split("== BEGIN evidence ==\n")[1].split("\n== END evidence ==")[0]
+    parts = re.split(r"^== (.+) ==\n", section, flags=re.MULTILINE)
+    return [(label, content.rstrip("\n")) for label, content in zip(parts[1::2], parts[2::2])]
+
+
+def test_contradiction_probe_answers_the_rules_decision():
+    """The answer is what the rules decide. It is the cause on the
+    `decided by rules:` line, and the cause the rules give the same
+    objects with the same endings. An event line that pulls the other way
+    does not change it."""
+    e = _entry("memory-limit-oomkill")
     n = names_mod.draw(random.Random(46))
-    ex = cases.contradiction_probe(entry, n)
+    ex = cases.contradiction_probe(e, n)
     answer = json.loads(ex.assistant)["verdicts"][0]["cause"]
-    lines = _cand_lines(ex.user)
-    assert lines, "the probe must still render a menu to be misled by"
-    causes = [ln.split("considered ", 1)[1].rsplit(": ", 1)[0] for ln in lines]
-    # A tag-copier answers whichever line carries `attributed`.
-    tagged = [ln for ln in lines if ": attributed" in ln]
-    assert tagged
-    assert all(not ln.startswith(f"considered {answer}:") for ln in tagged)
-    # An entry-lookup model answers the entry's stored winner from the finding
-    # block, which this row keeps byte-identical to every other case.
-    assert answer != entry.winner_cause.format(**_fmt_kwargs(n))
-    # A word counter answers the longest candidate phrase.
-    assert answer != max(causes, key=lambda s: len(s.split()))
-    # And the answer is not on the menu at all, so it cannot be copied.
-    assert answer not in causes
+    result = _contradiction_result(e, n)
+    assert result.decided
+    assert answer == _decided_line(ex)[0] == result.cause
+    assert answer == f"node {n.node} (no kubelet lease)"
 
 
-def test_contradiction_probe_reads_contradict_the_winner():
-    n = names_mod.draw(random.Random(47))
-    entry = _entry("memory-limit-oomkill")
-    ex = cases.contradiction_probe(entry, n)
-    evidence = ex.user.split("== BEGIN evidence ==")[1]
-    assert entry.contradiction.format(**_fmt_kwargs(n)) in evidence
-    assert "OOMKilled, exit code 137" not in evidence
+@pytest.mark.parametrize("key", [e.key for e in catalog.job1_entries()])
+def test_contradiction_probe_gold_follows_the_rules(key):
+    e = _entry(key)
+    n = _contradiction_names(e)
+    ex = cases.contradiction_probe(e, n)
+    result = _contradiction_result(e, n)
+    assert result.decided
+    doc = json.loads(ex.assistant)
+    (row,) = doc["verdicts"]
+    workload = f"{n.ns}/{n.name}"
+    assert row["workload"] == workload
+    assert row["cause"] == result.cause == _decided_line(ex)[0] == ex.meta["expected_cause"]
+    assert row["confidence"] == cases._confidence(e) == ex.meta["expected_confidence"]
+    assert row["rationale"] == cases._rule_rationale(result)
+    assert doc["summary"] == f"{workload} is failing: {result.cause}."
+    assert "\n" not in doc["summary"]
+    wm = ex.meta["workloads"][workload]
+    assert (wm["job"], wm["decided"], wm["decided_cause"]) == (1, True, result.cause)
+    # One candidate, and it is the answer, so the row has no decoy to name.
+    assert ex.meta["decoy_by_workload"] == {workload: []}
+    assert set(ex.meta) == {"case", "entry", "expected_cause", "expected_confidence",
+                            "workloads", "label", "decoy_by_workload"}
+    assert (ex.meta["case"], ex.meta["entry"], ex.meta["label"]) == (
+        "contradiction_probe", key, "none")
+
+
+@pytest.mark.parametrize("key", ["deployment-bad-image-tag", "node-cordon-diskfull",
+                                 "oversized-job-unschedulable"])
+def test_contradiction_probe_refuses_an_entry_the_rules_do_not_decide(key):
+    n = names_mod.draw(random.Random(7))
+    with pytest.raises(ValueError, match=f"contradiction_probe: the rules do not decide {key}"):
+        cases.contradiction_probe(_entry(key), n)
+
+
+# The 15 entries whose contradiction_probe row adds event lines
+# (tests/test_catalog.py checks the set against the catalog).
+_WITH_CONTRADICTION_EVENTS = (
+    "memory-limit-oomkill", "networkpolicy-deny-all", "coredns-corefile-broken",
+    "crashloop-pod", "probe-failure", "container-start-error",
+    "create-container-config-error", "init-crashloop", "init-config-error",
+    "init-errimagepull", "init-imagepullbackoff", "init-oomkilled", "restart-loop",
+    "volume-attach-error", "volume-mount-error",
+)
+
+
+@pytest.mark.parametrize("key", _WITH_CONTRADICTION_EVENTS)
+def test_contradiction_events_go_into_the_one_events_read(key):
+    """The contradicting lines go into the row's one events read, after
+    the entry's own lines and in the order they are declared. No other
+    read holds them, and no label repeats."""
+    e = _entry(key)
+    n = _contradiction_names(e)
+    ex = cases.contradiction_probe(e, n)
+    reads = _evidence_reads(ex.user)
+    labels = [label for label, _ in reads]
+    assert len(labels) == len(set(labels)), labels
+    (events,) = [content for label, content in reads if label.startswith("events ")]
+    assert labels[0] == f"events {n.ns}/{n.pod}"
+    own = _event_lines(e, n, e.events)
+    extra = _event_lines(e, n, e.contradiction_events)
+    assert events == (f"events for {n.ns}/{n.pod}:\n" + own + extra).rstrip("\n")
+    for line in extra.splitlines():
+        others = [label for label, content in reads
+                  if not label.startswith("events ") and line in content]
+        assert not others, (line, others)
 
 
 def _cand_section(user):
@@ -507,8 +599,8 @@ def _cand_lines(user):
     return [ln.strip() for ln in _cand_section(user).splitlines() if "considered " in ln]
 
 
-def _winner_is_first(user, winner_cause):
-    return _cand_lines(user)[0].startswith(f"considered {winner_cause}:")
+def _winner_is_first(user, cause):
+    return _cand_lines(user)[0].startswith(f"considered {cause}:")
 
 
 # The defect that compromised the first tuned model: _candidates() appended
@@ -600,26 +692,15 @@ def test_misattribution_probe_menu_never_tags_attributed():
     assert json.loads(ex.assistant)["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
 
 
-# The three probes above all leave the finding block untouched — they perturb
-# only the candidate menu — and every catalog entry appears in train, so a model
-# that ignores the menu entirely and recites a memorised entry-to-winner lookup
-# table would still be caught here: contradiction_probe both demotes the
-# catalog winner AND contradicts it with a fresh read, so the only correct
-# answer is a phrase that appears on no candidate line at all.
-def test_contradiction_probe_answers_none_of_these():
-    n = names_mod.draw(random.Random(45))
-    ex = cases.contradiction_probe(_entry("memory-limit-oomkill"), n)
-    (row,) = json.loads(ex.assistant)["verdicts"]
-    assert row["cause"] == c.NONE_OF_THESE
-    assert row["confidence"] == "medium"
-    assert ex.meta["case"] == "contradiction_probe"
-    assert ex.meta["expected_cause"] == c.NONE_OF_THESE
-
-
-def _fmt_kwargs(n):
-    return {"ns": n.ns, "name": n.name, "pod": n.pod, "container": n.container,
-            "init_container": n.init_container, "image": n.image, "node": n.node,
-            "pvc": n.pvc, "restarts": n.restarts}
+def test_contradiction_probe_never_answers_none_of_these():
+    """The rules decide every row of this slice, so no row's gold is
+    `none of these`. The event line that pulls the other way is there to
+    be read past, not to be answered."""
+    for e in catalog.job1_entries():
+        ex = cases.contradiction_probe(e, _contradiction_names(e))
+        (row,) = json.loads(ex.assistant)["verdicts"]
+        assert row["cause"] != c.NONE_OF_THESE, e.key
+        assert ex.meta["expected_cause"] != c.NONE_OF_THESE, e.key
 
 
 def test_multi_objects_injects_foreign_nodes_ruled_out():
@@ -649,14 +730,10 @@ def test_multi_derives_job_and_label_from_the_objects():
     """R21: multi's job/decided_* meta is derived by running rules.decide over the
     transformed objects, and the row gains 'workloads', 'label', 'decoy_by_workload'.
 
-    These two node-bearing entries decide on a DIFFERENT object than either
-    entry's own hand-written `winner_cause`: multi's foreign-node injection
-    (each pair gains the other pair's node, ruled out) still leaves both
-    workloads' own combined objects able to decide, and here they decide
-    on the other workload's node rather than their own catalog story. That
-    makes this pair a real regression check, not just a shape check: the
-    gold cause and rationale must follow what `rules.decide` actually
-    found, never the catalog's `winner_cause`."""
+    Multi's foreign-node injection (each pair gains the other pair's node,
+    ruled out) still leaves both workloads' own combined objects able to
+    decide. The gold cause and rationale must follow what `rules.decide`
+    actually found."""
     node_entries = [e for e in catalog.trainable()
                     if any(o.kind == "node" and o.placement == "on" for o in e.objects)]
     assert len(node_entries) >= 2
@@ -678,10 +755,6 @@ def test_multi_derives_job_and_label_from_the_objects():
 
     wm1, wm2 = ex.meta["workloads"][key1], ex.meta["workloads"][key2]
     assert wm1["decided"] and wm2["decided"], "fixture drifted: both rows must decide here"
-    # The bug this pins against: the catalog's own winner_cause is NOT what
-    # the rules decided for either workload in this exact draw.
-    assert wm1["decided_cause"] != cases._fmt(e1.winner_cause, n1)
-    assert wm2["decided_cause"] != cases._fmt(e2.winner_cause, n2)
     assert ex.meta["expected"] == {key1: wm1["decided_cause"], key2: wm2["decided_cause"]}
 
     answer = json.loads(ex.assistant)
@@ -737,8 +810,8 @@ def test_multi_probe_meta_lists_every_decoy():
 
 
 def test_prose_decoy_helpers_are_retired():
-    """After Task 6, no builder reads e.losers through these three helpers, and no
-    builder renders its evidence panel by hand through _reads -- multi() (Step 36)
+    """No builder builds a prose decoy menu through these three helpers, and
+    no builder renders its evidence panel by hand through _reads. multi()
     was the last caller of both _candidates and _reads."""
     for helper_name in ("_candidates", "_swapped_candidates", "_decoy_cause", "_reads"):
         assert not hasattr(cases, helper_name), (
@@ -751,6 +824,15 @@ def test_the_catalog_winner_helpers_are_retired():
     for helper_name in ("_winner_example", "_option_a_menu", "draw_ending"):
         assert not hasattr(cases, helper_name), (
             f"cases.{helper_name} should be deleted once job-1 rows use the gather")
+
+
+def test_the_read_budget_helpers_are_retired():
+    """contradiction_probe was the last builder to apply the read budget by
+    hand. Every single-workload row now takes its reads from the gather,
+    which spends the budget itself."""
+    assert not hasattr(cases, "_decoy_result")
+    assert not hasattr(render, "apply_budget")
+    assert "apply_budget" not in render.__all__
 
 
 def test_check_prompt_size_refuses_an_oversize_single_workload_prompt(monkeypatch):

@@ -109,8 +109,12 @@ def test_cousin_probe_is_not_in_the_exam():
     # row to each of five other cases (+5); and 31 corpus rows moved from
     # `attributed` to `own_cause` (no count change). The cousin probe still
     # added none. 252 -> 251.
+    # 2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    # the 17 entries the rules decide, not the 19 with a scripted
+    # contradiction: three entries' rows go and the new entry's row comes.
+    # The cousin probe still added none. 251 -> 249.
     exam = generate.test_set()
-    assert len(exam) == 251
+    assert len(exam) == 249
     exam_origins = {ex.meta.get("origin") for ex in exam
                     if ex.case in ("shared_origin_probe",
                                    "shared_origin_decoy_probe")}

@@ -147,7 +147,15 @@ def test_oracle_job1_is_perfect_on_train():
     # all 19, and build their prompt from the evidence gather. A new entry
     # (`pvc-unbound-unschedulable`) joins the catalog. Every later rng draw
     # moves, and so does the split. 3072 -> 3030. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3030}
+    # 2026-09-26 (faithful prompts): `contradiction_probe` now runs over the
+    # 17 entries the rules decide, so the exam's groups changed and
+    # `drop_held_out` drops different training rows. No training row is
+    # built differently. The exam lost `node-cordon-diskfull:edge/worker`,
+    # which lets one `own_cause` row back in (job 2), and gained
+    # `pvc-unbound-unschedulable:billing/gateway`, which drops one
+    # `wrong_attribution` row (job 2) and one `multi` row with two decided
+    # workloads (job 1). 3030 -> 3028. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3028}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -180,7 +188,11 @@ def test_oracle_job2_gate_is_perfect_on_val():
     # 2026-09-26 (faithful prompts): same reason. 298 -> 315. Rate unchanged.
     # 2026-09-26 (faithful prompts): job-1 rows on the gather, same reason.
     # 315 -> 336. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 336}
+    # 2026-09-26 (faithful prompts): the exam lost
+    # `oversized-job-unschedulable:web/checkout`, so `drop_held_out` lets
+    # four `own_cause` val rows in that group back in, one job-2 workload
+    # each. 336 -> 340. Rate unchanged.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 340}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -242,13 +254,18 @@ def test_oracle_job3_is_perfect_on_train():
     confirmed) with `worker-containerd-stop` (its node confirmed): two
     confirmed causes, and no shared one. The 13th is still two
     `worker-containerd-stop` workloads on different nodes. Rate still
-    1.0."""
+    1.0.
+
+    2026-09-26 (faithful prompts): the exam's `contradiction_probe` groups
+    changed, so `drop_held_out` drops the one `multi` row in the new
+    `pvc-unbound-unschedulable:billing/gateway` group, labeled `none` (see
+    job 1 above). 2793 -> 2792: `none` 2590 -> 2589. Rate still 1.0."""
     board = score.scoreboard(list(_train_results()))
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2793,
+        "rate": 1.0, "n": 2792,
         "by_label": {"shared": {"rate": 1.0, "n": 190},
                      "separate": {"rate": 1.0, "n": 13},
-                     "none": {"rate": 1.0, "n": 2590}}}
+                     "none": {"rate": 1.0, "n": 2589}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -301,18 +318,25 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     2026-09-26 (faithful prompts): job-1 rows on the gather. The `multi`
     share is unchanged, but the rng stream moved and a new entry joined
     the pool, so the names and the split moved -- 1240 -> 1161 in train,
-    118 -> 109 in val. Still perfect."""
+    118 -> 109 in val. Still perfect.
+
+    2026-09-26 (faithful prompts): the exam's `contradiction_probe` groups
+    changed, so `drop_held_out` drops one `multi` train row with two decided
+    workloads (see job 1 above) -- 1161 -> 1159 in train; val unchanged at
+    109. Still perfect."""
     def multi_job1(results):
         scores = [s for r in results if r["case"] == "multi" for s in r["job1_scores"]]
         return sum(scores), len(scores)
 
     # 2026-09-26 (faithful prompts): see the docstring. (1240.0, 1240) ->
     # (1161.0, 1161); (118.0, 118) -> (109.0, 109).
-    assert multi_job1(_train_results()) == (1161.0, 1161)
+    # 2026-09-26 (faithful prompts): see the docstring. (1161.0, 1161) ->
+    # (1159.0, 1159).
+    assert multi_job1(_train_results()) == (1159.0, 1159)
     assert multi_job1(_val_results()) == (109.0, 109)
 
 
-def test_exam_oracle_job1_misses_only_contradiction_probe():
+def test_exam_oracle_job1_is_perfect():
     """spec section 10 gate 2: the frozen exam's own job1, oracle-read.
     138 of 156 pass; the 18 misses are exactly the `contradiction_probe`
     rows, a case whose gold reply is engineered to contradict what job1
@@ -333,21 +357,33 @@ def test_exam_oracle_job1_misses_only_contradiction_probe():
     node object now names a node the pod is not on, so the rules rule it
     out and the row is undecided. 156 -> 118
     graded, 138 -> 101 passes, 18 -> 17 misses -- still exactly the
-    `contradiction_probe` rows."""
+    `contradiction_probe` rows.
+
+    2026-09-26 (faithful prompts): `contradiction_probe` rows are built on
+    the gather and answer the rules' cause, so job 1 grades them like any
+    other decided row and they pass. The 17 old job-1 rows are replaced by
+    17 new ones. 118 graded, 101 -> 118 passes, 17 -> 0 misses: a model that
+    answers each row with that row's gold content scores every job-1
+    workload."""
     exam, results = _exam()
     scores = [s for r in results for s in r["job1_scores"]]
     # 2026-09-26 (faithful prompts): oversized's contradiction row left
     # job 1. 157 -> 156; passes stay 138.
     # 2026-09-26 (faithful prompts): see the docstring. (156, 138.0) ->
     # (118, 101.0).
-    assert (len(scores), sum(scores)) == (118, 101.0)
+    # 2026-09-26 (faithful prompts): contradiction rows answer the rules'
+    # cause. (118, 101.0) -> (118, 118.0)
+    assert (len(scores), sum(scores)) == (118, 118.0)
     misses = [e.case for e, r in zip(exam, results)
              if sum(r["job1_scores"]) < len(r["job1_scores"])]
     # 2026-09-26 (faithful prompts): same reason. 19 -> 18.
     # 2026-09-26 (faithful prompts): node-cordon-diskfull's row left job 1
     # too. 18 -> 17.
-    assert len(misses) == 17
-    assert set(misses) == {"contradiction_probe"}
+    # 2026-09-26 (faithful prompts): contradiction rows pass. 17 -> 0
+    assert misses == []
+    contradiction = [s for e, r in zip(exam, results) if e.case == "contradiction_probe"
+                     for s in r["job1_scores"]]
+    assert contradiction == [1.0] * 17
 
 
 def test_exam_oracle_job3_is_perfect():
@@ -395,7 +431,12 @@ def test_exam_oracle_job2_is_perfect():
     rows and one two-workload `multi_misattribution_probe` row (+6).
     `node-cordon-diskfull`'s `contradiction_probe` row is now undecided
     (+1). 143 -> 181. Still perfect.
+
+    2026-09-26 (faithful prompts): `contradiction_probe` is built only for
+    the entries the rules decide, so the two undecided rows
+    (`node-cordon-diskfull` and `oversized-job-unschedulable`) are gone.
+    181 -> 179. Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 181}
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 179}

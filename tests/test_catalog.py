@@ -161,17 +161,60 @@ def test_29_entries_unique_keys():
 
 
 def test_trainable_entries_are_complete():
-    # No builder reads `winner_cause`, `winner_reason`, `reads` or
-    # `contradiction` for a new entry: a job-1 row takes its cause from the
-    # rules, and the prompt's events come from `events`.
+    # A job-1 row takes its cause from the rules, and the prompt's events
+    # come from `events`, so these are all a trainable entry needs.
     for e in catalog.trainable():
         assert e.issue and e.reason and e.evidence and e.recommendation, e.key
         assert e.rationale, e.key
         assert e.events, e.key
         assert e.own_cause and e.own_cause_keywords, e.key
-        for cause, verdict, reason in e.losers:
-            assert verdict in {"ruled_out", "outranked"}, e.key
-            assert cause and reason, e.key
+
+
+# The six fields no builder reads any more. The rules give a row its cause
+# and its candidates, and the events read comes from `events` and
+# `contradiction_events`. `degraded` has been dead since the cluster-health
+# block started to follow the row itself.
+GONE = ("contradiction", "winner_cause", "winner_reason", "losers", "reads", "degraded")
+
+
+def test_the_old_fields_are_gone():
+    import dataclasses
+
+    fields = {f.name for f in dataclasses.fields(catalog.CatalogEntry)}
+    assert fields.isdisjoint(GONE), sorted(fields & set(GONE))
+    assert "contradiction_events" in fields
+
+
+# The job-1 entries whose contradiction_probe row adds event lines. Every
+# job-1 entry but two: worker-containerd-stop's lease ending already prints
+# its node Ready=True, and pvc-unbound-unschedulable never had a
+# contradicting line.
+CONTRADICTION_EVENT_KEYS = (
+    "memory-limit-oomkill", "networkpolicy-deny-all", "coredns-corefile-broken",
+    "crashloop-pod", "probe-failure", "container-start-error",
+    "create-container-config-error", "init-crashloop", "init-config-error",
+    "init-errimagepull", "init-imagepullbackoff", "init-oomkilled", "restart-loop",
+    "volume-attach-error", "volume-mount-error",
+)
+
+
+def test_contradiction_events_are_on_exactly_the_15():
+    have = tuple(e.key for e in catalog.all_entries() if e.contradiction_events)
+    assert have == CONTRADICTION_EVENT_KEYS
+    assert len(have) == 15
+    assert set(have) <= {e.key for e in catalog.job1_entries()}
+
+
+def test_contradiction_events_have_the_events_shape():
+    """Same shape as `events`: (reason, message, count). A count is an int,
+    or a template that formats to one."""
+    for e in catalog.all_entries():
+        for reason, message, count in e.contradiction_events:
+            assert reason.format(**SAMPLE) and message.format(**SAMPLE), e.key
+            if isinstance(count, str):
+                assert int(count.format(**SAMPLE)) > 0, e.key
+            else:
+                assert isinstance(count, int) and count > 0, e.key
 
 
 def test_own_cause_keywords_are_satisfied_by_their_own_cause():
@@ -206,24 +249,25 @@ def test_untrainable_entries_say_why():
 
 
 def test_read_labels_match_kubeagent_shapes():
+    """The gather writes every read label now, so check the labels it
+    writes for each trainable entry's declared objects."""
     ok = ("events ", "describe node /", "describe pvc ", "log causes ")
     for e in catalog.trainable():
-        for label, _content in e.reads:
-            rendered = label.format(**SAMPLE)
-            assert rendered.startswith(ok), f"{e.key}: {rendered!r}"
+        _candidates, _result, reads = _single_row(e)
+        assert reads, e.key
+        for read in reads:
+            assert read.label.startswith(ok), f"{e.key}: {read.label!r}"
 
 
 def test_templates_resolve_with_sample_names():
     for e in catalog.trainable():
-        for tpl in (e.evidence, e.log_cause, e.recommendation, e.winner_cause,
-                    e.winner_reason, e.rationale, e.contradiction, e.own_cause):
+        for tpl in (e.evidence, e.log_cause, e.recommendation, e.rationale, e.own_cause):
             tpl.format(**SAMPLE)
-        for cause, _v, reason in e.losers:
-            cause.format(**SAMPLE)
+        for reason, message, count in e.events + e.contradiction_events:
             reason.format(**SAMPLE)
-        for label, content in e.reads:
-            label.format(**SAMPLE)
-            content.format(**SAMPLE)
+            message.format(**SAMPLE)
+            if isinstance(count, str):
+                count.format(**SAMPLE)
 
 
 def test_grounding_substrings_appear_in_corpus():
@@ -312,8 +356,7 @@ def test_the_unbound_claim_entry():
                            "provisioned")
     assert e.own_cause_keywords == ("claim", "volume")
     assert e.direct is True
-    assert (e.winner_cause, e.winner_reason, e.losers, e.reads, e.contradiction) == (
-        "", "", (), (), "")
+    assert e.contradiction_events == ()
     # The last entry of the catalog, so every other entry keeps its place.
     assert catalog.all_entries()[-1] is e
     assert catalog.trainable()[-1] is e

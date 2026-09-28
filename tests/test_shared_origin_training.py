@@ -760,14 +760,16 @@ def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
 
 # ------------------------------------------------------ the eval must not move
 
-def test_the_eval_set_is_two_hundred_and_fifty_one_rows():
+def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
     """253 until `shared_origin_decoy_probe` appended its ten, then 263
     until the 2026-09-24 job-2 generator fix cut the `none_of_these` slice
     from 19 rows to 8, then 252 until 2026-09-26 (faithful prompts), when
     `truncated`, `injection` and `positional_probe` came to cover only the
     17 entries the rules decide (-6) and the new
     `pvc-unbound-unschedulable` entry added one row to each of five other
-    cases (+5).
+    cases (+5). Then 251 until later that day, when `contradiction_probe`
+    came to cover the same 17 entries: three entries' rows left it and the
+    new entry's row joined it (-2).
 
     This test exists so the TRAINING half of the shared-origin work cannot
     move the exam by accident — a curriculum change that grows the test set
@@ -777,10 +779,12 @@ def test_the_eval_set_is_two_hundred_and_fifty_one_rows():
     byte-identical across the change. The 2026-09-24 generator fix moved it
     on purpose too, and re-pinned both exam digests below in the same
     commit. The 2026-09-26 job-1 change did too, and re-pinned all three
-    exam digests in the same commit.
+    exam digests in the same commit. So did the 2026-09-26 contradiction
+    change.
     """
     # 2026-09-26 (faithful prompts): see the docstring. 252 -> 251.
-    assert len(generate.test_set()) == 251
+    # 2026-09-26 (faithful prompts): see the docstring. 251 -> 249.
+    assert len(generate.test_set()) == 249
 
 
 # The frozen slice, byte for byte: the first 253 rows until 2026-09-24,
@@ -933,7 +937,23 @@ def test_the_eval_set_is_two_hundred_and_fifty_one_rows():
 # retired.
 # 24cc3f4beefb4ab3865d1bb4424d5d590323586e0f082abaaad1889f9df9d29b ->
 # 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1
-FROZEN_SLICE_SHA256 = "41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1"
+#
+# 2026-09-26 (faithful prompts): the `contradiction_probe` rows now take
+# their reads from the gather and their gold answer from the rules, over
+# the 17 entries the rules decide. The slice goes from 241 rows to 239.
+# The 19 old `contradiction_probe` rows go and 17 new ones come: the rows
+# of `deployment-bad-image-tag`, `node-cordon-diskfull` and
+# `oversized-job-unschedulable` leave, and the new
+# `pvc-unbound-unschedulable` entry joins. The other 16 entries keep their
+# place and their drawn names, but every one of their rows changes its user
+# message, gold answer and meta: the gold is the rules' cause, not
+# `none_of_these`, and `decoy_cause` is gone. The other 222 rows are byte
+# for byte the old ones, in the same order; the ten `shared_origin_probe`
+# rows at the end of the slice sit two places earlier. No system message moves.
+# Every number banked against the old bytes is retired.
+# 41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e88712af1 ->
+# e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043
+FROZEN_SLICE_SHA256 = "e562f79462dc3897931262aece841ccfb57d8788d9612e6141327c87ef0b7043"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1028,7 +1048,14 @@ FROZEN_SLICE_SHA256 = "41e7abdecf2d914d4eb741fa755bcf113c7eb681965023e3620fa38e8
 # move, so this digest moves only because the frozen slice inside it does.
 # f02889fb9a682ac761ac00eac8c4395bab280a3d1ea3b65bc8d5fffb117a2bee ->
 # 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89
-EVAL_SET_SHA256 = "8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89"
+#
+# 2026-09-26 (faithful prompts): the contradiction rows moved onto the
+# gather and the rules, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows are not catalog rows and do not move,
+# so this digest moves only because the frozen slice inside it does.
+# 8a79d7a9d9d13cb7ab9adaafd83278932b652fd70b1482ce16f513429f312d89 ->
+# e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835
+EVAL_SET_SHA256 = "e57c15c107bf52aa416533a6b246e2a3ba6ab8b7b893ef3708e4a54431184835"
 
 
 def _digest(rows) -> str:
@@ -1041,13 +1068,15 @@ def test_the_frozen_slice_is_every_row_before_the_decoy_probe():
     """The frozen slice is named by what it holds, not by a row number:
     every exam row before the trailing ten `shared_origin_decoy_probe`
     rows. Its length is pinned here, apart from its digest: 253 until the
-    2026-09-24 job-2 generator fix, 242 until the 2026-09-26 job-1 change
-    (see `FROZEN_SLICE_SHA256`), 241 since."""
+    2026-09-24 job-2 generator fix, 242 until the 2026-09-26 job-1 change,
+    241 until the 2026-09-26 contradiction change (see
+    `FROZEN_SLICE_SHA256`), 239 since."""
     rows = generate.test_set()
     assert [e.case for e in rows[-10:]] == ["shared_origin_decoy_probe"] * 10
     assert "shared_origin_decoy_probe" not in {e.case for e in rows[:-10]}
     # 2026-09-26 (faithful prompts): see `FROZEN_SLICE_SHA256`. 242 -> 241.
-    assert len(rows[:-10]) == 241
+    # 2026-09-26 (faithful prompts): see `FROZEN_SLICE_SHA256`. 241 -> 239.
+    assert len(rows[:-10]) == 239
 
 
 def test_the_frozen_slice_is_byte_identical_to_the_ones_every_scoreboard_used():

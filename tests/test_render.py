@@ -91,61 +91,6 @@ def test_draw_ending_registry_matches_seed_1_sequence():
     assert drawn[5].fresh.literal == "unauthorized"
 
 
-def _node_decoy(n):
-    return o.Object(kind="node", name=f"worker-{n}", scan_reason="NotReady",
-                     placement="on", fresh=o.Fresh(how="read", ready="True"))
-
-
-def test_apply_budget_marks_a_decoy_past_the_budget_not_read():
-    objects = tuple(_node_decoy(i) for i in range(8)) + (
-        o.Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                  placement="unmounted", fresh=o.Fresh(how="read", phase="Pending")),
-    )
-    out = render.apply_budget(objects, workload_order=(0,) * 9,
-                               entry_or_scenario_key="e1")
-    assert len(out) == 9
-    assert out[8].kind == "pvc"
-    assert out[8].fresh.how == "not_read"
-    assert out[8].fresh.phase == ""
-    assert out[0].fresh.how == "read"
-
-
-def test_apply_budget_raises_when_a_cause_would_be_starved():
-    cause = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
-                      placement="mounted", fresh=o.Fresh(how="read", phase="Pending"),
-                      intent="cause")
-    objects = tuple(_node_decoy(i) for i in range(8)) + (cause,)
-    try:
-        render.apply_budget(objects, workload_order=(0,) * 9,
-                             entry_or_scenario_key="e1")
-        raise AssertionError("expected ValueError")
-    except ValueError as err:
-        assert str(err) == (
-            "entry e1: the 8-read budget would leave pvc/data-0 "
-            "(intent=cause) unread"
-        )
-
-
-def test_apply_budget_has_no_overflow_switch():
-    """`truncated` was the one builder that starved its cause on purpose.
-    It now pads the candidate list with claims that are never read, so no
-    builder asks for an overflow."""
-    with pytest.raises(TypeError):
-        render.apply_budget((), workload_order=(), entry_or_scenario_key="e1",
-                            allow_overflow=True)
-
-
-def test_apply_budget_reorders_registry_before_node_before_pvc():
-    node = _node_decoy(0)
-    pvc = o.Object(kind="pvc", name="aux-0", scan_reason="ProvisioningFailed",
-                    placement="unmounted", fresh=o.Fresh(how="read", phase="Pending"))
-    registry = o.Object(kind="registry", name="registry.example.com", scan_reason="3",
-                         placement="", fresh=o.Fresh(how="read", literal="manifest unknown"))
-    out = render.apply_budget((pvc, node, registry), workload_order=(0, 0, 0),
-                               entry_or_scenario_key="e1")
-    assert [obj.kind for obj in out] == ["registry", "node", "pvc"]
-
-
 def _registry(literal):
     return o.Object(kind="registry", name="registry.example.com", scan_reason="3",
                      placement="", fresh=o.Fresh(how="read", literal=literal))
@@ -168,15 +113,13 @@ def test_registry_events_read_no_event_shape():
     assert read.content == "no events for shop/api-0"
 
 
-def test_registry_events_read_contradiction_probe_two_lines():
-    read = render.registry_events_read(_registry("unauthorized"), ns="shop", pod="api-0",
-                                        image="registry.example.com/api:1",
-                                        own_line="manifest unknown")
-    assert read.content == (
-        'events for shop/api-0:\n'
-        '  Failed: Failed to pull image "registry.example.com/api:1": unauthorized (x4)\n'
-        '  Failed: Failed to pull image "registry.example.com/api:1": manifest unknown (x4)\n'
-    )
+def test_registry_events_read_takes_no_second_line():
+    """The contradiction probe no longer reads a registry, so the read
+    prints only the registry's own line."""
+    with pytest.raises(TypeError):
+        render.registry_events_read(_registry("unauthorized"), ns="shop", pod="api-0",
+                                    image="registry.example.com/api:1",
+                                    own_line="manifest unknown")
 
 
 def test_object_reads_uses_rules_read_text_for_node_and_pvc():

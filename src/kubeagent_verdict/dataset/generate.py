@@ -419,18 +419,17 @@ def probe_sets() -> list[Example]:
     2026-09-24 also no header and no object reads); `multi_misattribution_probe`
     hands `attributed` to the decoy in the multi-workload shape the
     single-workload probes cannot reach;
-    `contradiction_probe` adds a read that
-    rules the winner out, so the answer is on no candidate line at all. None is
+    `contradiction_probe` gives one row per entry the rules decide: a
+    fresh read and an event line argue against the rules' cause, and the
+    answer is still that cause. None is
     ever generated into train or val — they exist to make a shortcut visible,
     and a shortcut the training data rewards is not a shortcut the eval can
     detect.
 
-    That last sentence is the limit of all four, and `contradiction_probe`
-    found it the hard way: the training data rewarded answering `none of these`
-    to the very contradiction sentence that slice reused, so a memorising
-    model passed it. Every catalog entry appears in train, val and test, so no
-    slice here can separate a model that reads from one that recites per-entry
-    answers. Ruling that out needs held-out entries and a retrain.
+    That is also the limit of all four. Every catalog entry is in train,
+    val and test, so no slice here can tell a model that reads from one
+    that recites each entry's answer. Ruling that out needs held-out
+    entries and a retrain.
     """
     from kubeagent_verdict.dataset import cases, catalog
 
@@ -478,29 +477,21 @@ def probe_sets() -> list[Example]:
         out.append(cases.multi_misattribution_probe(
             [(entry, first), (other, second)], _entry_rng("multi-probe", entry.key)))
 
-    # APPENDED again, for the same comparability reason. This slice contradicts
-    # the winner in the reads AND hands `attributed` to the decoy, so the only
-    # correct answer appears on no candidate line: a tag-copier, an
-    # index-copier and a word counter all score zero on it.
+    # APPENDED again, for the same comparability reason. One row per entry
+    # the rules decide, in catalog order. Each row's object ends on a fresh
+    # read that cannot confirm it, and for 15 of them the entry's
+    # `contradiction_events` add event lines that point somewhere else. The
+    # rules still decide the row, so the answer is their cause. The slice
+    # checks that an answer keeps to the rules' decision when the evidence
+    # pulls the other way.
     #
-    # It was built to also catch a model reciting a memorised entry-to-winner
-    # lookup table, and it DOES NOT — negative control v4 measured the
-    # known-broken first tune at 1.0 cause / 0.0 decoy here. The read text it
-    # reused was `none_of_these_case`'s verbatim, which made the contradiction
-    # sentence a trained trigger rather than something to reason about.
-    # `none_of_these` rows stopped carrying that sentence on 2026-09-16
-    # (e2eb459); since 2026-09-24 (5a58915) they use thin evidence and share
-    # neither it nor the rationale — but they still share this slice's gold
-    # summary sentence, and 18 of its 19 rows carry a describe-node read a
-    # `none_of_these` training row also renders (the other one reads only its
-    # registry events): 18 of its 37 reads under the overlap guard's name
-    # mask (19 byte for byte), measured 2026-09-26. See
-    # `cases.contradiction_probe`'s docstring for the full retraction and the
-    # byte-for-byte discrepancy; the slice is kept for the three shortcuts it
-    # does defeat.
-    for entry in catalog.trainable():
-        if not entry.objects or not entry.contradiction:
-            continue
+    # Until 2026-09-26 (faithful prompts) the answer here was `none of
+    # these`, and the slice was meant to catch a model that recites each
+    # entry's answer. It could not: every entry is in train, val and test.
+    # The row is now built on the gather, so the three entries the rules do
+    # not decide left it (19 rows -> 17), and a scoreboard banked before
+    # then does not line up with this slice.
+    for entry in catalog.job1_entries():
         out.append(cases.contradiction_probe(
             entry, _draw(entry, _entry_rng("contradiction-probe", entry.key))))
 

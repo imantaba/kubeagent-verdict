@@ -11,10 +11,12 @@ about `expected_cause` job 2 switches on (exact match vs. keyword
 match).
 
 Two gold fields do survive, at the top of `meta`, where a
-single-workload row mirrors them: `expected_cause` on 211 of the 251
-rows and `expected_confidence` on 221 (213 and 223 of 252 before the
-job-1 rows moved onto the gather on 2026-09-26; 224 and 234 of 263 before
-the 2026-09-24 generator fix removed 11 `none_of_these` rows). This view
+single-workload row mirrors them: `expected_cause` on 209 of the 249
+rows and `expected_confidence` on 219 (211 and 221 of 251 before the
+contradiction rows were decided by the rules on 2026-09-26; 213 and 223
+of 252 before the job-1 rows moved onto the gather that day; 224 and 234
+of 263 before the 2026-09-24 generator fix removed 11 `none_of_these`
+rows). This view
 keeps both. That makes
 the pin stricter than the gated numbers need, never looser: a gold
 cause or confidence that moved on one of those rows fails this test
@@ -24,8 +26,10 @@ partly free to move. They read those two fields, and a row that carries
 one of them is pinned on it.
 
 `GRADED_VIEW_SHA256` pins the sha256 of that view over the whole exam
-(`generate.test_set()`, 251 rows since the job-1 rows moved onto the
-gather on 2026-09-26; 252 from 2026-09-24; 263 before). This is not a TDD red test: it
+(`generate.test_set()`, 249 rows since the contradiction rows were
+decided by the rules on 2026-09-26; 251 from when the job-1 rows moved
+onto the gather that day; 252 from 2026-09-24; 263 before). This is not
+a TDD red test: it
 passes today, before the training-targets fix, because the fix only
 touches shared-origin rows, and this view keeps none of the fields it
 changes there -- their gold cause lives in the `meta["expected"]` dict.
@@ -96,6 +100,22 @@ rows where `node-cordon-diskfull`'s node is now ruled out (one each in
 byte ones the old exam had. A job-1 row's gold is now the rules' cause,
 so `expected_cause`, the confidence, the rationale, the summary and
 `decoy_by_workload` move on every job-1 row.
+
+Re-pinned again on 2026-09-26, when the `contradiction_probe` rows began
+taking their reads from the gather and their gold from the rules. The
+exam has 249 rows, not 251: the loop runs over the 17 entries the rules
+decide, so the rows of `deployment-bad-image-tag` (job 1),
+`node-cordon-diskfull` and `oversized-job-unschedulable` (both job 2)
+leave it, and the new entry `pvc-unbound-unschedulable` joins it. Job 1
+keeps 118 workloads and job 2 goes from 181 to 179. All 17
+`contradiction_probe` user
+messages are new; the other 232 rows are byte for byte the old ones, in
+the same order. Each of the 17 rows is job 1 and its gold is the rules'
+cause; the 16 older ones answered `none_of_these` before. So
+`expected_cause`, the confidence, the rationale, the summary and
+`decoy_by_workload` move on every one of them, and `decoy_cause` is gone
+from their meta. No other row's meta, `flagged` list or system message
+moves.
 """
 
 from __future__ import annotations
@@ -138,7 +158,11 @@ def view(row):
 # cause, a new entry joins, and node-cordon-diskfull's node is ruled out
 # 08a419b9c3e34487be700bff6c97904dfd0fbc3e4fb1d6508be6391071f600ab ->
 # 39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d
-GRADED_VIEW_SHA256 = "39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d"
+# 2026-09-26 (faithful prompts): the contradiction rows are decided by the
+# rules, on the gather, over the 17 entries the rules decide
+# 39ff30183aafa929e594770e43ae04d3d2e43eeda8bb77dc47b92c9a459b195d ->
+# 8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3
+GRADED_VIEW_SHA256 = "8f227d0b35cb125235cac095e46a6448bb23cdfc3afa6bebb73f8fb40a7401f3"
 
 
 def _digest(views) -> str:
