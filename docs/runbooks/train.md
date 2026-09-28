@@ -73,6 +73,10 @@ confirms it when the run ends.
    from the 149-row measurement above, not timed afresh: the 2026-09-19
    fix replayed 0908's banked outputs instead of re-serving (see below),
    so it produced no new timing.
+   **2026-09-28 measurement:** the time depends on the machine. On the
+   training machine, a `llama-server -t 4` run scored all 249 rows in 22
+   minutes. That is about 11 rows a minute, 6 times the workstation rate.
+   So time a few rows on your own machine before you trust either number.
    Note the endpoint: `kv-eval`
    defaults to Ollama's `http://localhost:11434/v1`, so a llama-server run
    without `--endpoint` silently scores whatever Ollama is serving.
