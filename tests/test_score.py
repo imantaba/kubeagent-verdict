@@ -3083,6 +3083,35 @@ def test_the_gold_answer_passes_the_grader_guard_on_every_exam_job2_workload():
     assert all(res["cause_acc"] == 1.0 for res in results)
 
 
+def test_the_gold_answer_passes_the_grader_guard_on_every_training_pool_job2_workload():
+    """The same net as the exam's, over the 8,000-row pool the training
+    build splits: `generate(17, 8000)`. A gold the guard zeroes here would
+    teach a model an answer the grader then refuses.
+
+    Measured 2026-09-28 (final review): 9,426 job-2 golds, and the guard
+    zeroes none of them. It costs about 2 s (1.4 s to build the pool, 0.4 s
+    to check it), so it runs on the full pool, not the 800-row seed set.
+    If this fails, fix the row, not the guard, for the reason the exam's
+    net gives.
+    """
+    checked = 0
+    zeroed = []
+    for row in (generate.to_row(ex) for ex in generate.generate(17, 8000)):
+        meta = row["meta"]
+        own = score._own_blocks(row["messages"][1]["content"], meta["workloads"])
+        gold = {v["workload"]: v["cause"]
+                for v in json.loads(row["messages"][2]["content"])["verdicts"]}
+        for name, wm in meta["workloads"].items():
+            if wm.get("job") != 2:
+                continue
+            checked += 1
+            if score._job2_guarded(gold[name], score._workload_decoys(meta, name), own[name]):
+                zeroed.append((meta["case"], name, gold[name]))
+
+    assert zeroed == []
+    assert checked == 9426
+
+
 def _own_keyword_bot(rows: list[dict]):
     """Answers every flagged workload with that workload's own answer keywords.
 
