@@ -183,7 +183,9 @@ which is where the corpus-derived, held-out-case and probe rows live; and
 `test_provenance_scan_reaches_every_catalog_entry` asserts the scanned
 corpus renders every trainable catalog entry, because a sampled 60-example
 batch renders `own_cause` for only 7 of the 20 (6 of 19 before
-2026-09-26) and a denylist cannot guard prose it never emits. That third
+2026-09-26; 2026-09-28: measured again, it was 7 of 19 at the branch base
+`4c954fe`, in a batch that held 61 rows — the "6 of 19" was written on
+2026-08-24) and a denylist cannot guard prose it never emits. That third
 test is the one that makes the first two
 mean something. No live cluster name, node name, private IP, internal
 hostname, kubeconfig path or context name is meant to enter a tracked file —
@@ -778,7 +780,10 @@ scoreboard should not be read as evidence of entry-level generalisation.
   "kubeconfig", `/home/`, bare `@`) over a generated train/val batch *and*
   over `generate.test_set()`, plus a coverage assertion that the scanned
   corpus renders every trainable catalog entry — a sampled 60-example batch
-  renders `own_cause` for only 7 of 20 (6 of 19 before 2026-09-26), and a
+  renders `own_cause` for only 7 of 20 (6 of 19 before 2026-09-26;
+  2026-09-28: measured again, it was 7 of 19 at the branch base `4c954fe`,
+  in a batch that held 61 rows — the "6 of 19" was written on
+  2026-08-24), and a
   denylist cannot guard prose it never emits. Still not a scan for every
   token outside the synthetic
   allowlist. (This entry previously ended "it does not run over

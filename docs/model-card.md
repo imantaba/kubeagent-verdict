@@ -58,7 +58,10 @@ a source:
    slug from kubeagent's chaos harness (17 slugs) plus one entry per
    known-issues kind not already covered by a slug (11 more, for 16 kinds
    total, since several kinds and slugs overlap), 19 of the 28 catalog
-   entries used to generate training examples. Each entry declares the
+   entries used to generate training examples. (That is v0.1.0's catalog:
+   19 of 28. Since 2026-09-26 the catalog has 29 entries, 20 of them
+   trainable; the 29th, `pvc-unbound-unschedulable`, covers no slug and
+   no kind.) Each entry declares the
    inventory findings that fault produces, the candidate list the
    deterministic pass would offer, evidence-line templates, and the
    correct verdict — and an entry's evidence templates may only claim
@@ -84,6 +87,10 @@ generated corpus: one runs over a train/val batch, a second over
 and a third asserts the scanned corpus actually renders every trainable
 catalog entry, because a sampled 60-example batch renders `own_cause` for
 only 6 of the 19 entries and a denylist cannot guard prose it never emits.
+(2026-09-28: measured again, the same way, by counting the entries the
+batch's `own_cause` rows name. At the branch base `4c954fe` it was 7 of
+19, in a batch that held 61 rows, not 60; the "6 of 19" was written on
+2026-08-24. Today it is 7 of the 20 trainable entries, in a batch of 60.)
 An earlier version of this paragraph recorded the test-set rows as
 unchecked. That was accurate when written; the gap has since been closed,
 and the coverage assertion is what keeps it closed.
@@ -158,7 +165,8 @@ metric lies.
 - **`length helps` and `length misleads` mean nothing read separately —
   read them together or not at all.** In 15 of the 19 trainable catalog
   entries the correct cause happens to be the longer candidate phrase
-  (mean 9.0 words against 6.4 for the losing candidate), so a model that
+  (mean 9.0 words against 6.4 for the losing candidate; measured on the
+  catalog before 2026-09-26, see docs/design.md), so a model that
   has learned nothing but "pick the longer option" scores high on
   `length helps` for free. The same word-counting model scores near zero
   on `length misleads`, where the longer phrase is the wrong one. A model
@@ -213,8 +221,10 @@ metric lies.
 
 ## Known limitations
 
-Every one of the 19 trainable catalog entries appears in the training
-set, the validation set, and the corpus-derived test set — the generator
+Every one of the 19 trainable catalog entries (v0.1.0's catalog: 19 of
+28; 29 entries, 20 trainable, since 2026-09-26, and all 20 appear in
+every split of `out/dataset-0928`) appears in the training set, the
+validation set, and the corpus-derived test set — the generator
 cycles through all trainable entries for every curriculum case, and only
 specific held-out (entry, workload) combinations, not whole entries, are
 excluded from training. The eval therefore does not test entry-level
@@ -437,7 +447,8 @@ measurement instead of hiding it.
 
 Separately, the catalog carries a known length cue in its phrasing: in 15
 of the 19 trainable entries the winning cause is written as the longer of
-the two candidate phrases (mean 9.0 words against 6.4). This is not a
+the two candidate phrases (mean 9.0 words against 6.4; measured on the
+catalog before 2026-09-26, see docs/design.md). This is not a
 training bug to be silently corrected: a correct root cause names a
 specific mechanism while a plausible wrong answer names a category, so the
 right answer tends to be the longer sentence in real reports too, and
@@ -811,7 +822,10 @@ against these.
    apply if the origin were healthy. That field is never printed into the
    prompt; the mismatch is a fact about the code, not something a model
    can read.
-4. **The exam's row 252 says "3 workloads failing to pull" and shows 2.**
+4. **The exam's row 238 (row 252 before 2026-09-26) says "3 workloads
+   failing to pull" and shows 2.** (2026-09-28: row 238 counting from 1,
+   index 237, in `out/dataset-0928/test.jsonl`, a `shared_origin_probe`
+   row.)
    The rule's cause string names a fixed count from the story: "3
    workloads failing to pull". This probe row flags only 2 of those 3
    workloads, so the count written into the text and the count of rows a

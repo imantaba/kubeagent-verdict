@@ -385,9 +385,19 @@ the why is recorded.
   - A `multi` block now prints each workload's finding lines, and its reads
     come from one gather over the whole row.
   - The oracle's multi curriculum is 1,207 job-1 workloads in train and
-    163 in val. The spec predicted 1,226 and 132.
-  - The thin-row rule (`_thin_multi`) fires 0 times. The spec expected it
-    to fire on some rows.
+    163 in val. Before this change it was 1,226 and 132. (2026-09-28:
+    this said "The spec predicted 1,226 and 132", but those were the
+    counts before the change, not a prediction. Measured again on
+    `out/dataset-0928`: still 1,207 and 163.)
+  - The thin-row rule (`_thin_multi`) fires 0 times (ruling 75): every
+    starved undecided workload in both builds still shows its keywords.
+    Unit tests reach both sides. (2026-09-28: this said "The spec
+    expected it to fire on some rows", but the spec gives no count.
+    Measured again: 0 times in 1,134 checks on the 8,000-row pool and 0
+    in 116 on the 800-row seed set. The exam has no `multi` rows, so the
+    rule never runs there. The pool has 14 starved undecided workloads
+    and the seed set 1; the bank has 11, 10 in train and 1 in val. All of
+    them show their keywords.)
   - Job-2 labels in `multi` rows that name a cause their prompt does not
     show: 618 before, 0 now.
   - `generate(seed, size)` returns exactly `size` rows. It used to return

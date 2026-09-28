@@ -96,7 +96,8 @@ confirms it when the run ends.
    That is a real control, not a shortcut: the generations are the old model's,
    and every metric is recomputed by today's code. It cost seconds where
    re-serving costs the ~2¼ hours above (~2½ hours at today's 263-row exam,
-   2026-09-19 estimate). It is valid only when the rows are the
+   2026-09-19 estimate; 263 when written, 249 since 2026-09-26). It is valid
+   only when the rows are the
    same rows — assert `len(banked) == len(rows)` and confirm the test bytes
    match, because `evaluate` walks rows positionally and a length-matched but
    reordered file would score silently wrong.
@@ -518,10 +519,12 @@ confirms it when the run ends.
      Read `n` anyway, but read it as a different question: how much of the
      exam the scorer could judge. A row leaves this rate when the prompt
      offered no suggestion line to echo, or when the scorer got no verdict
-     out of the reply. Today every one of the 263 prompts carries a
-     suggestion line, so in practice a missing row is one the scorer could
-     not read — and `contract` already charges the model for it, over all
-     263 rows. 0908 is the worked example: echo reads `0.0 (262)` because one
+     out of the reply. Today every one of the 263 prompts (263 when
+     written; 249 since 2026-09-26) carries a suggestion line. (Measured
+     again on 2026-09-28: all 249 of 249 still do.) So in practice a
+     missing row is one the scorer could not read — and `contract` already
+     charges the model for it, over all 263 rows (249 since 2026-09-26).
+     0908 is the worked example: echo reads `0.0 (262)` because one
      reply was not valid JSON, so no cause came off it. Note what that row is
      not. It is not a truncated reply and not a refusal: it is a complete
      answer that names a cause for both flagged workloads, with one extra `}`
