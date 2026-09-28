@@ -9,32 +9,35 @@ This directory pins the interface kubeagent-verdict trains against.
 - `system_prompt.txt` — the byte-exact `verdictSystemPrompt` constant from
   `internal/investigate/local.go`.
 - `golden/user_message.txt` — the byte-exact output of kubeagent's
-  `buildVerdictPrompt` for the inputs in `golden/input.json`, captured by a
-  temporary build-tagged Go test run inside a kubeagent checkout. The
-  capture procedure is `contract/capture/kv_capture_test.go.txt` in this
-  repository — copy it into a kubeagent checkout as
-  `internal/investigate/local_capture_test.go`, run it there, and copy the
-  files it writes back.
-- `golden/input.json` — the structured mirror of that capture's inputs; the
-  `next_step`/`command` strings are transcribed from the capture because
-  they are kubeagent's deterministic suggestion output.
+  `buildVerdictPrompt` for the cluster in `tests/fixtures/gather_fixture.yaml`,
+  captured by a build-tagged Go test run inside an unpacked `git archive` of
+  kubeagent. The harness is `contract/capture/kv_capture_test.go.txt` in
+  this repository. Its header holds the seven steps: copy it in as
+  `internal/investigate/kv_capture_test.go`, run it, and copy the files it
+  writes back.
+- `golden/input.json` — the structured mirror of that capture's inputs,
+  which the harness writes from the YAML fixture. The `next_step`/`command`
+  strings are kubeagent's own suggestion output.
 - `golden/answer.json` — a contract-valid answer for the fixture, used as a
   shape reference by tests.
-- `tests/fixtures/rules_golden.json` — the fixture `hypothesis.Decide` and
-  `hypothesis.Shared` ran against during capture: twelve workloads' rule
-  candidates and decisions, plus the shared-cause lines and the eight
+- `tests/fixtures/rules_golden.json` — what `hypothesis.Decide` and
+  `hypothesis.Shared` produced during capture: the ten scoped workloads'
+  rule candidates and decisions, plus the shared-cause lines and the eight
   bounded reads. `dataset/rules.py`'s tests replay it and must match the
   captured decisions field for field.
+- `tests/fixtures/gather_go/` and `tests/fixtures/gather_go_logs/` — the ten
+  stage dumps of the same run, one folder per fixture. Their README gives
+  the line format. `tests/test_gather_byte_equal.py` rebuilds each dump from
+  the Python port and compares it byte for byte.
 
 ## Re-pin procedure (when kubeagent changes the contract)
 
 kubeagent's diagnostics.md prose contract is the tripwire: a new contract
-version there means re-pinning here. Copy
-`contract/capture/kv_capture_test.go.txt` into a kubeagent checkout as
-`internal/investigate/local_capture_test.go`, run it against the new
-kubeagent tag, re-extract `system_prompt.txt`, update `contract.py`'s
-renderers until the golden test passes again, bump the version named in
-this file, and retrain.
+version there means re-pinning here. Run the seven steps in the header of
+`contract/capture/kv_capture_test.go.txt` against the new kubeagent tag,
+update `contract.py`'s renderers and the dataset port until the golden and
+byte-equal tests pass again, bump the version named in this file, and
+retrain.
 
 ## Port drift — kubeagent internals this pin also depends on
 
@@ -55,12 +58,50 @@ to any of these needs the same re-pin, even when
 Watch kubeagent's own CHANGELOG for these names, not just the prose
 contract version.
 
-## Capture record (v1.24.0 re-scope)
+## Capture record (v1.24.0, gather capture)
 
 - Captured from kubeagent tag `v1.24.0`, commit `15ec5649bbd2d07558eae945b71430afc8f231fd`.
-- Test: `contract/capture/kv_capture_test.go.txt`. The five steps are in its header.
-- Files: `tests/fixtures/rules_golden.json` (the rules pin). The prompt golden and the system prompt land in `contract/golden/` and `contract/system_prompt.txt` as the code that renders them lands.
-- The worktree was removed after the capture. kubeagent was not changed.
+- Harness: `contract/capture/kv_capture_test.go.txt`. It runs kubeagent's own
+  pipeline over two YAML fixtures, in `scan.go`'s order: `clusterhealth.Assess`,
+  `inventory.Prioritize`, the three `rootcause` annotators, `confidence.Annotate`,
+  then `flaggedScope`, `gatherEvidence`, `Decide`, `Shared` and
+  `buildVerdictPrompt`. The seven steps are in its header:
+  1. note kubeagent's `git status --short`, `git archive v1.24.0` into a
+     scratch folder, and count the tag's files with `git ls-tree`;
+  2. copy the two fixtures and the harness into the scratch folder;
+  3. unpack the archive, check the file count matches (748 both times), and
+     copy the harness in as `internal/investigate/kv_capture_test.go`;
+  4. run `go test -count=1 -tags goldencapture -run TestCaptureVerdictGolden
+     ./internal/investigate` with `KV_FIXTURE`, `KV_FIXTURE_LOGS` and
+     `KV_GOLDEN_DIR` set;
+  5. copy the goldens and both dump folders back, and record the tag and
+     commit here;
+  6. check the fixture still reaches every rule path the old
+     `rules_golden.json` did, and still refuses the reads of node worker-7,
+     PVC aux-1 and img/seven's events;
+  7. remove the scratch folder and check `git status --short` prints what
+     step 1 printed.
+- Files: `contract/golden/input.json`, `contract/golden/user_message.txt`,
+  `contract/system_prompt.txt` (unchanged, byte for byte),
+  `tests/fixtures/rules_golden.json`, and the dumps in
+  `tests/fixtures/gather_go/` and `tests/fixtures/gather_go_logs/`.
+- kubeagent's `git status --short` printed ` M .gitignore` before and after.
+  kubeagent was not changed, and the scratch folder was removed.
+- **Why there are two fixtures.** The gather stops after 8 reads. The main
+  fixture spends all 8 on the reads rule-path coverage needs, before it
+  reaches a crashed container, so its log dump holds no log read.
+  `gather_fixture_logs.yaml` is a small healthy cluster where 5 of the 8
+  reads are log reads. It writes dumps only, no golden file.
+- **What changed, and why.** The first capture hand-built its workload
+  order and never called `confidence.Annotate`, so the old golden showed
+  no `[confidence: …]` tag on any of its 10 workloads, and its order was
+  not the one `Prioritize` gives. The new golden has both. The fixture
+  changed too, so the scoped roster changed: 10 of 12 flagged workloads
+  are in scope (web/shop and web/worker are not). Two more shapes moved
+  with it: the cluster line now reads
+  `worker-1 NotReady: KubeletNotReady — container runtime is down`, and a
+  crash finding with a container gets a `-c <container>` suggestion.
+  `golden/answer.json` was edited by hand to the new roster.
 
 ## Dataset pin moves
 

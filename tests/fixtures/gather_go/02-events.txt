@@ -1,0 +1,19 @@
+events	1	app	api-6d5f7c8b9-k2m4p	ok	3	
+event	Pulling	Pulling image "registry.invalid/app/api:1.4"	5
+event	Failed	Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable desc = dial tcp 192.0.2.10:443: connect: connection refused	5
+event	BackOff	Back-off pulling image "registry.invalid/app/api:1.4"	12
+block	content	321
+events for app/api-6d5f7c8b9-k2m4p:
+  Pulling: Pulling image "registry.invalid/app/api:1.4" (x5)
+  Failed: Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable desc = dial tcp <redacted>: connect: connection refused (x5)
+  BackOff: Back-off pulling image "registry.invalid/app/api:1.4" (x12)
+events	4	db	orders-0	ok	2	
+event	Failed	Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown	3
+event	Failed	Error: ErrImagePull	3
+block	content	245
+events for db/orders-0:
+  Failed: Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown (x3)
+  Failed: Error: ErrImagePull (x3)
+events	8	img	seven-7c9d4b5f6-fghij	failed		events is forbidden
+block	content	32
+read failed: events is forbidden

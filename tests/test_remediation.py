@@ -14,20 +14,29 @@ ground truth rather than a transcription of the Go source.
 import json
 from pathlib import Path
 
+import yaml
+
 from kubeagent_verdict import remediation as r
 
-GOLDEN = Path(__file__).resolve().parent.parent / "contract" / "golden"
+ROOT = Path(__file__).resolve().parent.parent
+GOLDEN = ROOT / "contract" / "golden"
+FIXTURE = ROOT / "tests" / "fixtures" / "gather_fixture.yaml"
 
 
 def test_mirror_reproduces_the_captured_golden_rows():
     d = json.loads((GOLDEN / "input.json").read_text(encoding="utf-8"))
-    rows = [(f, w) for w in d["workloads"] for f in w["findings"]]
+    # The capture ran on this fixture. A golden finding has no container field,
+    # so each one's container comes from the fixture, in finding order.
+    containers = {f"{w['namespace']}/{w['name']}": [f["container"] for f in w["findings"]]
+                  for w in yaml.safe_load(FIXTURE.read_text(encoding="utf-8"))["workloads"]}
+    rows = [(f, w, container) for w in d["workloads"]
+            for f, container in zip(w["findings"], containers[f"{w['namespace']}/{w['name']}"],
+                                    strict=True)]
     assert rows, "golden capture carries no findings — the anchor is gone"
-    for f, w in rows:
+    assert any(container for _, _, container in rows), "no captured command names a container"
+    for f, w, container in rows:
         # The capture renders "<pod>" literally where the pod name was redacted.
-        # The capture's own fixture never sets a container on a finding, so no
-        # captured command carries a "-c <container>" clause either.
-        got = r.suggest(f["issue"], ns=w["namespace"], pod="<pod>", container="")
+        got = r.suggest(f["issue"], ns=w["namespace"], pod="<pod>", container=container)
         assert got.next_step == f["next_step"], f["issue"]
         assert got.command == f["command"], f["issue"]
 

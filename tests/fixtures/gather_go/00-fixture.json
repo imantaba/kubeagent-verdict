@@ -1,0 +1,713 @@
+{
+  "kubeagent": {
+    "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd",
+    "tag": "v1.24.0"
+  },
+  "nodes": [
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "False",
+        "ready_message": "container runtime is down",
+        "ready_reason": "KubeletNotReady",
+        "taints": [
+          [
+            "node.kubernetes.io/not-ready",
+            "",
+            "NoSchedule"
+          ]
+        ]
+      },
+      "name": "worker-1",
+      "scan_reason": "NotReady"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "name": "worker-2",
+      "scan_reason": "no kubelet lease"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "name": "worker-4",
+      "scan_reason": ""
+    },
+    {
+      "fresh": {
+        "how": "read_failed",
+        "message": "nodes \"worker-7\" is forbidden"
+      },
+      "name": "worker-7",
+      "scan_reason": "NotReady"
+    }
+  ],
+  "platform_line": "",
+  "pvcs": [
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Bound",
+        "storage_class": "fast-ssd",
+        "volume": "pv-0442"
+      },
+      "name": "aux-0",
+      "namespace": "db",
+      "scan_reason": "ProvisioningFailed"
+    },
+    {
+      "fresh": {
+        "how": "read_failed",
+        "message": "persistentvolumeclaims \"aux-1\" is forbidden"
+      },
+      "name": "aux-1",
+      "namespace": "db",
+      "scan_reason": "ProvisioningFailed"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Pending",
+        "storage_class": "fast-ssd",
+        "volume": ""
+      },
+      "name": "aux-2",
+      "namespace": "db",
+      "scan_reason": "ProvisioningFailed"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Lost",
+        "storage_class": "fast-ssd",
+        "volume": "pv-0821"
+      },
+      "name": "data-0",
+      "namespace": "db",
+      "scan_reason": "FailedBinding"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Pending",
+        "storage_class": "standard",
+        "volume": ""
+      },
+      "name": "cache-0",
+      "namespace": "store",
+      "scan_reason": "ProvisionerNotResponding"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Pending",
+        "storage_class": "standard",
+        "volume": ""
+      },
+      "name": "cache-1",
+      "namespace": "store",
+      "scan_reason": "ProvisionerNotResponding"
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "phase": "Pending",
+        "storage_class": "standard",
+        "volume": ""
+      },
+      "name": "assets-0",
+      "namespace": "web",
+      "scan_reason": "ProvisioningFailed"
+    }
+  ],
+  "service_issues": [
+    {
+      "detail": "service has 0 ready endpoints",
+      "name": "api",
+      "namespace": "shop",
+      "type": "NoReadyEndpoints"
+    }
+  ],
+  "summary": {
+    "cpu": {
+      "allocatable": "6",
+      "limits": "5400m",
+      "limits_pct": 90,
+      "requests": "4200m",
+      "requests_pct": 70
+    },
+    "memory": {
+      "allocatable": "12Gi",
+      "limits": "11Gi",
+      "limits_pct": 91,
+      "requests": "9Gi",
+      "requests_pct": 75
+    },
+    "metrics_available": false
+  },
+  "workloads": [
+    {
+      "decoy_events": [],
+      "desired": 3,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"registry.invalid/web/frontend:2.1\": rpc error: code = NotFound desc = manifest unknown",
+          4
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/web/frontend:2.1\"",
+          "image": "registry.invalid/web/frontend:2.1",
+          "issue": "ImagePullBackOff",
+          "pod": "web/frontend-5b8d7f6c9-q2w3e",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "frontend",
+      "namespace": "web",
+      "pod": "frontend-5b8d7f6c9-q2w3e",
+      "pods": [
+        {
+          "claims": [
+            "assets-0"
+          ],
+          "name": "frontend-5b8d7f6c9-q2w3e",
+          "node": "worker-2"
+        },
+        {
+          "claims": [],
+          "name": "frontend-5b8d7f6c9-r4t5y",
+          "node": "worker-4"
+        },
+        {
+          "claims": [],
+          "name": "frontend-5b8d7f6c9-u6i7o",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"registry.invalid/img/two:1.0\": i/o timeout",
+          2
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/img/two:1.0\"",
+          "image": "registry.invalid/img/two:1.0",
+          "issue": "ErrImagePull",
+          "pod": "img/two-7c9d4b5f6-bcdef",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "two",
+      "namespace": "img",
+      "pod": "two-7c9d4b5f6-bcdef",
+      "pods": [
+        {
+          "claims": [],
+          "name": "two-7c9d4b5f6-bcdef",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [
+        {
+          "events": [
+            [
+              "NodeNotReady",
+              "Node is not ready",
+              1
+            ]
+          ],
+          "object": "api-6d5f7c8b9-x7q9r"
+        },
+        {
+          "events": [
+            [
+              "ScalingReplicaSet",
+              "Scaled up replica set api-6d5f7c8b9 from 0 to 2",
+              1
+            ]
+          ],
+          "object": "api"
+        }
+      ],
+      "desired": 2,
+      "events": [
+        [
+          "Pulling",
+          "Pulling image \"registry.invalid/app/api:1.4\"",
+          5
+        ],
+        [
+          "Failed",
+          "Failed to pull image \"registry.invalid/app/api:1.4\": rpc error: code = Unavailable desc = dial tcp 192.0.2.10:443: connect: connection refused",
+          5
+        ],
+        [
+          "BackOff",
+          "Back-off pulling image \"registry.invalid/app/api:1.4\"",
+          12
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/app/api:1.4\"",
+          "image": "registry.invalid/app/api:1.4",
+          "issue": "ImagePullBackOff",
+          "pod": "app/api-6d5f7c8b9-k2m4p",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "api",
+      "namespace": "app",
+      "pod": "api-6d5f7c8b9-k2m4p",
+      "pods": [
+        {
+          "claims": [],
+          "name": "api-6d5f7c8b9-k2m4p",
+          "node": "worker-1"
+        },
+        {
+          "claims": [],
+          "name": "api-6d5f7c8b9-x7q9r",
+          "node": "worker-7"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "events is forbidden",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/img/seven:1.0\"",
+          "image": "registry.invalid/img/seven:1.0",
+          "issue": "ImagePullBackOff",
+          "pod": "img/seven-7c9d4b5f6-fghij",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "seven",
+      "namespace": "img",
+      "pod": "seven-7c9d4b5f6-fghij",
+      "pods": [
+        {
+          "claims": [],
+          "name": "seven-7c9d4b5f6-fghij",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "static",
+      "namespace": "web",
+      "pod": "static",
+      "pods": [
+        {
+          "claims": [],
+          "name": "static-8a7b6c5d4-mnbvc",
+          "node": "worker-4"
+        },
+        {
+          "claims": [],
+          "name": "static-8a7b6c5d4-lkjhg",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 2,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [
+        {
+          "events": [
+            [
+              "SuccessfulCreate",
+              "create Pod orders-0 in StatefulSet orders successful",
+              1
+            ]
+          ],
+          "object": "orders"
+        }
+      ],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"registry.invalid/db/orders:2.0\": rpc error: code = NotFound desc = failed to pull and unpack image \"registry.invalid/db/orders:2.0\": manifest unknown",
+          3
+        ],
+        [
+          "Failed",
+          "Error: ErrImagePull",
+          3
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/db/orders:2.0\"",
+          "image": "registry.invalid/db/orders:2.0",
+          "issue": "ErrImagePull",
+          "pod": "db/orders-0",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "StatefulSet",
+      "name": "orders",
+      "namespace": "db",
+      "pod": "orders-0",
+      "pods": [
+        {
+          "claims": [
+            "aux-0",
+            "aux-1",
+            "data-0"
+          ],
+          "name": "orders-0",
+          "node": "worker-1"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [
+        {
+          "events": [
+            [
+              "Failed",
+              "Failed to pull image \"registry.invalid/img/six:1.1\": connection reset by peer",
+              6
+            ]
+          ],
+          "object": "six-6f8e9d0a1-pulls"
+        }
+      ],
+      "desired": 2,
+      "events": [
+        [
+          "BackOff",
+          "Back-off restarting failed container app in pod six-6f8e9d0a1-crash",
+          9
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "app",
+          "evidence": "back-off 5m0s restarting failed container",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "log": "starting worker pool size=4\nloading config from /etc/six/config.yaml\npanic: runtime error: invalid memory address or nil pointer dereference\ngoroutine 1 [running]:\nmain.main()\n",
+          "log_read": "log cause: application panic (code bug)",
+          "pod": "img/six-6f8e9d0a1-crash",
+          "reason": "container keeps exiting"
+        },
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/img/six:1.1\"",
+          "image": "registry.invalid/img/six:1.1",
+          "issue": "ImagePullBackOff",
+          "pod": "img/six-6f8e9d0a1-pulls",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "six",
+      "namespace": "img",
+      "pod": "six-6f8e9d0a1-crash",
+      "pods": [
+        {
+          "claims": [],
+          "name": "six-6f8e9d0a1-crash",
+          "node": "worker-4"
+        },
+        {
+          "claims": [],
+          "name": "six-6f8e9d0a1-pulls",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 7,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "metrics",
+      "namespace": "store",
+      "pod": "metrics",
+      "pods": [
+        {
+          "claims": [],
+          "name": "metrics-4d3c2b1a0-qwert",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 1,
+      "restarts": 3,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"mirror.invalid/img/solo:1.0\"",
+          "image": "mirror.invalid/img/solo:1.0",
+          "issue": "ImagePullBackOff",
+          "pod": "img/solo-7c9d4b5f6-efghi",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "solo",
+      "namespace": "img",
+      "pod": "solo-7c9d4b5f6-efghi",
+      "pods": [
+        {
+          "claims": [],
+          "name": "solo-7c9d4b5f6-efghi",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [
+        [
+          "BackOff",
+          "Back-off restarting failed container coredns in pod coredns-76f75df574-abcde",
+          14
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "coredns",
+          "evidence": "back-off 5m0s restarting failed container",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "log": "[INFO] plugin/reload: Running configuration SHA512 = 5a1c\nCoreDNS-1.11.1\nlinux/amd64, go1.21.1\n",
+          "log_read": "log cause: last output before exit (no signature in the last 25 lines)",
+          "pod": "kube-system/coredns-76f75df574-abcde",
+          "reason": "container keeps exiting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "coredns",
+      "namespace": "kube-system",
+      "pod": "coredns-76f75df574-abcde",
+      "pods": [
+        {
+          "claims": [],
+          "name": "coredns-76f75df574-abcde",
+          "node": "worker-4"
+        },
+        {
+          "claims": [],
+          "name": "coredns-76f75df574-fghij",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 12,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/web/worker:3.2\"",
+          "image": "registry.invalid/web/worker:3.2",
+          "issue": "ErrImagePull",
+          "pod": "web/worker-9e8d7c6b5-zxcvb",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "worker",
+      "namespace": "web",
+      "pod": "worker-9e8d7c6b5-zxcvb",
+      "pods": [
+        {
+          "claims": [],
+          "name": "worker-9e8d7c6b5-zxcvb",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "FailedScheduling",
+          "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+          8
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "0/4 nodes are available: pod has unbound immediate PersistentVolumeClaims",
+          "image": "",
+          "issue": "Pending",
+          "pod": "store/cache-0",
+          "reason": "pod is not scheduled"
+        }
+      ],
+      "kind": "StatefulSet",
+      "name": "cache",
+      "namespace": "store",
+      "pod": "cache-0",
+      "pods": [
+        {
+          "claims": [
+            "cache-0",
+            "cache-1"
+          ],
+          "name": "cache-0",
+          "node": ""
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"registry.invalid/img/three:1.0\": unauthorized: authentication required",
+          4
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/img/three:1.0\"",
+          "image": "registry.invalid/img/three:1.0",
+          "issue": "ImagePullBackOff",
+          "pod": "img/three-7c9d4b5f6-cdefg",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "three",
+      "namespace": "img",
+      "pod": "three-7c9d4b5f6-cdefg",
+      "pods": [
+        {
+          "claims": [],
+          "name": "three-7c9d4b5f6-cdefg",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"registry.invalid/web/shop:5.0\"",
+          "image": "registry.invalid/web/shop:5.0",
+          "issue": "ImagePullBackOff",
+          "pod": "web/shop-3b2c1d0e9-poiuy",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "shop",
+      "namespace": "web",
+      "pod": "shop-3b2c1d0e9-poiuy",
+      "pods": [
+        {
+          "claims": [],
+          "name": "shop-3b2c1d0e9-poiuy",
+          "node": "worker-4"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    }
+  ]
+}

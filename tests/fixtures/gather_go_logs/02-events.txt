@@ -1,0 +1,79 @@
+events	1	shop	api-7d4b9c6f5-k8m2p	ok	32	
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 01 of 32: upstream pool 01 has no ready members)	1
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 02 of 32: upstream pool 02 has no ready members)	2
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 03 of 32: upstream pool 03 has no ready members)	3
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 04 of 32: upstream pool 04 has no ready members)	4
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 05 of 32: upstream pool 05 has no ready members)	5
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 06 of 32: upstream pool 06 has no ready members)	6
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 07 of 32: upstream pool 07 has no ready members)	7
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 08 of 32: upstream pool 08 has no ready members)	8
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 09 of 32: upstream pool 09 has no ready members)	9
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 10 of 32: upstream pool 10 has no ready members)	10
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 11 of 32: upstream pool 11 has no ready members)	11
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 12 of 32: upstream pool 12 has no ready members)	12
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 13 of 32: upstream pool 13 has no ready members)	13
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 14 of 32: upstream pool 14 has no ready members)	14
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 15 of 32: upstream pool 15 has no ready members)	15
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 16 of 32: upstream pool 16 has no ready members)	16
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 17 of 32: upstream pool 17 has no ready members)	17
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 18 of 32: upstream pool 18 has no ready members)	18
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 19 of 32: upstream pool 19 has no ready members)	19
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 20 of 32: upstream pool 20 has no ready members)	20
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 21 of 32: upstream pool 21 has no ready members)	21
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 22 of 32: upstream pool 22 has no ready members)	22
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 23 of 32: upstream pool 23 has no ready members)	23
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 24 of 32: upstream pool 24 has no ready members)	24
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 25 of 32: upstream pool 25 has no ready members)	25
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 26 of 32: upstream pool 26 has no ready members)	26
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 27 of 32: upstream pool 27 has no ready members)	27
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 28 of 32: upstream pool 28 has no ready members)	28
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 29 of 32: upstream pool 29 has no ready members)	29
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 30 of 32: upstream pool 30 has no ready members)	30
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 31 of 32: upstream pool 31 has no ready members)	31
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503 (check 32 of 32: upstream pool 32 has no ready members)	32
+block	content	4054
+events for shop/api-7d4b9c6f5-k8m2p:
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 01 of 32: upstream pool 01 has no ready members) (x1)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 02 of 32: upstream pool 02 has no ready members) (x2)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 03 of 32: upstream pool 03 has no ready members) (x3)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 04 of 32: upstream pool 04 has no ready members) (x4)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 05 of 32: upstream pool 05 has no ready members) (x5)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 06 of 32: upstream pool 06 has no ready members) (x6)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 07 of 32: upstream pool 07 has no ready members) (x7)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 08 of 32: upstream pool 08 has no ready members) (x8)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 09 of 32: upstream pool 09 has no ready members) (x9)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 10 of 32: upstream pool 10 has no ready members) (x10)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 11 of 32: upstream pool 11 has no ready members) (x11)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 12 of 32: upstream pool 12 has no ready members) (x12)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 13 of 32: upstream pool 13 has no ready members) (x13)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 14 of 32: upstream pool 14 has no ready members) (x14)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 15 of 32: upstream pool 15 has no ready members) (x15)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 16 of 32: upstream pool 16 has no ready members) (x16)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 17 of 32: upstream pool 17 has no ready members) (x17)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 18 of 32: upstream pool 18 has no ready members) (x18)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 19 of 32: upstream pool 19 has no ready members) (x19)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 20 of 32: upstream pool 20 has no ready members) (x20)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 21 of 32: upstream pool 21 has no ready members) (x21)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 22 of 32: upstream pool 22 has no ready members) (x22)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 23 of 32: upstream pool 23 has no ready members) (x23)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 24 of 32: upstream pool 24 has no ready members) (x24)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 25 of 32: upstream pool 25 has no ready members) (x25)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 26 of 32: upstream pool 26 has no ready members) (x26)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 27 of 32: upstream pool 27 has no ready members) (x27)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 28 of 32: upstream pool 28 has no ready members) (x28)
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (check 29 of 32: upstream pool 29 has no ready members) (x29)
+[truncated by kubeagent]
+events	4	shop	cart-6b8f5d7c4-r9t3w	ok	3	
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503	41
+event	Failed	Error: failed to start container "migrate": exec: "/usr/local/bin/migrate": executable file not found in $PATH	6
+event	BackOff	Back-off restarting failed container migrate in pod cart-6b8f5d7c4-r9t3w	18
+block	content	335
+events for shop/cart-6b8f5d7c4-r9t3w:
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (x41)
+  Failed: Error: failed to start container "migrate": exec: "/usr/local/bin/migrate": executable file not found in $PATH (x6)
+  BackOff: Back-off restarting failed container migrate in pod cart-6b8f5d7c4-r9t3w (x18)
+events	6	shop	checkout-0	ok	1	
+event	BackOff	Back-off restarting failed container app in pod checkout-0	27
+block	content	103
+events for shop/checkout-0:
+  BackOff: Back-off restarting failed container app in pod checkout-0 (x27)

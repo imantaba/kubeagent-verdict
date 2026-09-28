@@ -1,0 +1,20 @@
+log	1	shop	api-7d4b9c6f5-k8m2p	app	CrashLoopBackOff	read	2
+block	content	59
+log cause: cannot reach a dependency — connection refused
+log	1	shop	api-7d4b9c6f5-k8m2p	app	OOMKilled	deduped	2
+log	1	shop	api-7d4b9c6f5-k8m2p	metrics-proxy	CrashLoopBackOff	read	3
+block	content	97
+the previous log of shop/api-7d4b9c6f5-k8m2p container "metrics-proxy" has no classifiable output
+log	1	shop	api-7d4b9c6f5-x7q4n		OOMKilled	skip	
+log	2	shop	cart-6b8f5d7c4-r9t3w	app	ProbeFailure	skip	
+log	2	shop	cart-6b8f5d7c4-r9t3w	migrate	ContainerStartError	read	5
+block	content	36
+log cause: bad command or entrypoint
+log	3	shop	checkout-0	app	CrashLoopBackOff	read	7
+block	content	104
+reading the previous log of shop/checkout-0 was refused: this identity lacks the pods/log get permission
+log	3	shop	checkout-1	app	OOMKilled	read	8
+block	content	120
+no previous-instance log for shop/checkout-1 container "app" (nothing was refused; the container may not have restarted)
+log	3	shop	checkout-2	app	CrashLoopBackOff	budget	
+log	4	shop	search-5f9c8d7b6-h3j5l	app	CrashLoopBackOff	budget	

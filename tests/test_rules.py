@@ -4,15 +4,16 @@ Two kinds of test live here. The unit tests build small, hand-picked
 Objects to hit one branch of attribute()/decide()/shared()/label()/
 read_text()/check_declaration() at a time — including branches the
 capture fixture below never reaches. The replay tests at the bottom
-declare the same 12 workloads, 6 down nodes, 8 PVCs and 2 registries
-kubeagent's own v1.24.0 capture (Task 2) declared, run them through
-attribute() and decide(), and check the result against
+declare the 10 workloads, 3 down nodes, 7 PVCs and 2 registries that
+kubeagent's v1.24.0 gather capture scoped (tests/fixtures/gather_fixture.yaml),
+run them through attribute() and decide(), and check the result against
 tests/fixtures/rules_golden.json byte for byte. If a value here ever
 disagrees with the fixture, the fixture is right and this file is wrong.
 """
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -565,33 +566,36 @@ def test_check_declaration_still_runs_objects_check_objects():
 
 
 # ---------------------------------------------------------------------------
-# Replay: the v1.24.0 capture fixture (Task 2), byte for byte
+# Replay: the v1.24.0 gather capture, byte for byte
 # ---------------------------------------------------------------------------
 #
-# This roster is Task 2's own capture roster (kv_capture_test.go.txt),
-# carried into Python: the same 6 down nodes, the same 8 PVC issues in
-# db, the same 2 registry hosts, and the same 12 workloads, in the same
-# order captureWorkloads() returns them. registry.invalid's puller count
-# (7) is copied straight from the fixture's own `shared` line — see
-# _REGISTRY_INVALID_COUNT below. Everything else here is this file's own
-# best reading of the capture test source. If Task 2's real capture
-# differs from any of it, the values below are wrong and must be
-# corrected to match — the fixture is always the pin, never this file
-# (see the module docstring).
+# 2026-09-26 (faithful prompts): this roster used to be the first capture's
+# own (12 workloads, 6 down nodes, 8 PVCs). The capture now runs the real
+# gather over tests/fixtures/gather_fixture.yaml, so the roster follows that
+# file: its 3 down nodes, its 7 broken PVCs, and the 10 workloads the gather
+# scopes, in report order (the first 10 of the 12 flagged ones; web/shop and
+# web/worker fall outside the scope but still count toward registry.invalid).
+#
+# An object's fresh block is what the capture's gather left it:
+# - a node or PVC the budget reached carries the fixture's fresh block;
+# - the rest were never re-read (`not_read`);
+# - a registry's fresh block is what its events read showed.
+# test_the_roster_reads_exactly_what_the_capture_read checks the first two
+# against the capture's own reads. If a value here ever disagrees with the
+# golden, the golden is right and this file is wrong.
+
+_NOT_READ = o.Fresh(how="not_read")
 
 _NODE_DEFS = {
     "worker-1": {"scan_reason": "NotReady", "fresh": o.Fresh(
         how="read", ready="False", ready_reason="KubeletNotReady",
         ready_message="container runtime is down",
         taints=(("node.kubernetes.io/not-ready", "", "NoSchedule"),))},
-    "worker-2": {"scan_reason": "no kubelet lease", "fresh": o.Fresh(how="read", ready="True")},
-    "worker-3": {"scan_reason": "kubelet not heartbeating", "fresh": o.Fresh(how="not_read")},
-    "worker-5": {"scan_reason": "NotReady", "fresh": o.Fresh(how="read", ready="Unknown")},
-    "worker-6": {"scan_reason": "NotReady", "fresh": o.Fresh(how="read", ready="missing")},
+    "worker-2": {"scan_reason": "no kubelet lease", "fresh": _NOT_READ},
     "worker-7": {"scan_reason": "NotReady",
-                      "fresh": o.Fresh(how="read_failed", message='nodes "worker-7" is forbidden')},
+                 "fresh": o.Fresh(how="read_failed", message='nodes "worker-7" is forbidden')},
 }
-_NODE_NAMES = ("worker-1", "worker-2", "worker-3", "worker-5", "worker-6", "worker-7")
+_NODE_NAMES = ("worker-1", "worker-2", "worker-7")  # worker-4 is healthy: no candidate
 
 
 def _nodes_for(on: frozenset[str]) -> tuple[o.Object, ...]:
@@ -602,105 +606,81 @@ def _nodes_for(on: frozenset[str]) -> tuple[o.Object, ...]:
 
 
 _PVC_DEFS = {
-    "aux-0": {"scan_reason": "ProvisioningFailed",
-              "fresh": o.Fresh(how="read", phase="Bound", storage_class="fast-ssd", volume="pv-0442")},
-    "aux-1": {"scan_reason": "ProvisioningFailed",
-              "fresh": o.Fresh(how="read_failed", message='persistentvolumeclaims "aux-1" is forbidden')},
-    "aux-2": {"scan_reason": "ProvisioningFailed",
-              "fresh": o.Fresh(how="read", phase="Released", storage_class="fast-ssd")},
-    "aux-3": {"scan_reason": "ProvisioningFailed", "fresh": o.Fresh(how="not_read")},
-    "aux-4": {"scan_reason": "ProvisioningFailed", "fresh": o.Fresh(how="not_read")},
-    "cache-0": {"scan_reason": "ProvisionerNotResponding",
-                     "fresh": o.Fresh(how="read", phase="Pending", storage_class="standard")},
-    "data-0": {"scan_reason": "FailedBinding",
-                    "fresh": o.Fresh(how="read", phase="Lost", storage_class="fast-ssd", volume="pv-0821")},
-    "search-0": {"scan_reason": "ProvisionerNotResponding",
-                      "fresh": o.Fresh(how="read", phase="Pending", storage_class="standard")},
+    "db": {
+        "aux-0": {"scan_reason": "ProvisioningFailed",
+                  "fresh": o.Fresh(how="read", phase="Bound", storage_class="fast-ssd", volume="pv-0442")},
+        "aux-1": {"scan_reason": "ProvisioningFailed",
+                  "fresh": o.Fresh(how="read_failed", message='persistentvolumeclaims "aux-1" is forbidden')},
+        "aux-2": {"scan_reason": "ProvisioningFailed", "fresh": _NOT_READ},
+        "data-0": {"scan_reason": "FailedBinding",
+                   "fresh": o.Fresh(how="read", phase="Lost", storage_class="fast-ssd", volume="pv-0821")},
+    },
+    "store": {
+        "cache-0": {"scan_reason": "ProvisionerNotResponding", "fresh": _NOT_READ},
+        "cache-1": {"scan_reason": "ProvisionerNotResponding", "fresh": _NOT_READ},
+    },
+    "web": {
+        "assets-0": {"scan_reason": "ProvisioningFailed", "fresh": _NOT_READ},
+    },
 }
-_PVC_NAMES = ("aux-0", "aux-1", "aux-2", "aux-3", "aux-4", "cache-0", "data-0", "search-0")
 
 
-def _pvcs_for(mounted: frozenset[str]) -> tuple[o.Object, ...]:
+def _pvcs_for(ns: str, mounted: frozenset[str]) -> tuple[o.Object, ...]:
     return tuple(
-        o.Object(kind="pvc", name=name, placement=("mounted" if name in mounted else "unmounted"),
-                  **_PVC_DEFS[name])
-        for name in _PVC_NAMES
+        o.Object(kind="pvc", name=name, placement=("mounted" if name in mounted else "unmounted"), **d)
+        for name, d in _PVC_DEFS.get(ns, {}).items()
     )
 
 
-# registry.invalid's puller count is pinned at 7, matching real Go's
-# AnnotateRegistry: web/frontend also references registry.invalid, but its
-# RootCause is already set by the earlier node pass (worker-1 is "on"), so
-# AnnotateRegistry excludes it from the host's tally — real Go only counts
-# workloads that are still undecided when the registry pass runs. This
-# roster's own img/* count referencing registry.invalid is also 7 (one,
-# two, three, five, six, seven, eight); web/frontend is the 8th reference
-# and is the one AnnotateRegistry skips. scan_reason is a declarative
-# input, so it is set straight from the pin rather than computed here.
-# mirror.invalid never clears the threshold: it is img/lone's sole puller.
-_REGISTRY_INVALID_COUNT = "7"
+# registry.invalid's count is 6: img/two, img/seven, img/six, img/three,
+# web/shop and web/worker. app/api, db/orders and web/frontend also pull
+# from it, but a node already won each of them, so AnnotateRegistry leaves
+# them out of the tally (rootcause.go:112-116). mirror.invalid has one
+# puller, img/solo, and never clears the threshold of 2.
+_REGISTRY_INVALID_COUNT = "6"
 _MIRROR_INVALID_COUNT = "1"
 
 
-def _registry(name: str, count: str, **fresh_kw) -> tuple[o.Object, ...]:
-    return (o.Object(kind="registry", name=name, scan_reason=count, placement="",
-                      fresh=o.Fresh(how="read", **fresh_kw)),)
+def _registry(name: str, count: str, fresh: o.Fresh) -> tuple[o.Object, ...]:
+    return (o.Object(kind="registry", name=name, scan_reason=count, placement="", fresh=fresh),)
 
 
-# (namespace, name, pod, issue, objects) — captureWorkloads()'s own order.
+def _invalid(fresh: o.Fresh) -> tuple[o.Object, ...]:
+    return _registry("registry.invalid", _REGISTRY_INVALID_COUNT, fresh)
+
+
+# (namespace, name, pod, issue, objects), in report order. The pod is the
+# workload's events pod (the fixture's `pod`); the issue is its first pull
+# finding's issue when it has one, else its first finding's.
 ROSTER = [
-    {"namespace": "web", "name": "frontend", "pod": "frontend-5b8d7f6c9-q2w3e", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset({"worker-1", "worker-3", "worker-5", "worker-6", "worker-7"}))
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, literal="manifest unknown")},
-    {"namespace": "db", "name": "postgres", "pod": "postgres-0", "issue": "Pending",
-     "objects": _nodes_for(frozenset())
-                 + _pvcs_for(frozenset({"aux-0", "aux-1", "aux-2", "data-0"}))},
-    {"namespace": "db", "name": "cache", "pod": "cache-0", "issue": "Pending",
-     "objects": _nodes_for(frozenset({"worker-2"}))
-                 + _pvcs_for(frozenset({"cache-0"}))},
-    {"namespace": "db", "name": "search", "pod": "search-0", "issue": "Pending",
-     "objects": _nodes_for(frozenset())
-                 + _pvcs_for(frozenset({"search-0"}))},
-    {"namespace": "img", "name": "one", "pod": "one-7c9d4b5f6-abcde", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset())
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, literal="connection refused")},
-    {"namespace": "img", "name": "two", "pod": "two-7c9d4b5f6-bcdef", "issue": "ErrImagePull",
-     "objects": _nodes_for(frozenset())
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, literal="i/o timeout")},
-    {"namespace": "img", "name": "three", "pod": "three-7c9d4b5f6-cdefg", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset())
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, literal="unauthorized")},
-    {"namespace": "img", "name": "five", "pod": "five-7c9d4b5f6-defgh", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset())
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, literal="")},
-    {"namespace": "img", "name": "six", "pod": "six-6f8e9d0a1-crash", "issue": "ImagePullBackOff",
-     # The fixture's own pod for img/six is the CRASH pod (six-a), the
-     # first finding kubeagent's own eventsPod(w) reads — not the pull
-     # pod (six-b). Its events read hits the crash pod, so its registry
-     # candidate's fresh read is wrong_pod=True. See Task 2's own note:
-     # "For img/six the fixture's pod is the crash pod, and Python's
-     # Object for its registry carries wrong_pod=True." attribute()'s
-     # own `issue` argument still has to be "ImagePullBackOff" here —
-     # that is what makes a registry candidate exist at all — even
-     # though the workload's first *finding* is CrashLoopBackOff; the
-     # caller (a later task's builder) is the one that decides which of
-     # a multi-finding workload's issues governs registry attribution.
-     "objects": _nodes_for(frozenset())
-                 + _registry("registry.invalid", _REGISTRY_INVALID_COUNT, wrong_pod=True)},
-    {"namespace": "img", "name": "lone", "pod": "lone-7c9d4b5f6-efghi", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset())
-                 + _registry("mirror.invalid", _MIRROR_INVALID_COUNT)},
+    {"namespace": "app", "name": "api", "pod": "api-6d5f7c8b9-k2m4p", "issue": "ImagePullBackOff",
+     "objects": _nodes_for(frozenset({"worker-1", "worker-7"}))
+                 + _invalid(o.Fresh(how="read", literal="dial tcp"))},
+    {"namespace": "db", "name": "orders", "pod": "orders-0", "issue": "ErrImagePull",
+     "objects": _nodes_for(frozenset({"worker-1"}))
+                 + _pvcs_for("db", frozenset({"aux-0", "aux-1", "data-0"}))
+                 + _invalid(o.Fresh(how="read", literal="manifest unknown"))},
     {"namespace": "img", "name": "seven", "pod": "seven-7c9d4b5f6-fghij", "issue": "ImagePullBackOff",
-     # _registry()'s **fresh_kw shortcut only ever sets how="read"; a
-     # read-failed registry needs its own how and message, so it is
-     # built directly rather than through that helper.
      "objects": _nodes_for(frozenset())
-                 + (o.Object(kind="registry", name="registry.invalid", scan_reason=_REGISTRY_INVALID_COUNT,
-                             placement="", fresh=o.Fresh(how="read_failed", message="events is forbidden")),)},
-    {"namespace": "img", "name": "eight", "pod": "eight-7c9d4b5f6-ghijk", "issue": "ImagePullBackOff",
-     "objects": _nodes_for(frozenset())
-                 + (o.Object(kind="registry", name="registry.invalid", scan_reason=_REGISTRY_INVALID_COUNT,
-                             placement="", fresh=o.Fresh(how="not_read")),)},
+                 + _invalid(o.Fresh(how="read_failed", message="events is forbidden"))},
+    # img/six's events pod is its crash pod, the first finding's; the pull
+    # finding is its second. The events read never reaches the pulling pod.
+    {"namespace": "img", "name": "six", "pod": "six-6f8e9d0a1-crash", "issue": "ImagePullBackOff",
+     "objects": _nodes_for(frozenset()) + _invalid(o.Fresh(how="read", wrong_pod=True))},
+    {"namespace": "img", "name": "solo", "pod": "solo-7c9d4b5f6-efghi", "issue": "ImagePullBackOff",
+     "objects": _nodes_for(frozenset()) + _registry("mirror.invalid", _MIRROR_INVALID_COUNT, _NOT_READ)},
+    {"namespace": "img", "name": "three", "pod": "three-7c9d4b5f6-cdefg", "issue": "ImagePullBackOff",
+     "objects": _nodes_for(frozenset()) + _invalid(_NOT_READ)},
+    {"namespace": "img", "name": "two", "pod": "two-7c9d4b5f6-bcdef", "issue": "ErrImagePull",
+     "objects": _nodes_for(frozenset()) + _invalid(_NOT_READ)},
+    {"namespace": "kube-system", "name": "coredns", "pod": "coredns-76f75df574-abcde",
+     "issue": "CrashLoopBackOff", "objects": _nodes_for(frozenset())},
+    {"namespace": "store", "name": "cache", "pod": "cache-0", "issue": "Pending",
+     "objects": _nodes_for(frozenset()) + _pvcs_for("store", frozenset({"cache-0", "cache-1"}))},
+    {"namespace": "web", "name": "frontend", "pod": "frontend-5b8d7f6c9-q2w3e", "issue": "ImagePullBackOff",
+     "objects": _nodes_for(frozenset({"worker-2"}))
+                 + _pvcs_for("web", frozenset({"assets-0"}))
+                 + _invalid(_NOT_READ)},
 ]
 
 
@@ -714,7 +694,7 @@ def _replay(entry):
     return candidates, result
 
 
-@pytest.mark.parametrize("index", range(12))
+@pytest.mark.parametrize("index", range(len(ROSTER)))
 def test_port_matches_fixture_candidates_and_result(index):
     fixture = _fixture()
     fx_workload = fixture["workloads"][index]
@@ -741,39 +721,42 @@ def test_port_matches_fixture_candidates_and_result(index):
     assert got_decisions == fx_decisions
 
 
-def test_shared_matches_fixture_over_all_twelve_results():
+def test_shared_matches_fixture_over_all_ten_results():
     fixture = _fixture()
     results = tuple(_replay(entry)[1] for entry in ROSTER)
     assert list(r.shared(results)) == fixture["shared"]
 
 
-# Six of the fixture's eight reads are a node or a PVC describe; read_text()
-# covers both. The other two are "events ..." reads (img/one and img/five),
-# outside read_text()'s scope (see the module docstring) — they are pinned
-# directly against the fixture's own bytes instead of round-tripped through
-# a function.
+def test_the_roster_reads_exactly_what_the_capture_read():
+    # Every node and PVC this file marks as reached (not `not_read`) is one
+    # the capture described, and the other way round.
+    fixture = _fixture()
+    described = {rd["label"] for rd in fixture["reads"] if rd["label"].startswith("describe ")}
+    reached = {r.read_text(obj, ns=entry["namespace"], pod=entry["pod"])[0]
+               for entry in ROSTER for obj in entry["objects"]
+               if obj.kind in ("node", "pvc") and obj.fresh.how != "not_read"}
+    assert reached == described
+
+
+# Five of the capture's eight reads are a node or a PVC describe; read_text()
+# covers both. The other three are "events ..." reads (app/api, db/orders and
+# img/seven), outside read_text()'s scope (see the module docstring). They
+# are pinned against the fixture's own bytes instead of round-tripped
+# through a function.
+#
+# A fresh node now carries the kubelet's four conditions, as read_text()
+# writes them (contract/capture/kv_capture_test.go.txt:288-316,
+# `kvFreshNode`), so a read node's content is compared as read_text() gives
+# it. The first capture's nodes carried one condition each, which is why
+# this test used to feed describe_node() a stand-in.
 _READ_TEXT_CASES = [
-    # (fixture index, roster index, object name/kind lookup, ns, pod)
-    (0, 0, ("node", "worker-1"), "web", "frontend-5b8d7f6c9-q2w3e"),
-    (1, 2, ("node", "worker-2"), "db", "cache-0"),
-    (2, 1, ("pvc", "aux-0"), "db", "postgres-0"),
-    (3, 1, ("pvc", "data-0"), "db", "postgres-0"),
-    (4, 2, ("pvc", "cache-0"), "db", "cache-0"),
-    (7, 0, ("node", "worker-7"), "web", "frontend-5b8d7f6c9-q2w3e"),
+    # (fixture index, roster index, object kind/name lookup, ns, pod)
+    (1, 0, ("node", "worker-1"), "app", "api-6d5f7c8b9-k2m4p"),
+    (2, 0, ("node", "worker-7"), "app", "api-6d5f7c8b9-k2m4p"),
+    (4, 1, ("pvc", "aux-0"), "db", "orders-0"),
+    (5, 1, ("pvc", "aux-1"), "db", "orders-0"),
+    (6, 1, ("pvc", "data-0"), "db", "orders-0"),
 ]
-
-
-# The capture's node objects carry one condition each, not the kubelet's
-# four (contract/capture/kv_capture_test.go.txt:263-272, `captureReads`).
-# read_text() always writes all four, so a read node's content is pinned
-# through describe_node() fed the capture's own node: (unschedulable,
-# conditions, taints).
-_CAPTURE_NODES = {
-    "worker-1": (False, (("Ready", "False", "KubeletNotReady", "container runtime is down"),),
-                 (("node.kubernetes.io/not-ready", "", "NoSchedule"),)),
-    "worker-2": (False, (("Ready", "True", "KubeletReady", "kubelet is posting ready status"),),
-                 ()),
-}
 
 
 @pytest.mark.parametrize("fixture_index, roster_index, lookup, ns, pod", _READ_TEXT_CASES)
@@ -785,27 +768,145 @@ def test_read_text_matches_fixture(fixture_index, roster_index, lookup, ns, pod)
     obj = next(o for o in entry["objects"] if o.kind == kind and o.name == name)
     label, content = r.read_text(obj, ns=ns, pod=pod)
     assert label == fx_read["label"]
-    if kind == "node" and obj.fresh.how == "read":
-        unschedulable, conditions, taints = _CAPTURE_NODES[name]
-        content = r.describe_node(name, unschedulable=unschedulable, conditions=conditions,
-                                  taints=taints)
     assert content == fx_read["content"]
 
 
 def test_events_reads_are_pinned_literals_outside_read_text_scope():
     fixture = _fixture()
-    one, five = fixture["reads"][5], fixture["reads"][6]
-    assert one["label"] == "events img/one-7c9d4b5f6-abcde"
-    assert one["content"] == (
-        'events for img/one-7c9d4b5f6-abcde:\n'
-        '  Failed: Failed to pull image "registry.invalid/img/one:1.0": connection refused (x4)\n'
+    api, orders, seven = fixture["reads"][0], fixture["reads"][3], fixture["reads"][7]
+    assert api["label"] == "events app/api-6d5f7c8b9-k2m4p"
+    assert api["content"] == (
+        'events for app/api-6d5f7c8b9-k2m4p:\n'
+        '  Pulling: Pulling image "registry.invalid/app/api:1.4" (x5)\n'
+        '  Failed: Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable'
+        ' desc = dial tcp <redacted>: connect: connection refused (x5)\n'
+        '  BackOff: Back-off pulling image "registry.invalid/app/api:1.4" (x12)\n'
     )
-    assert five["label"] == "events img/five-7c9d4b5f6-defgh"
-    assert five["content"] == "no events for img/five-7c9d4b5f6-defgh"
+    assert orders["label"] == "events db/orders-0"
+    assert orders["content"] == (
+        'events for db/orders-0:\n'
+        '  Failed: Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound'
+        ' desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown (x3)\n'
+        '  Failed: Error: ErrImagePull (x3)\n'
+    )
+    assert seven["label"] == "events img/seven-7c9d4b5f6-fghij"
+    assert seven["content"] == "read failed: events is forbidden"
 
 
 def test_fixture_pins_the_kubeagent_version():
     fixture = _fixture()
     assert fixture["kubeagent"] == {"tag": "v1.24.0", "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd"}
-    assert len(fixture["workloads"]) == 12
+    assert len(fixture["workloads"]) == 10
     assert len(fixture["reads"]) == 8
+
+
+# ---------------------------------------------------------------------------
+# Rule-path coverage: the new capture still reaches every path the old one did
+# ---------------------------------------------------------------------------
+#
+# A path is (kind, verdict or outcome, sentence), with names and numbers
+# masked. The re-captured golden spends its read budget early, so it reaches
+# fewer Decide sentences than the first capture did. These sets pin what
+# the first capture reached; the tests fail if a later capture drops one.
+
+# From `git show 26c94ca:tests/fixtures/rules_golden.json` (the first capture).
+_OLD_ATTRIBUTION_PATHS = frozenset({
+    ("node", "attributed", "pod X is scheduled on it"),
+    ("node", "outranked", "node X (NotReady) is the stronger cause"),
+    ("node", "ruled_out", "no pod of this workload is scheduled on it"),
+    ("pvc", "attributed", "pod X mounts it"),
+    ("pvc", "outranked", "PVC X (…) is the stronger cause"),
+    ("pvc", "outranked", "node X (no kubelet lease) is the stronger cause"),
+    ("pvc", "ruled_out", "not mounted by this workload's pods"),
+    ("registry", "attributed", "N workloads failing to pull from this host clear the threshold of 2"),
+    ("registry", "outranked", "node X (NotReady) is the stronger cause"),
+    ("registry", "ruled_out", "only workload failing to pull from this host; threshold is 2"),
+})
+
+# From `git show 26c94ca:tests/fixtures/rules_golden.json` (the first capture).
+_OLD_DECIDE_PAIRS = frozenset({
+    ("node", "confirmed"), ("node", "unverified"),
+    ("pvc", "confirmed"), ("pvc", "refuted"), ("pvc", "unverified"),
+    ("registry", "confirmed"), ("registry", "refuted"), ("registry", "unverified"),
+})
+
+
+def _kind(cause: str) -> str:
+    return cause.split(" ", 1)[0].lower()
+
+
+def _mask(sentence: str) -> str:
+    sentence = re.sub(r"^pod \S+ ", "pod X ", sentence)
+    sentence = re.sub(r"^node \S+ \(", "node X (", sentence)
+    sentence = re.sub(r"^PVC \S+ \([^)]*\)", "PVC X (…)", sentence)
+    return re.sub(r"^\d+ workloads ", "N workloads ", sentence)
+
+
+def test_mask_names_the_pieces_it_hides():
+    assert _mask("pod api-6d5f7c8b9-k2m4p is scheduled on it") == "pod X is scheduled on it"
+    assert _mask("node worker-2 (no kubelet lease) is the stronger cause") == \
+        "node X (no kubelet lease) is the stronger cause"
+    assert _mask("PVC cache-0 (ProvisionerNotResponding) is the stronger cause") == \
+        "PVC X (…) is the stronger cause"
+    assert _mask("6 workloads failing to pull from this host clear the threshold of 2") == \
+        "N workloads failing to pull from this host clear the threshold of 2"
+
+
+def test_the_capture_reaches_every_old_attribution_path():
+    got = {(_kind(c["cause"]), c["verdict"], _mask(c["reason"]))
+           for w in _fixture()["workloads"] for c in w["candidates"]}
+    assert _OLD_ATTRIBUTION_PATHS - got == set()
+
+
+def test_the_capture_reaches_every_old_decide_pair():
+    got = {(_kind(d["candidate"]), d["outcome"])
+           for w in _fixture()["workloads"] for d in w["result"]["decisions"]}
+    assert _OLD_DECIDE_PAIRS - got == set()
+
+
+# The seven Decide sentences the first capture reached and the re-captured
+# golden does not. Each row is copied verbatim from
+# `git show 26c94ca:tests/fixtures/rules_golden.json`: the candidate's cause,
+# verdict and reason, and Go's outcome and evidence. The fresh block is the
+# input that capture declared for it (tests/test_rules.py at 26c94ca).
+# Decide never calls read_text, so the Ready=Unknown row runs too.
+_LOST_DECIDE_VECTORS = [
+    # (cause, verdict, reason, ns, object, outcome, evidence)
+    ("node worker-5 (NotReady)", "outranked", "node worker-1 (NotReady) is the stronger cause", "web",
+     o.Object(kind="node", name="worker-5", scan_reason="NotReady", placement="on",
+              fresh=o.Fresh(how="read", ready="Unknown")),
+     "confirmed", "Ready condition is Unknown now"),
+    ("node worker-6 (NotReady)", "outranked", "node worker-1 (NotReady) is the stronger cause", "web",
+     o.Object(kind="node", name="worker-6", scan_reason="NotReady", placement="on",
+              fresh=o.Fresh(how="read", ready="missing")),
+     "confirmed", "the node has no Ready condition"),
+    ("node worker-2 (no kubelet lease)", "attributed", "pod cache-0 is scheduled on it", "db",
+     o.Object(kind="node", name="worker-2", scan_reason="no kubelet lease", placement="on",
+              fresh=o.Fresh(how="read", ready="True")),
+     "unverified", "Ready condition is True, but the kubelet lease was not re-read"),
+    ("PVC search-0 (ProvisionerNotResponding)", "attributed", "pod search-0 mounts it", "db",
+     o.Object(kind="pvc", name="search-0", scan_reason="ProvisionerNotResponding", placement="mounted",
+              fresh=o.Fresh(how="read", phase="Pending", storage_class="standard")),
+     "confirmed", "phase is still Pending"),
+    ("PVC aux-2 (ProvisioningFailed)", "outranked", "PVC aux-0 (ProvisioningFailed) is the stronger cause", "db",
+     o.Object(kind="pvc", name="aux-2", scan_reason="ProvisioningFailed", placement="mounted",
+              fresh=o.Fresh(how="read", phase="Released", storage_class="fast-ssd")),
+     "unverified", "phase is not one kubeagent expects"),
+    ("registry registry.invalid (7 workloads failing to pull)", "attributed",
+     "7 workloads failing to pull from this host clear the threshold of 2", "img",
+     o.Object(kind="registry", name="registry.invalid", scan_reason="7", placement="",
+              fresh=o.Fresh(how="read", literal="unauthorized")),
+     "unverified", "a pull event shows an auth error: unauthorized; that can be one image or the whole host"),
+    ("registry registry.invalid (7 workloads failing to pull)", "attributed",
+     "7 workloads failing to pull from this host clear the threshold of 2", "img",
+     o.Object(kind="registry", name="registry.invalid", scan_reason="7", placement="",
+              fresh=o.Fresh(how="read", literal="")),
+     "unverified", "no pull event names the failure; events may have aged out"),
+]
+
+
+@pytest.mark.parametrize("cause, verdict, reason, ns, obj, outcome, evidence", _LOST_DECIDE_VECTORS,
+                         ids=[v[6] for v in _LOST_DECIDE_VECTORS])
+def test_decide_keeps_the_first_captures_lost_sentences(cause, verdict, reason, ns, obj, outcome, evidence):
+    result = r.decide((r.Candidate(cause, verdict, reason, obj, ns),))
+    assert result.decisions == (r.Decision(cause, outcome, evidence),)

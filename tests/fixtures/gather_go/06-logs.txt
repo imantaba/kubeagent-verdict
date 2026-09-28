@@ -1,0 +1,11 @@
+log	1	app	api-6d5f7c8b9-k2m4p		ImagePullBackOff	skip	
+log	2	db	orders-0		ErrImagePull	skip	
+log	3	img	seven-7c9d4b5f6-fghij		ImagePullBackOff	budget	
+log	4	img	six-6f8e9d0a1-crash	app	CrashLoopBackOff	budget	
+log	4	img	six-6f8e9d0a1-pulls		ImagePullBackOff	budget	
+log	5	img	solo-7c9d4b5f6-efghi		ImagePullBackOff	budget	
+log	6	img	three-7c9d4b5f6-cdefg		ImagePullBackOff	budget	
+log	7	img	two-7c9d4b5f6-bcdef		ErrImagePull	budget	
+log	8	kube-system	coredns-76f75df574-abcde	coredns	CrashLoopBackOff	budget	
+log	9	store	cache-0		Pending	budget	
+log	10	web	frontend-5b8d7f6c9-q2w3e		ImagePullBackOff	budget	

@@ -1,0 +1,58 @@
+down	worker-1	NotReady
+down	worker-2	no kubelet lease
+down	worker-7	NotReady
+workload	1	app	api	node worker-1 (NotReady)	high
+candidate	node	worker-1	attributed	read	2	node worker-1 (NotReady)	pod api-6d5f7c8b9-k2m4p is scheduled on it
+candidate	node	worker-2	ruled_out	ruled_out		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	outranked	read	3	node worker-7 (NotReady)	node worker-1 (NotReady) is the stronger cause
+candidate	registry	registry.invalid	outranked	registry		registry registry.invalid	node worker-1 (NotReady) is the stronger cause
+workload	2	db	orders	node worker-1 (NotReady)	high
+candidate	node	worker-1	attributed	deduped	2	node worker-1 (NotReady)	pod orders-0 is scheduled on it
+candidate	node	worker-2	ruled_out	ruled_out		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	ruled_out		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	pvc	aux-0	outranked	read	5	PVC aux-0 (ProvisioningFailed)	node worker-1 (NotReady) is the stronger cause
+candidate	pvc	aux-1	outranked	read	6	PVC aux-1 (ProvisioningFailed)	node worker-1 (NotReady) is the stronger cause
+candidate	pvc	aux-2	ruled_out	ruled_out		PVC aux-2 (ProvisioningFailed)	not mounted by this workload's pods
+candidate	pvc	data-0	outranked	read	7	PVC data-0 (FailedBinding)	node worker-1 (NotReady) is the stronger cause
+candidate	registry	registry.invalid	outranked	registry		registry registry.invalid	node worker-1 (NotReady) is the stronger cause
+workload	3	img	seven	registry registry.invalid (6 workloads failing to pull)	medium
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	registry	registry.invalid	attributed	budget		registry registry.invalid (6 workloads failing to pull)	6 workloads failing to pull from this host clear the threshold of 2
+workload	4	img	six	registry registry.invalid (6 workloads failing to pull)	medium
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	registry	registry.invalid	attributed	budget		registry registry.invalid (6 workloads failing to pull)	6 workloads failing to pull from this host clear the threshold of 2
+workload	5	img	solo		
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	registry	mirror.invalid	ruled_out	budget		registry mirror.invalid	only workload failing to pull from this host; threshold is 2
+workload	6	img	three	registry registry.invalid (6 workloads failing to pull)	medium
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	registry	registry.invalid	attributed	budget		registry registry.invalid (6 workloads failing to pull)	6 workloads failing to pull from this host clear the threshold of 2
+workload	7	img	two	registry registry.invalid (6 workloads failing to pull)	medium
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	registry	registry.invalid	attributed	budget		registry registry.invalid (6 workloads failing to pull)	6 workloads failing to pull from this host clear the threshold of 2
+workload	8	kube-system	coredns		
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+workload	9	store	cache	PVC cache-0 (ProvisionerNotResponding)	high
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	ruled_out	budget		node worker-2 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	pvc	cache-0	attributed	budget		PVC cache-0 (ProvisionerNotResponding)	pod cache-0 mounts it
+candidate	pvc	cache-1	outranked	budget		PVC cache-1 (ProvisionerNotResponding)	PVC cache-0 (ProvisionerNotResponding) is the stronger cause
+workload	10	web	frontend	node worker-2 (no kubelet lease)	high
+candidate	node	worker-1	ruled_out	budget		node worker-1 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	worker-2	attributed	budget		node worker-2 (no kubelet lease)	pod frontend-5b8d7f6c9-q2w3e is scheduled on it
+candidate	node	worker-7	ruled_out	budget		node worker-7 (NotReady)	no pod of this workload is scheduled on it
+candidate	pvc	assets-0	outranked	budget		PVC assets-0 (ProvisioningFailed)	node worker-2 (no kubelet lease) is the stronger cause
+candidate	registry	registry.invalid	outranked	budget		registry registry.invalid	node worker-2 (no kubelet lease) is the stronger cause

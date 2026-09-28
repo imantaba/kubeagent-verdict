@@ -20,6 +20,7 @@ The gather:
   row to its first 10 workloads (internal/investigate/gather.go:28-43),
   makes the reads in kubeagent's order (internal/investigate/gather.go:57-157),
   then decides each scoped workload (internal/investigate/local.go:216-219).
+  It also says what it did with each candidate and each finding: a `Step`.
 - The registry rule reads the pulling pod's events: `_pull_pod`,
   `_events_pod`, `_registry_fresh`, `_is_pull_event`, `_first_match` and
   `_classify_pull_events` port internal/hypothesis/decide.go:139-230.
@@ -199,6 +200,36 @@ class GatherWorkload:
     events_failed: str = ""
 
 
+# What the gather did with one candidate, checked in the gather's own order
+# (internal/investigate/gather.go:92-133):
+#   budget     it stopped first: 8 reads were already made;
+#   ruled_out  the verdict is ruled_out, so there is nothing to read;
+#   no_object  the candidate names no object;
+#   registry   a registry has no object to describe;
+#   deduped    an earlier candidate in the row already read this object;
+#   read       it described the object.
+CANDIDATE_ACTIONS = ("budget", "ruled_out", "no_object", "registry", "deduped", "read")
+# What the gather did with one finding (internal/investigate/gather.go:135-154):
+#   budget   it stopped first;
+#   skip     not a crash-family issue, no container, or no pod name;
+#   deduped  an earlier finding in the row already read this container's log;
+#   read     it read the previous log.
+FINDING_ACTIONS = ("budget", "skip", "deduped", "read")
+
+
+@dataclasses.dataclass(frozen=True)
+class Step:
+    """What the gather did with one candidate or one finding.
+
+    `action` is one of CANDIDATE_ACTIONS or FINDING_ACTIONS. `ref` is the
+    1-based place in `GatherResult.reads` of the read the step made (`read`)
+    or reused (`deduped`). It is 0 for every other action.
+    """
+
+    action: str
+    ref: int = 0
+
+
 @dataclasses.dataclass(frozen=True)
 class GatherResult:
     """What the gather read, and what the rules made of it.
@@ -207,13 +238,20 @@ class GatherResult:
     - `candidates` and `results` hold one entry for each workload in the
       scope, the first MAX_GATHER_WORKLOADS, in row order. A candidate
       carries its fresh-read outcome and evidence when it has a decision.
-    - A workload past the scope has no entry in either. It gets no reads and
-      no decision. It still counts toward its registry group.
+    - `candidate_steps` and `finding_steps` also hold one entry per scoped
+      workload: one `Step` per candidate, in trace order, and one per
+      finding, in finding order. They say which read each object and each
+      log came from, or why there was none. Every step of a workload the
+      budget never reached is `budget`.
+    - A workload past the scope has no entry in any of them. It gets no
+      reads and no decision. It still counts toward its registry group.
     """
 
     reads: tuple[c.EvidenceRead, ...]
     candidates: tuple[tuple[c.Candidate, ...], ...]
     results: tuple[rules.Result, ...]
+    candidate_steps: tuple[tuple[Step, ...], ...]
+    finding_steps: tuple[tuple[Step, ...], ...]
 
 
 def _pod_part(pod: str) -> str:
@@ -505,11 +543,13 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
     scoped = list(zip(filled, traces))[:c.MAX_GATHER_WORKLOADS]
 
     reads: list[c.EvidenceRead] = []
-    described: set[str] = set()
-    logged: set[str] = set()
+    described: dict[str, int] = {}  # dedup key -> the read's 1-based place
+    logged: dict[str, int] = {}
     events_ok: dict[str, tuple[tuple[str, str, int], ...]] = {}
     events_failed: dict[str, str] = {}
-    for w, trace in scoped:
+    candidate_steps: list[list[Step]] = [[] for _ in scoped]
+    finding_steps: list[list[Step]] = [[] for _ in scoped]
+    for (w, trace), cand_steps, find_steps in zip(scoped, candidate_steps, finding_steps):
         if len(reads) >= c.MAX_TOOL_CALLS:
             break
         pod = _events_pod(w)
@@ -527,28 +567,38 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
             if len(reads) >= c.MAX_TOOL_CALLS:
                 break
             obj = cand.obj
-            if cand.verdict == "ruled_out" or obj.name == "":
+            if cand.verdict == "ruled_out":
+                cand_steps.append(Step("ruled_out"))
+                continue
+            if obj.name == "":
+                cand_steps.append(Step("no_object"))
                 continue
             if obj.kind not in ("node", "pvc"):
-                continue  # gather.go:100: registry, no object to read
+                cand_steps.append(Step("registry"))  # gather.go:100: no object to read
+                continue
             obj_key = _object_key(obj, w.namespace)
             if obj_key in described:
+                cand_steps.append(Step("deduped", described[obj_key]))
                 continue
-            described.add(obj_key)
             reads.append(c.EvidenceRead(*rules.read_text(obj, ns=w.namespace, pod=w.pod)))
+            described[obj_key] = len(reads)
+            cand_steps.append(Step("read", len(reads)))
 
         for f in w.findings:
             if len(reads) >= c.MAX_TOOL_CALLS:
                 break
             if not _reads_log(f):
+                find_steps.append(Step("skip"))
                 continue
             log_key = f"{w.namespace}/{_pod_part(f.pod)}/{f.container}"
             if log_key in logged:
+                find_steps.append(Step("deduped", logged[log_key]))
                 continue
-            logged.add(log_key)
             reads.append(c.EvidenceRead(
                 f"log causes {w.namespace}/{_pod_part(f.pod)} container {f.container}",
                 f.log_read))
+            logged[log_key] = len(reads)
+            find_steps.append(Step("read", len(reads)))
 
     candidates: list[tuple[c.Candidate, ...]] = []
     results: list[rules.Result] = []
@@ -568,4 +618,13 @@ def gather(workloads: Sequence[GatherWorkload]) -> GatherResult:
         result = rules.decide(tuple(final))
         results.append(result)
         candidates.append(pair_candidates(final, result))
-    return GatherResult(tuple(reads), tuple(candidates), tuple(results))
+    # The loop stops at the budget: every step it never reached is `budget`.
+    budget = Step("budget")
+    return GatherResult(
+        tuple(reads), tuple(candidates), tuple(results),
+        candidate_steps=tuple(
+            tuple(steps) + (budget,) * (len(trace) - len(steps))
+            for steps, (_, trace) in zip(candidate_steps, scoped)),
+        finding_steps=tuple(
+            tuple(steps) + (budget,) * (len(w.findings) - len(steps))
+            for steps, (w, _) in zip(finding_steps, scoped)))

@@ -1,3 +1,10 @@
+cluster	Degraded	2	4
+node_issue	worker-1 NotReady: KubeletNotReady — container runtime is down
+node_issue	worker-2 no kubelet lease
+node_issue	worker-7 NotReady: KubeletNotReady — container runtime is down
+system_issue	kube-system/coredns 0/2 Degraded
+shared	2 workloads share one upstream cause: node worker-1 (NotReady)
+block	prompt	13375
 == BEGIN inventory ==
 Cluster health (P1): DEGRADED — 2/4 nodes Ready.
   node worker-1 NotReady: KubeletNotReady — container runtime is down

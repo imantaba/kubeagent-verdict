@@ -53,16 +53,22 @@ def test_user_message_has_the_v1240_shapes():
     assert "      fresh read: " in text
     assert "      fresh read: confirmed — " in text
     assert "    decided by rules: " in text
-    assert "    " + c.TRUNCATION_MARKER + "\n" in text
+    # 2026-09-26 (faithful prompts): the re-captured golden has no trace over the
+    # 8-candidate cap (db/orders has exactly 8), so the cap's marker left this check.
+    # The capture's new shapes took its place.
+    assert "- app/api (Deployment) [confidence: high]:\n" in text
+    assert "  node worker-1 NotReady: KubeletNotReady — container runtime is down\n" in text
+    assert "run: kubectl -n img logs <pod> -c app --previous\n" in text
 
 
 def test_answer_is_contract_shaped():
     doc = json.loads((GOLDEN / "answer.json").read_text(encoding="utf-8"))
     assert set(doc) == {"verdicts", "summary"}
     rows = doc["verdicts"]
+    # 2026-09-26 (faithful prompts): the scoped roster of tests/fixtures/gather_fixture.yaml.
     assert {r["workload"] for r in rows} == {
-        "web/frontend", "db/postgres", "db/cache", "db/search",
-        "img/one", "img/two", "img/three", "img/five", "img/six", "img/lone",
+        "app/api", "db/orders", "img/seven", "img/six", "img/solo",
+        "img/three", "img/two", "kube-system/coredns", "store/cache", "web/frontend",
     }
     for r in rows:
         assert set(r) == {"workload", "cause", "confidence", "rationale"}

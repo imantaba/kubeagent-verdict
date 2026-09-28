@@ -1,0 +1,11 @@
+node	2	worker-1	ok	
+block	content	437
+node worker-1: unschedulable=false
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=False (KubeletHasNoDiskPressure): kubelet has no disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down
+  taint node.kubernetes.io/not-ready=:NoSchedule
+node	3	worker-7	failed	nodes "worker-7" is forbidden
+block	content	42
+read failed: nodes "worker-7" is forbidden

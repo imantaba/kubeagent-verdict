@@ -1,0 +1,36 @@
+block	bundle	1519
+== events app/api-6d5f7c8b9-k2m4p ==
+events for app/api-6d5f7c8b9-k2m4p:
+  Pulling: Pulling image "registry.invalid/app/api:1.4" (x5)
+  Failed: Failed to pull image "registry.invalid/app/api:1.4": rpc error: code = Unavailable desc = dial tcp <redacted>: connect: connection refused (x5)
+  BackOff: Back-off pulling image "registry.invalid/app/api:1.4" (x12)
+
+== describe node /worker-1 ==
+node worker-1: unschedulable=false
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=False (KubeletHasNoDiskPressure): kubelet has no disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down
+  taint node.kubernetes.io/not-ready=:NoSchedule
+
+== describe node /worker-7 ==
+read failed: nodes "worker-7" is forbidden
+
+== events db/orders-0 ==
+events for db/orders-0:
+  Failed: Failed to pull image "registry.invalid/db/orders:2.0": rpc error: code = NotFound desc = failed to pull and unpack image "registry.invalid/db/orders:2.0": manifest unknown (x3)
+  Failed: Error: ErrImagePull (x3)
+
+== describe pvc db/aux-0 ==
+pvc db/aux-0: phase=Bound storageClass=fast-ssd volume=pv-0442
+
+== describe pvc db/aux-1 ==
+read failed: persistentvolumeclaims "aux-1" is forbidden
+
+== describe pvc db/data-0 ==
+pvc db/data-0: phase=Lost storageClass=fast-ssd volume=pv-0821
+
+== events img/seven-7c9d4b5f6-fghij ==
+read failed: events is forbidden
+
+
