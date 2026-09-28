@@ -1012,7 +1012,19 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # Every number banked against the old bytes is retired.
 # 99916709329ca5b9d027afb18b83c27ae99566f8dc87206ddfa8953c3aa691d1 ->
 # 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6
-FROZEN_SLICE_SHA256 = "9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6"
+#
+# 2026-09-28 (final review): a `multi_misattribution_probe` row now lists
+# every down node for every workload, as kubeagent does: a node the
+# workload has no pod on is "ruled out — no pod of this workload is
+# scheduled on it" (internal/rootcause/rootcause.go:24-56). Before, each
+# workload listed only its own node. The slice stays at 239 rows, and the
+# 20 `multi_misattribution_probe` rows move: each changes only its user
+# message, which gains ruled-out node lines, 36 in all, and loses none. No
+# group, gold answer, meta, decoy or system message moves, and no other row
+# moves. Every number banked against the old bytes is retired.
+# 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6 ->
+# 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69
+FROZEN_SLICE_SHA256 = "48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1138,7 +1150,15 @@ FROZEN_SLICE_SHA256 = "9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b382
 # Only their fix lines change; no gold answer or meta moves.
 # 423a96003e6f34d7bcb3828081ed58e7ec4a71ad9356e7aa34e164a852fd28a4 ->
 # 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f
-EVAL_SET_SHA256 = "85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f"
+#
+# 2026-09-28 (final review): the `multi_misattribution_probe` rows list
+# every down node for every workload, which moved `FROZEN_SLICE_SHA256`
+# above. The ten `shared_origin_decoy_probe` rows are not `multi` rows and
+# do not move, so this digest moves only because the frozen slice inside
+# it does.
+# 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f ->
+# b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653
+EVAL_SET_SHA256 = "b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653"
 
 
 def _digest(rows) -> str:

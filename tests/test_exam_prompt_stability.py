@@ -1,12 +1,20 @@
 """The banked exam's prompts must not move.
 
-`out/dataset-0926/test.jsonl` is the exam the faithful prompts
+`out/dataset-0928/test.jsonl` is the exam the faithful prompts
 (2026-09-25-faithful-prompts-design.md) bank: 249 rows, and a new
 baseline. Every model scored after that change answers these questions.
 Re-scoring banked replies against a corrected `meta` is only honest if
 the QUESTIONS are the same ones the model saw. This module is that
 proof: regenerate the exam and compare `messages` row for row, byte for
 byte.
+
+Until 2026-09-28 it pointed at `out/dataset-0926/test.jsonl`. The final
+review found that a `multi_misattribution_probe` row listed only each
+workload's own down node, where kubeagent lists every down node and rules
+out the ones a workload has no pod on. The fix adds those lines to the
+user message of the 20 `multi_misattribution_probe` rows, so that bank no
+longer matches this generator. No gold answer, meta or system message
+moved.
 
 Until 2026-09-26 it pointed at `out/dataset-0924/test.jsonl`, the 252-row
 exam the job-2 generator fix (2026-09-24-job2-generator-fix-design.md)
@@ -39,7 +47,9 @@ import pytest
 from kubeagent_verdict.dataset import generate
 
 # 2026-09-26 (faithful prompts): re-pointed for the new exam, dataset-0924 -> dataset-0926
-BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-0926" / "test.jsonl"
+# 2026-09-28 (final review): the multi probe lists every down node, so 20
+# exam user messages moved; re-pointed, dataset-0926 -> dataset-0928
+BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-0928" / "test.jsonl"
 
 pytestmark = pytest.mark.skipif(
     not BANK.exists(), reason=f"banked exam not present at {BANK}")

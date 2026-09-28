@@ -202,7 +202,12 @@ def view(row):
 # kubeagent's prompt does; no flagged list, gold or meta moves
 # 4bfdee36a997d35aae18f95528350e0a75ac649b1c62dcca34de288abf94421b ->
 # 3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c
-GRADED_VIEW_SHA256 = "3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c"
+# 2026-09-28 (final review): the 20 multi_misattribution_probe rows list
+# every down node for every workload, 36 more ruled-out node lines in their
+# user messages; no flagged list, gold or meta moves
+# 3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c ->
+# 396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108
+GRADED_VIEW_SHA256 = "396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108"
 
 
 def _digest(views) -> str:
