@@ -133,13 +133,14 @@ def test_header_for_refuses_two_attributed_candidates():
                            _cand("PVC data-0 (FailedBinding)", "attributed")))
 
 
-def test_workload_meta_has_exactly_seven_keys():
+def test_workload_meta_has_exactly_eight_keys():
     result = rules.Result(decided=True, cause="node worker-1 (NotReady)",
                            outcome="confirmed", evidence="Ready condition is False now",
                            group_key="", group_text="", decisions=())
     meta = render.workload_meta(result,
                                  expected_cause="node worker-1 (NotReady)",
-                                 own_cause_keywords=[])
+                                 own_cause_keywords=[],
+                                 own_cause_must_not=[])
     assert meta == {
         "job": 1,
         "decided": True,
@@ -148,20 +149,32 @@ def test_workload_meta_has_exactly_seven_keys():
         "decided_evidence": "Ready condition is False now",
         "expected_cause": "node worker-1 (NotReady)",
         "own_cause_keywords": [],
+        "own_cause_must_not": [],
     }
+
+
+def test_workload_meta_requires_the_must_not_list():
+    """No default: a caller that forgets the list fails at build time,
+    not with a meta that quietly grades every answer without it."""
+    result = rules.Result(decided=False, cause="", outcome="", evidence="",
+                           group_key="", group_text="", decisions=())
+    with pytest.raises(TypeError, match="own_cause_must_not"):
+        render.workload_meta(result, expected_cause="", own_cause_keywords=[])
 
 
 def test_workload_meta_falls_back_to_empty_strings_when_undecided():
     result = rules.Result(decided=False, cause="", outcome="", evidence="",
                            group_key="", group_text="", decisions=())
     meta = render.workload_meta(result, expected_cause="",
-                                 own_cause_keywords=["disk pressure"])
+                                 own_cause_keywords=["disk pressure"],
+                                 own_cause_must_not=["provision"])
     assert meta["job"] == 2
     assert meta["decided"] is False
     assert meta["decided_cause"] == ""
     assert meta["decided_outcome"] == ""
     assert meta["decided_evidence"] == ""
     assert meta["own_cause_keywords"] == ["disk pressure"]
+    assert meta["own_cause_must_not"] == ["provision"]
 
 
 def test_prompt_meta_adds_label_and_decoy_by_workload():

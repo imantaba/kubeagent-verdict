@@ -162,10 +162,11 @@ def header_for(candidates: tuple[c.Candidate, ...]) -> str:
 
 
 def workload_meta(result: rules.Result, *, expected_cause: str,
-                  own_cause_keywords: list[str]) -> dict:
-    """Build the seven-key per-workload meta dict: job, decided,
+                  own_cause_keywords: list[str],
+                  own_cause_must_not: list[str]) -> dict:
+    """Build the eight-key per-workload meta dict: job, decided,
     decided_cause, decided_outcome, decided_evidence, expected_cause,
-    own_cause_keywords.
+    own_cause_keywords, own_cause_must_not.
     `job` is derived from `result` itself — 1 when the workload decided, 2
     when it did not — never passed in by the caller. The four decided_*
     keys read straight off `result`, falling back to Result's own ""
@@ -174,7 +175,9 @@ def workload_meta(result: rules.Result, *, expected_cause: str,
     workload's own cause; the caller is responsible for the
     interface-sheet rule that it is non-empty only when job == 2 and
     expected_cause is a named cause (never on none_of_these, never on a
-    decided workload).
+    decided workload). `own_cause_must_not` travels with the keywords: the
+    same entry's list when the keywords come from a catalog entry, and []
+    everywhere else. It is required, so no caller can forget it.
     """
     return {
         "job": 1 if result.decided else 2,
@@ -184,6 +187,7 @@ def workload_meta(result: rules.Result, *, expected_cause: str,
         "decided_evidence": result.evidence,
         "expected_cause": expected_cause,
         "own_cause_keywords": own_cause_keywords,
+        "own_cause_must_not": own_cause_must_not,
     }
 
 

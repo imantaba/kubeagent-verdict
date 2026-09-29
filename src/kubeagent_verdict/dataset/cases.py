@@ -347,7 +347,8 @@ def _job1_example(e: CatalogEntry, n: Names, menu: tuple, case: str, *,
     cause, conf = result.cause, _confidence(e)
     rows = [{"workload": key, "cause": cause, "confidence": conf,
              "rationale": _rule_rationale(result)}]
-    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=[])
+    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=[],
+                       own_cause_must_not=[])
     decoys = [cand.cause for cand in candidates if cand.cause != cause]
     meta = {"case": case, "entry": e.key, "expected_cause": cause,
             "expected_confidence": conf}
@@ -479,18 +480,20 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
     user = _user_message(None, "", _service_issues(e, n), (w,), res.reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     if thin:
-        cause, conf, keywords = c.NONE_OF_THESE, "low", []
+        cause, conf, keywords, must_not = c.NONE_OF_THESE, "low", [], []
         rationale = _THIN_RATIONALE[shape]
         summary = (f"{key} is failing, but the evidence rules out the listed causes.\n"
                    "A closer look at the workload is needed.")
     else:
         cause, conf, keywords = _fmt(e.own_cause, n), _confidence(e), list(e.own_cause_keywords)
+        must_not = list(e.own_cause_must_not)
         suffix, last = _CLEAR_WORDING[case]
         rationale = _fmt(e.rationale, n) + suffix
         last = last or f"{_fmt(e.recommendation, n).capitalize()}."
         summary = f"{key} is failing: {cause}.\n{last}"
     rows = [{"workload": key, "cause": cause, "confidence": conf, "rationale": rationale}]
-    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords)
+    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords,
+                       own_cause_must_not=must_not)
     decoys = [cand.cause for cand in candidates]
     meta = {"case": case, "entry": e.key, "expected_cause": cause,
             "expected_confidence": conf}
@@ -666,7 +669,8 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     summary = f"{n.ns}/{n.name} is failing: {cause}.\nNo deterministic candidates were available."
     key = f"{n.ns}/{n.name}"
     wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords))
+                       own_cause_keywords=list(e.own_cause_keywords),
+                       own_cause_must_not=list(e.own_cause_must_not))
     meta = {"case": "empty_candidates", "entry": e.key, "expected_cause": cause,
             "expected_confidence": conf,
             "expected_own_keywords": list(e.own_cause_keywords)}
@@ -743,7 +747,8 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         rows.append({"workload": key, "cause": cause,
                      "confidence": _confidence(e), "rationale": _fmt(e.rationale, n)})
         workloads_meta[key] = workload_meta(result, expected_cause=cause,
-                                            own_cause_keywords=list(e.own_cause_keywords))
+                                            own_cause_keywords=list(e.own_cause_keywords),
+                                            own_cause_must_not=list(e.own_cause_must_not))
         not_own = {f"{_CAUSE_WORD[obj.kind]} {obj.name}" for obj in others}
         decoy_by_workload[key] = [cand.cause for cand in candidates
                                   if cand.cause.split(" (", 1)[0] not in not_own]
@@ -1094,8 +1099,11 @@ def _render_shared_origin(p: prop.Propagation, rng: random.Random,
         # string that is its expected answer -- the victim's own pair in the
         # healthy world, the scenario's shared pair in the broken one. Empty
         # only on a decided workload, which is job 1 and graded by echo.
+        # No must-not words: these keys come from propagation.py, not from a
+        # catalog entry.
         workloads_meta[key] = render.workload_meta(
-            result, expected_cause=row_cause, own_cause_keywords=row_keywords)
+            result, expected_cause=row_cause, own_cause_keywords=row_keywords,
+            own_cause_must_not=[])
         results.append(result)
 
     label = rules.label(rules.shared(tuple(results)))
@@ -1554,11 +1562,13 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
         # prints it, never the raw kind/name identifier.
         decoy_by_workload[key] = [shown.cause for raw, shown in zip(trace, candidates)
                                   if raw.obj.intent == "decoy"]
-        own_cause_keywords = ([] if result.decided or expected_cause == c.NONE_OF_THESE
-                              else list(e.own_cause_keywords))
+        graded = not (result.decided or expected_cause == c.NONE_OF_THESE)
+        own_cause_keywords = list(e.own_cause_keywords) if graded else []
+        own_cause_must_not = list(e.own_cause_must_not) if graded else []
         workloads_meta[key] = render.workload_meta(
             result, expected_cause=expected_cause,
-            own_cause_keywords=own_cause_keywords)
+            own_cause_keywords=own_cause_keywords,
+            own_cause_must_not=own_cause_must_not)
     # rules.shared groups the row's confirmed results by group_key and returns
     # either the group summary lines, the single "no shared cause among the..."
     # fallback (>=2 confirmed, every group size 1), or () (<2 confirmed) --

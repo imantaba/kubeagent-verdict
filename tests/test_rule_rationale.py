@@ -106,7 +106,8 @@ def test_rule_rationale_passes_job1_on_every_reachable_branch(case_id, obj, issu
     result = _decide(obj, issue=issue)
     assert result.decided, case_id
     rationale = cases._rule_rationale(result)
-    meta = render.workload_meta(result, expected_cause=result.cause, own_cause_keywords=[])
+    meta = render.workload_meta(result, expected_cause=result.cause, own_cause_keywords=[],
+                                own_cause_must_not=[])
     reply_row = {"cause": result.cause, "rationale": rationale}
     assert score.job1(meta, reply_row) == 1.0, (case_id, rationale)
 
