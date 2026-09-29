@@ -1346,7 +1346,12 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
     decoy sits on ONE workload must not read as "resisted" just because a
     DIFFERENT workload in the same row was answered. Before decoy_by_workload,
     the row-level `answered` gate saw the other workload's verdict and let
-    the decoy-bearing one go untested for free."""
+    the decoy-bearing one go untested for free.
+
+    2026-09-29 (Spec 4a): shop/api is job 2 here. `decoy_rate` now counts
+    job-2 workloads only, so a job-1 shop/api would read None for that
+    reason alone and this test would stop testing the unanswered path. The
+    last assert shows shop/api is measured: naming its decoy is caught."""
     row = {"messages": [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "user shop/api and shop/web"},
@@ -1358,11 +1363,10 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
         "meta": {"case": "multi_misattribution_probe", "label": "separate",
                  "decoy_by_workload": {"shop/api": ["decoy for shop/api"]},
                  "workloads": {
-                     "shop/api": {"job": 1, "decided": True,
-                                  "decided_cause": "node worker-1 (disk pressure)",
-                                  "decided_outcome": "confirmed",
-                                  "decided_evidence": "disk pressure condition is True",
-                                  "expected_cause": "node worker-1 (disk pressure)"},
+                     "shop/api": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "the node's disk is full",
+                                  "own_cause_keywords": ["disk"]},
                      "shop/web": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
                                   "expected_cause": "memory limit too low for the workload",
@@ -1376,6 +1380,13 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
          "confidence": "high", "rationale": "r"}], "summary": "s"})
     results = score.evaluate([row], lambda messages: answer)
     assert results[0]["named_decoy"] is None
+
+    named = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "decoy for shop/api",
+         "confidence": "high", "rationale": "r"},
+        {"workload": "shop/web", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": "s"})
+    assert score.evaluate([row], lambda messages: named)[0]["named_decoy"] is True
 
 
 def test_decoy_by_workload_empty_still_scores_from_the_row_level_pair():
@@ -1458,6 +1469,46 @@ def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
     False, and never enters decoy_rate as a free 'resisted' row."""
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     assert results[0]["named_decoy"] is None
+
+
+def test_decoy_gate_is_none_when_the_only_decoy_sits_on_a_job1_workload():
+    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+
+    On a `shared_origin_probe` row, `decoy_by_workload` lists a decided
+    workload's own decided cause. That cause IS the job-1 gold, so the right
+    answer named its own "decoy" and read as a hit. A row whose only
+    decoy-bearing workload is job 1 has nothing to test: `named_decoy` is
+    None and the row stays out of `decoy_rate`. Before: True, and
+    `decoy_rate` {1.0, 1}."""
+    wm = _node_workload(cause="node worker-1 (no kubelet lease)",
+                        evidence="Ready condition is True, but the kubelet lease was not re-read",
+                        outcome="unverified")
+    gold = _one_verdict("shop/api", wm["decided_cause"], "the kubelet lease was not re-read")
+    row = {"messages": [{"role": "system", "content": "sys"},
+                        {"role": "user", "content": "user shop/api"},
+                        {"role": "assistant", "content": gold}],
+           "meta": {"case": "shared_origin_probe", "label": "none",
+                    "decoy_by_workload": {"shop/api": [wm["decided_cause"]]},
+                    "workloads": {"shop/api": wm}}}
+
+    results = score.evaluate([row], lambda _messages: gold)
+    assert results[0]["named_decoy"] is None
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": None, "n": 0}
+
+
+def test_the_gold_reply_names_no_decoy_on_any_exam_row():
+    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+
+    The gold reply is the right answer, so it names no decoy. On the exam,
+    128 rows carry a decoy on a job-2 workload, and the gold reply reads
+    False on every one. Before, 190 rows were measured and the gold reply
+    read True on 10 of them, all on the two shared-origin cases: there a
+    decided workload's own cause is listed as its "decoy", and the right
+    answer names it. {0.0526, 190} -> {0.0, 128}."""
+    rows = _corpus_rows()
+    replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
+    results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 128}
 
 
 # --------------------------------------------------- evaluate(): job1/job2/job3

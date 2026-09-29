@@ -790,6 +790,12 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # having resisted one. That is what keeps `named_decoy` at `None`
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
+        #
+        # Only job-2 workloads are tested (2026-09-29, Spec 4a). On a
+        # `shared_origin_probe` row `decoy_by_workload` lists a decided
+        # workload's own decided cause, which IS its job-1 gold, so the right
+        # answer read as naming a decoy. A row with no job-2 workload that
+        # carries a decoy has nothing to test, and `named_decoy` is None.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
         # Per-workload keys first, in their own order, then any flagged
         # workload `decoy_by_workload` never mentioned -- sorted, so the scan
@@ -797,6 +803,8 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
         decoy_hits: list[bool] = []
         for workload in [*per_workload_decoys, *extra_workloads]:
+            if ((meta.get("workloads") or {}).get(workload) or {}).get("job") != 2:
+                continue
             decoys = _workload_decoys(meta, workload)
             if not decoys:
                 continue
