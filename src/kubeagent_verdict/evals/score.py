@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Iterable
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
@@ -332,14 +333,26 @@ def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -
     return any(line and line in c for line in own_lines)
 
 
+def _keywords_match(cause: str, keywords: Iterable[str],
+                    must_not: Iterable[str] = ()) -> bool:
+    """The keyword rule, written once for `job2` and `cause_acc`: the cause,
+    cleaned by `_norm_cause`, holds every keyword and no must-not word. Both
+    lists are lowercased and matched as substrings."""
+    c = _norm_cause(cause)
+    return (all(str(k).lower() in c for k in keywords)
+            and not any(str(m).lower() in c for m in must_not))
+
+
 def job2(meta_workload: dict, reply_row: dict | None,
          own_cause_keywords: list[str], *, workload: str = "",
-         decoys: Iterable[str] = (), own_lines: Iterable[str] = ()) -> float:
+         decoys: Iterable[str] = (), own_lines: Iterable[str] = (),
+         own_cause_must_not: Iterable[str] = ()) -> float:
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
-    story's own cause -- all of `own_cause_keywords` appear in the reply's
-    cause, matched as substrings after lowercasing both sides -- or, on a
-    `none_of_these` workload, when the reply's cause is exactly that. 0.0
-    otherwise, including a missing row or reply.
+    story's own cause -- the reply's cause, cleaned by `_norm_cause`, holds
+    every one of `own_cause_keywords` and none of `own_cause_must_not`, both
+    matched as lowercase substrings -- or, on a `none_of_these` workload,
+    when the reply's cause is exactly that. 0.0 otherwise, including a
+    missing row or reply.
 
     The grader guard runs first and scores 0.0 when the cause holds one of
     `decoys` (G2) or one of `own_lines` (G3b). It runs before the keyword
@@ -361,7 +374,8 @@ def job2(meta_workload: dict, reply_row: dict | None,
         return 1.0 if got_cause == NONE_OF_THESE else 0.0
     if not _is_job2_keyword_graded(meta_workload, own_cause_keywords):
         return 0.0
-    return 1.0 if all(str(k).lower() in got_cause for k in own_cause_keywords) else 0.0
+    return 1.0 if _keywords_match(str(reply_row.get("cause", "")), own_cause_keywords,
+                                  own_cause_must_not) else 0.0
 
 
 JOB3_BAR = 0.9
@@ -557,7 +571,11 @@ def _suggestion_strings(prompt: str) -> set[str]:
 
 
 def _norm_cause(s: str) -> str:
-    return " ".join(str(s).lower().strip().rstrip(".").split())
+    """One cleaning step for every cause the grader reads: NFKC first, so a
+    full-width letter, space or period folds to its plain form, then
+    lowercase, strip, trailing periods off, and runs of whitespace
+    squeezed to one space."""
+    return " ".join(unicodedata.normalize("NFKC", str(s)).lower().strip().rstrip(".").split())
 
 
 # Job 2 grades most of its workloads by keyword containment rather than exact
@@ -601,7 +619,8 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
     so the two cannot drift into measuring different populations. The matching
     is the grader's own normalisation: lowercase substring containment, `all`
     and not `any`. Anything looser would report an exposure the grader would
-    not accept.
+    not accept. The grader also applies NFKC (`_norm_cause`) and exposure does
+    not; NFKC changes 0 of the exam's prompt texts, so the counts are the same.
 
     A workload that is not keyword-graded is absent from both counts, never a
     zero in the denominator -- the same contract `_rate` states.
@@ -697,8 +716,8 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
             if guard is not None and _job2_guarded(str(got.get("cause", "")), **guard):
                 matched = False
             elif wm.get("job") == 2 and _is_job2_keyword_graded(wm, keywords):
-                matched = all(str(k).lower() in str(got.get("cause", "")).lower()
-                              for k in keywords)
+                matched = _keywords_match(str(got.get("cause", "")), keywords,
+                                          wm.get("own_cause_must_not") or [])
             else:
                 matched = got.get("cause") == exp["cause"]
             if matched:
@@ -791,7 +810,8 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         job1_scores = [job1(wm, by_workload.get(w))
                        for w, wm in workloads.items() if wm.get("job") == 1]
         job2_scores = ([job2(wm, by_workload.get(w), wm.get("own_cause_keywords") or [],
-                             workload=w, **guards[w])
+                             workload=w, **guards[w],
+                             own_cause_must_not=wm.get("own_cause_must_not") or [])
                         for w, wm in workloads.items() if wm.get("job") == 2]
                        if grade_job2 else [])
         row_job3 = (job3(meta.get("label", ""), (doc or {}).get("summary"))

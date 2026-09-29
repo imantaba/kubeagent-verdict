@@ -549,6 +549,85 @@ def test_job2_refuses_an_ungradable_workload_before_the_guard_runs():
         score.job2(wm, reply, [], workload="prod/api", decoys=["node worker-1 (NotReady)"])
 
 
+# --------------------------------------------------- job 2: one cleaning step, must-not words
+
+
+def test_norm_cause_folds_full_width_letters_first():
+    """NFKC runs before the lowercase, so full-width letters, a full-width
+    space and a full-width period fold to their plain forms."""
+    assert score._norm_cause("ＭＥＭＯＲＹ　Ｌｉｍｉｔ．") == "memory limit"
+
+
+def test_job2_guard_g2_finds_a_decoy_written_in_full_width_letters():
+    decoys = ["node worker-1 (NotReady)"]
+    assert score._job2_guarded("memory limit too low, or ｎｏｄｅ ｗｏｒｋｅｒ－１ （ＮｏｔＲｅａｄｙ）",
+                               decoys, ())
+
+
+def test_job2_matches_keywords_written_in_full_width_letters():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "the ＭＥＭＯＲＹ ＬＩＭＩＴ is too small", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 1.0
+
+
+def test_job2_none_of_these_is_still_an_exact_match():
+    """The cleaning step is for the keyword rule and the guard. The
+    `none_of_these` match stays `cause.strip().lower()`, exact."""
+    wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
+    assert score.job2(wm, {"cause": "  None_Of_These "}, []) == 1.0
+    assert score.job2(wm, {"cause": "none_of_these."}, []) == 0.0
+    assert score.job2(wm, {"cause": "ｎｏｎｅ＿ｏｆ＿ｔｈｅｓｅ"}, []) == 0.0
+
+
+def test_keywords_match_needs_every_keyword_and_no_must_not_word():
+    assert score._keywords_match("The Memory LIMIT.", ["memory", "limit"])
+    assert not score._keywords_match("the memory is low", ["memory", "limit"])
+    assert not score._keywords_match("the init container's memory limit is too small",
+                                     ["memory", "limit"], ["init container"])
+    # A must-not word is a substring rule, like a keyword. "initial" does
+    # not hold "init container".
+    assert score._keywords_match("the initial memory limit is too small",
+                                 ["memory", "limit"], ["init container"])
+
+
+# 0920's two wrong answers that the old key graded right: exam rows 197
+# and 198 (0-based), both `multi_misattribution_probe`, both on an
+# `oversized-job-unschedulable` workload.
+_OVERSIZED_KEYWORDS = ["memory", "node"]
+_OVERSIZED_GOLD = "the pod's memory request is larger than any node can allocate"
+_0920_ROW_197 = ("the pod's node has a MemoryPressure condition and the pod requests a "
+                 "32Mi resolution")
+_0920_ROW_198 = ("the pod's node is cordoned and reporting Insufficient memory as a charge "
+                 "against its own memory limit")
+
+
+def test_job2_zeroes_a_cause_that_holds_a_must_not_word():
+    wm = {"job": 2, "decided": False, "expected_cause": _OVERSIZED_GOLD}
+    must_not = ["cordon", "pressure"]
+    for cause in (_0920_ROW_197, _0920_ROW_198):
+        reply = {"cause": cause, "confidence": "high", "rationale": "r"}
+        assert score.job2(wm, reply, _OVERSIZED_KEYWORDS) == 1.0
+        assert score.job2(wm, reply, _OVERSIZED_KEYWORDS, own_cause_must_not=must_not) == 0.0
+    gold = {"cause": _OVERSIZED_GOLD, "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, gold, _OVERSIZED_KEYWORDS, own_cause_must_not=must_not) == 1.0
+
+
+def test_evaluate_grades_a_meta_with_no_must_not_key_and_reads_the_key_when_present():
+    """An exam file built before the must-not words has no
+    `own_cause_must_not` in its meta. It still grades: the list is empty.
+    When the key is there, both cause graders read it."""
+    row = _row_with_job2_workload(["memory", "limit"])
+    assert "own_cause_must_not" not in row["meta"]["workloads"]["shop/api"]
+    init_answer = _one_verdict("shop/api", "the init container's memory limit is too small")
+
+    [res] = score.evaluate([row], lambda _messages: init_answer)
+    assert (res["cause_acc"], res["job2_scores"]) == (1.0, [1.0])
+
+    row["meta"]["workloads"]["shop/api"]["own_cause_must_not"] = ["init container"]
+    [res] = score.evaluate([row], lambda _messages: init_answer)
+    assert (res["cause_acc"], res["job2_scores"]) == (0.0, [0.0])
+
+
 # --------------------------------------------------- job 3: the summary scorer
 
 
