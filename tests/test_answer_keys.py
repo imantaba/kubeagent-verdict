@@ -173,6 +173,9 @@ def test_0920s_wrong_memory_request_answers_score_0(exam_rows, index):
     assert wm["own_cause_must_not"] == ["cordon", "pressure"]
     kw = wm["own_cause_keywords"]
     must_not = wm["own_cause_must_not"]
+    # The keywords alone pass it: the must-not list is what zeroes it.
+    assert score.job2(wm, {"cause": cause}, kw, workload=name,
+                      own_cause_must_not=[]) == 1.0
     assert score.job2(wm, {"cause": cause}, kw, workload=name,
                       own_cause_must_not=must_not) == 0.0
     assert score.job2(wm, {"cause": _gold(row)[name]}, kw, workload=name,
