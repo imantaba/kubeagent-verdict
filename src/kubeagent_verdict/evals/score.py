@@ -196,8 +196,16 @@ def _is_job2_keyword_graded(meta_workload: dict,
 # The grader guard. Job 2 marks a cause right when every keyword is in it, so
 # a reply can collect the keywords without judging anything: paste the lines
 # the prompt printed about the workload, or name the real cause next to a
-# decoy. Two checks zero such a reply. G2: the cause holds a decoy. G3b: the
-# cause holds a full printed line of the workload's own block.
+# decoy. Two checks zero such a reply. G2: the cause holds a decoy of 3 words
+# or more. G3b: the cause holds a printed line of the workload's own block,
+# whole or with its first 1 or 2 words cut, as long as 3 words are left.
+#
+# Both limits are 3 words (2026-09-29, Spec 4a). A shorter piece sits inside
+# right answers: the 2-word decoy `registry registry.example.com` is inside a
+# right bad-tag answer that names the host, and with no floor on the crop the
+# gold reply loses a workload. A 3-word cut zeroes 6 gold answers. A single
+# clause lifted out of the middle of a line still passes, and must: 17 gold
+# sentences are printed in their own prompts.
 #
 # Both read the RAW cause, normalized by `_norm_cause` and nothing else. No
 # 512-rune cap and no `_clean_rationale`: a capped cause cuts off the lines
@@ -322,15 +330,34 @@ def _workload_decoys(meta: dict, workload: str) -> list[str]:
 def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -> bool:
     """Whether the grader guard zeroes this job-2 cause.
 
-    G2: the normalized cause holds a normalized decoy. G3b: it holds one of
-    `own_lines`, which are already normalized (what `_own_blocks` returns).
-    An empty decoy or line is skipped: an empty string sits inside every
-    cause.
+    G2: the normalized cause holds a normalized decoy of 3 words or more. A
+    shorter decoy is skipped. G3b: it holds one of `own_lines`, which are
+    already normalized (what `_own_blocks` returns), whole or with its first
+    1 or 2 words cut (see `_g3b`). An empty decoy or line is skipped: an
+    empty string sits inside every cause.
     """
     c = _norm_cause(cause)
-    if any(n and n in c for n in (_norm_cause(d) for d in decoys if d)):
+    if any(len(n.split()) >= 3 and n in c for n in (_norm_cause(d) for d in decoys if d)):
         return True
-    return any(line and line in c for line in own_lines)
+    return _g3b(c, own_lines)
+
+
+def _g3b(c: str, own_lines: Iterable[str]) -> bool:
+    """Whether the cleaned cause `c` holds one of `own_lines`, whole or with
+    its first 1 or 2 words cut. A cut is made only when at least 3 words are
+    left, so a 3-word line is matched whole only."""
+    for line in own_lines:
+        if not line:
+            continue
+        if line in c:
+            return True
+        words = line.split()
+        for cut in (1, 2):
+            if len(words) - cut < 3:
+                break
+            if " ".join(words[cut:]) in c:
+                return True
+    return False
 
 
 def _keywords_match(cause: str, keywords: Iterable[str],
@@ -355,7 +382,7 @@ def job2(meta_workload: dict, reply_row: dict | None,
     missing row or reply.
 
     The grader guard runs first and scores 0.0 when the cause holds one of
-    `decoys` (G2) or one of `own_lines` (G3b). It runs before the keyword
+    `decoys` (G2) or one of `own_lines`, whole or cut (G3b). It runs before the keyword
     rule because a pasted block or a hedge carries the keywords too, and
     the keyword rule alone would mark it right. With no `decoys` and no
     `own_lines`, nothing is guarded: that is the unguarded score.
