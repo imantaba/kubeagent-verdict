@@ -57,6 +57,10 @@ class CatalogEntry:
     direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
     own_cause: str = ""  # the cause phrase when the winner is omitted from candidates
     own_cause_keywords: tuple[str, ...] = ()
+    # Words a right job-2 answer never holds. An answer that holds every
+    # keyword and any one of these scores 0. Matched as lowercase
+    # substrings, the same as the keywords.
+    own_cause_must_not: tuple[str, ...] = ()
     grounding: tuple[str, ...] = ()  # substrings that must appear in this slug's corpus assertions
     network_policies: tuple[str, ...] = ()
     service_issue: tuple[str, str] | None = None  # (type, detail template)
@@ -75,6 +79,12 @@ class CatalogEntry:
     # restartCount=6, and a workload's count is the sum over its pods'
     # containers (inventory/inventory.go:158-170, 488).
     min_restarts: int = 1
+
+
+# The three ways an answer writes "init container". Each is its own
+# must-not word on the main-container stories. Never bare "init":
+# "initial" and "initialize" would trip it.
+INIT_CONTAINER = ("init container", "init-container", "initcontainer")
 
 
 def all_entries() -> tuple[CatalogEntry, ...]:

@@ -524,7 +524,11 @@ def test_shared_origin_meta_is_derived_from_the_object_not_declared():
     for meta in r.meta["workloads"].values():
         assert set(meta) == {
             "job", "decided", "decided_cause", "decided_outcome",
-            "decided_evidence", "expected_cause", "own_cause_keywords"}
+            "decided_evidence", "expected_cause", "own_cause_keywords",
+            "own_cause_must_not"}
+        # Shared-origin keys come from propagation.py, not from a catalog
+        # entry, so there are no must-not words.
+        assert meta["own_cause_must_not"] == []
         assert meta["job"] == 1
         assert meta["decided"] is True
     assert r.meta["label"] in ("shared", "separate", "none")

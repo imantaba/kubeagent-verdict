@@ -344,6 +344,15 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     (`shared_cause`) never appears in a fully-decided twin's answer, so
     nothing fires.
 
+    2026-09-29 (Spec 4a): `decoy_rate` counts job-2 workloads only, so a
+    decided workload's own listed cause no longer counts, and the paragraph
+    above now describes the old reading. `named_decoy` is None on the 3 rows
+    where every workload is decided (no job-2 workload to test). On the 2
+    `none`-labeled rows that keep an undecided workload, the twin names the
+    row-level trap -- the shared cause -- on that workload, so it reads True:
+    the trap this docstring's title names, now fired for the right reason.
+    On the 5 `shared`-labeled rows it reads False, as before.
+
     job3 grades the summary against THIS row's own `none` label, so it
     tracks what the twin's summary actually claims, not which origin it is:
     a `shared`-labeled twin (the three origin-object stories) still writes "N
@@ -361,7 +370,10 @@ def test_a_model_that_always_claims_a_shared_origin_fails_this_slice(decoys, pro
     for e, t, r in zip(decoys, probes, results):
         decided = [w["decided"] for w in e.meta["workloads"].values()]
         assert r["cause_acc"] == sum(decided) / len(decided), e.meta["origin"]
-        assert r["named_decoy"] is (t.meta["label"] != "shared"), e.meta["origin"]
+        has_job2 = any(w["job"] == 2 for w in e.meta["workloads"].values())
+        # 2026-09-29 (Spec 4a): job-2 workloads only. True on 5 of 10 -> 2 of 10
+        expected = (t.meta["label"] != "shared") if has_job2 else None
+        assert r["named_decoy"] is expected, e.meta["origin"]
         assert r["job3"] == (0.0 if t.meta["label"] == "shared" else 1.0), e.meta["origin"]
 
 
@@ -375,6 +387,11 @@ def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
     just `[result.cause]`, so even the CORRECT reply names its own workload
     as its own "decoy". It reads True exactly where the row decides at
     least one workload, never on a fully undecided row.
+
+    2026-09-29 (Spec 4a): that quirk is gone. `decoy_rate` counts job-2
+    workloads only, so a decided workload's own cause is never read as its
+    decoy. The correct reply now reads False on the 7 rows with an undecided
+    (job-2) workload and None on the 3 rows where every workload is decided.
     """
     by_prompt = {e.user: e.assistant for e in decoys}
     results = score.evaluate([generate.to_row(e) for e in decoys],
@@ -383,8 +400,9 @@ def test_a_model_that_reads_the_evidence_passes_this_slice(decoys):
     assert all(r["conf_acc"] == 1.0 for r in results)
     assert all(r["job3"] == 1.0 for r in results)
     for e, r in zip(decoys, results):
-        n_decided = sum(1 for w in e.meta["workloads"].values() if w["decided"])
-        assert r["named_decoy"] is (n_decided > 0), e.meta["origin"]
+        has_job2 = any(w["job"] == 2 for w in e.meta["workloads"].values())
+        # 2026-09-29 (Spec 4a): job-2 workloads only. True on 5 of 10 -> 0 of 10
+        assert r["named_decoy"] is (False if has_job2 else None), e.meta["origin"]
 
 
 # ------------------------------------------- the training set must not move

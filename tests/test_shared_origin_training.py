@@ -1024,7 +1024,16 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # moves. Every number banked against the old bytes is retired.
 # 9d548bee64a9519a3ca080fcde14846b4f0beb0fac4381c582002b3828dbdde6 ->
 # 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69
-FROZEN_SLICE_SHA256 = "48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69"
+#
+# 2026-09-29 (Spec 4a): meta only, no message moves. Every workload's meta
+# gains `own_cause_must_not`, and the two init bad-tag entries gain `init`
+# in their `own_cause_keywords`. The slice stays at 239 rows, and all 239
+# move, each in its meta alone. No group, prompt, gold answer, decoy or
+# system message moves. Every number banked against the old bytes is
+# retired.
+# 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69 ->
+# f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a
+FROZEN_SLICE_SHA256 = "f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1158,7 +1167,14 @@ FROZEN_SLICE_SHA256 = "48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d0
 # it does.
 # 85388c7e17b60d0c4dc6dfc3448b0ff82226e028ecebf6443f20d00082163b5f ->
 # b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653
-EVAL_SET_SHA256 = "b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653"
+#
+# 2026-09-29 (Spec 4a): meta only, no message moves. Every workload's meta
+# gains `own_cause_must_not`, which moved `FROZEN_SLICE_SHA256` above. The
+# ten `shared_origin_decoy_probe` rows move too, for the same reason; no
+# prompt, gold answer or decoy of theirs moves.
+# b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653 ->
+# a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2
+EVAL_SET_SHA256 = "a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2"
 
 
 def _digest(rows) -> str:

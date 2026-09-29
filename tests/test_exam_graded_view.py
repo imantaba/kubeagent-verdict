@@ -207,7 +207,12 @@ def view(row):
 # user messages; no flagged list, gold or meta moves
 # 3118c0dac18db802c5db5574e4fc5be8420fd7651a144bf6ff498701f3c8af4c ->
 # 396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108
-GRADED_VIEW_SHA256 = "396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108"
+# 2026-09-29 (Spec 4a): meta only, no message moves. Every workload's meta
+# gains own_cause_must_not, and the two init bad-tag entries gain init in
+# their own_cause_keywords; no flagged list, gold or prompt moves
+# 396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108 ->
+# efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4
+GRADED_VIEW_SHA256 = "efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4"
 
 
 def _digest(views) -> str:

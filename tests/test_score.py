@@ -501,6 +501,43 @@ def test_job2_guard_does_not_fire_on_part_of_a_line():
     assert not score._job2_guarded("node worker-1 (NotReady)", (), own)
 
 
+def test_job2_guard_g3b_finds_a_line_with_its_first_one_or_two_words_cut():
+    """G3b also zeroes a cause that holds an own line minus its first word,
+    or minus its first 2 words. A 3-word cut is not made: the cause below
+    that holds the line minus its first 3 words passes."""
+    own = _normalized(_GUARD_API_INVENTORY)
+    words = score._norm_cause(_GUARD_API_INVENTORY[1]).split()
+    assert score._job2_guarded("memory limit: " + " ".join(words[1:]), (), own)
+    assert score._job2_guarded("memory limit: " + " ".join(words[2:]), (), own)
+    assert not score._job2_guarded("memory limit: " + " ".join(words[3:]), (), own)
+
+
+def test_job2_guard_g3b_crops_no_line_below_3_words():
+    """The 3-word floor. A cut that would leave fewer than 3 words is not
+    made. `exit: memory limit` is 3 words, so it is matched whole and never
+    cropped, and a right answer that holds `memory limit` is not zeroed.
+    `no events for web/api-gw-5c6b-fghij` is 4 words, so it loses its first
+    word and never its first 2."""
+    own = _normalized(["    exit: memory limit", "no events for web/api-gw-5c6b-fghij"])
+    assert not score._job2_guarded("the container's memory limit is too small", (), own)
+    assert score._job2_guarded("exit: memory limit", (), own)
+    assert score._job2_guarded("see events for web/api-gw-5c6b-fghij", (), own)
+    assert not score._job2_guarded("see for web/api-gw-5c6b-fghij", (), own)
+
+
+def test_job2_guard_g2_skips_a_decoy_under_3_words():
+    """G2 skips a decoy shorter than 3 words after cleaning. On the exam the
+    only one is `registry registry.example.com`. So a right bad-tag answer
+    that names the host passes, and so does a hedge with that decoy: that
+    is the cost, pinned by the hedge bot. A 3-word decoy still zeroes a
+    hedge."""
+    short, long_ = ["registry registry.example.com"], ["node worker-1 (NotReady)"]
+    gold = "the image tag does not exist in the registry"
+    assert not score._job2_guarded(gold + " registry.example.com", short, ())
+    assert not score._job2_guarded(gold + " or registry registry.example.com", short, ())
+    assert score._job2_guarded(gold + " or node worker-1 (NotReady)", long_, ())
+
+
 def test_job2_guard_skips_an_empty_decoy_or_line():
     """An empty string sits inside every cause. Skipping it keeps one blank
     decoy from zeroing every reply."""
@@ -527,12 +564,19 @@ def test_job2_zeroes_a_guarded_reply_even_when_every_keyword_is_present():
 
 def test_job2_guards_a_none_of_these_workload_too():
     """The guard runs before the exact `none_of_these` match as well. The
-    decoy here is made up: it is the one way to show that order, since any
-    other guarded reply would miss the exact match anyway."""
+    own line here is made up: it is the one way to show that order, since
+    any other guarded reply would miss the exact match anyway.
+
+    2026-09-29 (Spec 4a): this test used a made-up decoy, `none_of_these`.
+    That decoy is 1 word, and G2 now skips a decoy under 3 words, so the
+    reply passes it. G3b matches a whole own line of any length, so a
+    made-up own line shows the order instead."""
     wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
     reply = {"cause": score.NONE_OF_THESE, "confidence": "medium", "rationale": "r"}
     assert score.job2(wm, reply, []) == 1.0
-    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 0.0
+    assert score.job2(wm, reply, [], own_lines={score.NONE_OF_THESE}) == 0.0
+    # 2026-09-29 (Spec 4a): G2 skips a 1-word decoy 0.0 -> 1.0
+    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 1.0
 
 
 def test_job2_missing_reply_still_scores_zero_with_the_guard_on():
@@ -547,6 +591,85 @@ def test_job2_refuses_an_ungradable_workload_before_the_guard_runs():
     reply = {"cause": "node worker-1 (NotReady)", "confidence": "high", "rationale": "r"}
     with pytest.raises(score.UngradableWorkload):
         score.job2(wm, reply, [], workload="prod/api", decoys=["node worker-1 (NotReady)"])
+
+
+# --------------------------------------------------- job 2: one cleaning step, must-not words
+
+
+def test_norm_cause_folds_full_width_letters_first():
+    """NFKC runs before the lowercase, so full-width letters, a full-width
+    space and a full-width period fold to their plain forms."""
+    assert score._norm_cause("ＭＥＭＯＲＹ　Ｌｉｍｉｔ．") == "memory limit"
+
+
+def test_job2_guard_g2_finds_a_decoy_written_in_full_width_letters():
+    decoys = ["node worker-1 (NotReady)"]
+    assert score._job2_guarded("memory limit too low, or ｎｏｄｅ ｗｏｒｋｅｒ－１ （ＮｏｔＲｅａｄｙ）",
+                               decoys, ())
+
+
+def test_job2_matches_keywords_written_in_full_width_letters():
+    wm = {"job": 2, "decided": False, "expected_cause": "container killed at its memory limit"}
+    reply = {"cause": "the ＭＥＭＯＲＹ ＬＩＭＩＴ is too small", "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, reply, ["memory", "limit"]) == 1.0
+
+
+def test_job2_none_of_these_is_still_an_exact_match():
+    """The cleaning step is for the keyword rule and the guard. The
+    `none_of_these` match stays `cause.strip().lower()`, exact."""
+    wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
+    assert score.job2(wm, {"cause": "  None_Of_These "}, []) == 1.0
+    assert score.job2(wm, {"cause": "none_of_these."}, []) == 0.0
+    assert score.job2(wm, {"cause": "ｎｏｎｅ＿ｏｆ＿ｔｈｅｓｅ"}, []) == 0.0
+
+
+def test_keywords_match_needs_every_keyword_and_no_must_not_word():
+    assert score._keywords_match("The Memory LIMIT.", ["memory", "limit"])
+    assert not score._keywords_match("the memory is low", ["memory", "limit"])
+    assert not score._keywords_match("the init container's memory limit is too small",
+                                     ["memory", "limit"], ["init container"])
+    # A must-not word is a substring rule, like a keyword. "initial" does
+    # not hold "init container".
+    assert score._keywords_match("the initial memory limit is too small",
+                                 ["memory", "limit"], ["init container"])
+
+
+# 0920's two wrong answers that the old key graded right: exam rows 197
+# and 198 (0-based), both `multi_misattribution_probe`, both on an
+# `oversized-job-unschedulable` workload.
+_OVERSIZED_KEYWORDS = ["memory", "node"]
+_OVERSIZED_GOLD = "the pod's memory request is larger than any node can allocate"
+_0920_ROW_197 = ("the pod's node has a MemoryPressure condition and the pod requests a "
+                 "32Mi resolution")
+_0920_ROW_198 = ("the pod's node is cordoned and reporting Insufficient memory as a charge "
+                 "against its own memory limit")
+
+
+def test_job2_zeroes_a_cause_that_holds_a_must_not_word():
+    wm = {"job": 2, "decided": False, "expected_cause": _OVERSIZED_GOLD}
+    must_not = ["cordon", "pressure"]
+    for cause in (_0920_ROW_197, _0920_ROW_198):
+        reply = {"cause": cause, "confidence": "high", "rationale": "r"}
+        assert score.job2(wm, reply, _OVERSIZED_KEYWORDS) == 1.0
+        assert score.job2(wm, reply, _OVERSIZED_KEYWORDS, own_cause_must_not=must_not) == 0.0
+    gold = {"cause": _OVERSIZED_GOLD, "confidence": "high", "rationale": "r"}
+    assert score.job2(wm, gold, _OVERSIZED_KEYWORDS, own_cause_must_not=must_not) == 1.0
+
+
+def test_evaluate_grades_a_meta_with_no_must_not_key_and_reads_the_key_when_present():
+    """An exam file built before the must-not words has no
+    `own_cause_must_not` in its meta. It still grades: the list is empty.
+    When the key is there, both cause graders read it."""
+    row = _row_with_job2_workload(["memory", "limit"])
+    assert "own_cause_must_not" not in row["meta"]["workloads"]["shop/api"]
+    init_answer = _one_verdict("shop/api", "the init container's memory limit is too small")
+
+    [res] = score.evaluate([row], lambda _messages: init_answer)
+    assert (res["cause_acc"], res["job2_scores"]) == (1.0, [1.0])
+
+    row["meta"]["workloads"]["shop/api"]["own_cause_must_not"] = ["init container"]
+    [res] = score.evaluate([row], lambda _messages: init_answer)
+    assert (res["cause_acc"], res["job2_scores"]) == (0.0, [0.0])
 
 
 # --------------------------------------------------- job 3: the summary scorer
@@ -1223,7 +1346,12 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
     decoy sits on ONE workload must not read as "resisted" just because a
     DIFFERENT workload in the same row was answered. Before decoy_by_workload,
     the row-level `answered` gate saw the other workload's verdict and let
-    the decoy-bearing one go untested for free."""
+    the decoy-bearing one go untested for free.
+
+    2026-09-29 (Spec 4a): shop/api is job 2 here. `decoy_rate` now counts
+    job-2 workloads only, so a job-1 shop/api would read None for that
+    reason alone and this test would stop testing the unanswered path. The
+    last assert shows shop/api is measured: naming its decoy is caught."""
     row = {"messages": [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "user shop/api and shop/web"},
@@ -1235,11 +1363,10 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
         "meta": {"case": "multi_misattribution_probe", "label": "separate",
                  "decoy_by_workload": {"shop/api": ["decoy for shop/api"]},
                  "workloads": {
-                     "shop/api": {"job": 1, "decided": True,
-                                  "decided_cause": "node worker-1 (disk pressure)",
-                                  "decided_outcome": "confirmed",
-                                  "decided_evidence": "disk pressure condition is True",
-                                  "expected_cause": "node worker-1 (disk pressure)"},
+                     "shop/api": {"job": 2, "decided": False, "decided_cause": "",
+                                  "decided_outcome": "", "decided_evidence": "",
+                                  "expected_cause": "the node's disk is full",
+                                  "own_cause_keywords": ["disk"]},
                      "shop/web": {"job": 2, "decided": False, "decided_cause": "",
                                   "decided_outcome": "", "decided_evidence": "",
                                   "expected_cause": "memory limit too low for the workload",
@@ -1253,6 +1380,13 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
          "confidence": "high", "rationale": "r"}], "summary": "s"})
     results = score.evaluate([row], lambda messages: answer)
     assert results[0]["named_decoy"] is None
+
+    named = json.dumps({"verdicts": [
+        {"workload": "shop/api", "cause": "decoy for shop/api",
+         "confidence": "high", "rationale": "r"},
+        {"workload": "shop/web", "cause": "memory limit too low for the workload",
+         "confidence": "high", "rationale": "r"}], "summary": "s"})
+    assert score.evaluate([row], lambda messages: named)[0]["named_decoy"] is True
 
 
 def test_decoy_by_workload_empty_still_scores_from_the_row_level_pair():
@@ -1335,6 +1469,46 @@ def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
     False, and never enters decoy_rate as a free 'resisted' row."""
     results = score.evaluate([ROW], lambda messages: ROW["messages"][2]["content"])
     assert results[0]["named_decoy"] is None
+
+
+def test_decoy_gate_is_none_when_the_only_decoy_sits_on_a_job1_workload():
+    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+
+    On a `shared_origin_probe` row, `decoy_by_workload` lists a decided
+    workload's own decided cause. That cause IS the job-1 gold, so the right
+    answer named its own "decoy" and read as a hit. A row whose only
+    decoy-bearing workload is job 1 has nothing to test: `named_decoy` is
+    None and the row stays out of `decoy_rate`. Before: True, and
+    `decoy_rate` {1.0, 1}."""
+    wm = _node_workload(cause="node worker-1 (no kubelet lease)",
+                        evidence="Ready condition is True, but the kubelet lease was not re-read",
+                        outcome="unverified")
+    gold = _one_verdict("shop/api", wm["decided_cause"], "the kubelet lease was not re-read")
+    row = {"messages": [{"role": "system", "content": "sys"},
+                        {"role": "user", "content": "user shop/api"},
+                        {"role": "assistant", "content": gold}],
+           "meta": {"case": "shared_origin_probe", "label": "none",
+                    "decoy_by_workload": {"shop/api": [wm["decided_cause"]]},
+                    "workloads": {"shop/api": wm}}}
+
+    results = score.evaluate([row], lambda _messages: gold)
+    assert results[0]["named_decoy"] is None
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": None, "n": 0}
+
+
+def test_the_gold_reply_names_no_decoy_on_any_exam_row():
+    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+
+    The gold reply is the right answer, so it names no decoy. On the exam,
+    128 rows carry a decoy on a job-2 workload, and the gold reply reads
+    False on every one. Before, 190 rows were measured and the gold reply
+    read True on 10 of them, all on the two shared-origin cases: there a
+    decided workload's own cause is listed as its "decoy", and the right
+    answer names it. {0.0526, 190} -> {0.0, 128}."""
+    rows = _corpus_rows()
+    replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
+    results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 128}
 
 
 # --------------------------------------------------- evaluate(): job1/job2/job3
@@ -2595,8 +2769,12 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     alone keeps any bot that reads nothing under the bar. That was too
     strong. It holds a verbatim paste to 0, but a near-copy is a known gap:
     the same own lines with the first word of each line cut score 147 of
-    177 = 0.8305 with the guard on, over JOB2_BAR. See
-    `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`.
+    177 = 0.8305 with the guard on, over JOB2_BAR.
+
+    2026-09-29 (Spec 4a): that gap is closed. G3b also matches a line with
+    its first 1 or 2 words cut, and the near-copy scores 0 of 177. See
+    `test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut`. A
+    single clause lifted out of the middle of a line still passes.
 
     2026-09-26 (faithful prompts), when the job-1 rows moved onto the
     evidence gather: 31 exam rows whose entry has no job-1 rule ask become
@@ -2788,11 +2966,23 @@ def _own_reads(prompt: str, name: str, names: list[str]) -> list[str]:
     return reads
 
 
-def _trimmed_paste_bot(rows: list[dict]):
+def _first_word_cut(words: list[str]) -> list[str]:
+    return words[1:]
+
+
+def _first_2_words_cut(words: list[str]) -> list[str]:
+    return words[2:]
+
+
+def _first_2_words_swapped(words: list[str]) -> list[str]:
+    return words[1:2] + words[:1] + words[2:]
+
+
+def _trimmed_paste_bot(rows: list[dict], trim=_first_word_cut):
     """Answers every flagged workload with its own inventory entry and its
-    own evidence reads, with the first word of each line cut off, joined by
-    newlines. It is the paste bot cut down to one workload, and cut just
-    enough that no whole line is left. It reads nothing."""
+    own evidence reads, each line changed by `trim`, joined by newlines. It
+    is the paste bot cut down to one workload, and changed just enough that
+    no whole line is left. It reads nothing."""
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
     def chat_fn(messages: list[dict]) -> str:
@@ -2802,7 +2992,7 @@ def _trimmed_paste_bot(rows: list[dict]):
         for name in names:
             lines = _own_entry(prompt, "inventory", name) + _own_reads(prompt, name, names)
             verdicts.append({"workload": name,
-                             "cause": "\n".join(" ".join(line.split()[1:]) for line in lines),
+                             "cause": "\n".join(" ".join(trim(line.split())) for line in lines),
                              "confidence": "medium",
                              "rationale": "restating this workload's own lines, trimmed"})
         return json.dumps({"verdicts": verdicts,
@@ -2811,69 +3001,60 @@ def _trimmed_paste_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard():
-    """This is a known gap. A bot that reads nothing clears JOB2_BAR by
-    copying its own lines with one word cut from each.
+@pytest.mark.parametrize(("trim", "unguarded_wins"), [
+    (_first_word_cut, 147),
+    (_first_2_words_cut, 147),
+    (_first_2_words_swapped, 153),
+])
+def test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut(trim, unguarded_wins):
+    """A bot that reads nothing copies its own lines with the front of each
+    line changed: the first word cut, the first 2 words cut, or the first 2
+    words swapped. No whole line is left, but the keywords are, so with no
+    guard the bot clears JOB2_BAR: 147, 147 and 153 of 177.
 
-    The bot takes each workload's own inventory entry and its own evidence
-    reads, and drops the first word of every line. G3b zeroes a cause only
-    when it holds a whole line of the workload's own block, so it never
-    fires: no whole line is left. The keywords are still there, so job 2
-    marks the cause right. The guard takes nothing away from this bot. It
-    scores 147 of 177 with the guard and 147 of 177 without it, 0.8305,
-    above JOB2_BAR (0.7). A verbatim paste of the same lines scores 0 (see
-    the paste and echo tests above), so the guard holds a verbatim copy
-    down, and not a near-copy.
+    G3b also matches a line with its first 1 or 2 words cut, as long as 3
+    words are left. Each of these causes holds such a piece of some line,
+    so the guard zeroes all of them: 0 of 177.
 
-    Closing the gap needs a stronger G3b, such as matching part of a line.
-    That changes what the grader promises, so it is a spec amendment, and
-    Spec 4 owns it. Until then, a job-2 rate near 0.83 does not show on its
-    own that a model reads the evidence.
-
-    Measured 2026-09-28 (final review). If a change moves this number, the
-    gap moved. Re-pin it and say why; if G3b got stronger, this test's
-    last bar check is the one to flip.
+    2026-09-29 (Spec 4a): renamed from
+    `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`,
+    which pinned the first-word bot at 147 of 177 = 0.8305 guarded, over
+    the bar. The 2-word bots are new. The unguarded numbers measure the
+    corpus, not the guard, and do not move.
     """
     rows = _corpus_rows()
-    bot = _trimmed_paste_bot(rows)
+    bot = _trimmed_paste_bot(rows, trim)
     board = score.scoreboard(score.evaluate(rows, bot))
     unguarded = _unguarded_job2_scores(rows, bot)
 
-    # The guarded pair: 147 of 177 with the guard on.
-    assert board["jobs"]["job2"] == {"rate": 0.8305, "n": 177}
-    assert round(board["jobs"]["job2"]["rate"] * board["jobs"]["job2"]["n"]) == 147
-    # The unguarded pair: the same 147 of 177. The guard zeroes none of them.
-    assert (sum(unguarded), len(unguarded)) == (147, 177)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.8305
-    # The gap itself: this bot is over the bar.
-    assert board["jobs"]["job2"]["rate"] >= score.JOB2_BAR
+    # 2026-09-29 (Spec 4a): G3b crops 1 or 2 front words {0.8305, 177} -> {0.0, 177}
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 177}
+    assert (sum(unguarded), len(unguarded)) == (unguarded_wins, 177)
+    assert sum(unguarded) / len(unguarded) >= score.JOB2_BAR
 
 
 _BAD_TAG_GOLD = "the image tag does not exist in the registry"
 
 
-def test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2():
-    """This is a known gap. A right answer can lose job 2 for naming the
-    registry host.
+def test_a_right_bad_tag_answer_that_names_the_registry_host_passes_g2():
+    """A right answer does not lose job 2 for naming the registry host.
 
     The bad-image-tag rows print the candidate `registry
     registry.example.com` and rule it out, so it is the workload's decoy.
-    G2 zeroes any cause that contains a decoy. The gold cause is "the image
-    tag does not exist in the registry", and it passes. Add the host, "...
-    in the registry registry.example.com", and the words "registry
-    registry.example.com" now sit inside the answer, so G2 zeroes it,
-    although it is right.
+    The gold cause is "the image tag does not exist in the registry". Add
+    the host, "... in the registry registry.example.com", and the decoy
+    sits inside the answer. G2 skips a decoy under 3 words, and this decoy
+    is 2, so the answer passes.
 
-    Plan ruling 37 accepted this decoy, because the gold answer does not
-    contain it and the gold net test stays green. That is still true. The
-    cost is the one below, and a narrower G2 is a spec amendment that
-    Spec 4 owns.
+    On the exam, 30 of the 177 job-2 workloads have the gold bad-tag cause.
+    29 of them carry the decoy. The one left, on an `empty_candidates` row,
+    has none. The gold reply with the host added scores 177 of 177, the
+    same as the gold reply.
 
-    Measured 2026-09-28 (final review) on the exam: 30 of the 177 job-2
-    workloads have the gold bad-tag cause. 29 of them carry the decoy and
-    lose the point. The one left, on an `empty_candidates` row, has no
-    decoy. The gold reply with the host added scores 148 of 177 = 0.8362,
-    where the gold reply scores 177 of 177.
+    2026-09-29 (Spec 4a): renamed from
+    `test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2`.
+    Measured 2026-09-28, G2 zeroed 29 of the 30 and the reply scored 148 of
+    177 = 0.8362.
     """
     rows = _corpus_rows()
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
@@ -2900,10 +3081,11 @@ def test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2():
                 zeroed += score._job2_guarded(_BAD_TAG_GOLD + " registry.example.com",
                                               decoys, own[name])
 
-    assert (bad_tag, zeroed) == (30, 29)
+    # 2026-09-29 (Spec 4a): G2 skips the 2-word registry decoy (30, 29) -> (30, 0)
+    assert (bad_tag, zeroed) == (30, 0)
     board = score.scoreboard(score.evaluate(rows, chat_fn))
-    assert board["jobs"]["job2"] == {"rate": 0.8362, "n": 177}
-    assert round(board["jobs"]["job2"]["rate"] * board["jobs"]["job2"]["n"]) == 177 - 29
+    # 2026-09-29 (Spec 4a): same reason {0.8362, 177} -> {1.0, 177}
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 177}
 
 
 def _name_the_decoy_bot(rows: list[dict]):
@@ -3022,6 +3204,12 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     workloads net. The workloads with no own decoy are still 32. Job 2
     counts 177. Unguarded the hedge wins all 169 keyword-graded workloads, 0.9548;
     the other 8 expect `none_of_these`. Guarded it is 32 of 177 = 0.1808.
+
+    2026-09-29 (Spec 4a): G2 skips a decoy under 3 words. 29 bad-tag
+    workloads' first own decoy is the 2-word `registry
+    registry.example.com`, so their hedge passes now. Guarded it is 32 + 29
+    = 61 of 177 = 0.3446. That is the measured cost of letting a right
+    answer name the registry host, and it stays under JOB2_BAR.
     """
     rows = _corpus_rows()
     bot = _hedge_bot(rows)
@@ -3038,7 +3226,10 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     # 2026-09-26 (faithful prompts): five workers; two job-2 workloads leave
     # net and the 32 with no own decoy stay {0.1788, 179} -> {0.1808, 177}
     # (32 of 177)
-    assert board["jobs"]["job2"] == {"rate": 0.1808, "n": 177}
+    # 2026-09-29 (Spec 4a): G2 skips the 2-word registry decoy, 29 hedges pass
+    # {0.1808, 177} -> {0.3446, 177} (61 of 177)
+    assert board["jobs"]["job2"] == {"rate": 0.3446, "n": 177}
+    assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
     # 2026-09-26 (faithful prompts): same workload (134, 142) -> (134, 143),
     # 0.9437 -> 0.9371
     # 2026-09-26 (faithful prompts): 37 new keyword-graded workloads, all won

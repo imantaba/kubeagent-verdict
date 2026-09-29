@@ -806,7 +806,8 @@ def test_multi_derives_job_and_label_from_the_objects():
     for meta in ex.meta["workloads"].values():
         assert set(meta) == {
             "job", "decided", "decided_cause", "decided_outcome",
-            "decided_evidence", "expected_cause", "own_cause_keywords"}
+            "decided_evidence", "expected_cause", "own_cause_keywords",
+            "own_cause_must_not"}
         assert meta["job"] in (1, 2)
     assert ex.meta["label"] in ("shared", "separate", "none")
     assert set(ex.meta["decoy_by_workload"]) == {key1, key2}

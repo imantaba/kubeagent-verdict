@@ -1,6 +1,6 @@
 """Slug-keyed catalog entries — one per chaos fault slug (17 when complete)."""
 
-from kubeagent_verdict.dataset.catalog import CatalogEntry
+from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, CatalogEntry
 from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
 
 ENTRIES = [
@@ -30,6 +30,7 @@ ENTRIES = [
         direct=True,
         own_cause="container killed at its memory limit",
         own_cause_keywords=("memory", "limit"),
+        own_cause_must_not=INIT_CONTAINER,
         grounding=("OOMKilled",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
@@ -57,6 +58,7 @@ ENTRIES = [
         direct=True,
         own_cause="the image tag does not exist in the registry",
         own_cause_keywords=("image", "registry"),
+        own_cause_must_not=INIT_CONTAINER,
         grounding=("ImagePullBackOff",),
         objects=(
             Object(kind="registry", name="registry.example.com", scan_reason="2",
@@ -277,6 +279,7 @@ ENTRIES = [
         direct=True,
         own_cause="the pod's memory request is larger than any node can allocate",
         own_cause_keywords=("memory", "node"),
+        own_cause_must_not=("cordon", "pressure"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="off",
                    fresh=NODE_NOT_READY, intent="decoy"),

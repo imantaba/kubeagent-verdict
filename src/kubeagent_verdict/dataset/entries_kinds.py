@@ -1,7 +1,7 @@
 """Kind-keyed catalog entries — one per issue kind no slug entry covers (11),
 then `pvc-unbound-unschedulable`, which covers neither a slug nor a kind."""
 
-from kubeagent_verdict.dataset.catalog import CatalogEntry
+from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, CatalogEntry
 from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
 
 _UNBOUND_CLAIM = ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
@@ -65,6 +65,7 @@ ENTRIES = [
         direct=True,
         own_cause="the container's entrypoint names a path that does not exist in the image",
         own_cause_keywords=("container", "image"),
+        own_cause_must_not=(*INIT_CONTAINER, "tag"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
@@ -190,7 +191,7 @@ ENTRIES = [
                   "rather than the registry being unreachable.",
         direct=True,
         own_cause="the init container's image tag does not exist in the registry",
-        own_cause_keywords=("tag", "registry"),
+        own_cause_keywords=("init", "registry", "tag"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
@@ -219,7 +220,7 @@ ENTRIES = [
                   "image's own tag is wrong.",
         direct=True,
         own_cause="the init container's image tag does not exist in the registry",
-        own_cause_keywords=("registry", "tag"),
+        own_cause_keywords=("init", "tag", "registry"),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
@@ -351,6 +352,7 @@ ENTRIES = [
         direct=True,
         own_cause="the PVC's underlying volume is unhealthy or unreachable on the pod's node",
         own_cause_keywords=("volume", "pod"),
+        own_cause_must_not=("provision",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),
