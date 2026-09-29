@@ -792,6 +792,9 @@ Seven limits on this reading, carried from the design that scored it:
    one keeps no whole line, so the guard never fires, and it scores 147 of
    177 = 0.8305 on job 2, over the 0.7 bar. See known limit 11 below.)
 
+   (2026-09-29, Spec 4a: G3b now also finds a line with its first 1 or 2
+   words cut, so this bot scores 0 of 177. See known limit 11 below.)
+
 ### 0920 against the Spec 3 exam (2026-09-28)
 
 This is a diagnostic run: step 1 of the Spec 3 run order. It gates
@@ -829,7 +832,9 @@ from copying the prompt? Very little. Most right answers are sentences
   name the wrong cause and still pass. For example, "the pod's node is
   cordoned and reporting Insufficient memory …" is graded right for a
   memory request no node can fit. The keywords, `memory` and `node`, are
-  common words. Spec 4 owns the weak-keyword item.
+  common words. Spec 4 owns the weak-keyword item. (2026-09-29: Spec 4a
+  gave that key two must-not words, `cordon` and `pressure`, so both
+  answers now score 0. See the next section.)
 
 **Where it lost points.**
 
@@ -854,6 +859,69 @@ from copying the prompt? Very little. Most right answers are sentences
 baseline. It shows that 0920 picks the right story most of the time. It
 does not show that 0920 reasons past a story it has seen. Next come
 Spec 4, then 0920 live again, then the retrain.
+
+### 0920 re-scored under the 4a grader (2026-09-29)
+
+This is a replay. No model was called: the Spec 4a grader re-read the
+replies stored in `out/eval/0920-exam0928`. Run:
+`out/eval/0920-exam0929-replay`. Exam: `out/dataset-0929/test.jsonl`,
+`test_sha256`
+`dd3834efe5b986ec2591ccdf1b0be3e86dec1dd5d235b2a8ae17b219c5dcb2f5`.
+It shows the model the same bytes as the 0928 exam: 0 of 249 messages
+moved. Only the answer keys the grader reads moved.
+
+| | 0928 grader | 4a grader | bar | |
+|---|---|---|---|---|
+| Job 1 | 0.95 (114 of 120) | 0.95 (114 of 120) | ≥ 0.9 | met |
+| Job 2 | 0.8136 (144 of 177) | 0.8023 (142 of 177) | ≥ 0.7 | met |
+| Job 3 | 0.875 (35 of 40) | 0.875 (35 of 40) | ≥ 0.9 | missed |
+| Length gap | −0.3125 | −0.3125 | ≤ 0.15 | met |
+| Decoy rate | 0.0421 (8 of 190) | 0.0 (0 of 128) | | |
+
+What moved, and why:
+
+- **Job 2 lost 2 answers, and both were wrong.** They are the two memory
+  answers above, on rows 197 and 198 (counting from 0). The key for "the
+  pod's memory request is larger than any node can allocate" now has two
+  must-not words, `cordon` and `pressure`. Each answer holds one, so each
+  scores 0. No other job-2 answer moved.
+- **The decoy rate counts job-2 workloads only.** It used to count
+  decided (job-1) workloads too, where a right answer can be the same
+  text as a decoy. Those were the 8 of 190. On job-2 workloads, 0920
+  named 0 decoys in 128. The gold reply moves the same way: 10 of 190
+  before, 0 of 128 now.
+- **0920's 5 part-line copies still pass.** Each cuts 3 words off the
+  front of a printed line, and G3b crops at most 2. See known limit 11.
+
+The bots read nothing. Job 2, under each grader:
+
+| Bot | 0928 grader | 4a grader |
+|---|---|---|
+| Own lines, first word cut | 147 of 177 = 0.8305 | 0 of 177 |
+| Own lines, first 2 words cut | 147 of 177 = 0.8305 | 0 of 177 |
+| Own lines, first 2 words swapped | 153 of 177 = 0.8644 | 0 of 177 |
+| Hedge: the cause, then a decoy | 32 of 177 = 0.1808 | 61 of 177 = 0.3446 |
+| Gold reply | 177 of 177 | 177 of 177 |
+| Gold reply with the registry host | 148 of 177 = 0.8362 | 177 of 177 |
+| Own keywords, pasted | 177 of 177 | 177 of 177 (reads the new keys) |
+| Own keywords, old `init` keys | 177 of 177 | 165 of 177 = 0.9322 |
+
+The hedge bot gains 29 workloads. They are the bad-tag rows whose first
+decoy is the 2-word registry decoy, which G2 now skips. That is the cost
+of closing known limit 12, and the bot stays far under the 0.7 bar. The
+last row is a reply built from the two init bad-tag keys as they were,
+without `init`: the exam's 12 workloads on those keys lose their point.
+
+**Weak keywords.** On the 0928 exam, 34 pairs of answer keys had one
+story's gold answer pass a different story's key. The must-not words and
+the new `init` word take that to 21. A test pins the 21 exactly, so a
+change that adds a pair fails it. All 21 are left for Spec 4b. 8 are on
+`node-cordon-diskfull`'s key, `node` and `pod` (see known limit 10). The
+other 13 involve the shared-origin keys, which 4b rewrites.
+
+**What this changes:** nothing in the plan. Job 2's 0.8023 is the
+baseline under the new grader. Next come Spec 4b, then 0920 live again,
+then the retrain.
 
 ## Known limits of the training data and the exam
 
@@ -991,6 +1059,17 @@ against these.
     `test_a_trimmed_paste_clears_the_job2_bar_a_known_gap_in_the_guard`).
     A stronger G3b changes the grader, so it needs a change to the spec.
     A later design (Spec 4) owns it.
+
+    (2026-09-29, Spec 4a: closed for cut pastes. G3b now also zeroes an
+    answer that holds an own line with its first 1 or 2 words cut, as
+    long as 3 words are left. The bot above scores 0 of 177, and so do
+    two more: first 2 words cut, and first 2 words swapped. The test is
+    now `test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut`.
+    One kind of copy still passes, and it has to: a single clause lifted
+    out of the middle of a printed line. 0920 wrote 5 right answers this
+    way. A rule that zeroes such a clause would zero gold answers too,
+    because 17 gold sentences are printed in their own prompts. On those
+    rows job 2 cannot tell reading from copying.)
 12. **A right bad-image-tag answer scores 0 if it names the registry
     host.** (Added 2026-09-28.) The bad-image-tag rows print the
     candidate `registry registry.example.com` and rule it out, so it is
@@ -1008,3 +1087,12 @@ against these.
     `test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2`).
     A narrower G2 changes the grader, so it needs a change to the spec. A
     later design (Spec 4) owns it.
+
+    (2026-09-29, Spec 4a: closed. G2 now skips a decoy under 3 words.
+    `registry registry.example.com` is 2 words, and it is the only exam
+    decoy that short. The gold reply with the host scores 177 of 177. The
+    test is now
+    `test_a_right_bad_tag_answer_that_names_the_registry_host_passes_g2`.
+    The cost: a hedge that names the cause and that decoy passes too. The
+    hedge bot goes from 32 to 61 of 177 = 0.3446, still under the 0.7
+    bar.)

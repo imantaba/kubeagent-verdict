@@ -531,7 +531,8 @@ the why is recorded.
   and 12. Closing either one changes the grader, so it needs a change to
   the spec.
 
-  Left for Spec 4 (known, not fixed here):
+  Left for Spec 4 (known, not fixed here; 2026-09-29: split into "Done
+  in 4a" and "Left for 4b" in the next entry):
   - B4: three arms the generator reaches have no Go capture to check
     them byte for byte (the candidate-cap line, a registry auth sentence
     and the no-pull-event sentence). Covering them needs a new capture.
@@ -545,3 +546,109 @@ the why is recorded.
   - A node's state at scan time: a cordon and a pressure condition.
   - A stronger G3b.
   - A narrower G2.
+
+- **2026-09-29 — Spec 4a, the grader guard and weak keywords.** All three
+  hashes moved: `FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256` and
+  `GRADED_VIEW_SHA256`. Only `meta` moved. No message moved: all 7,427
+  rows show the model the same bytes as `out/dataset-0928`. The exam is
+  still 249 rows and the frozen slice still 239. The graded populations
+  stay the same: job 1 120 workloads, job 2 177 (169 keyword-graded),
+  job 3 40 rows. A model's replies to the 0928 exam are its replies to
+  this one, so they can be re-scored with no model call. The model card
+  records 0920's replay.
+
+  The planned `meta` changes:
+  - Every workload carries a new key, `own_cause_must_not`: words that
+    zero an answer that holds them. It is non-empty on the job-2
+    workloads of five catalog entries and empty everywhere else.
+  - The two init bad-tag entries' `own_cause_keywords` gain `init`. The
+    row-level `expected_own_keywords` on those entries' `own_cause` rows
+    move the same way.
+
+  The seven entries whose keys changed:
+
+  | Entry | Required (was) | Required (now) | Must not |
+  |---|---|---|---|
+  | `memory-limit-oomkill` | memory, limit | same | init container |
+  | `deployment-bad-image-tag` | image, registry | same | init container |
+  | `container-start-error` | container, image | same | init container, tag |
+  | `init-errimagepull` | tag, registry | init, registry, tag | — |
+  | `init-imagepullbackoff` | registry, tag | init, tag, registry | — |
+  | `oversized-job-unschedulable` | memory, node | same | cordon, pressure |
+  | `volume-mount-error` | volume, pod | same | provision |
+
+  "Init container" is three must-not words: `init container`,
+  `init-container` and `initcontainer`. Never bare `init`, which
+  "initial" and "initialize" would trip.
+
+  The gate. Before the re-pin, a script compared `out/dataset-0929` with
+  `out/dataset-0928` row by row. With the planned changes taken out, 0
+  rows differ, in messages or in `meta`. What it counted:
+
+  | Split | Rows | Workloads | With must-not words | Init keys moved | Row-level keys moved |
+  |---|---|---|---|---|---|
+  | train | 6,457 | 10,991 | 778 | 271 | 115 |
+  | val | 721 | 1,225 | 85 | 33 | 14 |
+  | test | 249 | 297 | 57 | 12 | 4 |
+
+  The hashes, old → new:
+
+  | Pin | Old | New |
+  |---|---|---|
+  | `FROZEN_SLICE_SHA256` | `48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69` | `f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a` |
+  | `EVAL_SET_SHA256` | `b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653` | `a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2` |
+  | `GRADED_VIEW_SHA256` | `396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108` | `efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4` |
+
+  The bank, `out/dataset-0929`, built with the same command (`--seed 17
+  --size 8000`), by sha256:
+  - `test.jsonl`: `dd3834efe5b986ec2591ccdf1b0be3e86dec1dd5d235b2a8ae17b219c5dcb2f5`
+  - `train.jsonl`: `6b8da804eaf2de616979d4296c2950f6522d0e0f0369c350770b36340182042f`
+  - `val.jsonl`: `e0e79322e3a533f19c5ea6f670ce160ce65a54196b131835a3b0aac7454b649b`
+
+  `out/dataset-0928` stays on disk. The prompt-stability test still reads
+  its exam: that test reads messages only, and no message moved.
+
+  The grader: four changes, and no bar moved (0.9 / 0.7 / 0.9).
+  - One cleaning step. `_norm_cause` applies NFKC first, so a full-width
+    letter reads as the plain one. The guard, the keyword match and the
+    must-not match all go through it. `none_of_these` is still an exact
+    match.
+  - G3b crops. It also zeroes an answer that holds an own line with its
+    first 1 or 2 words cut, as long as 3 words are left. Gap 1 of the
+    previous entry is closed for cut pastes.
+  - G2 skips a decoy under 3 words. On the exam that is only `registry
+    registry.example.com`. Gap 2 of the previous entry is closed.
+  - `decoy_rate` counts job-2 workloads only. A decided workload's right
+    answer can be the same text as a decoy, and it no longer counts as
+    naming one. The gold reply and 0920 both read 0 of 128.
+
+  Job 2, the bots, before → after:
+
+  | Bot | Before | After |
+  |---|---|---|
+  | own lines, first word cut | 0.8305 (147 of 177) | 0 |
+  | own lines, first 2 words cut | 0.8305 (147 of 177) | 0 |
+  | own lines, first 2 words swapped | 0.8644 (153 of 177) | 0 |
+  | hedge | 0.1808 (32 of 177) | 0.3446 (61 of 177) |
+  | gold | 1.0 | 1.0 |
+  | gold with the registry host | 0.8362 (148 of 177) | 1.0 |
+
+  Weak keywords: 34 pairs of exam keys where one story's gold answer
+  passes another story's key, now 21. A test pins the 21 exactly.
+
+  Done in 4a, from the previous entry's list:
+  - C9: the NFKC step.
+  - A stronger G3b, for cut pastes. A clause lifted out of the middle of
+    a line still passes; model-card limit 11 says why it must.
+  - A narrower G2.
+
+  Left for 4b, from the same list:
+  - B4: three arms with no Go capture.
+  - B6: a refused read's message is shorter than the API server's real
+    text.
+  - D4: `multi`'s decoy list is keyed on each object's intent.
+  - A node's state at scan time: a cordon and a pressure condition.
+
+  Every item on the 2026-09-26 entry's "Left for Spec 4" list is still
+  open too. The full 4b list, the 21 weak pairs included, is under "Left
+  for 4b" in `docs/superpowers/specs/2026-09-29-grader-guard-design.md`.
