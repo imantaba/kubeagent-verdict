@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-29
 **Branch:** `spec4a-grader` (cut off `main` @ `ce6688f`)
-**Status:** draft, for review
+**Status:** approved (883e663); implemented on `spec4a-grader`
 
 ## What this is
 

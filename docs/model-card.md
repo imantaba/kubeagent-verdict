@@ -827,7 +827,8 @@ from copying the prompt? Very little. Most right answers are sentences
   cut off, for example
   `container exceeded its memory limit and was killed (container "app", exitCode=137)`.
   The guard only catches whole lines, so these pass. This is known
-  limit 11.
+  limit 11. (2026-09-29: G3b now also cuts 1 or 2 words off the front.
+  These 5 cut 3, so they still pass.)
 - **The last 5 right answers are in the model's own words.** 2 of them
   name the wrong cause and still pass. For example, "the pod's node is
   cordoned and reporting Insufficient memory …" is graded right for a
@@ -876,7 +877,7 @@ moved. Only the answer keys the grader reads moved.
 | Job 2 | 0.8136 (144 of 177) | 0.8023 (142 of 177) | ≥ 0.7 | met |
 | Job 3 | 0.875 (35 of 40) | 0.875 (35 of 40) | ≥ 0.9 | missed |
 | Length gap | −0.3125 | −0.3125 | ≤ 0.15 | met |
-| Decoy rate | 0.0421 (8 of 190) | 0.0 (0 of 128) | | |
+| Decoy rate | 0.0421 (8 of 190 rows) | 0.0 (0 of 128 rows) | | |
 
 What moved, and why:
 
@@ -887,9 +888,9 @@ What moved, and why:
   scores 0. No other job-2 answer moved.
 - **The decoy rate counts job-2 workloads only.** It used to count
   decided (job-1) workloads too, where a right answer can be the same
-  text as a decoy. Those were the 8 of 190. On job-2 workloads, 0920
-  named 0 decoys in 128. The gold reply moves the same way: 10 of 190
-  before, 0 of 128 now.
+  text as a decoy. Those were the 8 of 190 rows. Counting job-2
+  workloads only, 0920 names a decoy on 0 of 128 rows. The gold reply
+  moves the same way: 10 of 190 rows before, 0 of 128 now.
 - **0920's 5 part-line copies still pass.** Each cuts 3 words off the
   front of a printed line, and G3b crops at most 2. See known limit 11.
 
@@ -1096,3 +1097,29 @@ against these.
     The cost: a hedge that names the cause and that decoy passes too. The
     hedge bot goes from 32 to 61 of 177 = 0.3446, still under the 0.7
     bar.)
+13. **G3b also zeroes a right answer written in a `log cause:` label's
+    words.** (Added 2026-09-29, after Spec 4a's final review.) Some own
+    blocks print a line like `log cause: bad command or entrypoint`. G3b
+    cuts 1 or 2 words off the front of each own line. Cut `log cause:`
+    off this one and what is left is the label, `bad command or
+    entrypoint`. So a right answer that uses the label's words in a row,
+    such as "the container exits because of a bad command or entrypoint",
+    holds a cut line and scores 0. Before Spec 4a it scored 1. On the
+    exam, 24 of the 177 job-2 workloads carry such a line: 4 labels, 6
+    workloads each. Gold and 0920 never write a label this way, so no
+    pinned number moved. The code does what the spec says. It still means
+    job 2 can mark a model wrong for using kubeagent's own words. Spec 4b
+    owns it. One idea: never cut past a word that ends in `:`.
+14. **A must-not word is a plain substring, and it cannot see "not".**
+    (Added 2026-09-29, after Spec 4a's final review.) Must-not words match
+    anywhere in the cleaned answer, the same way keywords do. So `tag`
+    also hits `stage`, `outage` and `percentage`, and `provision` also
+    hits `provisioned`. And a right answer that names a must-not word to
+    rule it out still scores 0: "the main container, not an init
+    container, is killed at its memory limit", or "… no node is cordoned
+    or under memory pressure". The prompts of exam rows 197 and 198 print
+    `MemoryPressure=False`, so a model that reads them has a reason to
+    name it. No gold answer and no right 0920 answer hits either case,
+    so no pinned number moved. The spec chose substring matching on
+    purpose, and kept bare `init` off the list because `initial` would
+    trip it. Spec 4b owns the rest.

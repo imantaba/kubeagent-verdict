@@ -529,7 +529,8 @@ the why is recorded.
 
   Tests pin both gaps, and the model card lists them as known limits 11
   and 12. Closing either one changes the grader, so it needs a change to
-  the spec.
+  the spec. (2026-09-29: Spec 4a closed gap 1 for cut pastes, and closed
+  gap 2. See the next entry.)
 
   Left for Spec 4 (known, not fixed here; 2026-09-29: split into "Done
   in 4a" and "Left for 4b" in the next entry):
@@ -620,7 +621,7 @@ the why is recorded.
     registry.example.com`. Gap 2 of the previous entry is closed.
   - `decoy_rate` counts job-2 workloads only. A decided workload's right
     answer can be the same text as a decoy, and it no longer counts as
-    naming one. The gold reply and 0920 both read 0 of 128.
+    naming one. The gold reply and 0920 both read 0 of 128 rows.
 
   Job 2, the bots, before → after:
 
@@ -649,6 +650,25 @@ the why is recorded.
   - D4: `multi`'s decoy list is keyed on each object's intent.
   - A node's state at scan time: a cordon and a pressure condition.
 
+  Found by the final review, also left for 4b:
+  - G3b zeroes a right answer written in a `log cause:` label's words,
+    on 24 of the 177 exam job-2 workloads. Model-card limit 13.
+  - A must-not word is a plain substring, and it cannot see "not".
+    Model-card limit 14.
+  - G2 now skips `registry registry.example.com`, so a wrong answer that
+    says that registry is unreachable passes the bad-image-tag key on
+    all 29 bad-image-tag workloads that carry that decoy. The key has no
+    must-not word for a registry fault.
+  - NFKC leaves a non-ASCII hyphen (U+2010 to U+2015) as it is, and
+    `init_container` is not one of the three spellings. An init-container
+    answer written either way passes the main-container keys.
+  - `named_decoy` still compares the raw answer with each decoy, exact
+    match. It skips the cleaning step, so a decoy copied with a capital
+    letter or a trailing period does not count as naming it.
+
   Every item on the 2026-09-26 entry's "Left for Spec 4" list is still
-  open too. The full 4b list, the 21 weak pairs included, is under "Left
-  for 4b" in `docs/superpowers/specs/2026-09-29-grader-guard-design.md`.
+  open too. The spec's "Left for 4b" list, in
+  `docs/superpowers/specs/2026-09-29-grader-guard-design.md`, adds what
+  was found while writing 4a, the 21 weak pairs among them. It does not
+  repeat the items above or the 2026-09-26 list. 4b starts from all
+  three lists.
