@@ -199,8 +199,35 @@ def test_every_answer_key_is_lowercase():
     assert n
 
 
+def test_counts():
+    by = s.by_key()
+    assert len(by) == 47
+    assert sum(st.cls == "P" for st in by.values()) == 38
+    tr = s.trainable()
+    assert len(tr) == 41
+    assert [st.cls for st in tr] == ["P"] * 35 + ["R"] * 6
+    assert [st.key for st in tr[35:]] == list(s.RULED_ORDER)
+    assert [st.key for st in s.exam()] == list(s.EXAM_KEYS)
+
+
 def test_named_edits():
     by = s.by_key()
     assert any(cd.type == "PIDPressure" and cd.status == "True"
                for cd in by["node-pid-pressure"].broken.conditions)
     assert by["networkpolicy-deny-all"].healthy.policies == ()
+    for key in ("networkpolicy-egress-allowlist-stale", "networkpolicy-dns-egress-missing",
+                "networkpolicy-namespace-label-drifted", "networkpolicy-port-mismatch",
+                "networkpolicy-allow-selector-typo", "networkpolicy-ingress-deny-all",
+                "shared-pvc-multi-attach", "csi-driver-version-mismatch"):
+        assert any(v.events_healthy is not None or v.evidence_healthy is not None
+                   or v.log_healthy is not None for v in by[key].victims), key
+
+
+def test_p_labels_are_mixed():
+    labels = []
+    for st in s.trainable():
+        if st.cls != "P":
+            continue
+        b, _ = _both(st)
+        labels.append(gold.gold_for(b).label)
+    assert labels.count("shared") >= 5 and labels.count("none") >= 5, labels
