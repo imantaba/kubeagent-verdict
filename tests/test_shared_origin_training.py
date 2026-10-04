@@ -44,8 +44,8 @@ from collections import Counter
 
 import pytest
 
-from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import generate, propagation
+from kubeagent_verdict import contract, vocab
+from kubeagent_verdict.dataset import generate, propagation, stories
 
 SIZE = 800
 SEED = 17
@@ -1233,8 +1233,14 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-DRAWS = 33  # plain-story shared_origin rows per scenario at BIG; see below.
-RULED_DRAWS = 66  # ruled-story shared_origin rows per scenario at BIG.
+DRAWS = 48  # plain-story shared_origin rows per story at BIG; see below.
+RULED_DRAWS = 70  # ruled-story shared_origin rows per story at BIG.
+# 2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, 35 plain
+# stories (`cls == "P"`) then 6 ruled ones (`cls == "R"`). 15% of 14000 is
+# 2100 pairs: four in five go to the plain stories (1680 = 35 x 48) and one
+# in five to the ruled ones (420 = 6 x 70). Origin variants are gone, so the
+# sampling argument below no longer applies: the two numbers now pin only
+# the equal shares inside each pool. The comment below is history.
 # Re-measured 2026-09-19 (Task 9, spec section 7 ruling A): `BIG` is now a
 # FIXED literal, not `275 * len(propagation.trainable_scenarios())`. Scaling
 # by pool size stopped being safe once the pool split into two differently
@@ -1252,7 +1258,7 @@ RULED_DRAWS = 66  # ruled-story shared_origin rows per scenario at BIG.
 # 7% across twenty-four -- a deterministic failure with correct data. At
 # n=33 it is 7.0e-10 per scenario, 3.4e-8 across forty-eight; n=66 is
 # smaller still.
-BIG = 13200
+BIG = 14000
 
 
 @pytest.fixture(scope="module")
@@ -1262,36 +1268,49 @@ def big_rows():
 
 def test_big_deals_exactly_draws_rows_per_scenario():
     """`BIG` promises DRAWS plain-story rows and RULED_DRAWS ruled-story
-    rows per scenario, not one uniform rate over the whole pool (spec
+    rows per story, not one uniform rate over the whole pool (spec
     section 7 ruling A: "within each pool every story gets an equal share",
-    checked per pool, not across them). Re-measured 2026-09-19, Task 9."""
-    pool = propagation.trainable_scenarios()
-    plain = sum(1 for p in pool if p.origin_object is None)
-    ruled = sum(1 for p in pool if p.origin_object is not None)
+    checked per pool, not across them). Re-measured 2026-09-19, Task 9.
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, split on
+    `Story.cls`."""
+    pool = stories.trainable()
+    plain = sum(1 for st in pool if st.cls == "P")
+    ruled = sum(1 for st in pool if st.cls == "R")
+    assert (plain, ruled) == (35, 6)
     assert generate.counts_for(BIG)["shared_origin"] == DRAWS * plain + RULED_DRAWS * ruled
 
 
 def test_the_trainable_pool_exercises_every_issue_kind():
     """A kind absent from the curriculum is a kind the shared-origin rule was
     never taught over -- and `vocab.ISSUE_KINDS` is what the eval draws from.
+
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`. Measured
+    before the named edits, the 41 kept stories' victims cover all 16 kinds;
+    three of them (Init:ErrImagePull, Init:ImagePullBackOff, Init:OOMKilled)
+    rest on one victim each.
     """
-    seen = {v.issue for p in propagation.trainable_scenarios() for v in p.victims}
+    seen = {v.issue for st in stories.trainable() for v in st.victims}
     missing = sorted(set(vocab.ISSUE_KINDS) - seen)
-    assert not missing, f"no trainable scenario exercises: {missing}"
+    assert not missing, f"no trainable story exercises: {missing}"
 
 
 # The pool grew by group across Tasks 5–9 of the 2026-09-08 coverage plan.
 # Twenty-four is what it held when the 0907 run failed deciders 1 and 5;
 # forty-eight was that plan's end. On 2026-09-19 the training-targets fix
 # merged six ruled stories on top (section 6 of its design): 48 to 54.
-EXPECTED_POOL = 54
+# On 2026-10-03 (Spec 4b-1) the family moved to `stories.trainable()`: the
+# 12 X stories and runtime-class-removed left it, 54 to 41 (35 plain, then 6
+# ruled). `multi` keeps `propagation.trainable_scenarios()`, still 54.
+EXPECTED_POOL = 41
 
 
 def test_the_trainable_pool_holds_the_planned_count():
-    """The pool is pinned so a scenario cannot fall out of the tuple unseen."""
-    pool = propagation.trainable_scenarios()
+    """The pool is pinned so a story cannot fall out of the tuple unseen."""
+    pool = stories.trainable()
     assert len(pool) == EXPECTED_POOL
-    assert len({p.key for p in pool}) == EXPECTED_POOL
+    assert len({st.key for st in pool}) == EXPECTED_POOL
+    assert [st.cls for st in pool] == ["P"] * 35 + ["R"] * 6
+    assert len(propagation.trainable_scenarios()) == 54
 
 
 # One marker per exam read layout, and the fewest trainable scenarios that
@@ -1402,44 +1421,22 @@ def test_every_trainable_scenario_is_taught_equally(big_rows):
     fail on the intended shape, not a bug. Equal shares still hold inside
     each pool: every plain story gets the same count and every ruled story
     gets the same count.
+
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, split on
+    `Story.cls`, and the shares are pinned exactly: DRAWS for every plain
+    story and RULED_DRAWS for every ruled one.
     """
-    pool = propagation.trainable_scenarios()
-    plain_keys = {p.key for p in pool if p.origin_object is None}
-    ruled_keys = {p.key for p in pool if p.origin_object is not None}
+    pool = stories.trainable()
+    plain_keys = {st.key for st in pool if st.cls == "P"}
+    ruled_keys = {st.key for st in pool if st.cls == "R"}
     for case in ("shared_origin", "shared_origin_decoy"):
         counts = Counter(e.meta["origin"] for e in big_rows if e.case == case)
         assert set(counts) == plain_keys | ruled_keys, (
             f"{case}: {sorted((plain_keys | ruled_keys) ^ set(counts))}")
         plain_shares = {v for k, v in counts.items() if k in plain_keys}
         ruled_shares = {v for k, v in counts.items() if k in ruled_keys}
-        assert len(plain_shares) == 1, f"{case}: uneven plain shares {dict(counts)}"
-        assert len(ruled_shares) == 1, f"{case}: uneven ruled shares {dict(counts)}"
-
-
-def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_rows):
-    """Declaring four variants is not the same as rendering them. If the draw
-    were keyed on something constant per scenario, every row would carry
-    variant 0 and the whole mechanism would be inert while its own unit test
-    still passed.
-
-    The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
-    random: this is a sampling check, and its strength is a function of
-    `DRAWS`. At 33 draws a correct pool trips it about once in thirty
-    million runs across a pool of forty-eight. Lowering `BIG` is not a free
-    speed-up -- at 11 draws it is about 7%, and the failure names a scenario
-    whose data is fine.
-    """
-    by_key = {p.key: p for p in propagation.trainable_scenarios()}
-    seen = {k: set() for k in by_key}
-    for e in big_rows:
-        if e.case != "shared_origin":
-            continue
-        p = by_key[e.meta["origin"]]
-        for i, (broken, _healthy) in enumerate(p.origin_variants):
-            if broken.split("\n")[0] in e.user:
-                seen[p.key].add(i)
-    thin = {k: sorted(v) for k, v in seen.items() if len(v) < 3}
-    assert not thin, f"scenarios rendering fewer than 3 variants: {thin}"
+        assert plain_shares == {DRAWS}, f"{case}: plain shares {dict(counts)}"
+        assert ruled_shares == {RULED_DRAWS}, f"{case}: ruled shares {dict(counts)}"
 
 
 def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
@@ -1463,10 +1460,18 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     (`f"PVC {pvc} (...)"`), so each ruled PVC draw can add several new
     distinct causes at once. The bar stays 0.12 and 0.30; the new pool
     clears both with more room than the old one did.
+
+    Re-measured 2026-10-03 (Spec 4b-1: 41 stories, `BIG` = 14000).
+    `none_of_these` is left out of the count: it is the answer "nothing in
+    this workload's own lines says why", not a cause a model can name by
+    rote, and the ceiling test in test_shared_origin_floor.py bounds it on
+    its own. Measured: 97 distinct causes, top one 0.0665, top three
+    0.1228. The bar stays 0.12 and 0.30.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"
-                     for cause in e.meta["expected"].values())
+                     for cause in e.meta["expected"].values()
+                     if cause != contract.NONE_OF_THESE)
     total = sum(causes.values())
     top = causes.most_common(3)
     assert top[0][1] / total <= 0.12, (
