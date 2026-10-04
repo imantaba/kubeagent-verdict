@@ -1228,8 +1228,7 @@ _STORIES: tuple[Story, ...] = (
                               cause="its volume cannot mount because the mount timed out "
                                     "waiting for the condition",
                               keys=("mount", "timed"), confidence="medium",
-                              rationale="its mount event shows a timeout on the node",
-                              link=True),
+                              rationale="its mount event shows a timeout on the node"),
                 events_healthy=(("FailedMount", ("Unable to attach or mount volumes: unmounted "
                                  "volumes=[data]: its claim is stuck Terminating, the finalizer "
                                  "never cleared"), 6),),
@@ -1335,7 +1334,8 @@ _STORIES: tuple[Story, ...] = (
                               cause="its init container fails to download its seed data "
                                     "through the proxy",
                               keys=("download", "proxy"), confidence="medium",
-                              rationale="its init evidence says the proxy download failed"),
+                              rationale="its init evidence says the proxy download failed",
+                              link=True),
                 evidence_healthy="last state terminated with exit code 1; seed download from a decommissioned host no longer resolves",
                 healthy=Answer(anchor="seed download from a decommissioned host no longer resolves",
                                cause="its init container downloads from a decommissioned host "
@@ -1388,7 +1388,8 @@ _STORIES: tuple[Story, ...] = (
                               cause="its init config fetch is refused because the request "
                                     "carried no identity token",
                               keys=("refused", "identity"), confidence="medium",
-                              rationale="its init evidence says the request had no token"),
+                              rationale="its init evidence says the request had no token",
+                              link=True),
                 evidence_healthy="config fetch refused: the init image predates token-file support",
                 healthy=Answer(anchor="the init image predates token-file support",
                                cause="its init image predates token-file support",
@@ -1479,7 +1480,8 @@ _STORIES: tuple[Story, ...] = (
                               cause="its volume cannot mount because the Secret behind it is "
                                     "not found",
                               keys=("volume", "secret"), confidence="medium",
-                              rationale="its mount event says the Secret behind the volume is gone"),
+                              rationale="its mount event says the Secret behind the volume is gone",
+                              link=True),
                 evidence_healthy="MountVolume.SetUp failed for volume tls: secret \"{name}-tls\" not found",
                 events_healthy=(("FailedMount", ("MountVolume.SetUp failed for volume \"tls\": secret "
                                  "\"{name}-tls\" not found, removed by a cleanup job that matched "
@@ -1626,12 +1628,12 @@ _STORIES: tuple[Story, ...] = (
                               keys=("metrics", "expired"), confidence="medium",
                               rationale="its evidence shows an x509 expiry on the push",
                               link=True),
-                evidence_healthy="metrics push failed: x509: chain ends at a private CA intermediate that lapsed",
-                healthy=Answer(anchor="chain ends at a private ca intermediate that lapsed",
+                evidence_healthy="metrics push failed: x509: chain ends at a private CA intermediate that was rotated out",
+                healthy=Answer(anchor="chain ends at a private ca intermediate that was rotated out",
                                cause="its certificate chain ends at a private intermediate that "
-                                     "lapsed",
+                                     "was rotated out",
                                keys=("private", "intermediate"),
-                               rationale="its evidence names a lapsed private intermediate"),
+                               rationale="its evidence names a private intermediate that was rotated out"),
                 none_phrase="its container keeps restarting"),
         ),
         broken=World(origin_row=OriginRow(
@@ -2102,8 +2104,8 @@ _STORIES: tuple[Story, ...] = (
                               rationale="its attach event says the volume is held by one node",
                               link=True),
                 events_healthy=(("FailedAttachVolume", ("Multi-Attach error for volume \"pvc-{pvc}\" "
-                                 "Volume is already exclusively attached to one node, held by its "
-                                 "own previous pod that is still terminating"), 8),),
+                                 "Volume is held by its own previous pod that is still "
+                                 "terminating"), 8),),
                 healthy=Answer(anchor="held by its own previous pod",
                                cause="its volume is held by its own previous pod, which is "
                                      "still terminating",
@@ -2120,8 +2122,7 @@ _STORIES: tuple[Story, ...] = (
                               cause="its volume cannot mount because the mount timed out "
                                     "waiting for the condition",
                               keys=("mount", "timed"), confidence="medium",
-                              rationale="its mount event shows a timeout",
-                              link=True),
+                              rationale="its mount event shows a timeout"),
                 events_healthy=(("FailedMount", ("Unable to attach or mount volumes: unmounted "
                                  "volumes=[data]: underlying disk reports I/O errors"), 6),),
                 healthy=Answer(anchor="underlying disk reports i/o errors",
@@ -2313,7 +2314,8 @@ _STORIES: tuple[Story, ...] = (
                               cause="its volume cannot attach because the NFS server is not "
                                     "responding",
                               keys=("attach", "responding"),
-                              rationale="its attach event says the NFS server is not responding"),
+                              rationale="its attach event says the NFS server is not responding",
+                              link=True),
                 evidence_healthy='AttachVolume.Attach failed for volume "{pvc}": node image lacks the NFS client package',
                 events_healthy=(("FailedAttachVolume", ('AttachVolume.Attach failed for volume "{pvc}": '
                                  "node image lacks the NFS client package"), 4),),
@@ -2535,8 +2537,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: datastore check timed out", 6),),
                 broken=Answer(anchor="egress-allowlist",
-                              cause="the NetworkPolicy egress-allowlist no longer matches the datastore pods, so its readiness probe fails",
-                              keys=('policy', 'datastore'),
+                              cause="the NetworkPolicy egress-allowlist selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-allowlist", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: datastore query exceeded its 1s timeout", 6),),
                 healthy=Answer(anchor="query exceeded its 1s timeout",
@@ -2549,8 +2551,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: datastore unreachable", 5),),
                 broken=Answer(anchor="egress-allowlist",
-                              cause="the NetworkPolicy egress-allowlist no longer matches the datastore pods, so its readiness probe fails",
-                              keys=('policy', 'datastore'),
+                              cause="the NetworkPolicy egress-allowlist selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-allowlist", link=True),
                 none_phrase="its readiness probe fails"),
             VictimText(
@@ -2600,8 +2602,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: peer lookup failed", 5),),
                 broken=Answer(anchor="egress-to-app",
-                              cause="the NetworkPolicy egress-to-app allows no DNS traffic, so its readiness probe fails",
-                              keys=('policy', 'traffic'),
+                              cause="the NetworkPolicy egress-to-app selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-to-app", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: peer hostname is misspelled in the StatefulSet's config", 5),),
                 healthy=Answer(anchor="peer hostname is misspelled",
@@ -2635,8 +2637,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: broker check timed out", 6),),
                 broken=Answer(anchor="egress-to-messaging",
-                              cause="the NetworkPolicy egress-to-messaging blocks its broker traffic, so its readiness probe fails",
-                              keys=('policy', 'broker'),
+                              cause="the NetworkPolicy egress-to-messaging selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-to-messaging", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: broker login was revoked", 6),),
                 healthy=Answer(anchor="broker login was revoked",
@@ -2649,8 +2651,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: broker publish timed out", 4),),
                 broken=Answer(anchor="egress-to-messaging",
-                              cause="the NetworkPolicy egress-to-messaging blocks its broker traffic, so its readiness probe fails",
-                              keys=('policy', 'broker'),
+                              cause="the NetworkPolicy egress-to-messaging selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-to-messaging", link=True),
                 none_phrase="its readiness probe fails"),
             VictimText(
@@ -2679,8 +2681,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: cache check timed out", 6),),
                 broken=Answer(anchor="egress-to-cache",
-                              cause="the NetworkPolicy egress-to-cache opens the wrong cache port, so its readiness probe fails",
-                              keys=('policy', 'cache'),
+                              cause="the NetworkPolicy egress-to-cache selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names egress-to-cache", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: cache token has expired", 6),),
                 healthy=Answer(anchor="cache token has expired",
@@ -2720,7 +2722,7 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: API check timed out", 6),),
                 broken=Answer(anchor="allow-frontend-egress",
-                              cause="the NetworkPolicy allow-frontend-egress selects nothing, so default-deny blocks its API traffic",
+                              cause="the NetworkPolicy allow-frontend-egress selects its pods, a possible cause of its failing readiness probe",
                               keys=('policy', 'selects'),
                               rationale="its network policy line names allow-frontend-egress", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: token rejected, service account that was deleted", 6),),
@@ -2734,7 +2736,7 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: API handshake timed out", 5),),
                 broken=Answer(anchor="allow-frontend-egress",
-                              cause="the NetworkPolicy allow-frontend-egress selects nothing, so default-deny blocks its API traffic",
+                              cause="the NetworkPolicy allow-frontend-egress selects its pods, a possible cause of its failing readiness probe",
                               keys=('policy', 'selects'),
                               rationale="its network policy line names allow-frontend-egress", link=True),
                 none_phrase="its readiness probe fails"),
@@ -2768,8 +2770,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: cluster join got no reply", 6),),
                 broken=Answer(anchor="deny-all-ingress",
-                              cause="the NetworkPolicy deny-all-ingress blocks inbound traffic, so its readiness probe fails",
-                              keys=('policy', 'inbound'),
+                              cause="the NetworkPolicy deny-all-ingress selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
                               rationale="its network policy line names deny-all-ingress", link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: join step expects a reply on a port its container never opens", 6),),
                 healthy=Answer(anchor="expects a reply on a port its container never opens",
@@ -2782,9 +2784,10 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe on the container is failing",
                 events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: peer handshake did not complete", 4),),
                 broken=Answer(anchor="deny-all-ingress",
-                              cause="the NetworkPolicy deny-all-ingress blocks inbound traffic, so its readiness probe fails",
-                              keys=('policy', 'inbound'),
-                              rationale="its network policy line names deny-all-ingress"),
+                              cause="the NetworkPolicy deny-all-ingress selects its pods, a possible cause of its failing readiness probe",
+                              keys=('policy', 'selects'),
+                              rationale="its network policy line names deny-all-ingress",
+                              link=True),
                 events_healthy=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503, body: quorum size is one more than its replica count", 4),),
                 healthy=Answer(anchor="quorum size is one more than its replica count",
                                cause="its quorum size is one more than its replica count",

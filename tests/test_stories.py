@@ -231,3 +231,16 @@ def test_p_labels_are_mixed():
         b, _ = _both(st)
         labels.append(gold.gold_for(b).label)
     assert labels.count("shared") >= 5 and labels.count("none") >= 5, labels
+
+
+@pytest.mark.parametrize("key,taint", [
+    ("node-network-unavailable", "node.kubernetes.io/network-unavailable"),
+    ("node-disk-pressure", "node.kubernetes.io/disk-pressure"),
+])
+def test_healthy_pending_victim_names_dedicated_taint_only(key, taint):
+    st = s.by_key()[key]
+    for seed in range(5):
+        broken, healthy = _both(st, seed)
+        assert "dedicated=gpu" in healthy.user, (key, seed)
+        assert taint not in healthy.user, (key, seed)
+        assert taint in broken.user, (key, seed)
