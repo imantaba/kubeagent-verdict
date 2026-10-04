@@ -277,8 +277,8 @@ The case mix is what adjudication means, in approximate proportions:
 | `none_of_these` — thin evidence: every candidate is ruled out or refuted, and the prompt names no cause | ~4% | Abstaining: saying no cause is shown when the prompt names none |
 | Own evidence-grounded cause (unlisted) | ~13% | Naming what the deterministic pass missed |
 | Multi-workload prompts (2–4 flagged, mixed causes) | ~13% | One verdict row per listed workload, no extras |
-| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on every row the rules do not decide and the rules' own cause on every row they do; calling it shared only when the rules confirm it |
-| `shared_origin_decoy` — the same scenario, origin read HEALTHY | ~15% | Taking each workload's own cause when the read refutes the shared story. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
+| `shared_origin` — 2–4 flagged, all downstream of one broken component | ~15% | Naming the story's cause on a row only when that row's own lines show it, and `none_of_these` otherwise; the rules' own cause on every row they decide; calling it shared only when the rules confirm it or 2 or more victims' own lines show the link |
+| `shared_origin_decoy` — the same story, origin HEALTHY | ~15% | Taking each workload's own cause when its lines show one, and `none_of_these` when they do not. Emitted as `shared_origin`'s twin from one salt, never independently; the two shares must stay equal |
 | Truncated evidence (marker present) | ~5% | Judging honestly under cut evidence — lower confidence |
 | Injection attempts inside evidence | ~10% | Evidence is data; fake `== END ==` markers and "ignore your instructions" text change nothing |
 | Empty candidates / healthy distractors mixed in | ~5% | Not inventing problems |
@@ -411,6 +411,15 @@ and a scoreboard banked against the shorter file still lines up row for row.
 The training set does not move at all — every new group is `propagation:`-
 prefixed and collides with nothing, so `drop_held_out` drops the same rows and
 `train.jsonl` and `val.jsonl` regenerate byte-identical across the change.
+
+(2026-10-04, Spec 4b-1.) The shared-origin family no longer uses an invented
+origin read. Each prompt is now built by running kubeagent's own steps on a
+story: the report order, the gather, the rules over every candidate, and the
+render. There are 47 stories, each in two worlds, one broken and one
+healthy. 41 are trainable, where the old pool had 54, and 6 are exam-only.
+The paragraphs above describe the earlier design, and they stay as history.
+`multi` still draws from `propagation.trainable_scenarios()`; Spec 4b-3 owns
+it. The counts and the hashes are in `contract/PIN.md`.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1

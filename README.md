@@ -155,6 +155,13 @@ The twin is not evidence about the models below: a model that answers
 "separate causes" to everything scores 1.0 on it, which is exactly what these
 two did.
 
+(2026-10-04, Spec 4b-1: the twin paragraph above describes the rows as they
+were. The twin is no longer a copy of the broken rows with the reads
+swapped. Each world is now built from kubeagent's own steps, so the lines
+differ as the faults differ. The exam keeps its 20 shared-origin rows, from
+6 stories. The scores below were taken on the rows as they were before
+2026-10-04.)
+
 | `shared_origin_probe`, v0.1.0 | |
 |---|---|
 | contract validity | 1.0 (10) |

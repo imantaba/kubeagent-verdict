@@ -797,6 +797,12 @@ Seven limits on this reading, carried from the design that scored it:
 
 ### 0920 against the Spec 3 exam (2026-09-28)
 
+(2026-10-04, Spec 4b-1: this section scored the exam's shared-origin rows as
+they were before 2026-10-04. Spec 4b-1 rebuilt those 20 rows, and 20 of the
+20 user messages moved. The other 229 rows are byte for byte the same.
+Nothing was re-scored. 0920 has not been run on the rebuilt exam, so no
+number here compares with it.)
+
 This is a diagnostic run: step 1 of the Spec 3 run order. It gates
 nothing and ships nothing. Run: `out/eval/0920-exam0928`, served by a
 local `llama-server` from 0920's Q8_0 file (sha256 `f4327d90…`). Exam:
@@ -862,6 +868,12 @@ does not show that 0920 reasons past a story it has seen. Next come
 Spec 4, then 0920 live again, then the retrain.
 
 ### 0920 re-scored under the 4a grader (2026-09-29)
+
+(2026-10-04, Spec 4b-1: this section scored the exam's shared-origin rows as
+they were before 2026-10-04. Spec 4b-1 rebuilt those 20 rows, and 20 of the
+20 user messages moved. The other 229 rows are byte for byte the same.
+Nothing was re-scored. 0920 has not been run on the rebuilt exam, so no
+number here compares with it.)
 
 This is a replay. No model was called: the Spec 4a grader re-read the
 replies stored in `out/eval/0920-exam0928`. Run:
@@ -940,6 +952,14 @@ against these.
    printed in the same row says `Unknown`. Both are true readings of the
    same fault, worded two different ways — a model that expects the two
    words to match will not find them matching here.
+
+   (2026-10-04, Spec 4b-1: Closed for this family. The family's rows are now
+   built by running kubeagent's own steps, so the node read in a prompt is
+   the one kubeagent prints. Of the family rows whose rationale states a
+   Ready condition, these state a word the prompt does not show: 0 of 49 in
+   train, 0 of 5 in val and 0 of 1 in the exam. Counted the same way on
+   `out/dataset-0929`: 0 of 14 in train, 0 of 3 in val and 1 of 3 in the
+   exam.)
 2. **The exam's decoy-node rows put two reasons on one node.** In
    `coredns-down` and `node-disk-pressure`, the rule rationale talks about
    the decoy node while the rest of the row is about CoreDNS or disk
@@ -947,6 +967,12 @@ against these.
    same node, worker-3, is named under two different rule reasons —
    "NotReady" and "no kubelet lease" — in the same row, and neither reason
    is what the row's own evidence shows for that node (disk pressure).
+
+   (2026-10-04, Spec 4b-1: Closed for this family. Of the family rows that
+   name a node, these name one node under two different reasons: 0 of 72 in
+   train, 0 of 8 in val and 0 of 1 in the exam. Counted the same way on
+   `out/dataset-0929`: 37 of 378 in train, 3 of 22 in val and 4 of 12 in the
+   exam.)
 3. **The exam's storage story shows `Pending` where an internal field says
    `Bound`.** The row a model reads always says the claim is `Pending`,
    which is correct — the claim really is stuck. The propagation table that
@@ -954,6 +980,13 @@ against these.
    apply if the origin were healthy. That field is never printed into the
    prompt; the mismatch is a fact about the code, not something a model
    can read.
+
+   (2026-10-04, Spec 4b-1: re-measured. The prompt now prints a claim as
+   kubeagent reads it. Now: 77 train rows, 3 val rows and 2 exam rows show a
+   claim; 0 of them show one claim with two phases; phases shown in train:
+   Pending 191. Before, on `out/dataset-0929`: 294 train rows, 26 val rows
+   and 6 exam rows show a claim; 0 of them show one claim with two phases;
+   phases shown in train: Bound 182, Pending 112.)
 4. **The exam's row 238 (row 252 before 2026-09-26) says "3 workloads
    failing to pull" and shows 2.** (2026-09-28: row 238 counting from 1,
    index 237, in `out/dataset-0928/test.jsonl`, a `shared_origin_probe`
@@ -962,6 +995,15 @@ against these.
    workloads failing to pull". This probe row flags only 2 of those 3
    workloads, so the count written into the text and the count of rows a
    model is asked to judge do not match.
+
+   (2026-10-04, Spec 4b-1: Closed for this family. The exam row named above
+   is one of the 20 rows that were rebuilt. Of the family rows whose cause
+   says "N workloads", these say an N that is not the number of verdicts in
+   the row that carry that cause: 0 of 97 in train, 0 of 11 in val and 0 of
+   2 in the exam. Counted the same way on `out/dataset-0929`: 0 of 71 in
+   train, 0 of 9 in val and 1 of 2 in the exam. The count in the cause is
+   the number of workloads the registry rule attributed. Init-container pull
+   victims on the same host are not in it.)
 5. **Two rationale-template builders, not all of them.** Only two call
    sites build a rule row's rationale from one function, `_rule_rationale`
    in `dataset/cases.py`: the shared-origin family's `_shared_origin_row`
@@ -972,24 +1014,42 @@ against these.
    On those rows, a model could learn the template's wording instead of the
    reasoning behind it — job 1, which grades whether the model repeats the
    decided cause, cannot tell the two apart.
-6. **Plain broken twins always deny a shared cause, even though both rows
-   name the same origin.** A plain story's two twin rows both point at the
-   same real cause, but the rules cannot check a plain story's origin, so
-   the summary on both rows says the rules did not confirm one cause. A
-   model could learn "never call a cause shared" from this pattern alone.
-   The ruled broken twins teach the other side, because the rules can check
-   a ruled story's origin: in this build 192 of them land in train and 22
-   in val, all carrying the `shared` label. This build has 960 plain pairs
-   and 240 ruled pairs (1,200 in all), and every one of the 48 plain
-   stories keeps at least 15 of its 20 pairs in train. Three stories tie
-   for the lowest, at 15 (`sidecar-injector-broken`, `node-corrupt-overlay`
-   and `cluster-maintenance-taint`), and the highest is 20. A further 26 of the 240
-   ruled pairs, drawn only from the two node-kind ruled stories, are
-   deliberately rendered "unverified" instead of confirmed (25 land in
-   train, 1 in val): the origin read is made to fail, so the rules cannot
-   confirm or deny it, and the label is `none`, not `shared`. That is a
-   third pattern, not a second copy of "plain" — it teaches "the rules
-   could not check" as its own answer.
+
+   (2026-10-04, Spec 4b-1: re-measured. `_rule_rationale` moved to
+   `render.rule_rationale`, and the old name stays as an alias. The template
+   now covers 617 of 617 decided family workloads in train, 54 of 54 in val
+   and 12 of 12 in the exam; across every case, 3,151 of 3,151 decided
+   workloads in train. Before, on `out/dataset-0929`: 540 of 540 decided
+   family workloads in train, 54 of 54 in val and 30 of 30 in the exam;
+   across every case, 3,074 of 3,074 decided workloads in train. These two
+   are counted by one rule on both builds. The numbers in the text above
+   were counted another way, so read the two against each other and not
+   against that text.)
+6. **A broken twin is labelled "shared" only when the prompt shows why.**
+   (Rewritten 2026-10-04, Spec 4b-1. The limit used to say that plain broken
+   twins always deny a shared cause. That is no longer true.) A story is one
+   of two kinds. A ruled story is one the rules can check: its origin is a
+   node, a claim or a registry, a fresh read confirms it, and 2 or more
+   victims share it. A plain story is every other kind: the rules never
+   group 2 or more of its victims. A broken world is labelled "shared" in
+   two cases. The rules confirm one cause on 2 or more workloads. Or 2 or
+   more victims show the origin's link in their own lines. Every other row
+   is labelled "none". That covers every healthy world, and every
+   "unverified" twin, where the origin read fails and the rules can neither
+   confirm nor deny. In train, 35 plain stories give 860 pairs, and 6 ruled
+   stories give 220 pairs. Of the plain pairs, 509 are labelled "shared" and
+   325 "none". Of the ruled pairs that are not "unverified", 197 are
+   "shared" and 0 are "none". A further 49 ruled pairs are "unverified", and
+   43 of those carry the label "none". In val, 65 plain pairs and 17 ruled
+   pairs are labelled "shared". Every story keeps at least 12 pairs in
+   train, a bar a test holds. The lowest story has 20 and the highest has
+   39. The risk is a cue. If a story's name decided its label, a model could
+   learn the name and skip the evidence. A test checks that 20 plain stories
+   end mostly "shared" and 14 end mostly "none" (1 tied), at least 5 each,
+   so the label comes from the prompt and not from the story. For the
+   record, the old limit counted 960 plain pairs and 240 ruled pairs, 192
+   ruled train rows and 22 in val labelled "shared", and 26 unverified pairs
+   (25 in train, 1 in val), over 48 plain stories.
 7. **No decoy rate on any shared-origin-family row built from a trainable
    story — for two different reasons.** Every row from `shared_origin`,
    `shared_origin_decoy`, and the `--probe-cousins` diagnostic carries an
@@ -1009,6 +1069,13 @@ against these.
    three of their six scenarios — `coredns-down`, `node-disk-pressure` and
    `networkpolicy-deny-all` — do declare decoy objects and do carry a
    decoy rate there.)
+
+   (2026-10-04, Spec 4b-1: re-measured. The code and the story counts named
+   above describe the build before 2026-10-04. Family rows that carry a
+   decoy rate now: 174 of 2,160 family rows in train, 14 of 240 in val and 4
+   of 20 in the exam. Before, on `out/dataset-0929`: 0 of 2,178 family rows
+   in train, 0 of 222 in val and 10 of 20 in the exam. The `--probe-cousins`
+   rows that carry one: 5 of 82 rows (41 pairs).)
 8. **Two read formats for one node.** kubeagent labels a node's own trail
    read `describe node /worker-2`, with a leading slash, and `read_text` in
    `dataset/rules.py` copies that label. The node stories in
@@ -1018,6 +1085,18 @@ against these.
    row, and in 42 of the 62 train rows it is the same node both times. The
    exam's node-story rows print only the story form. A model that expects
    one fixed format will see both.
+
+   (2026-10-04, Spec 4b-1: the family rows only. Closed for this family. Its
+   rows print one form only: kubeagent's, with the slash. Family rows by
+   form, now: kubeagent's form with the slash only: 72 in train, 8 in val, 1
+   in the exam; the story form only: 0 in train, 0 in val, 0 in the exam;
+   both forms: 0 in train, 0 in val, 0 in the exam. Before, on
+   `out/dataset-0929`: kubeagent's form with the slash only: 0 in train, 0
+   in val, 0 in the exam; the story form only: 402 in train, 38 in val, 6 in
+   the exam; both forms: 0 in train, 0 in val, 0 in the exam. `multi` is not
+   changed by 4b-1. Every `multi` row is byte for byte the one in
+   `out/dataset-0929`, so what the text above says about `multi` rows still
+   holds. Spec 4b-3 owns `multi`.)
 9. **The rule rationale asserts read results the prompt never shows.**
    `_rule_rationale`'s sentence quotes `result.evidence`, the rules
    engine's own one-line summary of a fresh read (`ready condition is
@@ -1035,6 +1114,13 @@ against these.
    special case where this invented text also happens to contradict
    something the prompt does print (`Unknown` against `False`); this is
    the general case, and the bigger fact.
+
+   (2026-10-04, Spec 4b-1: Closed for this family. The family's candidate
+   list now prints kubeagent's own `fresh read:` line, and the rationale
+   quotes it. Of the family's rule rows that use the template, these quote a
+   read the prompt never shows: 0 of 617 in train, 0 of 54 in val and 0 of
+   12 in the exam. Counted the same way on `out/dataset-0929`: 540 of 540 in
+   train, 54 of 54 in val and 30 of 30 in the exam.)
 10. **One story's answer names disk pressure its prompt never shows.**
     (Added 2026-09-26.) `node-cordon-diskfull`'s own cause, rationale and
     keywords still say the node reports disk pressure. Since 2026-09-26 no
@@ -1123,3 +1209,18 @@ against these.
     so no pinned number moved. The spec chose substring matching on
     purpose, and kept bare `init` off the list because `initial` would
     trip it. Spec 4b owns the rest.
+15. **`none_of_these` is 13.1% of the train answers.** (Added 2026-10-04,
+    Spec 4b-1.) A victim's gold names a cause only when its anchor is in
+    that victim's own lines. Where it is not, the gold is `none_of_these`.
+    In train that is 1,461 of 11,192 = 13.1% of all verdicts. In
+    `out/dataset-0929` it was 251 of 10,991 = 2.3%. In broken worlds it is
+    533 of 2,931 = 18.2%. In healthy worlds it is 677 of 2,710 = 25.0%.
+    Tests hold the mix. The balance test wants the broken and the healthy
+    share within 10 points, so the answer does not tell a model which world
+    it is in. The gap is 6.8 points. The ceiling test wants the answer at
+    most 30% of all train verdicts. The three-verdict test wants at least 40
+    of every 100 healthy rows to carry 3 or more verdicts, so a healthy row
+    is not always a short one. It is 532 of 1,080 = 49.3%. The risk is one
+    these tests cannot see. A model that over-learns `none_of_these` will
+    say it when the evidence is there. We will see that only after the
+    retrain.
