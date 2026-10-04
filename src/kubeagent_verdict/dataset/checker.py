@@ -30,8 +30,9 @@ With `meta=None` (the golden file has none), ANS-1 skips its meta clause,
 ANS-2 is skipped, and every other rule runs.
 
 A few rules check the builder's own model where kubeagent's output depends
-on cluster state the prompt does not show (B7's node count, for one). Each
-such rule says so.
+on cluster state the prompt does not show. Each such rule says so. B7 is
+one: the health header's node total is a count the prompt cannot show, so B7
+only checks that it is at least the number of nodes the row names.
 """
 from __future__ import annotations
 

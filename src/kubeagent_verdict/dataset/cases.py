@@ -751,21 +751,6 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
                    meta=meta)
 
 
-def _draw_in(rng: random.Random, ns: str | None) -> Names:
-    """Draw a name set, optionally pinned to one namespace.
-
-    The pod suffix and the image path both embed the namespace, so pinning
-    `ns` after the draw means redrawing those two rather than leaving an
-    example whose image says `shop` and whose workload says `payments`.
-    """
-    n = names_mod.draw(rng)
-    if ns is None:
-        return n
-    return dataclasses.replace(
-        n, ns=ns, pod=names_mod.pod_name(rng, n.name),
-        image=f"registry.example.com/{ns}/{n.name}:{n.image.rsplit(':', 1)[1]}")
-
-
 def _shared_origin_example(case: str, built: so.Built, **extra) -> Example:
     """One family row from a built world: gold from `gold.gold_for`, meta per
     Ruling 8, decoys per Ruling 12. `extra` adds case-specific meta keys."""

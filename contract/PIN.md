@@ -851,6 +851,9 @@ the why is recorded.
     33, separate 0, shared 7). The 20 family rows hold 12 of the job-1
     workloads (was 30) and 38 of the job-2 workloads (was 18).
   - No bar moved: 0.9, 0.7 and 0.9.
+  - The evidence-overlap pins moved: `shared_origin_probe` 3 → 19 of 40,
+    and `shared_origin_decoy_probe` 2 → 13 of 30. The real gather prints
+    the same line shapes in both worlds, and training rows print them too.
 
   The mix, counted on the new `train.jsonl`. These are the numbers the
   mix tests passed with:
@@ -895,6 +898,9 @@ the why is recorded.
     - B6;
     - the G2 registry skip;
     - must-not words for this family;
+    - node-disk-pressure's ContainerStartError keys ("containerd",
+      "task") name no origin; re-key it to ("space", "containerd") with the
+      exam rebuild;
     - B4's fourth arm, the shared-cause cap;
     - tighter checker checks that real output does not need: service-line
       wording and sort order, the network-policy gate, a message-only

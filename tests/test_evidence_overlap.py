@@ -210,12 +210,17 @@ DECLARED = {
     # a hit here is a read whose masked text a kept training row also prints: shared
     # wording, never a shared scenario.
     # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines;
-    # was (3, 34).
+    # was (3, 34). The pin moved from 3 to 19 of 40 because the real gather prints the
+    # same line shapes in both worlds, and those shapes now match training reads. The
+    # shapes that move the count: events headers, log-cause lines, no-previous-log
+    # lines, `unschedulable=false`, and claim Pending headers.
     "shared_origin_probe": (19, 40),
     # Its healthy-origin twin, declared rather than left out on purpose: an undeclared
     # slice is not measured at all, so the guard's coverage would silently lag the exam.
     # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines;
-    # was (2, 34).
+    # was (2, 34). The pin moved from 2 to 13 of 30 for the same reason, with the same
+    # hit shapes: events headers, log-cause lines, no-previous-log lines,
+    # `unschedulable=false`, and claim Pending headers.
     "shared_origin_decoy_probe": (13, 30),
 }
 

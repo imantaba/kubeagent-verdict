@@ -280,8 +280,9 @@ def test_system_lines_are_in_go_order():
 
 
 def test_an_unknown_node_reason_raises():
-    """The dataset builds two node stories: NotReady and no kubelet lease.
-    Any other reason has no block text here, so it raises."""
+    """The dataset builds three node-down stories. This block has text for two
+    reasons: NotReady and no kubelet lease. Any other reason has no block
+    text here, so it raises."""
     w = _wl(candidates=(_node("worker-1", "kubelet not heartbeating"),))
     with pytest.raises(ValueError, match="worker-1"):
         render.cluster_health((w,), ())

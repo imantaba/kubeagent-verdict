@@ -1043,7 +1043,8 @@ against these.
    "shared" and 325 "none", and 26 more are "unverified". Of the ruled
    pairs, 197 are "shared" and 23 are "unverified". Of the 49 "unverified"
    pairs, 43 carry "none". The other 6 are plain pairs where 2 or more
-   victims show the link, so they are "shared". In val, 66 plain pairs and
+   victims show the link, so they are "shared" (so 515 plain pairs are
+   labelled shared in all). In val, 66 plain pairs and
    17 ruled pairs are labelled "shared". Every story keeps at least 12 pairs
    in train, a bar a test holds. The lowest story has 20 and the highest has
    39. The risk is a cue. If a story's name decided its label, a model could

@@ -1,12 +1,13 @@
 """The gather, checked byte for byte against kubeagent.
 
-Two YAML fixtures describe a cluster: `tests/fixtures/gather_fixture.yaml`
-and `tests/fixtures/gather_fixture_logs.yaml`. A Go harness ran the real
+Four YAML fixtures describe a cluster: `tests/fixtures/gather_fixture.yaml`,
+`gather_fixture_logs.yaml`, `gather_fixture_cluster.yaml` and
+`gather_fixture_registry.yaml`. A Go harness ran the real
 kubeagent v1.24.0 code over each one and wrote eleven dumps per fixture, to
-`tests/fixtures/gather_go/` and `tests/fixtures/gather_go_logs/`. That
-folder's README is the dump format. This test loads the same YAML, runs the
-Python port over it and writes the same dumps, then compares them byte for
-byte. It needs no Go.
+`tests/fixtures/gather_go/`, `gather_go_logs/`, `gather_go_cluster/` and
+`gather_go_registry/`. The README in `gather_go/` is the dump format. This
+test loads the same YAML, runs the Python port over it and writes the same
+dumps, then compares them byte for byte. It needs no Go.
 
 The split of work:
 
