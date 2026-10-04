@@ -293,7 +293,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="default-deny",
                               cause="its pods are selected by the NetworkPolicy default-deny, "
                                     "a possible cause of its failing liveness probe",
-                              keys=("policy", "deny"), confidence="medium",
+                              keys=("liveness", "policy"), confidence="medium",
                               rationale="its network policy line names default-deny",
                               link=True),
                 none_phrase="its liveness probe fails"),
@@ -304,7 +304,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="default-deny",
                               cause="its pods are selected by the NetworkPolicy default-deny, "
                                     "a possible cause of its failing readiness probe",
-                              keys=("policy", "deny"), confidence="medium",
+                              keys=("readiness", "policy"), confidence="medium",
                               rationale="its network policy line names default-deny",
                               link=True),
                 none_phrase="its readiness probe fails"),
@@ -1078,9 +1078,9 @@ _STORIES: tuple[Story, ...] = (
                 events=(("Failed", "Error: failed to create containerd task: no space left on device", 3),),
                 log=NO_PREVIOUS,
                 broken=Answer(anchor="failed to create containerd task: no space left on device",
-                              cause="its container cannot start because there is no space "
-                                    "left on the device",
-                              keys=("space", "device"), confidence="medium",
+                              cause="its container cannot start because containerd failed "
+                                    "to create its task, with no space left on the device",
+                              keys=("containerd", "task"), confidence="medium",
                               rationale="its start event says the device has no space left"),
                 events_healthy=(("Failed", ("Error: failed to create containerd task: no space left "
                                  "on device. Ephemeral storage: pod limit 1Gi, currently used 1Gi"), 3),),
