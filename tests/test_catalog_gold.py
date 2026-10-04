@@ -6,12 +6,16 @@ See docs/superpowers/specs/2026-10-04-catalog-gold-design.md.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import re
 from pathlib import Path
 
 import pytest
 
-from kubeagent_verdict.dataset import catalog, generate, stories
+from kubeagent_verdict import contract as c
+from kubeagent_verdict.dataset import cases, catalog, generate, gold, stories
+from kubeagent_verdict.dataset import names as names_mod
 
 ENTRIES = {e.key: e for e in catalog.all_entries()}
 
@@ -273,3 +277,146 @@ def test_no_prompt_byte_moves_from_dataset_1004(build_1004, split):
     assert len(new) == len(old)
     for i, (a, b) in enumerate(zip(new, old)):
         assert a["messages"][:2] == b["messages"][:2], (split, i)
+
+
+# ------------------------------------------------------------ the gold
+
+# The probe's fact pattern (spec test 2): a number with an optional unit,
+# or a CamelCase word. Compared lowercase against the own lines.
+FACT = re.compile(r"\b(?:\d+(?:\.\d+)?[A-Za-z]*|[A-Z][a-z]+[A-Z][A-Za-z]+|[a-z]+[A-Z][A-Za-z]+)\b")
+GATED = "; none of its own lines says why."
+# Task 3 rebuilds these two on the gate and empties this set.
+MULTI_CASES = {"multi", "multi_misattribution_probe"}
+
+
+@pytest.fixture(scope="module")
+def examples() -> list:
+    """Every catalog case over three seeds, plus the exam. About 7 s."""
+    rows = []
+    for seed in (17, 18, 19):
+        rows += generate.generate(seed, 8000)
+    return rows + generate.test_set()
+
+
+def catalog_rows(examples, skip=frozenset()):
+    """(example, workload, entry, verdict, workload meta, own lines) for every
+    catalog workload. A catalog group is `entry:ns/name`, joined by `+`."""
+    for ex in examples:
+        if ex.case.startswith("shared_origin") or ex.case in skip:
+            continue
+        entry_of = {wl: ENTRIES[key] for key, wl in
+                    (part.split(":", 1) for part in ex.group.split("+"))}
+        own = gold.own_lines(ex.user, list(entry_of))
+        verdicts = {v["workload"]: v for v in json.loads(ex.assistant)["verdicts"]}
+        for wl, e in entry_of.items():
+            yield ex, wl, e, verdicts[wl], ex.meta["workloads"][wl], sorted(own[wl])
+
+
+def _names() -> names_mod.Names:
+    return names_mod.Names(
+        ns="shop", name="web", pod="web-5d8f7c9b4-x2k9p", container="app",
+        init_container="init-config", image="registry.example.com/shop/web:v1.2.3",
+        node="worker-1", pvc="data-0", restarts=5)
+
+
+def test_every_named_answer_rests_on_its_own_lines(examples):
+    """Spec test 2: the cause is the kit's, and the anchor, every key and
+    every fact in the reason are on the workload's own lines."""
+    named = 0
+    for ex, wl, e, v, wm, own in catalog_rows(examples, skip=MULTI_CASES):
+        if wm["decided"] or v["cause"] == c.NONE_OF_THESE:
+            continue
+        named += 1
+        a, text, where = e.answer, "\n".join(own), (ex.case, ex.group, wl)
+        assert v["cause"] == cases._fmt(a.cause, _names()), where
+        assert any(gold._norm_cause(a.anchor) in ln for ln in own), where
+        assert all(any(k in ln for ln in own) for k in a.keys), where
+        unshown = [t for t in FACT.findall(v["rationale"]) if t.lower() not in text]
+        assert unshown == [], (*where, unshown)
+    assert named > 1000
+
+
+def test_confidence_follows_the_gold(examples):
+    """Spec test 4: rules-decided rows are high, named rows carry the kit's
+    confidence, none_of_these rows are low, and meta agrees."""
+    for ex, wl, e, v, wm, _own in catalog_rows(examples, skip=MULTI_CASES):
+        if wm["decided"]:
+            want = "high"
+        elif v["cause"] == c.NONE_OF_THESE:
+            want = "low"
+        else:
+            want = e.answer.confidence
+        assert v["confidence"] == want, (ex.case, ex.group, wl)
+        if "expected_confidence" in ex.meta:
+            first = json.loads(ex.assistant)["verdicts"][0]
+            assert ex.meta["expected_confidence"] == first["confidence"], (ex.case, ex.group)
+
+
+def _probe_own_lines(examples) -> list[str]:
+    ex = next(x for x in examples
+              if x.case == "own_cause" and x.group.startswith("probe-failure:"))
+    wl = ex.group.split(":", 1)[1]
+    return sorted(gold.own_lines(ex.user, [wl])[wl])
+
+
+def test_the_gate_names_the_cause_only_on_its_anchor(examples):
+    """Spec test 3, the hand-cut case: real own lines of a probe-failure row."""
+    e, n = ENTRIES["probe-failure"], _names()
+    own = _probe_own_lines(examples)
+    named = cases._entry_gold(e, n, own, [])
+    assert named == gold.RowGold("named", e.answer.cause, "high", ("readiness", "endpoint"),
+                                 e.answer.rationale, False)
+    none = gold.RowGold("none_of_these", "", "low", (),
+                        "its readiness probe fails" + GATED, False)
+    cut = [ln for ln in own if "http 500" not in ln]
+    assert cases._entry_gold(e, n, cut, []) == none
+    assert cases._entry_gold(e, n, own, ["http 500"]) == none
+
+
+def test_a_key_only_on_an_excluded_line_fails_the_build():
+    e = dataclasses.replace(ENTRIES["probe-failure"], answer=stories.Answer(
+        anchor="http 500", cause="the readiness endpoint fails",
+        keys=("readiness", "endpoint"), rationale="x."))
+    own = ["probe says http 500", "readiness endpoint is down"]
+    with pytest.raises(ValueError, match="sits only in excluded lines"):
+        cases._entry_gold(e, _names(), own, ["readiness endpoint is down"])
+    with pytest.raises(ValueError, match="sits in no own line"):
+        cases._entry_gold(e, _names(), own[:1], [])
+
+
+def test_an_entry_with_no_kit_cannot_answer():
+    e = next(x for x in catalog.all_entries() if not x.trains)
+    with pytest.raises(ValueError, match="has no answer kit"):
+        cases._entry_gold(e, _names(), [], [])
+
+
+def _unprinted(key: str) -> catalog.CatalogEntry:
+    """`key`'s entry with an anchor no prompt ever prints."""
+    e = ENTRIES[key]
+    return dataclasses.replace(e, answer=dataclasses.replace(
+        e.answer, anchor="this line is never printed"))
+
+
+@pytest.mark.parametrize("case", ["own_cause", "wrong_attribution", "misattribution_probe"])
+def test_a_single_row_with_no_anchor_names_nothing(case):
+    e, n = _unprinted("probe-failure"), _names()
+    shape = "refuted" if case == "wrong_attribution" else "ruled_out"
+    ex = cases._undecided_example(e, n, case=case, shape=shape, evidence="clear")
+    doc = json.loads(ex.assistant)
+    (row,) = doc["verdicts"]
+    assert (row["cause"], row["confidence"], row["rationale"]) == (
+        c.NONE_OF_THESE, "low", "its readiness probe fails" + GATED)
+    assert doc["summary"] == cases._ruled_out_summary("shop/web")
+    wm = ex.meta["workloads"]["shop/web"]
+    assert (wm["own_cause_keywords"], wm["own_cause_must_not"]) == ([], [])
+    assert ex.meta["expected_cause"] == c.NONE_OF_THESE
+
+
+def test_an_empty_candidates_row_with_no_anchor_does_not_claim_a_list():
+    ex = cases.empty_candidates(_unprinted("probe-failure"), _names())
+    doc = json.loads(ex.assistant)
+    (row,) = doc["verdicts"]
+    assert (row["cause"], row["confidence"]) == (c.NONE_OF_THESE, "low")
+    assert doc["summary"] == ("shop/web is failing, but its own lines do not show why.\n"
+                              "No deterministic candidates were available.")
+    assert ex.meta["expected_own_keywords"] == []

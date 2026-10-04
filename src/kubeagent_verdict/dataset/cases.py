@@ -324,7 +324,7 @@ def _job1_example(e: CatalogEntry, n: Names, menu: tuple, case: str, *,
     w = _workload(e, n, candidates, render.header_for(candidates), result=result)
     user = _user_message(None, "", _service_issues(e, n), (w,), res.reads, key=e.key)
     key = f"{n.ns}/{n.name}"
-    cause, conf = result.cause, _confidence(e)
+    cause, conf = result.cause, "high"
     rows = [{"workload": key, "cause": cause, "confidence": conf,
              "rationale": _rule_rationale(result)}]
     wm = workload_meta(result, expected_cause=cause, own_cause_keywords=[],
@@ -424,14 +424,46 @@ _CLEAR_WORDING = {
     "misattribution_probe": ("", None),
 }
 _MENUS = {"refuted": _refuted_menu, "ruled_out": _ruled_out_menu}
+_GATED_NONE = "; none of its own lines says why."
+
+
+def _entry_gold(e: CatalogEntry, n: Names, own: Sequence[str],
+                excluded: Sequence[str]) -> gold.RowGold:
+    """The gold for one undecided catalog workload (Spec 4b-2 §2).
+
+    It names the kit's cause only when the kit's anchor is in the
+    workload's anchor lines: its own lines minus every line that names an
+    excluded (ruled-out or refuted) cause. Otherwise the answer is
+    none_of_these, at low confidence, with no keys. A named answer whose
+    key sits in no anchor line raises ValueError, so a kit that leans on
+    a hidden word fails the build instead of teaching it.
+    """
+    a = e.answer
+    if a is None:
+        raise ValueError(f"{e.key} has no answer kit")
+    own = list(own)
+    anchors = gold.drop_excluded(own, excluded)
+    anchor = gold._norm_cause(_fmt(a.anchor, n))
+    if any(anchor in ln for ln in anchors):
+        gold.check_keys(a.keys, anchors=anchors, own=own)
+        return gold.RowGold("named", _fmt(a.cause, n), a.confidence, a.keys,
+                            _fmt(a.rationale, n), False)
+    return gold.RowGold("none_of_these", "", "low", (), f"{e.none_phrase}{_GATED_NONE}", False)
+
+
+def _ruled_out_summary(key: str) -> str:
+    """The summary of an undecided single row that names no cause."""
+    return (f"{key} is failing, but the evidence rules out the listed causes.\n"
+            "A closer look at the workload is needed.")
 
 
 def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
                        evidence: str) -> Example:
     """Build one undecided row: `shape` is "refuted" or "ruled_out",
     `evidence` is "clear" or "thin". Thin evidence is the `none_of_these`
-    case and only it; clear evidence answers the entry's own cause at its
-    own confidence.
+    case and only it; clear evidence answers the kit's cause when the
+    workload's own lines show its anchor (`_entry_gold`), and none_of_these
+    when they do not.
 
     No rng: nothing here is drawn. kubeagent prints candidates in trace
     order, and the answer is on no candidate line, so order gives nothing
@@ -462,15 +494,21 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
     if thin:
         cause, conf, keywords, must_not = c.NONE_OF_THESE, "low", [], []
         rationale = _THIN_RATIONALE[shape]
-        summary = (f"{key} is failing, but the evidence rules out the listed causes.\n"
-                   "A closer look at the workload is needed.")
+        summary = _ruled_out_summary(key)
     else:
-        cause, conf, keywords = _fmt(e.own_cause, n), _confidence(e), list(e.own_cause_keywords)
-        must_not = list(e.own_cause_must_not)
-        suffix, last = _CLEAR_WORDING[case]
-        rationale = _fmt(e.rationale, n) + suffix
-        last = last or f"{_fmt(e.recommendation, n).capitalize()}."
-        summary = f"{key} is failing: {cause}.\n{last}"
+        own = sorted(gold.own_lines(user, [key])[key])
+        g = _entry_gold(e, n, own, gold.excluded_from(candidates, result))
+        if g.verdict == "named":
+            cause, conf, keywords = g.cause, g.confidence, list(g.keys)
+            must_not = list(e.own_cause_must_not)
+            suffix, last = _CLEAR_WORDING[case]
+            rationale = g.rationale + suffix
+            last = last or f"{_fmt(e.recommendation, n).capitalize()}."
+            summary = f"{key} is failing: {cause}.\n{last}"
+        else:
+            cause, conf, keywords, must_not = c.NONE_OF_THESE, "low", [], []
+            rationale = g.rationale
+            summary = _ruled_out_summary(key)
     rows = [{"workload": key, "cause": cause, "confidence": conf, "rationale": rationale}]
     wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords,
                        own_cause_must_not=must_not)
@@ -623,8 +661,9 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
 def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     """No candidates at all: the prompt names the cause.
 
-    The row answers the entry's own cause at `_confidence(e)`, as every
-    clear undecided row does; until 2026-09-24 it answered a flat `medium`.
+    The row answers the kit's cause when its own lines show the anchor, and
+    none_of_these when they do not (Spec 4b-2). There is no candidate list,
+    so nothing is excluded.
     Its reads are the gather's for a workload with no candidate: the events
     of its pod and, for a crash-family entry, the clear log read. There is
     nothing to describe. No candidates means no header.
@@ -641,19 +680,24 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     registries = tuple(bind(obj, names) for obj in e.objects if obj.kind == "registry")
     reads = gather.gather([gather_workload(e, n, registries)]).reads
     user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
-    cause = _fmt(e.own_cause, n)
-    conf = _confidence(e)
-    rows = [{"workload": f"{n.ns}/{n.name}", "cause": cause, "confidence": conf,
-             "rationale": _fmt(e.rationale, n)
-                          + " The candidate list shown did not include this cause."}]
-    summary = f"{n.ns}/{n.name} is failing: {cause}.\nNo deterministic candidates were available."
     key = f"{n.ns}/{n.name}"
-    wm = workload_meta(result, expected_cause=cause,
-                       own_cause_keywords=list(e.own_cause_keywords),
-                       own_cause_must_not=list(e.own_cause_must_not))
+    own = sorted(gold.own_lines(user, [key])[key])
+    g = _entry_gold(e, n, own, [])
+    if g.verdict == "named":
+        cause, conf, keywords = g.cause, g.confidence, list(g.keys)
+        must_not = list(e.own_cause_must_not)
+        rationale = g.rationale + " The candidate list shown did not include this cause."
+        first = f"{key} is failing: {cause}."
+    else:
+        cause, conf, keywords, must_not = c.NONE_OF_THESE, "low", [], []
+        rationale = g.rationale
+        first = f"{key} is failing, but its own lines do not show why."
+    rows = [{"workload": key, "cause": cause, "confidence": conf, "rationale": rationale}]
+    summary = f"{first}\nNo deterministic candidates were available."
+    wm = workload_meta(result, expected_cause=cause, own_cause_keywords=keywords,
+                       own_cause_must_not=must_not)
     meta = {"case": "empty_candidates", "entry": e.key, "expected_cause": cause,
-            "expected_confidence": conf,
-            "expected_own_keywords": list(e.own_cause_keywords)}
+            "expected_confidence": conf, "expected_own_keywords": keywords}
     meta.update(prompt_meta({key: wm}, label="none", decoy_by_workload={key: []}))
     return Example(case="empty_candidates", group=f"{e.key}:{n.ns}/{n.name}",
                    system=c.SYSTEM_PROMPT, user=user, assistant=_answer(rows, summary),

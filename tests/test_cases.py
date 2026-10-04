@@ -34,17 +34,19 @@ def test_attributed_example_shape():
     assert row["cause"].startswith(f"node {n.node} (")
     assert f"considered {row['cause']}: attributed — " in ex.user
     assert f"    decided by rules: {row['cause']} — " in ex.user
-    assert row["confidence"] == "high"  # direct=True entry with full evidence
+    assert row["confidence"] == "high"  # a rules-decided row is high
     assert doc["summary"] == f"{n.ns}/{n.name} is failing: {row['cause']}."
     assert ex.meta["expected_cause"] == row["cause"]
     assert set(ex.meta) == {"case", "entry", "expected_cause", "expected_confidence",
                             "workloads", "label", "decoy_by_workload"}
 
 
-def test_attributed_indirect_entry_gets_medium():
+def test_attributed_rows_are_high_for_every_entry():
+    # 2026-10-04 (Spec 4b-2): probe-failure was `medium` until now. A rules-decided row is
+    # `high` whatever the entry's kit says; the kit's confidence is for named answers.
     n = names_mod.draw(random.Random(12))
     ex = cases.attributed(_entry("probe-failure"), n, random.Random(12))
-    assert json.loads(ex.assistant)["verdicts"][0]["confidence"] == "medium"
+    assert json.loads(ex.assistant)["verdicts"][0]["confidence"] == "high"
 
 
 def test_attributed_user_message_is_contract_valid():
@@ -121,7 +123,7 @@ def test_every_job1_row_is_decided_and_its_gold_is_the_rules_cause(builder):
         assert row["rationale"] == cases._rule_rationale(rules.Result(
             decided=True, cause=wm["decided_cause"], outcome=wm["decided_outcome"],
             evidence=wm["decided_evidence"], group_key="", group_text="", decisions=()))
-        assert row["confidence"] == ex.meta["expected_confidence"] == cases._confidence(e)
+        assert row["confidence"] == ex.meta["expected_confidence"] == "high"  # 2026-10-04 (Spec 4b-2): was the entry's
         assert json.loads(ex.assistant)["summary"] == f"{key} is failing: {row['cause']}."
         assert ex.meta["entry"] == e.key and ex.meta["case"] == builder
 
@@ -250,12 +252,12 @@ def test_truncated_shows_eight_candidates_then_the_marker():
             assert lines[0].startswith(f"considered {cause}: attributed — "), e.key
 
 
-def test_truncated_answers_at_the_entrys_confidence_with_no_caution():
-    for e, _n, ex in _job1_rows("truncated", 17):
+def test_truncated_answers_high_with_no_caution():
+    # 2026-10-04 (Spec 4b-2): a rules-decided row is high, so this no longer follows the entry.
+    for _e, _n, ex in _job1_rows("truncated", 17):
         doc = json.loads(ex.assistant)
         (row,) = doc["verdicts"]
-        assert row["confidence"] == ex.meta["expected_confidence"] == cases._confidence(e)
-        assert row["confidence"] != "low"
+        assert row["confidence"] == ex.meta["expected_confidence"] == "high"
         assert "treat with caution" not in doc["summary"]
 
 
@@ -265,7 +267,7 @@ def test_empty_candidates_renders_none_section():
     assert "== BEGIN candidates ==\n(none)\n== END candidates ==" in ex.user
     (row,) = json.loads(ex.assistant)["verdicts"]
     assert row["cause"] == "container killed at its memory limit"  # own phrasing
-    assert row["confidence"] == "high"  # a direct entry; was a flat "medium"
+    assert row["confidence"] == "high"  # the kit's confidence
 
 
 def test_empty_candidates_has_no_candidates_and_the_fixed_sentence():
@@ -273,7 +275,7 @@ def test_empty_candidates_has_no_candidates_and_the_fixed_sentence():
     n = names_mod.draw(random.Random(13))
     ex = cases.empty_candidates(e, n)
     answer = json.loads(ex.assistant)
-    assert answer["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
+    assert answer["verdicts"][0]["cause"] == cases._fmt(e.answer.cause, n)
     assert answer["verdicts"][0]["rationale"].endswith(
         "The candidate list shown did not include this cause.")
     assert ex.user.count("considered") == 0
@@ -281,15 +283,15 @@ def test_empty_candidates_has_no_candidates_and_the_fixed_sentence():
 
 def test_empty_candidates_answers_at_the_entrys_confidence_and_keeps_the_log_read():
     """An empty candidate list does not make the reads say less. The row
-    answers the entry's own cause at the entry's own confidence, like every
+    answers the kit's cause at the kit's own confidence, like every
     clear undecided row, and a crash-family entry keeps the log read
     kubeagent makes for it."""
     for e in catalog.trainable():
         n = names_mod.draw(random.Random(25))
         ex = cases.empty_candidates(e, n)
         (row,) = json.loads(ex.assistant)["verdicts"]
-        assert row["confidence"] == cases._confidence(e), e.key
-        assert ex.meta["expected_confidence"] == cases._confidence(e), e.key
+        assert row["confidence"] == e.answer.confidence, e.key
+        assert ex.meta["expected_confidence"] == e.answer.confidence, e.key
         log = cases._log_read(e, n, "clear")
         if log is not None:
             assert f"== {log.label} ==\n{log.content}" in ex.user, e.key
@@ -407,9 +409,9 @@ def test_own_cause_is_the_ruled_out_shape():
     n = names_mod.draw(random.Random(9))
     ex = cases.own_cause_case(e, n)
     answer = json.loads(ex.assistant)
-    assert answer["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
-    assert answer["verdicts"][0]["confidence"] == cases._confidence(e)
-    assert ex.meta["expected_own_keywords"] == list(e.own_cause_keywords)
+    assert answer["verdicts"][0]["cause"] == cases._fmt(e.answer.cause, n)
+    assert answer["verdicts"][0]["confidence"] == e.answer.confidence
+    assert ex.meta["expected_own_keywords"] == list(e.answer.keys)
     assert answer["verdicts"][0]["rationale"].endswith(
         "The candidate list shown did not include this cause.")
     assert ": attributed" not in _cand_section(ex.user)
@@ -428,7 +430,7 @@ def test_wrong_attribution_names_its_decoy_cause_and_expects_the_own_cause():
     answer = json.loads(ex.assistant)
     key = f"{n.ns}/{n.name}"
     assert ex.meta["decoy_cause"] == ex.meta["decoy_by_workload"][key][0]
-    assert answer["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
+    assert answer["verdicts"][0]["cause"] == cases._fmt(e.answer.cause, n)
 
 
 def test_positional_probe_takes_rng_and_raises_on_empty_objects():
@@ -558,7 +560,8 @@ def test_contradiction_probe_gold_follows_the_rules(key):
     workload = f"{n.ns}/{n.name}"
     assert row["workload"] == workload
     assert row["cause"] == result.cause == _decided_line(ex)[0] == ex.meta["expected_cause"]
-    assert row["confidence"] == cases._confidence(e) == ex.meta["expected_confidence"]
+    # 2026-10-04 (Spec 4b-2): a rules-decided row is high.
+    assert row["confidence"] == "high" == ex.meta["expected_confidence"]
     assert row["rationale"] == cases._rule_rationale(result)
     assert doc["summary"] == f"{workload} is failing: {result.cause}."
     assert "\n" not in doc["summary"]
@@ -711,7 +714,7 @@ def test_misattribution_probe_menu_never_tags_attributed():
     section = _cand_section(ex.user)
     assert ": attributed" not in section
     # The evidence is untouched, so the answer is the workload's own cause.
-    assert json.loads(ex.assistant)["verdicts"][0]["cause"] == cases._fmt(e.own_cause, n)
+    assert json.loads(ex.assistant)["verdicts"][0]["cause"] == cases._fmt(e.answer.cause, n)
 
 
 def test_contradiction_probe_never_answers_none_of_these():
@@ -1535,9 +1538,9 @@ def test_a_ruled_out_row_outside_the_crash_family_has_only_the_events_read():
 
 
 @pytest.mark.parametrize(("key", "header"), [
-    ("networkpolicy-deny-all", "high"),      # a node cause; the entry says medium
-    ("probe-failure", "high"),               # a node cause; the entry says medium
-    ("restart-loop", "high"),                # a node cause; the entry says medium
+    ("networkpolicy-deny-all", "high"),      # a node cause; the kit says medium
+    ("probe-failure", "high"),               # a node cause; the kit says high
+    ("restart-loop", "high"),                # a node cause; the kit says high
     ("memory-limit-oomkill", "high"),        # the rule and the entry agree
 ])
 def test_the_refuted_header_follows_kubeagents_rule_not_the_entry(key, header):
@@ -1635,14 +1638,14 @@ def test_the_public_builders_give_one_prompt_one_answer():
 
 @pytest.mark.parametrize("case", CLEAR_CASES)
 @pytest.mark.parametrize("shape", SHAPES)
-def test_a_clear_row_answers_the_own_cause_at_the_entrys_confidence(case, shape):
+def test_a_clear_row_answers_the_kits_cause_at_the_kits_confidence(case, shape):
     for e in catalog.trainable():
         n = names_mod.draw(random.Random(5))
         ex = cases._undecided_example(e, n, case=case, shape=shape, evidence="clear")
         (row,) = json.loads(ex.assistant)["verdicts"]
-        assert row["cause"] == cases._fmt(e.own_cause, n) == ex.meta["expected_cause"]
-        assert row["confidence"] == ("high" if e.direct else "medium") \
-            == ex.meta["expected_confidence"], e.key
+        # 2026-10-04 (Spec 4b-2): the kit's cause and confidence, not the entry's.
+        assert row["cause"] == cases._fmt(e.answer.cause, n) == ex.meta["expected_cause"]
+        assert row["confidence"] == e.answer.confidence == ex.meta["expected_confidence"], e.key
 
 
 @pytest.mark.parametrize(("case", "suffix", "last_line"), [
@@ -1658,9 +1661,9 @@ def test_each_clear_case_keeps_its_own_wording(case, suffix, last_line):
     n = names_mod.draw(random.Random(5))
     ex = cases._undecided_example(e, n, case=case, shape="ruled_out", evidence="clear")
     doc = json.loads(ex.assistant)
-    assert doc["verdicts"][0]["rationale"] == cases._fmt(e.rationale, n) + suffix
+    assert doc["verdicts"][0]["rationale"] == cases._fmt(e.answer.rationale, n) + suffix
     want = last_line or cases._fmt(e.recommendation, n).capitalize() + "."
-    assert doc["summary"] == f"{n.ns}/{n.name} is failing: {cases._fmt(e.own_cause, n)}.\n{want}"
+    assert doc["summary"] == f"{n.ns}/{n.name} is failing: {cases._fmt(e.answer.cause, n)}.\n{want}"
 
 
 def test_each_case_keeps_its_own_meta_keys():

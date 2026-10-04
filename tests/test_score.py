@@ -3582,8 +3582,9 @@ def test_the_exposed_workloads_trace_back_to_twenty_catalog_entries():
     """
     declaring = {}
     for entry in catalog.all_entries():
-        if entry.own_cause_keywords:
-            declaring.setdefault(tuple(entry.own_cause_keywords), []).append(entry.key)
+        # 2026-10-04 (Spec 4b-2): the exam's meta carries the kit's keys, so read the kits.
+        if entry.answer:
+            declaring.setdefault(tuple(entry.answer.keys), []).append(entry.key)
 
     exposed, hidden = Counter(), Counter()
     for row in _corpus_rows():
