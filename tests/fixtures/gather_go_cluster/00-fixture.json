@@ -1,0 +1,1442 @@
+{
+  "backends": [
+    {
+      "desired": 0,
+      "kind": "CronJob",
+      "labels": {
+        "app": "s04"
+      },
+      "name": "b-s04",
+      "namespace": "svc"
+    },
+    {
+      "desired": 0,
+      "kind": "Job",
+      "labels": {
+        "app": "s05"
+      },
+      "name": "b-s05",
+      "namespace": "svc"
+    },
+    {
+      "desired": 0,
+      "kind": "DaemonSet",
+      "labels": {
+        "app": "s06"
+      },
+      "name": "b-s06",
+      "namespace": "svc"
+    },
+    {
+      "desired": 0,
+      "kind": "Deployment",
+      "labels": {
+        "app": "s07"
+      },
+      "name": "b-s07",
+      "namespace": "svc"
+    },
+    {
+      "desired": 0,
+      "kind": "StatefulSet",
+      "labels": {
+        "app": "s08"
+      },
+      "name": "b-s08",
+      "namespace": "svc"
+    }
+  ],
+  "endpoint_slices": [
+    {
+      "namespace": "svc",
+      "ready": [
+        "true"
+      ],
+      "service": "s01"
+    },
+    {
+      "namespace": "svc",
+      "ready": [
+        "false"
+      ],
+      "service": "s02"
+    }
+  ],
+  "kubeagent": {
+    "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd",
+    "tag": "v1.24.0"
+  },
+  "network_policies": [
+    {
+      "name": "allow-web",
+      "namespace": "app",
+      "pod_selector": {
+        "app": "web"
+      }
+    },
+    {
+      "name": "deny-web",
+      "namespace": "app",
+      "pod_selector": {
+        "app": "web"
+      }
+    },
+    {
+      "name": "other-ns-policy",
+      "namespace": "other",
+      "pod_selector": {
+        "app": "web"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx start and the",
+          "reason": "KubeletNotReady",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "False",
+        "ready_message": "container runtime is down",
+        "ready_reason": "KubeletNotReady"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n01",
+      "scan_reason": "NotReady"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "Kubelet stopped posting node status.",
+          "reason": "NodeStatusUnknown",
+          "status": "Unknown",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "False",
+        "ready_message": "container runtime is down",
+        "ready_reason": "KubeletNotReady"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n02",
+      "scan_reason": "NotReady"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "PLEG is not healthy: pleg was last seen active 3m0s ago",
+          "reason": "",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "False",
+        "ready_message": "container runtime is down",
+        "ready_reason": "KubeletNotReady"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n03",
+      "scan_reason": "NotReady"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "missing"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n04",
+      "scan_reason": "NotReady"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "missing",
+      "name": "n05",
+      "scan_reason": "no kubelet lease"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "no_renew",
+      "name": "n06",
+      "scan_reason": "no kubelet lease"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 40400,
+      "name": "n07",
+      "scan_reason": "kubelet not heartbeating"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 42500,
+      "name": "n08",
+      "scan_reason": "kubelet not heartbeating"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 95000,
+      "name": "n09",
+      "scan_reason": "kubelet not heartbeating"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 3600000,
+      "name": "n10",
+      "scan_reason": "kubelet not heartbeating"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 3700000,
+      "name": "n11",
+      "scan_reason": "kubelet not heartbeating"
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 40000,
+      "name": "n12",
+      "scan_reason": ""
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has insufficient memory available",
+          "reason": "KubeletHasInsufficientMemory",
+          "status": "True",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has insufficient PID available",
+          "reason": "KubeletHasInsufficientPID",
+          "status": "True",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n13",
+      "scan_reason": ""
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n14",
+      "scan_reason": "",
+      "unschedulable": true
+    },
+    {
+      "conditions": [
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has disk pressure",
+          "reason": "KubeletHasDiskPressure",
+          "status": "True",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "container runtime is down",
+          "reason": "KubeletNotReady",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "disk_pressure": true,
+        "how": "read",
+        "ready": "False",
+        "ready_message": "container runtime is down",
+        "ready_reason": "KubeletNotReady",
+        "unschedulable": true
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n15",
+      "scan_reason": "NotReady",
+      "unschedulable": true
+    },
+    {
+      "conditions": [
+        {
+          "message": "the node has no route to its pod network",
+          "reason": "NoRouteCreated",
+          "status": "True",
+          "type": "NetworkUnavailable"
+        },
+        {
+          "message": "the root filesystem is mounted read-only",
+          "reason": "FilesystemIsReadOnly",
+          "status": "True",
+          "type": "ReadonlyFilesystem"
+        },
+        {
+          "message": "the docker overlay2 store is corrupt",
+          "reason": "CorruptDockerOverlay2",
+          "status": "True",
+          "type": "CorruptDockerOverlay2"
+        },
+        {
+          "message": "kubelet has sufficient memory available",
+          "reason": "KubeletHasSufficientMemory",
+          "status": "False",
+          "type": "MemoryPressure"
+        },
+        {
+          "message": "kubelet has no disk pressure",
+          "reason": "KubeletHasNoDiskPressure",
+          "status": "False",
+          "type": "DiskPressure"
+        },
+        {
+          "message": "kubelet has sufficient PID available",
+          "reason": "KubeletHasSufficientPID",
+          "status": "False",
+          "type": "PIDPressure"
+        },
+        {
+          "message": "kubelet is posting ready status",
+          "reason": "KubeletReady",
+          "status": "True",
+          "type": "Ready"
+        }
+      ],
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "lease": "renewed",
+      "lease_age_ms": 10000,
+      "name": "n16",
+      "scan_reason": ""
+    }
+  ],
+  "platform_line": "",
+  "pvcs": [],
+  "service_issues": [],
+  "services": [
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s01",
+      "namespace": "svc",
+      "selector": {
+        "app": "s01"
+      },
+      "type": "LoadBalancer"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s02",
+      "namespace": "svc",
+      "selector": {
+        "app": "s02"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {
+        "kubeagent.io/expected-empty": "true"
+      },
+      "lb_ingress": false,
+      "name": "s03",
+      "namespace": "svc",
+      "selector": {
+        "app": "s03"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s04",
+      "namespace": "svc",
+      "selector": {
+        "app": "s04"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s05",
+      "namespace": "svc",
+      "selector": {
+        "app": "s05"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s06",
+      "namespace": "svc",
+      "selector": {
+        "app": "s06"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s07",
+      "namespace": "svc",
+      "selector": {
+        "app": "s07"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s08",
+      "namespace": "svc",
+      "selector": {
+        "app": "s08"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s09",
+      "namespace": "svc",
+      "selector": {
+        "app": "s09"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s10",
+      "namespace": "svc",
+      "selector": {
+        "app": "s10"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s11",
+      "namespace": "svc",
+      "selector": {
+        "app": "s11"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s12",
+      "namespace": "svc",
+      "selector": {
+        "app": "s12"
+      },
+      "type": "ClusterIP"
+    },
+    {
+      "annotations": {},
+      "lb_ingress": false,
+      "name": "s13",
+      "namespace": "svc",
+      "selector": {
+        "app": "s13"
+      },
+      "type": "ClusterIP"
+    }
+  ],
+  "summary": {
+    "cpu": {
+      "allocatable": "6",
+      "limits": "5400m",
+      "limits_pct": 90,
+      "requests": "4200m",
+      "requests_pct": 70
+    },
+    "memory": {
+      "allocatable": "12Gi",
+      "limits": "11Gi",
+      "limits_pct": 91,
+      "requests": "9Gi",
+      "requests_pct": 75
+    },
+    "metrics_available": false
+  },
+  "workloads": [
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "BackOff",
+          "Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w",
+          18
+        ],
+        [
+          "NodeNotReady",
+          "Node is not ready",
+          1
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=12",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "app/cart-6b8f5d7c4-r9t3w",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "cart",
+      "namespace": "app",
+      "pod": "cart-6b8f5d7c4-r9t3w",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "cart"
+          },
+          "name": "cart-6b8f5d7c4-r9t3w",
+          "node": "n15",
+          "ready": false
+        }
+      ],
+      "ready": 0,
+      "restarts": 12,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [
+        [
+          "Unhealthy",
+          "Readiness probe failed: Get \"http://web:8080/healthz\": context deadline exceeded",
+          27
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "app",
+          "evidence": "container \"app\": readiness — connection timed out",
+          "image": "",
+          "issue": "ProbeFailure",
+          "pod": "app/web-5d8f7c9b6-a1b2c",
+          "reason": "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        },
+        {
+          "container": "app",
+          "evidence": "container \"app\": readiness — connection timed out",
+          "image": "",
+          "issue": "ProbeFailure",
+          "pod": "app/web-5d8f7c9b6-d4e5f",
+          "reason": "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "web",
+      "namespace": "app",
+      "pod": "web-5d8f7c9b6-a1b2c",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "web"
+          },
+          "name": "web-5d8f7c9b6-a1b2c",
+          "node": "n16",
+          "ready": false
+        },
+        {
+          "claims": [],
+          "labels": {
+            "app": "web"
+          },
+          "name": "web-5d8f7c9b6-d4e5f",
+          "node": "n16",
+          "ready": false
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=5",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-a-7c9d4b5f6-x0k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-a",
+      "namespace": "kube-system",
+      "pod": "ks-a-7c9d4b5f6-x0k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-a"
+          },
+          "name": "ks-a-7c9d4b5f6-x0k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 5,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=6",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-b-7c9d4b5f6-x1k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-b",
+      "namespace": "kube-system",
+      "pod": "ks-b-7c9d4b5f6-x1k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-b"
+          },
+          "name": "ks-b-7c9d4b5f6-x1k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 6,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=7",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-c-7c9d4b5f6-x2k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-c",
+      "namespace": "kube-system",
+      "pod": "ks-c-7c9d4b5f6-x2k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-c"
+          },
+          "name": "ks-c-7c9d4b5f6-x2k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 7,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=8",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-d-7c9d4b5f6-x3k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-d",
+      "namespace": "kube-system",
+      "pod": "ks-d-7c9d4b5f6-x3k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-d"
+          },
+          "name": "ks-d-7c9d4b5f6-x3k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 8,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=9",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-e-7c9d4b5f6-x4k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-e",
+      "namespace": "kube-system",
+      "pod": "ks-e-7c9d4b5f6-x4k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-e"
+          },
+          "name": "ks-e-7c9d4b5f6-x4k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 9,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=10",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-f-7c9d4b5f6-x5k2m",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-f",
+      "namespace": "kube-system",
+      "pod": "ks-f-7c9d4b5f6-x5k2m",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-f"
+          },
+          "name": "ks-f-7c9d4b5f6-x5k2m",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 10,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "container \"app\", restartCount=9",
+          "image": "",
+          "issue": "CrashLoopBackOff",
+          "pod": "kube-system/ks-deploy-5b8d7f6c9-q2w3e",
+          "reason": "Container repeatedly crashes after starting"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "ks-deploy",
+      "namespace": "kube-system",
+      "pod": "ks-deploy-5b8d7f6c9-q2w3e",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-deploy"
+          },
+          "name": "ks-deploy-5b8d7f6c9-q2w3e",
+          "node": "n16"
+        },
+        {
+          "claims": [],
+          "labels": {
+            "app": "ks-deploy"
+          },
+          "name": "ks-deploy-5b8d7f6c9-r4t5y",
+          "node": "n16"
+        }
+      ],
+      "ready": 0,
+      "restarts": 9,
+      "status": "CrashLoopBackOff"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "StatefulSet",
+      "name": "ks-sts",
+      "namespace": "kube-system",
+      "pod": "ks-sts",
+      "pods": [],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Pending"
+    },
+    {
+      "decoy_events": [],
+      "desired": 4,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "DaemonSet",
+      "name": "ks-ds",
+      "namespace": "kube-system",
+      "pod": "ks-ds",
+      "pods": [
+        {
+          "claims": [],
+          "name": "ks-ds-a1b2c",
+          "node": "n16"
+        },
+        {
+          "claims": [],
+          "name": "ks-ds-d4e5f",
+          "node": "n12"
+        },
+        {
+          "claims": [],
+          "name": "ks-ds-g7h8i",
+          "node": "n13"
+        }
+      ],
+      "ready": 3,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Job",
+      "name": "ks-job",
+      "namespace": "kube-system",
+      "pod": "ks-job",
+      "pods": [],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Failed"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "CronJob",
+      "name": "ks-cron",
+      "namespace": "kube-system",
+      "pod": "ks-cron",
+      "pods": [],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Last run failed"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s01",
+      "namespace": "svc",
+      "pod": "backing-s01",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s01"
+          },
+          "name": "backing-s01-0",
+          "node": "n16",
+          "ready": true
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s02",
+      "namespace": "svc",
+      "pod": "backing-s02",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s02"
+          },
+          "name": "backing-s02-0",
+          "node": "n16",
+          "ready": true
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s10",
+      "namespace": "svc",
+      "pod": "backing-s10",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s10"
+          },
+          "name": "backing-s10-0",
+          "node": "n01",
+          "ready": false
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s11",
+      "namespace": "svc",
+      "pod": "backing-s11",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s11"
+          },
+          "name": "backing-s11-0",
+          "node": "n02",
+          "ready": false
+        },
+        {
+          "claims": [],
+          "labels": {
+            "app": "s11"
+          },
+          "name": "backing-s11-1",
+          "node": "n05",
+          "ready": false
+        }
+      ],
+      "ready": 2,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s12",
+      "namespace": "svc",
+      "pod": "backing-s12",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s12"
+          },
+          "name": "backing-s12-0",
+          "node": "n16",
+          "ready": false
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 3,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s13",
+      "namespace": "svc",
+      "pod": "backing-s13",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s13"
+          },
+          "name": "backing-s13-0",
+          "node": "n16",
+          "ready": false
+        },
+        {
+          "claims": [],
+          "labels": {
+            "app": "s13"
+          },
+          "name": "backing-s13-1",
+          "node": "n16",
+          "ready": false
+        },
+        {
+          "claims": [],
+          "labels": {
+            "app": "s13"
+          },
+          "name": "backing-s13-2",
+          "node": "n16",
+          "ready": false
+        }
+      ],
+      "ready": 3,
+      "restarts": 0,
+      "status": "Running"
+    }
+  ]
+}

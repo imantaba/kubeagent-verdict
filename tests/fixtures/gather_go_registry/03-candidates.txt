@@ -1,0 +1,12 @@
+workload	1	pull	p-auth	registry reg.example.com (5 workloads failing to pull)	medium
+candidate	registry	reg.example.com	attributed	registry		registry reg.example.com (5 workloads failing to pull)	5 workloads failing to pull from this host clear the threshold of 2
+workload	2	pull	p-conn	registry reg.example.com (5 workloads failing to pull)	medium
+candidate	registry	reg.example.com	attributed	registry		registry reg.example.com (5 workloads failing to pull)	5 workloads failing to pull from this host clear the threshold of 2
+workload	3	pull	p-image	registry reg.example.com (5 workloads failing to pull)	medium
+candidate	registry	reg.example.com	attributed	registry		registry reg.example.com (5 workloads failing to pull)	5 workloads failing to pull from this host clear the threshold of 2
+workload	4	pull	p-nopull	registry reg.example.com (5 workloads failing to pull)	medium
+candidate	registry	reg.example.com	attributed	registry		registry reg.example.com (5 workloads failing to pull)	5 workloads failing to pull from this host clear the threshold of 2
+workload	5	pull	p-notread	registry reg.example.com (5 workloads failing to pull)	medium
+candidate	registry	reg.example.com	attributed	registry		registry reg.example.com (5 workloads failing to pull)	5 workloads failing to pull from this host clear the threshold of 2
+workload	6	pull	solo		
+candidate	registry	other.example.com	ruled_out	ruled_out		registry other.example.com	only workload failing to pull from this host; threshold is 2

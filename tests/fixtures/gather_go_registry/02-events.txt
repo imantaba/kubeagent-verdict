@@ -1,0 +1,32 @@
+events	1	pull	p-auth-5d8f7c9b6-d4e5f	ok	1	
+event	Failed	Failed to pull image "reg.example.com/b:1": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required	4
+block	content	190
+events for pull/p-auth-5d8f7c9b6-d4e5f:
+  Failed: Failed to pull image "reg.example.com/b:1": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required (x4)
+events	2	pull	p-conn-6b8f5d7c4-a1b2c	ok	2	
+event	Failed	Failed to pull image "reg.example.com/a:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout	6
+event	BackOff	Back-off pulling image "reg.example.com/a:1"	14
+block	content	219
+events for pull/p-conn-6b8f5d7c4-a1b2c:
+  Failed: Failed to pull image "reg.example.com/a:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x6)
+  BackOff: Back-off pulling image "reg.example.com/a:1" (x14)
+events	3	pull	p-image-7c9d4b5f6-g7h8i	ok	1	
+event	Failed	Failed to pull image "reg.example.com/c:1": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown	3
+block	content	179
+events for pull/p-image-7c9d4b5f6-g7h8i:
+  Failed: Failed to pull image "reg.example.com/c:1": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown (x3)
+events	4	pull	p-nopull-6d5f7c8b9-j1k2l	ok	1	
+event	BackOff	Back-off pulling image "reg.example.com/d:1"	22
+block	content	103
+events for pull/p-nopull-6d5f7c8b9-j1k2l:
+  BackOff: Back-off pulling image "reg.example.com/d:1" (x22)
+events	5	pull	p-notread-5b8d7f6c9-m3n4o	ok	1	
+event	Unhealthy	Readiness probe failed: HTTP probe failed with statuscode: 503	9
+block	content	123
+events for pull/p-notread-5b8d7f6c9-m3n4o:
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (x9)
+events	6	pull	solo-7c9d4b5f6-s7t8u	ok	1	
+event	Failed	Failed to pull image "other.example.com/f:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout	5
+block	content	157
+events for pull/solo-7c9d4b5f6-s7t8u:
+  Failed: Failed to pull image "other.example.com/f:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x5)

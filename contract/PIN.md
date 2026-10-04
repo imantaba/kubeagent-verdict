@@ -103,6 +103,75 @@ contract version.
   crash finding with a container gets a `-c <container>` suggestion.
   `golden/answer.json` was edited by hand to the new roster.
 
+## Capture record (v1.24.0, cluster and registry capture)
+
+- Captured from kubeagent tag `v1.24.0`, commit `15ec5649bbd2d07558eae945b71430afc8f231fd`.
+  Go: `go1.26.4 linux/amd64`.
+- The capture ran from a `git archive v1.24.0` copy in a scratch folder; the
+  kubeagent checkout was not touched.
+- Harness: `contract/capture/kv_capture_test.go.txt`. It now has four modes,
+  each with its own fixture env var: main (`KV_FIXTURE`), logs
+  (`KV_FIXTURE_LOGS`), cluster (`KV_FIXTURE_CLUSTER`) and registry
+  (`KV_FIXTURE_REGISTRY`). One `go test -count=1 -tags goldencapture -run
+  TestCaptureVerdictGolden ./internal/investigate` run writes all four dump
+  folders. The cluster mode also runs three pure scan steps in `scan.go`'s
+  order: `svchealth.Assess`, `svchealth.AnnotateEndpointCause` and
+  `netpolicy.Annotate` (before `rootcause.Annotate`).
+- New fixtures: `tests/fixtures/gather_fixture_cluster.yaml` (16 nodes, 19
+  workloads, 13 services) and `tests/fixtures/gather_fixture_registry.yaml`
+  (3 nodes, 6 Deployments that fail to pull).
+- New dumps: `tests/fixtures/gather_go_cluster/` and
+  `tests/fixtures/gather_go_registry/`, 11 files each, plus a README.
+- The 22 old dumps (`gather_go/` and `gather_go_logs/`) and the four golden
+  files came out of this run byte for byte as they were. Nothing under
+  `contract/golden/` moved.
+- The Python tests check the registry dumps byte for byte. The cluster dumps
+  are checked only for dump 0 until the Python cluster-health code exists.
+- Built rows reach the registry no-pull sentence 0 times. The capture proves
+  its bytes; reaching it needs a victim whose events have aged out.
+- **What the cluster capture does not pin.**
+  - Services s11 to s13 are cut by the prompt's 10-issue cap. So the "2 down
+    nodes" wording and the one-pod versus many-pods wording never reach a
+    dump. The Python port of those arms has no byte check.
+  - n15's node attribution is the 12th of 12 candidates for each workload,
+    and the prompt keeps 8. The line "decided by rules: node n15 (NotReady)"
+    still shows.
+  - No node describe beyond n15 happens. The 8 reads go to events reads before
+    ks-ds and ks-e are reached.
+- sha256 of the fixtures:
+
+  | File | sha256 |
+  |---|---|
+  | `gather_fixture_cluster.yaml` | `83f62faacfac972ade51aa8553f64c23f60743a896dbf44481fdfab058285b0f` |
+  | `gather_fixture_registry.yaml` | `48811313b35ad24e27dc4e670a321fe6018a35b447c1a6baf61f9415ff308b05` |
+
+- sha256 of the dumps (`sha256sum` format). `05-pvcs.txt` is empty in both
+  folders, and `04-nodes.txt` is empty in the registry folder
+  (`e3b0c442…`).
+
+      fcdbc99f3a0e729bd0dca4101df4afb88bc9842ce644c0e7209ca6ba2714ef15  gather_go_cluster/00-fixture.json
+      4c77e595a5306377ed86cf80dd75e73e8b62067d36bae4f198fa0b94f163956f  gather_go_cluster/01-order.txt
+      0dab56fb3d2835692df3988817f7e50224979e4c0c27fa70daf47c5cbb649106  gather_go_cluster/02-events.txt
+      877956fd80b0dcecd3f3f0737a7f2aa179d1595b4b6c5d5ed7b50640ad69f5f0  gather_go_cluster/03-candidates.txt
+      66bc3439671a6efc8c9e6422101daf0d754cb44a43d11d3ad44b9c32c40c943f  gather_go_cluster/04-nodes.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_cluster/05-pvcs.txt
+      34a2db7f46ce5d662f86998706a5eb158a8386f6857d6ac92f4b89d0579c998d  gather_go_cluster/06-logs.txt
+      884f6dc71e7caaf660760e730ad83f3a30977a7a4ac7436aac017be67bca4322  gather_go_cluster/07-trail.txt
+      e49370ca72bc319e0cd13862361edcf101c628f194ba784ea1dd16ca0d6ac63c  gather_go_cluster/08-bundle.txt
+      ec5591ac409d83531f81ade0139c0c7903eb2be9532c5d859a2454877e6ea992  gather_go_cluster/09-decide.txt
+      72aae1ba7238ed920ea8e4602a91ee464775e32dfac98d60cddb8eb2a9fde228  gather_go_cluster/10-prompt.txt
+      0ce4aa595c3eaf0ad3b3226a9928bc9534e2593ab1082e8db1fbfb323c209582  gather_go_registry/00-fixture.json
+      6201f610bf496c64f84f910df9ef8e3a766b74b29d0aeed0a94db502ecbe8934  gather_go_registry/01-order.txt
+      cc4115ae678b7b02bee1f18ee054462ea9d61462f8aa929d6fe77f5eb715d130  gather_go_registry/02-events.txt
+      17ffd057f40091e7bf97aa65f61567eefb491a462c9894a909ef7540d94c5a5a  gather_go_registry/03-candidates.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_registry/04-nodes.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_registry/05-pvcs.txt
+      760caac51cc68b2a56aea7c908eb63b0b2f1853920d00d81a9e78a09f70970c1  gather_go_registry/06-logs.txt
+      dd3fc774ce3bb7abd0938aed62abe0a14363940a3e5e3d94f2ef5ed18da8c131  gather_go_registry/07-trail.txt
+      221bc8acb55538ba1a655de31062753f04fb0c3d7a665c139e916c0aac46a2ba  gather_go_registry/08-bundle.txt
+      747c808f00e5acc6247225cafa1f75bb8fbfa7d76db2ede15ab37485085a2b21  gather_go_registry/09-decide.txt
+      43d50c0b60ccce1ebdcdd9ec3b48e3c37c41af40ea3126f60104afb8d7edfeca  gather_go_registry/10-prompt.txt
+
 ## Dataset pin moves
 
 The exam's two hashes live in `tests/test_shared_origin_training.py`:

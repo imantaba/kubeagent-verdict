@@ -1,0 +1,8 @@
+row	1	pull	p-auth	Deployment	2	scoped
+row	2	pull	p-conn	Deployment	2	scoped
+row	3	pull	p-image	Deployment	2	scoped
+row	4	pull	p-nopull	Deployment	2	scoped
+row	5	pull	p-notread	Deployment	2	scoped
+row	6	pull	solo	Deployment	2	scoped
+hidden_restarts	0
+hidden_cron	0

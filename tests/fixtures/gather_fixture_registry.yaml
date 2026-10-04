@@ -1,0 +1,209 @@
+# The registry fixture: a fourth small cluster for the Go capture harness
+# (contract/capture/kv_capture_test.go.txt, mode registry) and the Python byte-equal
+# gather test. It exists for the registry candidate: every outcome the rules can give
+# a workload that fails to pull an image. It uses the main fixture's keys and format.
+# The top-level keys:
+#   kubeagent       the kubeagent tag and commit the Go dumps were captured from.
+#   summary         the CPU and memory summary the prompt prints (resources.Summary).
+#   platform_line   the prompt's platform line; empty means none.
+#   service_issues  the service issues the prompt prints (svchealth.Issue); none here.
+#   nodes           every node: its name, what the scan saw (scan_reason) and what a fresh describe finds (fresh).
+#   pvcs            every broken PVC; none here.
+#   workloads       every workload in file order (not report order): pods, findings and events.
+#
+# All 3 nodes are healthy and unnamed, so T = max(3, 0 + 1) = 3 and the cluster is Healthy.
+# Six Deployments in namespace pull each fail to pull an image. Five pull from
+# reg.example.com, so kubeagent names that registry as the cause. One pulls from
+# other.example.com alone, which is below the threshold of 2.
+#   p-conn     the pull event shows a connection error      -> confirmed
+#   p-auth     the pull event shows an auth error           -> unverified
+#   p-image    the pull event shows an image error          -> refuted
+#   p-nopull   only a BackOff event, no pull failure        -> unverified
+#   p-notread  the first finding is a probe failure on one pod, and the pull failure is on
+#              a second pod. The gather reads the first pod's events, not the pulling pod's.
+#   solo       the only workload on its host                -> ruled out
+# A workload's pod is its events pod: the first finding's pod name, else the workload name.
+# A workload's events are what a read of its events pod returns, as [reason, message, count].
+
+kubeagent:
+  tag: "v1.24.0"
+  commit: "15ec5649bbd2d07558eae945b71430afc8f231fd"
+
+summary:
+  cpu:
+    allocatable: "6"
+    requests: "4200m"
+    requests_pct: 70
+    limits: "5400m"
+    limits_pct: 90
+  memory:
+    allocatable: "12Gi"
+    requests: "9Gi"
+    requests_pct: 75
+    limits: "11Gi"
+    limits_pct: 91
+  metrics_available: false
+
+platform_line: ""
+
+service_issues: []
+
+nodes:
+  - name: "w1"
+    scan_reason: ""
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "w2"
+    scan_reason: ""
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "w3"
+    scan_reason: ""
+    fresh:
+      how: "read"
+      ready: "True"
+
+pvcs: []
+
+workloads:
+  - namespace: "pull"
+    name: "p-conn"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "p-conn-6b8f5d7c4-a1b2c"
+    pods:
+      - {name: "p-conn-6b8f5d7c4-a1b2c", node: "w1", claims: []}
+    findings:
+      - pod: "pull/p-conn-6b8f5d7c4-a1b2c"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "reg.example.com/a:1"'
+        container: ""
+        image: "reg.example.com/a:1"
+    events:
+      - ["Failed", 'Failed to pull image "reg.example.com/a:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout', 6]
+      - ["BackOff", 'Back-off pulling image "reg.example.com/a:1"', 14]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "pull"
+    name: "p-auth"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "p-auth-5d8f7c9b6-d4e5f"
+    pods:
+      - {name: "p-auth-5d8f7c9b6-d4e5f", node: "w2", claims: []}
+    findings:
+      - pod: "pull/p-auth-5d8f7c9b6-d4e5f"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "reg.example.com/b:1"'
+        container: ""
+        image: "reg.example.com/b:1"
+    events:
+      - ["Failed", 'Failed to pull image "reg.example.com/b:1": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required', 4]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "pull"
+    name: "p-image"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "p-image-7c9d4b5f6-g7h8i"
+    pods:
+      - {name: "p-image-7c9d4b5f6-g7h8i", node: "w3", claims: []}
+    findings:
+      - pod: "pull/p-image-7c9d4b5f6-g7h8i"
+        issue: "ErrImagePull"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "reg.example.com/c:1"'
+        container: ""
+        image: "reg.example.com/c:1"
+    events:
+      - ["Failed", 'Failed to pull image "reg.example.com/c:1": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown', 3]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "pull"
+    name: "p-nopull"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "p-nopull-6d5f7c8b9-j1k2l"
+    pods:
+      - {name: "p-nopull-6d5f7c8b9-j1k2l", node: "w1", claims: []}
+    findings:
+      - pod: "pull/p-nopull-6d5f7c8b9-j1k2l"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Back-off pulling image "reg.example.com/d:1"'
+        container: ""
+        image: "reg.example.com/d:1"
+    events:
+      - ["BackOff", 'Back-off pulling image "reg.example.com/d:1"', 22]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "pull"
+    name: "p-notread"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "Degraded"
+    restarts: 0
+    pod: "p-notread-5b8d7f6c9-m3n4o"
+    pods:
+      - {name: "p-notread-5b8d7f6c9-m3n4o", node: "w2", claims: []}
+      - {name: "p-notread-5b8d7f6c9-p5q6r", node: "w3", claims: []}
+    findings:
+      - pod: "pull/p-notread-5b8d7f6c9-m3n4o"
+        issue: "ProbeFailure"
+        reason: "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        evidence: 'container "app": readiness — HTTP 503'
+        container: "app"
+        image: ""
+      - pod: "pull/p-notread-5b8d7f6c9-p5q6r"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "reg.example.com/e:1"'
+        container: ""
+        image: "reg.example.com/e:1"
+    events:
+      - ["Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503", 9]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "pull"
+    name: "solo"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 0
+    pod: "solo-7c9d4b5f6-s7t8u"
+    pods:
+      - {name: "solo-7c9d4b5f6-s7t8u", node: "w1", claims: []}
+    findings:
+      - pod: "pull/solo-7c9d4b5f6-s7t8u"
+        issue: "ImagePullBackOff"
+        reason: "image pull keeps failing"
+        evidence: 'Failed to pull image "other.example.com/f:1"'
+        container: ""
+        image: "other.example.com/f:1"
+    events:
+      - ["Failed", 'Failed to pull image "other.example.com/f:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout', 5]
+    events_failed: ""
+    decoy_events: []

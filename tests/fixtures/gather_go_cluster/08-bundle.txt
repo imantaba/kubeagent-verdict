@@ -1,0 +1,33 @@
+block	bundle	1222
+== events app/cart-6b8f5d7c4-r9t3w ==
+events for app/cart-6b8f5d7c4-r9t3w:
+  BackOff: Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w (x18)
+  NodeNotReady: Node is not ready (x1)
+
+== describe node /n15 ==
+node n15: unschedulable=true
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=True (KubeletHasDiskPressure): kubelet has disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down
+
+== events app/web-5d8f7c9b6-a1b2c ==
+events for app/web-5d8f7c9b6-a1b2c:
+  Unhealthy: Readiness probe failed: Get "http://web:8080/healthz": context deadline exceeded (x27)
+
+== events kube-system/ks-a-7c9d4b5f6-x0k2m ==
+no events for kube-system/ks-a-7c9d4b5f6-x0k2m
+
+== events kube-system/ks-b-7c9d4b5f6-x1k2m ==
+no events for kube-system/ks-b-7c9d4b5f6-x1k2m
+
+== events kube-system/ks-c-7c9d4b5f6-x2k2m ==
+no events for kube-system/ks-c-7c9d4b5f6-x2k2m
+
+== events kube-system/ks-cron ==
+no events for kube-system/ks-cron
+
+== events kube-system/ks-d-7c9d4b5f6-x3k2m ==
+no events for kube-system/ks-d-7c9d4b5f6-x3k2m
+
+

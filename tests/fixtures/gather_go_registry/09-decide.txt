@@ -1,0 +1,17 @@
+read_events	pull/p-auth-5d8f7c9b6-d4e5f	1
+read_events	pull/p-conn-6b8f5d7c4-a1b2c	2
+read_events	pull/p-image-7c9d4b5f6-g7h8i	1
+read_events	pull/p-nopull-6d5f7c8b9-j1k2l	1
+read_events	pull/p-notread-5b8d7f6c9-m3n4o	1
+read_events	pull/solo-7c9d4b5f6-s7t8u	1
+result	1	pull/p-auth	true	unverified	registry reg.example.com (5 workloads failing to pull)	a pull event shows an auth error: unauthorized; that can be one image or the whole host		
+decision	registry	reg.example.com	unverified	registry reg.example.com (5 workloads failing to pull)	a pull event shows an auth error: unauthorized; that can be one image or the whole host
+result	2	pull/p-conn	true	confirmed	registry reg.example.com (5 workloads failing to pull)	a pull event shows a connection error: dial tcp	registry/reg.example.com	registry reg.example.com (5 workloads failing to pull)
+decision	registry	reg.example.com	confirmed	registry reg.example.com (5 workloads failing to pull)	a pull event shows a connection error: dial tcp
+result	3	pull/p-image	false					
+decision	registry	reg.example.com	refuted	registry reg.example.com (5 workloads failing to pull)	a pull event shows an image error: manifest unknown; this pull fails for this image, not the host
+result	4	pull/p-nopull	true	unverified	registry reg.example.com (5 workloads failing to pull)	no pull event names the failure; events may have aged out		
+decision	registry	reg.example.com	unverified	registry reg.example.com (5 workloads failing to pull)	no pull event names the failure; events may have aged out
+result	5	pull/p-notread	true	unverified	registry reg.example.com (5 workloads failing to pull)	events of the pulling pod were not read		
+decision	registry	reg.example.com	unverified	registry reg.example.com (5 workloads failing to pull)	events of the pulling pod were not read
+result	6	pull/solo	false					

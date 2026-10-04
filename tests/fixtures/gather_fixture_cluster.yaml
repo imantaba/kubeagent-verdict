@@ -1,0 +1,663 @@
+# The cluster fixture: a third small cluster for the Go capture harness
+# (contract/capture/kv_capture_test.go.txt, mode cluster) and the Python byte-equal
+# gather test. It exists for the cluster-health block and the service block of the
+# prompt. It uses the main fixture's keys and format, plus the optional keys below.
+# The top-level keys:
+#   kubeagent         the kubeagent tag and commit the Go dumps were captured from.
+#   summary           the CPU and memory summary the prompt prints (resources.Summary).
+#   platform_line     the prompt's platform line; empty means none.
+#   service_issues    empty here. In this mode the harness computes the service issues
+#                     from the four lists below, as scan does.
+#   nodes             16 nodes, n01 to n16, each with the conditions the scan saw.
+#   pvcs              none.
+#   workloads         every workload in file order (not report order): pods, findings, events.
+#   services          each Service: namespace, name, type, selector, annotations, lb_ingress.
+#   endpoint_slices   per Service, one entry per address: "true", "false" or "unset".
+#   backends          the controllers that back a Service: kind, labels and desired count.
+#   network_policies  each policy and the pod labels it selects.
+#
+# Optional keys on a node: conditions (type, status, reason, message, in the order
+# the scan listed them), unschedulable (cordoned), lease ("renewed", "missing" or
+# "no_renew") and lease_age_ms (how long ago a renewed lease was renewed).
+# When a node has conditions, its scan_reason is the reason kubeagent must give it in
+# its down-node list ("NotReady", "no kubelet lease", "kubelet not heartbeating"),
+# or "" for a node that is not down. The fresh block uses the field names of
+# kubeagent_verdict.dataset.objects.Fresh.
+# Optional keys on a pod: labels and ready.
+#
+# The clock is 2026-09-26 12:00 UTC and the lease threshold is 40 seconds.
+#   n01..n04  NotReady, four ways: a long message (130 runes, an e-acute at rune 115),
+#             Ready Unknown, no reason, and no Ready condition at all.
+#   n05, n06  no kubelet lease: no Lease object, and a Lease with no renew time.
+#   n07..n11  Ready, lease too old: 40s, 43s, 1m35s, 1h0m0s and 1h1m40s stale.
+#   n12       Ready, lease 40.000s old: not past the threshold, so not down.
+#   n13       MemoryPressure and PIDPressure.
+#   n14       cordoned.
+#   n15       DiskPressure, NotReady and cordoned.
+#   n16       three node-problem-detector conditions that kubeagent does not read.
+# That is 12 down nodes, more than the 8 candidates the prompt keeps per workload.
+#
+# Workloads. Every flagged workload has the same priority, so the scope is the first
+# 10 in namespace order: app/cart, app/web, then kube-system's first eight. Three
+# kube-system workloads (ks-f, ks-job, ks-sts) fall past the 10, and their system
+# lines still print. app/cart runs on n15, which is the 12th candidate, so its
+# attribution is cut from the prompt. The svc namespace holds the Services' pods in
+# healthy workloads that are never flagged.
+#
+# Services s01..s13 are one per wording of the service detail. The prompt keeps the
+# first 10, so s11, s12 and s13 are in the fixture but not in the prompt.
+
+kubeagent:
+  tag: "v1.24.0"
+  commit: "15ec5649bbd2d07558eae945b71430afc8f231fd"
+
+summary:
+  cpu:
+    allocatable: "6"
+    requests: "4200m"
+    requests_pct: 70
+    limits: "5400m"
+    limits_pct: 90
+  memory:
+    allocatable: "12Gi"
+    requests: "9Gi"
+    requests_pct: 75
+    limits: "11Gi"
+    limits_pct: 91
+  metrics_available: false
+
+platform_line: ""
+
+service_issues: []
+
+nodes:
+  - name: "n01"
+    scan_reason: "NotReady"
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "False", reason: "KubeletNotReady", message: "container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx start and the"}
+    fresh:
+      how: "read"
+      ready: "False"
+      ready_reason: "KubeletNotReady"
+      ready_message: "container runtime is down"
+  - name: "n02"
+    scan_reason: "NotReady"
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "Unknown", reason: "NodeStatusUnknown", message: "Kubelet stopped posting node status."}
+    fresh:
+      how: "read"
+      ready: "False"
+      ready_reason: "KubeletNotReady"
+      ready_message: "container runtime is down"
+  - name: "n03"
+    scan_reason: "NotReady"
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "False", reason: "", message: "PLEG is not healthy: pleg was last seen active 3m0s ago"}
+    fresh:
+      how: "read"
+      ready: "False"
+      ready_reason: "KubeletNotReady"
+      ready_message: "container runtime is down"
+  - name: "n04"
+    scan_reason: "NotReady"
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+    fresh:
+      how: "read"
+      ready: "missing"
+  - name: "n05"
+    scan_reason: "no kubelet lease"
+    lease: "missing"
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n06"
+    scan_reason: "no kubelet lease"
+    lease: "no_renew"
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n07"
+    scan_reason: "kubelet not heartbeating"
+    lease: "renewed"
+    lease_age_ms: 40400
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n08"
+    scan_reason: "kubelet not heartbeating"
+    lease: "renewed"
+    lease_age_ms: 42500
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n09"
+    scan_reason: "kubelet not heartbeating"
+    lease: "renewed"
+    lease_age_ms: 95000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n10"
+    scan_reason: "kubelet not heartbeating"
+    lease: "renewed"
+    lease_age_ms: 3600000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n11"
+    scan_reason: "kubelet not heartbeating"
+    lease: "renewed"
+    lease_age_ms: 3700000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n12"
+    scan_reason: ""
+    lease: "renewed"
+    lease_age_ms: 40000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n13"
+    scan_reason: ""
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "True", reason: "KubeletHasInsufficientMemory", message: "kubelet has insufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "True", reason: "KubeletHasInsufficientPID", message: "kubelet has insufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n14"
+    scan_reason: ""
+    unschedulable: true
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+  - name: "n15"
+    scan_reason: "NotReady"
+    unschedulable: true
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "True", reason: "KubeletHasDiskPressure", message: "kubelet has disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "False", reason: "KubeletNotReady", message: "container runtime is down"}
+    fresh:
+      how: "read"
+      ready: "False"
+      ready_reason: "KubeletNotReady"
+      ready_message: "container runtime is down"
+      disk_pressure: true
+      unschedulable: true
+  - name: "n16"
+    scan_reason: ""
+    lease: "renewed"
+    lease_age_ms: 10000
+    conditions:
+      - {type: "NetworkUnavailable", status: "True", reason: "NoRouteCreated", message: "the node has no route to its pod network"}
+      - {type: "ReadonlyFilesystem", status: "True", reason: "FilesystemIsReadOnly", message: "the root filesystem is mounted read-only"}
+      - {type: "CorruptDockerOverlay2", status: "True", reason: "CorruptDockerOverlay2", message: "the docker overlay2 store is corrupt"}
+      - {type: "MemoryPressure", status: "False", reason: "KubeletHasSufficientMemory", message: "kubelet has sufficient memory available"}
+      - {type: "DiskPressure", status: "False", reason: "KubeletHasNoDiskPressure", message: "kubelet has no disk pressure"}
+      - {type: "PIDPressure", status: "False", reason: "KubeletHasSufficientPID", message: "kubelet has sufficient PID available"}
+      - {type: "Ready", status: "True", reason: "KubeletReady", message: "kubelet is posting ready status"}
+    fresh:
+      how: "read"
+      ready: "True"
+
+pvcs: []
+
+workloads:
+  - namespace: "app"
+    name: "cart"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "Degraded"
+    restarts: 12
+    pod: "cart-6b8f5d7c4-r9t3w"
+    pods:
+      - {name: "cart-6b8f5d7c4-r9t3w", node: "n15", claims: [], labels: {app: "cart"}, ready: false}
+    findings:
+      - pod: "app/cart-6b8f5d7c4-r9t3w"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=12"
+        container: ""
+        image: ""
+    events:
+      - ["BackOff", "Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w", 18]
+      - ["NodeNotReady", "Node is not ready", 1]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "app"
+    name: "web"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "Degraded"
+    restarts: 0
+    pod: "web-5d8f7c9b6-a1b2c"
+    pods:
+      - {name: "web-5d8f7c9b6-a1b2c", node: "n16", claims: [], labels: {app: "web"}, ready: false}
+      - {name: "web-5d8f7c9b6-d4e5f", node: "n16", claims: [], labels: {app: "web"}, ready: false}
+    findings:
+      - pod: "app/web-5d8f7c9b6-a1b2c"
+        issue: "ProbeFailure"
+        reason: "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        evidence: "container \"app\": readiness — connection timed out"
+        container: "app"
+        image: ""
+      - pod: "app/web-5d8f7c9b6-d4e5f"
+        issue: "ProbeFailure"
+        reason: "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        evidence: "container \"app\": readiness — connection timed out"
+        container: "app"
+        image: ""
+    events:
+      - ["Unhealthy", "Readiness probe failed: Get \"http://web:8080/healthz\": context deadline exceeded", 27]
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-a"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 5
+    pod: "ks-a-7c9d4b5f6-x0k2m"
+    pods:
+      - {name: "ks-a-7c9d4b5f6-x0k2m", node: "n16", claims: [], labels: {app: "ks-a"}}
+    findings:
+      - pod: "kube-system/ks-a-7c9d4b5f6-x0k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=5"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-b"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 6
+    pod: "ks-b-7c9d4b5f6-x1k2m"
+    pods:
+      - {name: "ks-b-7c9d4b5f6-x1k2m", node: "n16", claims: [], labels: {app: "ks-b"}}
+    findings:
+      - pod: "kube-system/ks-b-7c9d4b5f6-x1k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=6"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-c"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 7
+    pod: "ks-c-7c9d4b5f6-x2k2m"
+    pods:
+      - {name: "ks-c-7c9d4b5f6-x2k2m", node: "n16", claims: [], labels: {app: "ks-c"}}
+    findings:
+      - pod: "kube-system/ks-c-7c9d4b5f6-x2k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=7"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-d"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 8
+    pod: "ks-d-7c9d4b5f6-x3k2m"
+    pods:
+      - {name: "ks-d-7c9d4b5f6-x3k2m", node: "n16", claims: [], labels: {app: "ks-d"}}
+    findings:
+      - pod: "kube-system/ks-d-7c9d4b5f6-x3k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=8"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-e"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 9
+    pod: "ks-e-7c9d4b5f6-x4k2m"
+    pods:
+      - {name: "ks-e-7c9d4b5f6-x4k2m", node: "n16", claims: [], labels: {app: "ks-e"}}
+    findings:
+      - pod: "kube-system/ks-e-7c9d4b5f6-x4k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=9"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-f"
+    kind: "Deployment"
+    ready: 0
+    desired: 1
+    status: "CrashLoopBackOff"
+    restarts: 10
+    pod: "ks-f-7c9d4b5f6-x5k2m"
+    pods:
+      - {name: "ks-f-7c9d4b5f6-x5k2m", node: "n16", claims: [], labels: {app: "ks-f"}}
+    findings:
+      - pod: "kube-system/ks-f-7c9d4b5f6-x5k2m"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=10"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-deploy"
+    kind: "Deployment"
+    ready: 0
+    desired: 2
+    status: "CrashLoopBackOff"
+    restarts: 9
+    pod: "ks-deploy-5b8d7f6c9-q2w3e"
+    pods:
+      - {name: "ks-deploy-5b8d7f6c9-q2w3e", node: "n16", claims: [], labels: {app: "ks-deploy"}}
+      - {name: "ks-deploy-5b8d7f6c9-r4t5y", node: "n16", claims: [], labels: {app: "ks-deploy"}}
+    findings:
+      - pod: "kube-system/ks-deploy-5b8d7f6c9-q2w3e"
+        issue: "CrashLoopBackOff"
+        reason: "Container repeatedly crashes after starting"
+        evidence: "container \"app\", restartCount=9"
+        container: ""
+        image: ""
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-sts"
+    kind: "StatefulSet"
+    ready: 0
+    desired: 1
+    status: "Pending"
+    restarts: 0
+    pod: "ks-sts"
+    pods: []
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-ds"
+    kind: "DaemonSet"
+    ready: 3
+    desired: 4
+    status: "Running"
+    restarts: 0
+    pod: "ks-ds"
+    pods:
+      - {name: "ks-ds-a1b2c", node: "n16", claims: []}
+      - {name: "ks-ds-d4e5f", node: "n12", claims: []}
+      - {name: "ks-ds-g7h8i", node: "n13", claims: []}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-job"
+    kind: "Job"
+    ready: 0
+    desired: 1
+    status: "Failed"
+    restarts: 0
+    pod: "ks-job"
+    pods: []
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "kube-system"
+    name: "ks-cron"
+    kind: "CronJob"
+    ready: 0
+    desired: 1
+    status: "Last run failed"
+    restarts: 0
+    pod: "ks-cron"
+    pods: []
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s01"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s01"
+    pods:
+      - {name: "backing-s01-0", node: "n16", claims: [], labels: {app: "s01"}, ready: true}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s02"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s02"
+    pods:
+      - {name: "backing-s02-0", node: "n16", claims: [], labels: {app: "s02"}, ready: true}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s10"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s10"
+    pods:
+      - {name: "backing-s10-0", node: "n01", claims: [], labels: {app: "s10"}, ready: false}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s11"
+    kind: "Deployment"
+    ready: 2
+    desired: 2
+    status: "Running"
+    restarts: 0
+    pod: "backing-s11"
+    pods:
+      - {name: "backing-s11-0", node: "n02", claims: [], labels: {app: "s11"}, ready: false}
+      - {name: "backing-s11-1", node: "n05", claims: [], labels: {app: "s11"}, ready: false}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s12"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s12"
+    pods:
+      - {name: "backing-s12-0", node: "n16", claims: [], labels: {app: "s12"}, ready: false}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s13"
+    kind: "Deployment"
+    ready: 3
+    desired: 3
+    status: "Running"
+    restarts: 0
+    pod: "backing-s13"
+    pods:
+      - {name: "backing-s13-0", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
+      - {name: "backing-s13-1", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
+      - {name: "backing-s13-2", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+services:
+  - {namespace: "svc", name: "s01", type: "LoadBalancer", selector: {app: "s01"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s02", type: "ClusterIP", selector: {app: "s02"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s03", type: "ClusterIP", selector: {app: "s03"}, annotations: {"kubeagent.io/expected-empty": "true"}, lb_ingress: false}
+  - {namespace: "svc", name: "s04", type: "ClusterIP", selector: {app: "s04"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s05", type: "ClusterIP", selector: {app: "s05"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s06", type: "ClusterIP", selector: {app: "s06"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s07", type: "ClusterIP", selector: {app: "s07"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s08", type: "ClusterIP", selector: {app: "s08"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s09", type: "ClusterIP", selector: {app: "s09"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s10", type: "ClusterIP", selector: {app: "s10"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s11", type: "ClusterIP", selector: {app: "s11"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s12", type: "ClusterIP", selector: {app: "s12"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s13", type: "ClusterIP", selector: {app: "s13"}, annotations: {}, lb_ingress: false}
+
+endpoint_slices:
+  - {namespace: "svc", service: "s01", ready: ["true"]}
+  - {namespace: "svc", service: "s02", ready: ["false"]}
+
+backends:
+  - {namespace: "svc", name: "b-s04", kind: "CronJob", labels: {app: "s04"}, desired: 0}
+  - {namespace: "svc", name: "b-s05", kind: "Job", labels: {app: "s05"}, desired: 0}
+  - {namespace: "svc", name: "b-s06", kind: "DaemonSet", labels: {app: "s06"}, desired: 0}
+  - {namespace: "svc", name: "b-s07", kind: "Deployment", labels: {app: "s07"}, desired: 0}
+  - {namespace: "svc", name: "b-s08", kind: "StatefulSet", labels: {app: "s08"}, desired: 0}
+
+network_policies:
+  - {namespace: "app", name: "allow-web", pod_selector: {app: "web"}}
+  - {namespace: "app", name: "deny-web", pod_selector: {app: "web"}}
+  - {namespace: "other", name: "other-ns-policy", pod_selector: {app: "web"}}

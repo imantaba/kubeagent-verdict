@@ -1,0 +1,7 @@
+node	2	n15	ok	
+block	content	376
+node n15: unschedulable=true
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=True (KubeletHasDiskPressure): kubelet has disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down

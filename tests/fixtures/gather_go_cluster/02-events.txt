@@ -1,0 +1,27 @@
+events	1	app	cart-6b8f5d7c4-r9t3w	ok	2	
+event	BackOff	Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w	18
+event	NodeNotReady	Node is not ready	1
+block	content	161
+events for app/cart-6b8f5d7c4-r9t3w:
+  BackOff: Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w (x18)
+  NodeNotReady: Node is not ready (x1)
+events	3	app	web-5d8f7c9b6-a1b2c	ok	1	
+event	Unhealthy	Readiness probe failed: Get "http://web:8080/healthz": context deadline exceeded	27
+block	content	135
+events for app/web-5d8f7c9b6-a1b2c:
+  Unhealthy: Readiness probe failed: Get "http://web:8080/healthz": context deadline exceeded (x27)
+events	4	kube-system	ks-a-7c9d4b5f6-x0k2m	ok	0	
+block	content	46
+no events for kube-system/ks-a-7c9d4b5f6-x0k2m
+events	5	kube-system	ks-b-7c9d4b5f6-x1k2m	ok	0	
+block	content	46
+no events for kube-system/ks-b-7c9d4b5f6-x1k2m
+events	6	kube-system	ks-c-7c9d4b5f6-x2k2m	ok	0	
+block	content	46
+no events for kube-system/ks-c-7c9d4b5f6-x2k2m
+events	7	kube-system	ks-cron	ok	0	
+block	content	33
+no events for kube-system/ks-cron
+events	8	kube-system	ks-d-7c9d4b5f6-x3k2m	ok	0	
+block	content	46
+no events for kube-system/ks-d-7c9d4b5f6-x3k2m
