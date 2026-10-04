@@ -91,7 +91,8 @@ def draw(story: stories.Story, rng: random.Random, *, width: int) -> Draw:
         origin = replace(o, ns=row.namespace, name=row.name, container=row.container,
                          pod=names_mod.pod_name(rng, row.name))
     named = {n.node for n in victims} | ({origin.node} if origin else set())
-    total = rng.randint(max(3, len(named) + 1), 5)
+    lo = max(3, len(named) + 1)
+    total = rng.randint(lo, max(lo, 5))
     nodes = sorted(named)
     for extra in names_mod.NODES:
         if len(nodes) >= total:
@@ -117,6 +118,8 @@ def _container(t, n: Names) -> str:
 
 
 def _log_body(value: str) -> str:
+    if not value:
+        raise ValueError("a crash-family log is empty: it would print a bare log-cause label")
     if value == stories.NO_PREVIOUS:
         return LOG_NO_PREVIOUS
     if value == stories.NO_CLASSIFIABLE:

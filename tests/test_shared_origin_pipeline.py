@@ -1,8 +1,10 @@
+import dataclasses
 import random
 
 import pytest
 
 from kubeagent_verdict import contract as c
+from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import rules, stories
 from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.checker import LOG_CAUSE_PREFIX, LOG_CAUSES
@@ -102,3 +104,25 @@ def test_prompt_fits_and_has_at_most_ten_workloads():
         for built in _twins(key):
             assert len(built.rows) <= c.MAX_GATHER_WORKLOADS
             assert len(built.gathered.reads) <= c.MAX_TOOL_CALLS
+
+
+def test_draw_survives_five_named_nodes():
+    # Four victims plus the origin can name all 5 of names.NODES; the old
+    # randint(6, 5) raised ValueError there.
+    base = stories.by_key()["coredns-down"]
+    st = dataclasses.replace(base, victims=base.victims + base.victims)
+    for seed in range(2000):
+        # Stop at the first seed whose victims and origin name every node.
+        d = so.draw(st, random.Random(seed), width=4)
+        named = {n.node for n in d.victims} | {d.origin.node}
+        if len(named) == 5:
+            break
+    else:
+        pytest.fail("no seed in 2000 names all five nodes")
+    assert d.nodes == tuple(sorted(names_mod.NODES))
+    assert len(d.nodes) >= 3
+
+
+def test_log_body_refuses_an_empty_log():
+    with pytest.raises(ValueError, match="empty"):
+        so._log_body("")

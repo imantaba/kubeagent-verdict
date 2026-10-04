@@ -1,5 +1,6 @@
 import pytest
 
+from kubeagent_verdict.dataset import gather
 from kubeagent_verdict.dataset import stories as s
 from kubeagent_verdict.dataset.checker import LOG_CAUSES
 
@@ -40,3 +41,19 @@ def test_exam_order_and_trainable_disjoint():
     exam = [st.key for st in s.exam()]
     assert exam == [k for k in s.EXAM_KEYS if k in s.by_key()]
     assert not {st.key for st in s.trainable()} & set(s.EXAM_KEYS)
+
+
+def test_crash_family_logs_are_never_empty():
+    # gather reads a log for a crash-family issue; an empty one would print a
+    # bare "log cause: ". _pick treats "" as set, so log_healthy="" is refused too.
+    for key, st in s.by_key().items():
+        rows = list(st.victims)
+        for world in (st.broken, st.healthy):
+            if world.origin_row is not None:
+                rows.append(world.origin_row)
+        for t in rows:
+            if t.issue not in gather.CRASH_FAMILY:
+                continue
+            assert t.log, (key, t.issue, "log")
+            if getattr(t, "log_healthy", None) is not None:
+                assert t.log_healthy, (key, t.issue, "log_healthy")
