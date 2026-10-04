@@ -470,3 +470,26 @@ def test_a_multi_workload_with_no_anchor_names_nothing():
     wm = ex.meta["workloads"]["shop/gateway"]
     assert (wm["expected_cause"], wm["own_cause_keywords"], wm["own_cause_must_not"]) == (
         c.NONE_OF_THESE, [], [])
+
+
+def test_the_real_grader_gives_every_catalog_gold_full_marks():
+    """Spec test 6: every built catalog gold, read back as the reply, keeps
+    full marks under the real grader (G2 and G3b included), and job 2
+    scores it 1.0 against its own keys and must-not words."""
+    from test_shared_origin_pool import full_marks_misses
+    rows = [ex for ex in generate.generate(17, 8000) + generate.test_set()
+            if not ex.case.startswith("shared_origin")]
+    assert len(rows) > 5000
+    assert full_marks_misses(rows) == []
+
+
+def test_the_grader_check_can_fail():
+    """The same check, fed a probe-failure gold whose cause is another
+    entry's, must lose a mark: the test above is not vacuous."""
+    from test_shared_origin_pool import full_marks_misses
+    ex = next(x for x in generate.test_set() if x.case == "own_cause"
+              and x.group.startswith("probe-failure:"))
+    doc = json.loads(ex.assistant)
+    doc["verdicts"][0]["cause"] = ENTRIES["init-oomkilled"].answer.cause
+    bad = dataclasses.replace(ex, assistant=json.dumps(doc))
+    assert full_marks_misses([bad]) != []
