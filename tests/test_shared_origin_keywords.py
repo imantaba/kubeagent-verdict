@@ -1,69 +1,106 @@
-"""The eval six's job-2 grading keywords.
+"""The exam's job-2 grading keywords, on the rebuilt shared-origin rows.
 
-Sixteen victims and six shared causes, one curated pair each. Three
-properties, and the second and third are the ones that matter:
+Job 2 grades a named cause by keywords. Three properties, and the second and
+third are the ones that matter:
 
-- COVERAGE: every eval scenario and victim carries a pair, so no exam
-  workload can fall back to the empty list that scored 20 of them 0.0
-  whatever the model answered.
-- SELF-CONTAINMENT: each keyword is a substring of its own cause. A typo
-  here would make the workload unanswerable -- the exact defect being
-  fixed, re-introduced one layer up.
-- DISCRIMINATION: a pair must not appear in full in any OTHER cause on the
-  same menu. Spec section 3 measured what happens without this: a pair of
-  `node`,`worker-3` scored `node worker-3 (no kubelet lease)` as correct
-  against a gold answer about disk pressure.
-
-The twin leg of the discrimination check is the one spec section 9 names:
-a shared-origin workload's gold answer is its own local cause in the
-healthy world and the scenario's shared cause in the broken one, so those
-two strings are each other's twin and a pair that cannot tell them apart
-grades both worlds the same.
+- COVERAGE: every named job-2 workload in the 20 shared-origin exam rows has
+  one to three keywords. Every other workload (decided by the rules, or
+  `none_of_these`) has none. A named workload with no keywords could score
+  0.0 whatever the model answered. That is a defect in the data, not a
+  failure of the model.
+- SELF-CONTAINMENT: each keyword is a lowercase word of four letters or more
+  and sits inside its own cause. A typo here would make the workload
+  unanswerable.
+- DISCRIMINATION: a keyword set must not match any other cause the same row
+  asks about. Two legs. The sibling leg: a workload's keywords do not match
+  a different cause on another workload in the same row. The twin leg: they do
+  not match the same workload's answer in the other world, including
+  `none_of_these`. A set that cannot tell the two worlds apart grades both
+  worlds the same.
 """
-from kubeagent_verdict.dataset import propagation as prop
+import re
+
+import pytest
+
+from kubeagent_verdict import contract
+from kubeagent_verdict.dataset import generate
+from kubeagent_verdict.evals import score
+
+# 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 18.
+EXAM_KEYWORDED = 24
 
 
-def test_every_eval_scenario_and_victim_carries_a_keyword_pair():
-    for p in prop.all_scenarios():
-        assert len(p.own_cause_keywords) == 2, p.key
-        for v in p.victims:
-            assert len(v.own_cause_keywords) == 2, (p.key, v.local_cause)
+@pytest.fixture(scope="module")
+def probes():
+    return generate.shared_origin_probes()
 
 
-def test_every_eval_keyword_appears_in_its_own_cause():
-    for p in prop.all_scenarios():
-        shared = p.shared_cause.lower()
-        for k in p.own_cause_keywords:
-            assert k == k.lower(), (p.key, k)
-            assert k in shared, (p.key, k)
-        for v in p.victims:
-            local = v.local_cause.lower()
-            for k in v.own_cause_keywords:
-                assert k == k.lower(), (p.key, k)
-                assert k in local, (p.key, v.local_cause, k)
+@pytest.fixture(scope="module")
+def decoys():
+    return generate.shared_origin_decoy_probes()
 
 
-def test_every_eval_keyword_pair_discriminates_on_its_own_menu():
-    """No pair matches in full any other cause the same menu prints.
+def _keyed(ex):
+    """Yield (workload, cause, keywords) for each named job-2 workload."""
+    for workload, m in ex.meta["workloads"].items():
+        cause = m["expected_cause"]
+        if m["job"] == 2 and cause != contract.NONE_OF_THESE:
+            yield workload, cause, m["own_cause_keywords"]
 
-    The menu is three candidates: the victim's own local cause
-    (`attributed`), the scenario's distractor, and the shared cause. A
-    scenario's victims also share a prompt, so a victim's pair is checked
-    against its siblings' causes too.
-    """
-    for p in prop.all_scenarios():
-        shared = p.shared_cause.lower()
-        distractor = p.distractor_cause.lower()
-        assert not all(k in distractor for k in p.own_cause_keywords), p.key
-        for v in p.victims:
-            local = v.local_cause.lower()
-            kws = v.own_cause_keywords
-            assert not all(k in shared for k in kws), (p.key, v.local_cause)
-            assert not all(k in distractor for k in kws), (p.key, v.local_cause)
-            assert not all(k in local for k in p.own_cause_keywords), (
-                p.key, v.local_cause)
-            for other in p.victims:
-                if other is v:
+
+def test_every_named_job2_workload_carries_one_to_three_keywords(probes, decoys):
+    named = 0
+    for ex in probes + decoys:
+        for workload, m in ex.meta["workloads"].items():
+            keys = m["own_cause_keywords"]
+            if m["job"] == 2 and m["expected_cause"] != contract.NONE_OF_THESE:
+                named += 1
+                assert 1 <= len(keys) <= 3, (ex.group, workload, keys)
+            else:
+                assert keys == [], (ex.group, workload, keys)
+    assert named > 0
+
+
+def test_every_exam_keyword_appears_in_its_own_cause(probes, decoys):
+    checked = 0
+    for ex in probes + decoys:
+        for workload, cause, keys in _keyed(ex):
+            checked += 1
+            for k in keys:
+                assert re.fullmatch(r"[a-z]{4,}", k), (ex.group, workload, k)
+                assert k in cause.lower(), (ex.group, workload, k, cause)
+            assert score._keywords_match(cause, keys), (ex.group, workload)
+    assert checked > 0
+
+
+def test_every_exam_keyword_set_discriminates(probes, decoys):
+    siblings = 0
+    for ex in probes + decoys:
+        named = list(_keyed(ex))
+        for workload, cause, keys in named:
+            for other, other_cause, _ in named:
+                if other == workload or other_cause == cause:
                     continue
-                assert not all(k in other.local_cause.lower() for k in kws), (
-                    p.key, v.local_cause, other.local_cause)
+                siblings += 1
+                assert not score._keywords_match(other_cause, keys), (
+                    ex.group, workload, other)
+    assert siblings > 0
+
+    twins = 0
+    for probe, decoy in zip(probes, decoys):
+        for here, there in ((probe, decoy), (decoy, probe)):
+            for workload, cause, keys in _keyed(here):
+                other_cause = there.meta["expected"].get(workload)
+                if other_cause is None or other_cause == cause:
+                    continue
+                twins += 1
+                assert not score._keywords_match(other_cause, keys), (
+                    here.group, workload, other_cause)
+    assert twins > 0
+
+
+def test_the_exam_keyword_count_is_pinned(probes, decoys):
+    keyed = sum(len(list(_keyed(ex))) for ex in probes + decoys)
+    # The pin guards the story data. A story edit that adds or drops a named
+    # job-2 workload on the exam moves this number on purpose.
+    assert keyed == EXAM_KEYWORDED

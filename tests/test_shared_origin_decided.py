@@ -1,241 +1,334 @@
-"""`_render_shared_origin`'s decided-row cause/rationale and its
-label-driven summary (spec section 3).
+"""The shared-origin family's decided rows and its label-driven summary.
 
-Unit tests build synthetic `rules.Result` values and row dicts directly,
-one per branch of the two small pure helpers `_render_shared_origin`
-delegates to: `_shared_origin_row` (per-victim cause/rationale) and
-`_shared_origin_summary` (the four-way summary table). Build-level tests
-then confirm the wiring against the real eval scenarios, where the
-decided/undecided split actually occurs today (see the trainable pool's
-own oracle tests for the training side, which never decides).
+A row the rules decide (job 1) takes its cause and rationale from the rules.
+A row they do not decide (job 2) is `named` from its own lines, or it is
+`none_of_these`. The label is `shared` or `none`. Nothing in this family is
+ever labelled `separate`.
 
-Re-pinned on 2026-09-23 for the exam-grader fix
-(2026-09-23-exam-grader-fix-design.md): `_shared_origin_row` grew a third
-return value, the job-2 keyword list, plus two new keyword-only keyword
-arguments (`decoy_keywords`, `shared_keywords`) that feed it. The four
-`_shared_origin_row` unit tests below now unpack `cause, rationale,
-keywords` and pass both new keywords, and each asserts the keyword list
-the brief's design says that branch owns: `[]` on a decided row (job 1,
-graded by echo, never by keyword), the shared pair on an undecided broken
-row, the decoy's own pair on an undecided healthy row.
+The summary follows the label. A `shared` row gets three lines: the count and
+the origin, the root cause, and the remedy. A `none` row gets a header and then
+one line per row, at most three. The header says "failing for separate
+reasons" only in a healthy world where every row has its own, different cause
+(a named cause or a rules-decided one). Anywhere else it says the rules did not
+confirm one cause, because anything stronger would claim more than the rows show.
 """
 
 from __future__ import annotations
 
 import json
+import random
+import re
 
 import pytest
 
-from kubeagent_verdict.dataset import cases, generate, rules
-from kubeagent_verdict.dataset import propagation as prop
+from kubeagent_verdict import contract
+from kubeagent_verdict.dataset import cases, generate, gold, render, stories
+from kubeagent_verdict.dataset import shared_origin as so
 
-# --------------------------------------------------------------- fixtures
-
-
-def _confirmed_result(cause: str = "node worker-2 (NotReady)") -> rules.Result:
-    return rules.Result(decided=True, cause=cause, outcome="confirmed",
-                        evidence="Ready condition is False now",
-                        group_key="node/worker-2", group_text=cause,
-                        decisions=())
+_SHARED_HEAD = re.compile(r"^\d+ workloads share one upstream cause: ")
+_ROW_LINE = re.compile(r"^[^\s:]+/[^\s:]+: ")
 
 
-def _unverified_result(cause: str = "node worker-1 (no kubelet lease)") -> rules.Result:
-    return rules.Result(decided=True, cause=cause, outcome="unverified",
-                        evidence="Ready condition is True, but the kubelet "
-                                 "lease was not re-read",
-                        group_key="", group_text="", decisions=())
+def _verdicts(ex) -> dict[str, dict]:
+    return {v["workload"]: v for v in json.loads(ex.assistant)["verdicts"]}
 
 
-def _undecided_result() -> rules.Result:
-    return rules.Result(decided=False, cause="", outcome="", evidence="",
-                        group_key="", group_text="", decisions=())
+def _summary(ex) -> str:
+    return json.loads(ex.assistant)["summary"]
 
 
-# ---------------------------------------------------- _shared_origin_row
+def _built(key, world, width=None, **kw):
+    st = stories.by_key()[key]
+    d = so.draw(st, random.Random(11), width=width or len(st.victims))
+    return so.build(st, d, world=world, **kw)
 
 
-def test_decided_confirmed_row_gets_the_rules_cause_and_rationale():
-    result = _confirmed_result()
-    cause, rationale, keywords = cases._shared_origin_row(
-        result, healthy=False, decoy="the wrong decoy cause",
-        shared_cause="the story's shared cause",
-        decoy_keywords=("wrong", "decoy"),
-        shared_keywords=("shared", "cause"))
-    assert cause == result.cause
-    assert rationale == cases._rule_rationale(result)
-    assert keywords == []  # decided is job 1, graded by echo, never keywords
+def _answers(st):
+    """Every `Answer` a story can print: victims in both worlds, then origin rows."""
+    for v in st.victims:
+        for a in (v.broken, v.healthy):
+            if a is not None:
+                yield a
+    for w in (st.broken, st.healthy):
+        if w.origin_row is not None and w.origin_row.answer is not None:
+            yield w.origin_row.answer
 
 
-def test_decided_unverified_row_also_gets_the_rules_cause_and_rationale():
-    result = _unverified_result()
-    cause, rationale, keywords = cases._shared_origin_row(
-        result, healthy=True, decoy="the decoy cause",
-        shared_cause="the story's shared cause",
-        decoy_keywords=("decoy", "cause"),
-        shared_keywords=("shared", "cause"))
-    assert cause == result.cause
-    assert rationale == cases._rule_rationale(result)
-    assert keywords == []
+@pytest.fixture(scope="module")
+def fam():
+    """The exam probes, the exam decoy probes and the cousin probes."""
+    rows = (generate.shared_origin_probes()
+            + generate.shared_origin_decoy_probes()
+            + generate.shared_origin_cousin_probes())
+    narrow = sum(1 for st in stories.exam() if len(st.victims) >= 3)
+    assert len(rows) == 2 * (len(stories.EXAM_KEYS) + narrow) + 2 * len(stories.trainable())
+    return rows
 
 
-def test_undecided_broken_row_keeps_the_shared_cause():
-    result = _undecided_result()
-    cause, rationale, keywords = cases._shared_origin_row(
-        result, healthy=False, decoy="the decoy cause",
-        shared_cause="the story's shared cause",
-        decoy_keywords=("decoy", "cause"),
-        shared_keywords=("shared", "cause"))
-    assert cause == "the story's shared cause"
-    assert rationale is None  # caller keeps today's rationale template
-    assert keywords == ["shared", "cause"]
+# ------------------------------------------------------- decided rows
 
 
-def test_undecided_healthy_row_keeps_the_decoy_cause():
-    result = _undecided_result()
-    cause, rationale, keywords = cases._shared_origin_row(
-        result, healthy=True, decoy="the decoy cause",
-        shared_cause="the story's shared cause",
-        decoy_keywords=("decoy", "cause"),
-        shared_keywords=("shared", "cause"))
-    assert cause == "the decoy cause"
-    assert rationale is None
-    assert keywords == ["decoy", "cause"]
+def test_a_confirmed_row_gets_the_rules_cause_and_rationale():
+    b = _built("node-not-ready", "broken")
+    g = gold.gold_for(b)
+    victims = [r for r in b.rows if r.role == "victim"]
+    assert victims
+    for row in victims:
+        res = row.result
+        assert res.decided and res.outcome == "confirmed", row.key
+        rg = g.rows[row.key]
+        assert rg.verdict == "decided", row.key
+        assert rg.cause == res.cause, row.key
+        assert rg.rationale == render.rule_rationale(res), row.key
+        assert rg.keys == (), row.key
+
+    # The same draw, rendered as an example: the reply and the meta agree.
+    st = stories.by_key()["node-not-ready"]
+    ex = cases.shared_origin_probe(st, random.Random(11))
+    verdicts = _verdicts(ex)
+    assert {r.key for r in victims} <= set(verdicts)
+    for row in victims:
+        assert verdicts[row.key]["cause"] == row.result.cause
+        assert verdicts[row.key]["rationale"] == render.rule_rationale(row.result)
+        m = ex.meta["workloads"][row.key]
+        assert m["job"] == 1 and m["decided"], row.key
+        assert m["decided_cause"] == row.result.cause, row.key
+        assert m["decided_outcome"] == "confirmed", row.key
+        assert m["own_cause_keywords"] == [], row.key
 
 
-# ------------------------------------------------ _shared_origin_summary
+def test_an_unverified_row_is_decided_and_the_label_is_none():
+    """A refused node read still decides (job 1, outcome "unverified"), but it
+    confirms nothing, so the rules do not call the cause shared (Ruling 31)."""
+    st = stories.by_key()["node-not-ready"]
+    b = _built("node-not-ready", "broken", unverified=True)
+    victims = [r for r in b.rows if r.role == "victim"]
+    assert victims
+    assert all(r.result.decided and r.result.outcome == "unverified" for r in victims)
+    g = gold.gold_for(b)
+    assert g.label == "none"
+    header = (f"{len(b.rows)} workloads are failing, and kubeagent's rules did not "
+              "confirm one cause on two or more of them.")
+    assert g.summary.split("\n")[0] == header
+
+    ex = cases.shared_origin(st, random.Random(11), unverified=True)
+    assert ex.meta["label"] == "none"
+    for row in victims:
+        m = ex.meta["workloads"][row.key]
+        assert m["job"] == 1 and m["decided_outcome"] == "unverified", row.key
+    assert _summary(ex).split("\n")[0] == header
+
+    # A story with no down node has nothing to refuse, so it cannot be unverified.
+    with pytest.raises(ValueError, match="unverified"):
+        cases.shared_origin(stories.by_key()["registry-unreachable"],
+                            random.Random(11), unverified=True)
 
 
-_ROWS = [{"workload": "ns1/a", "cause": "cause A"},
-        {"workload": "ns2/b", "cause": "cause B"},
-        {"workload": "ns3/c", "cause": "cause C"}]
+# ---------------------------------------------------------- summaries
 
 
-def test_shared_label_keeps_todays_three_lines():
-    lines = cases._shared_origin_summary(
-        "shared", healthy=False, count=3, origin="the origin is broken",
-        shared_cause="the shared cause", remedy="fix the origin",
-        rows=_ROWS, key="test-story")
-    assert lines == ["3 workloads share one upstream cause: the origin is broken.",
-                     "Root cause: the shared cause.", "fix the origin"]
+def test_a_shared_summary_is_three_lines(fam):
+    seen = 0
+    for ex in fam:
+        if ex.meta["label"] != "shared":
+            continue
+        seen += 1
+        lines = _summary(ex).split("\n")
+        assert len(lines) == 3, (ex.case, ex.group)
+        assert _SHARED_HEAD.match(lines[0]), lines[0]
+        assert lines[1].startswith("Root cause: "), lines[1]
+        n = int(lines[0].split(" ", 1)[0])
+        assert 2 <= n <= len(ex.meta["expected"]), (ex.group, n)
+        assert lines[2].strip(), (ex.group, "empty remedy line")
+    assert seen > 0
 
 
-def test_none_label_healthy_twin_all_different_says_separate_reasons():
-    lines = cases._shared_origin_summary(
-        "none", healthy=True, count=3, origin="the origin is broken",
-        shared_cause="the shared cause", remedy="fix the origin",
-        rows=_ROWS, key="test-story")
-    assert lines[0] == "3 workloads are failing for separate reasons."
-    assert lines[1:] == ["ns1/a: cause A.", "ns2/b: cause B.", "ns3/c: cause C."]
-
-
-def test_none_label_broken_says_rules_did_not_confirm_one_cause():
-    lines = cases._shared_origin_summary(
-        "none", healthy=False, count=3, origin="the origin is broken",
-        shared_cause="the shared cause", remedy="fix the origin",
-        rows=_ROWS, key="test-story")
-    assert lines[0] == ("3 workloads are failing, and kubeagent's rules did not "
-                        "confirm one cause on two or more of them.")
-    assert lines[1:] == ["ns1/a: cause A.", "ns2/b: cause B.", "ns3/c: cause C."]
-    assert "fix the origin" not in lines
-
-
-def test_none_label_healthy_twin_with_a_repeated_cause_uses_the_other_branch():
-    rows = [{"workload": "ns1/a", "cause": "same cause"},
-           {"workload": "ns2/b", "cause": "same cause"}]
-    lines = cases._shared_origin_summary(
-        "none", healthy=True, count=2, origin="the origin is broken",
-        shared_cause="the shared cause", remedy="fix the origin",
-        rows=rows, key="test-story")
-    assert lines[0] == ("2 workloads are failing, and kubeagent's rules did not "
-                        "confirm one cause on two or more of them.")
-
-
-def test_separate_label_raises():
-    with pytest.raises(ValueError, match="separate"):
-        cases._shared_origin_summary(
-            "separate", healthy=False, count=3, origin="x", shared_cause="y",
-            remedy="z", rows=_ROWS, key="test-story")
-
-
-def test_summary_lines_cap_at_three_rows():
-    rows = _ROWS + [{"workload": "ns4/d", "cause": "cause D"}]
-    lines = cases._shared_origin_summary(
-        "none", healthy=True, count=4, origin="x", shared_cause="y",
-        remedy="z", rows=rows, key="test-story")
-    assert len(lines) == 4  # 1 header + 3 rows, never the fourth
-
-
-# --------------------------------------------------------- build-level tests
-
-
-def test_no_story_shared_cause_or_local_cause_holds_a_shared_claim_phrase():
-    """A cause holding a shared-claim phrase would make job 3 read a `none`
-    row's per-workload cause line as a claim and fail it (spec section 3).
-    """
-    phrases = cases.SHARED_CLAIM_PHRASES
-    for pool in (prop.trainable_scenarios(), prop.all_scenarios()):
-        for p in pool:
-            low = p.shared_cause.lower()
-            assert not any(ph in low for ph in phrases), (p.key, "shared_cause")
-            for v in p.victims:
-                low = v.local_cause.lower()
-                assert not any(ph in low for ph in phrases), (p.key, "local_cause")
-
-
-def test_a_shared_label_only_comes_from_an_origin_object():
-    """Every `shared` row is a ruled story's broken twin or one of the exam's
-    three origin-object stories -- never a plain story, which has no
-    candidate the rules could confirm twice under one group key.
-
-    Extended 2026-09-19 (Task 9, spec section 6): before Task 9 no trainable
-    story decided, so only the eval half of this claim had a pool to check
-    against. Task 9 merged the six ruled stories into `trainable_scenarios()`;
-    the second loop below walks that fifty-four-story pool with the TRAINING
-    builder (`cases.shared_origin`, not the eval-only `shared_origin_probe`)
-    and confirms the same rule holds there too -- exactly the six ruled
-    stories decide, and every one of the forty-eight plain stories does not.
-    """
-    for p in prop.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        if ex.meta["label"] == "shared":
-            assert p.origin_object is not None, p.key
-    for p in prop.trainable_scenarios():
-        ex = cases.shared_origin(p, generate._entry_rng("t", p.key), victims=2)
-        if ex.meta["label"] == "shared":
-            assert p.origin_object is not None, p.key
+def test_a_healthy_summary_says_separate_reasons_only_when_the_rows_earn_it(fam):
+    """Earned means: no row is `none_of_these`, and no two rows share a cause."""
+    earned = unearned = 0
+    for ex in fam:
+        if ex.case != "shared_origin_decoy_probe":
+            continue
+        causes = list(ex.meta["expected"].values())
+        n = len(causes)
+        head = _summary(ex).split("\n")[0]
+        if contract.NONE_OF_THESE not in causes and len(set(causes)) == n:
+            earned += 1
+            assert head == f"{n} workloads are failing for separate reasons.", ex.group
         else:
-            assert p.origin_object is None, p.key
+            unearned += 1
+            assert head == (f"{n} workloads are failing, and kubeagent's rules did not "
+                            "confirm one cause on two or more of them."), ex.group
+    assert earned > 0 and unearned > 0, (earned, unearned)
 
 
-def test_exactly_three_of_six_shared_origin_probe_stories_are_shared():
-    """The three origin-object eval stories (node-not-ready,
-    storage-provisioner-down, registry-unreachable) label `shared`; the
-    other three (coredns-down, node-disk-pressure, networkpolicy-deny-all)
-    label `none` -- pinned so a future story addition is a deliberate
-    edit here, not a silent drift.
-    """
-    labels = {}
-    for p in prop.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        labels[p.key] = ex.meta["label"]
-    assert labels == {
-        "coredns-down": "none",
-        "node-not-ready": "shared",
-        "storage-provisioner-down": "shared",
-        "registry-unreachable": "shared",
-        "node-disk-pressure": "none",
-        "networkpolicy-deny-all": "none",
-    }
+def test_a_broken_none_summary_says_the_rules_did_not_confirm_one_cause(fam):
+    seen = 0
+    for ex in fam:
+        if ex.case != "shared_origin_probe" or ex.meta["label"] != "none":
+            continue
+        seen += 1
+        n = len(ex.meta["expected"])
+        lines = _summary(ex).split("\n")
+        assert lines[0] == (f"{n} workloads are failing, and kubeagent's rules did not "
+                            "confirm one cause on two or more of them."), ex.group
+        assert 3 <= len(lines) <= 4, (ex.group, len(lines))
+        # Header, then one line per row. There is no remedy line on a `none` row.
+        for ln in lines[1:]:
+            assert _ROW_LINE.match(ln), (ex.group, ln)
+    assert seen > 0
+
+
+def test_the_family_never_carries_the_label_separate(fam):
+    # Ruling 25: the rules' "separate" maps to "none". The word survives only
+    # in a summary header, and only when a healthy world earns it.
+    assert {ex.meta["label"] for ex in fam} == {"shared", "none"}
+
+
+def test_a_summary_lists_at_most_three_rows(fam):
+    for ex in fam:
+        if ex.meta["label"] == "shared":
+            continue
+        n = len(ex.meta["expected"])
+        assert len(_summary(ex).split("\n")) == 1 + min(3, n), ex.group
+
+    # The loop above only reaches a fourth row if some example has one. Force
+    # it: build every story in both worlds, and cap the ones with four rows.
+    capped = 0
+    for st in stories.by_key().values():
+        for world in ("broken", "healthy"):
+            b = _built(st.key, world)
+            if len(b.rows) < 4:
+                continue
+            capped += 1
+            g = gold.gold_for(b)
+            lines = gold._summary(b, g.rows, "none", len(b.rows)).split("\n")
+            assert len(lines) == 4, (st.key, world)
+            assert [ln.split(":")[0] for ln in lines[1:]] == [r.key for r in b.rows[:3]]
+    assert capped > 0
+
+
+def test_no_story_answer_holds_a_shared_claim_phrase():
+    """A cause with a shared-claim phrase would make job 3 read a `none` row's
+    per-workload line as a claim and fail it. The shared summary is exempt: it
+    carries the claim on purpose, and it is built from the story's shown text,
+    not from an answer."""
+    checked = 0
+    for st in stories.by_key().values():
+        for a in _answers(st):
+            checked += 1
+            low = a.cause.lower()
+            for ph in cases.SHARED_CLAIM_PHRASES:
+                assert ph not in low, (st.key, ph, a.cause)
+    assert checked > 0
+
+
+# ------------------------------------------------------------ labels
+
+
+def test_a_shared_label_is_earned():
+    """`shared` needs two confirmed rows, or (for a plain story) two linked
+    victims. A healthy world is never `shared`. Every story at its narrowest
+    and widest width, so the width rule is exercised too."""
+    seen: set[str] = set()
+    for st in stories.by_key().values():
+        for width in sorted({2, len(st.victims)}):
+            for world in ("broken", "healthy"):
+                d = so.draw(st, random.Random(5), width=width)
+                b = so.build(st, d, world=world)
+                g = gold.gold_for(b)
+                confirmed = sum(1 for r in b.rows if r.result.outcome == "confirmed")
+                linked = sum(1 for r in b.rows
+                             if r.role == "victim" and g.rows[r.key].linked)
+                tag = (st.key, width, world)
+                if world == "healthy":
+                    assert g.label == "none", tag
+                    seen.add("healthy-none")
+                elif g.label == "shared":
+                    assert confirmed >= 2 or (st.cls == "P" and linked >= 2), tag
+                    seen.add("broken-shared")
+                else:
+                    if st.cls == "P":
+                        assert linked < 2, tag
+                    seen.add("broken-none")
+    assert seen == {"healthy-none", "broken-shared", "broken-none"}
+
+
+def test_every_r_story_is_shared_in_the_broken_world_at_every_width():
+    """Task 5 checks full width. This checks the narrow width as well, because
+    the wide probe and the training loop draw ruled stories at width 2."""
+    checked = 0
+    for st in stories.by_key().values():
+        if st.cls != "R":
+            continue
+        for width in sorted({2, len(st.victims)}):
+            d = so.draw(st, random.Random(5), width=width)
+            broken = so.build(st, d, world="broken")
+            healthy = so.build(st, d, world="healthy")
+            tag = (st.key, width)
+            assert gold.gold_for(broken).label == "shared", tag
+            for r in broken.rows:
+                if r.role == "victim":
+                    assert r.result.decided and r.result.outcome == "confirmed", (tag, r.key)
+            assert gold.gold_for(healthy).label == "none", tag
+            assert not any(r.result.decided for r in healthy.rows), tag
+            checked += 1
+    assert checked >= sum(1 for st in stories.by_key().values() if st.cls == "R")
+
+
+# 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines;
+# was ['none', 'shared', 'shared', 'shared', 'none', 'none', 'none', 'shared', 'shared', 'none'].
+EXAM_PROBE_LABELS = ["shared", "shared", "shared", "shared", "none",
+                     "shared", "none", "shared", "shared", "none"]
+
+
+def test_the_exam_probe_labels_are_pinned():
+    """Six full-width probes in exam order, then the width-2 probes of the four
+    exam stories with three or more victims. Pinned so a story edit that moves
+    a label is a deliberate edit here, not a silent drift."""
+    probes = generate.shared_origin_probes()
+    decoys = generate.shared_origin_decoy_probes()
+    full = [st.key for st in stories.exam()]
+    narrow = [st.key for st in stories.exam() if len(st.victims) >= 3]
+    assert [e.meta["origin"] for e in probes] == full + narrow
+    assert [e.meta["label"] for e in probes] == EXAM_PROBE_LABELS
+    assert {e.meta["label"] for e in decoys} == {"none"}
+    by_key = stories.by_key()
+    for e in probes:
+        if by_key[e.meta["origin"]].cls == "R":
+            assert e.meta["label"] == "shared", e.group
 
 
 def test_a_decided_shared_origin_probe_workload_carries_the_rules_cause():
-    """`node-not-ready`'s two victims share one node, so both decide against
-    the SAME `origin_object` and both get the identical rules' cause."""
-    p = {q.key: q for q in prop.all_scenarios()}["node-not-ready"]
-    ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    verdicts = json.loads(ex.assistant)["verdicts"]
-    causes = {v["cause"] for v in verdicts}
+    """`node-not-ready`'s victims share one node, so every one decides against
+    it and gets the identical rules' cause."""
+    st = stories.by_key()["node-not-ready"]
+    ex = cases.shared_origin_probe(st, generate._entry_rng("t", st.key))
+    causes = {v["cause"] for v in json.loads(ex.assistant)["verdicts"]}
     assert len(causes) == 1
-    only_cause = causes.pop()
-    assert only_cause != p.shared_cause  # the rules' own terse cause, not the sentence
-    assert only_cause.startswith("node ")
+    only = causes.pop()
+    assert only.startswith("node ")
+    assert ex.meta["scope_value"] in only
+    d = so.draw(st, generate._entry_rng("t", st.key), width=len(st.victims))
+    # The rules' own terse cause, not the story's shown sentence.
+    assert only != so._sub(st.shown_cause, None, d)
+
+
+# ------------------------------------------------------------ the job split
+
+
+def test_the_job_split_follows_the_rules_decision(fam):
+    decided = undecided = 0
+    for ex in fam:
+        expected = ex.meta["expected"]
+        for name, m in ex.meta["workloads"].items():
+            if m["decided"]:
+                decided += 1
+                assert m["job"] == 1, (ex.group, name)
+                assert m["own_cause_keywords"] == [], (ex.group, name)
+                assert m["decided_cause"] == expected[name], (ex.group, name)
+                assert m["decided_outcome"] in ("confirmed", "unverified"), (ex.group, name)
+            else:
+                undecided += 1
+                assert m["job"] == 2, (ex.group, name)
+    assert decided > 0 and undecided > 0, (decided, undecided)
