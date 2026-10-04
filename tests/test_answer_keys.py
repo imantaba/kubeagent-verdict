@@ -4,8 +4,9 @@ A named-cause job-2 answer scores 1 when its cleaned cause holds every
 required word and no must-not word. Seven catalog entries change: five
 gain must-not words, and the two init bad-tag entries gain `init`. These
 tests pin that table, the meta it reaches in a build, and what it does to
-the exam. See docs/superpowers/specs/2026-09-29-grader-guard-design.md,
-sections 5 and 7.
+the exam. 2026-10-04 (Spec 4b-2): the required words now live on the
+entry's answer kit (`e.answer.keys`). See
+docs/superpowers/specs/2026-09-29-grader-guard-design.md, sections 5 and 7.
 """
 
 from __future__ import annotations
@@ -26,7 +27,8 @@ CHANGED = {
     "deployment-bad-image-tag": (("image", "registry"), INIT),
     "container-start-error": (("container", "image"), (*INIT, "tag")),
     "init-errimagepull": (("init", "registry", "tag"), ()),
-    "init-imagepullbackoff": (("init", "tag", "registry"), ()),
+    # 2026-10-04 (Spec 4b-2): was ("init", "tag", "registry").
+    "init-imagepullbackoff": (("init", "pull"), ()),
     "oversized-job-unschedulable": (("memory", "node"), ("cordon", "pressure")),
     "volume-mount-error": (("volume", "pod"), ("provision",)),
 }
@@ -65,7 +67,7 @@ def test_init_container_is_the_three_spellings_and_never_bare_init():
 def test_the_seven_changed_entries_carry_the_spec_table():
     for key, (required, must_not) in CHANGED.items():
         e = _entry(key)
-        assert (e.own_cause_keywords, e.own_cause_must_not) == (required, must_not), key
+        assert (e.answer.keys, e.own_cause_must_not) == (required, must_not), key
 
 
 def test_every_other_entry_has_no_must_not_words():
@@ -77,7 +79,7 @@ def test_every_other_entry_has_no_must_not_words():
 def test_each_init_spelling_trips_the_main_container_memory_key(spelling):
     e = _entry("memory-limit-oomkill")
     cause = f"the {spelling}'s memory limit is too small"
-    assert not score._keywords_match(cause, e.own_cause_keywords, e.own_cause_must_not)
+    assert not score._keywords_match(cause, e.answer.keys, e.own_cause_must_not)
 
 
 @pytest.mark.parametrize("cause", [
@@ -86,7 +88,7 @@ def test_each_init_spelling_trips_the_main_container_memory_key(spelling):
 ])
 def test_initial_and_initialize_do_not_trip_it(cause):
     e = _entry("memory-limit-oomkill")
-    assert score._keywords_match(cause, e.own_cause_keywords, e.own_cause_must_not)
+    assert score._keywords_match(cause, e.answer.keys, e.own_cause_must_not)
 
 
 # ------------------------------------------------------------ the build
@@ -113,8 +115,8 @@ def test_every_pool_workload_carries_its_entrys_must_not_list(pool_rows):
     """
     by_keywords: dict[tuple[str, ...], set[tuple[str, ...]]] = {}
     for e in catalog.all_entries():
-        if e.own_cause_keywords:
-            by_keywords.setdefault(e.own_cause_keywords, set()).add(e.own_cause_must_not)
+        if e.answer:
+            by_keywords.setdefault(e.answer.keys, set()).add(e.own_cause_must_not)
     # One list per keyword set, or a workload's list would be ambiguous.
     assert all(len(v) == 1 for v in by_keywords.values())
 

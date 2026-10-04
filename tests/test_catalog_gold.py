@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import random
 import re
 from pathlib import Path
 
@@ -285,8 +286,6 @@ def test_no_prompt_byte_moves_from_dataset_1004(build_1004, split):
 # or a CamelCase word. Compared lowercase against the own lines.
 FACT = re.compile(r"\b(?:\d+(?:\.\d+)?[A-Za-z]*|[A-Z][a-z]+[A-Z][A-Za-z]+|[a-z]+[A-Z][A-Za-z]+)\b")
 GATED = "; none of its own lines says why."
-# Task 3 rebuilds these two on the gate and empties this set.
-MULTI_CASES = {"multi", "multi_misattribution_probe"}
 
 
 @pytest.fixture(scope="module")
@@ -323,7 +322,7 @@ def test_every_named_answer_rests_on_its_own_lines(examples):
     """Spec test 2: the cause is the kit's, and the anchor, every key and
     every fact in the reason are on the workload's own lines."""
     named = 0
-    for ex, wl, e, v, wm, own in catalog_rows(examples, skip=MULTI_CASES):
+    for ex, wl, e, v, wm, own in catalog_rows(examples):
         if wm["decided"] or v["cause"] == c.NONE_OF_THESE:
             continue
         named += 1
@@ -339,7 +338,7 @@ def test_every_named_answer_rests_on_its_own_lines(examples):
 def test_confidence_follows_the_gold(examples):
     """Spec test 4: rules-decided rows are high, named rows carry the kit's
     confidence, none_of_these rows are low, and meta agrees."""
-    for ex, wl, e, v, wm, _own in catalog_rows(examples, skip=MULTI_CASES):
+    for ex, wl, e, v, wm, _own in catalog_rows(examples):
         if wm["decided"]:
             want = "high"
         elif v["cause"] == c.NONE_OF_THESE:
@@ -420,3 +419,54 @@ def test_an_empty_candidates_row_with_no_anchor_does_not_claim_a_list():
     assert doc["summary"] == ("shop/web is failing, but its own lines do not show why.\n"
                               "No deterministic candidates were available.")
     assert ex.meta["expected_own_keywords"] == []
+
+
+def test_the_old_fields_are_gone():
+    fields = {f.name for f in dataclasses.fields(catalog.CatalogEntry)}
+    assert not fields & {"direct", "own_cause", "own_cause_keywords", "rationale"}
+    assert not hasattr(cases, "_confidence")
+
+
+# The pool's gated rows: generate(17, 8000) index and workload. All four are
+# coredns `multi` rows whose read budget ran out before the coredns log read,
+# so no own line shows the configuration parse error (Plan ruling 3).
+GATED_POOL = {(2088, "web/scheduler"), (2177, "web/scheduler"), (2630, "media/worker"),
+              (2850, "edge/gateway")}
+
+
+def test_the_gate_fires_on_exactly_the_four_coredns_multi_rows():
+    """Spec test 3, the real coredns multi shape."""
+    pool, found = generate.generate(17, 8000), set()
+    for i, ex in enumerate(pool):
+        if ex.case.startswith("shared_origin"):
+            continue
+        for v in json.loads(ex.assistant)["verdicts"]:
+            if v["rationale"].endswith(GATED):
+                found.add((i, v["workload"]))
+                assert ex.case == "multi" and ex.group.count("coredns-corefile-broken") == 1
+                assert (v["cause"], v["confidence"], v["rationale"]) == (
+                    c.NONE_OF_THESE, "low", "its container keeps crashing" + GATED)
+                assert ex.meta["workloads"][v["workload"]]["own_cause_keywords"] == []
+    assert found == GATED_POOL
+    # The exam's catalog rows hold no gated answer (shared-origin rows are
+    # not catalog rows, and the gold module gates those itself).
+    assert not [ex for ex in generate.test_set()
+                if not ex.case.startswith("shared_origin")
+                and any(v["rationale"].endswith(GATED)
+                        for v in json.loads(ex.assistant)["verdicts"])]
+
+
+def test_a_multi_workload_with_no_anchor_names_nothing():
+    """`_starved_row`'s shape: shop/gateway gets no read, its keys show on
+    its finding line, so `_thin_multi` passes it on and the gate decides."""
+    from test_cases import _crash_pairs
+    from test_cases import _names as row_names
+    e = _unprinted("node-cordon-diskfull")
+    ex = cases.multi([*_crash_pairs(), (e, row_names("shop", "gateway", "worker-4"))],
+                     random.Random(26))
+    v = next(r for r in json.loads(ex.assistant)["verdicts"] if r["workload"] == "shop/gateway")
+    assert (v["cause"], v["confidence"], v["rationale"]) == (
+        c.NONE_OF_THESE, "low", "its pod cannot be scheduled" + GATED)
+    wm = ex.meta["workloads"]["shop/gateway"]
+    assert (wm["expected_cause"], wm["own_cause_keywords"], wm["own_cause_must_not"]) == (
+        c.NONE_OF_THESE, [], [])

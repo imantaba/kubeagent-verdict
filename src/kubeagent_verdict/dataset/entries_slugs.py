@@ -26,11 +26,6 @@ ENTRIES = [
              ("back-off restarting failed container {container} in pod {pod}: last state "
               "terminated with exit code 1 (Error), node reports ample allocatable memory"), 1),
         ),
-        rationale="The container exits 137 with reason OOMKilled on every restart, which points "
-                  "at its own memory limit rather than the node.",
-        direct=True,
-        own_cause="container killed at its memory limit",
-        own_cause_keywords=("memory", "limit"),
         own_cause_must_not=INIT_CONTAINER,
         answer=Answer(
             anchor="issue: oomkilled",
@@ -61,11 +56,6 @@ ENTRIES = [
             ("Failed", "Error: ErrImagePull", 1),
             ("BackOff", 'Back-off pulling image "{image}"', 1),
         ),
-        rationale="The pull failure names {image} as not found, so the tag itself is wrong "
-                  "rather than the registry being unreachable.",
-        direct=True,
-        own_cause="the image tag does not exist in the registry",
-        own_cause_keywords=("image", "registry"),
         own_cause_must_not=INIT_CONTAINER,
         answer=Answer(
             anchor="\": not found",
@@ -116,12 +106,6 @@ ENTRIES = [
               "taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
               "scheduling."), 6),
         ),
-        rationale="The node carries unschedulable=true plus a DiskPressure condition and taint, "
-                  "and the FailedScheduling event names disk pressure directly, so the node's own "
-                  "state explains the pending pod better than a cluster-wide CPU shortage.",
-        direct=True,
-        own_cause="the pod's node is cordoned and reporting disk pressure",
-        own_cause_keywords=("node", "pod"),
         answer=Answer(
             anchor="were unschedulable",
             cause="one node is unschedulable (cordoned) and the others have taints the pod does "
@@ -161,12 +145,6 @@ ENTRIES = [
         contradiction_events=(
             ("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 500", 9),
         ),
-        rationale="The probe timeouts start exactly when the deny-all policy is created and hit "
-                  "every replica at once, which points at network reachability rather than an "
-                  "application defect.",
-        direct=False,
-        own_cause="a NetworkPolicy now blocks traffic to the pod's probe port",
-        own_cause_keywords=("network", "policy"),
         answer=Answer(
             anchor="network policy: pods selected by",
             cause="a default-deny network policy blocks the probe's traffic to the pod",
@@ -199,12 +177,6 @@ ENTRIES = [
         contradiction_events=(
             ("Killing", "Stopping container coredns (node {node} shutting down)", 1),
         ),
-        rationale="Both CoreDNS replicas crash the same way on different nodes, and the previous "
-                  "log classifies as a configuration parse error, which points at the shared "
-                  "Corefile rather than either node.",
-        direct=True,
-        own_cause="the Corefile has a syntax or plugin error that crashes CoreDNS on startup",
-        own_cause_keywords=("coredns", "error"),
         answer=Answer(
             anchor="log cause: configuration parse",
             cause="the Corefile has a syntax or plugin error that crashes CoreDNS on startup",
@@ -266,12 +238,6 @@ ENTRIES = [
              ("Error: RunContainerError: failed to create containerd task: context deadline "
               "exceeded"), 4),
         ),
-        rationale="Node {node} reports NotReady with its runtime down, and the same image runs "
-                  "cleanly elsewhere in the cluster, so the node's runtime explains the failure "
-                  "rather than the image.",
-        direct=True,
-        own_cause="containerd on the pod's node is not responding (context deadline exceeded)",
-        own_cause_keywords=("containerd", "deadline"),
         answer=Answer(
             anchor="containerd task: context deadline exceeded",
             cause="containerd on the pod's node is not responding (context deadline exceeded)",
@@ -321,12 +287,6 @@ ENTRIES = [
              ("0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are "
               "available: 3 Preemption is not helpful for scheduling."), 5),
         ),
-        rationale="Every node in the scheduler's message is rejected for Insufficient memory and "
-                  "none carry SchedulingDisabled, so the request itself does not fit rather than "
-                  "nodes being withdrawn.",
-        direct=True,
-        own_cause="the pod's memory request is larger than any node can allocate",
-        own_cause_keywords=("memory", "node"),
         own_cause_must_not=("cordon", "pressure"),
         answer=Answer(
             anchor="insufficient memory",
@@ -359,11 +319,6 @@ ENTRIES = [
         contradiction_events=(
             ("Pulled", 'Successfully pulled image "{image}"', 1),
         ),
-        rationale="The previous log classifies as a bad entrypoint and the image itself pulled "
-                  "successfully, so the container's own startup command explains the crash loop.",
-        direct=True,
-        own_cause="the container's command or entrypoint is wrong and it exits immediately",
-        own_cause_keywords=("entrypoint", "exit"),
         answer=Answer(
             anchor="log cause: bad command or entrypoint",
             cause="the container's command or entrypoint is wrong and it exits immediately",

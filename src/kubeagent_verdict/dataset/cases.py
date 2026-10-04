@@ -264,10 +264,6 @@ def _user_message(summary: c.ResourceSummary | None,
     return user
 
 
-def _confidence(e: CatalogEntry) -> str:
-    return "high" if e.direct else "medium"
-
-
 def _rule_summary(n: Names, cause: str) -> str:
     """A rule-decided row's summary: one line naming the rules' cause.
 
@@ -733,8 +729,8 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     other workload's node, and every other workload's claim in its own
     namespace, ruled out, as kubeagent's rootcause does (see
     `_foreign_objects`). Each header is the one kubeagent's confidence rule
-    gives the attributed cause, and the answer keeps the entry's own
-    confidence. A workload the budget never reached has no reads to judge
+    gives the attributed cause, and each answer is the kit's, through the
+    gate (`_entry_gold`). A workload the budget never reached has no reads to judge
     its cause from, so the row refuses it.
 
     The decoys are each workload's OWN refuted candidates. A ruled-out line
@@ -757,8 +753,7 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
     foreign = [_foreign_objects(pairs, own, i) for i in range(len(pairs))]
     res = gather.gather([gather_workload(e, n, own[i] + foreign[i])
                          for i, (e, n) in enumerate(pairs)])
-    workloads, rows = [], []
-    workloads_meta: dict[str, dict] = {}
+    workloads = []
     decoy_by_workload: dict[str, list[str]] = {}
     for (e, n), others, candidates, result in zip(pairs, foreign, res.candidates,
                                                    res.results):
@@ -767,17 +762,23 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
             raise ValueError(f"multi_misattribution_probe: the read budget never reached {key}")
         workloads.append(_workload(e, n, candidates, render.header_for(candidates),
                                    result=result))
-        cause = _fmt(e.own_cause, n)
-        rows.append({"workload": key, "cause": cause,
-                     "confidence": _confidence(e), "rationale": _fmt(e.rationale, n)})
-        workloads_meta[key] = workload_meta(result, expected_cause=cause,
-                                            own_cause_keywords=list(e.own_cause_keywords),
-                                            own_cause_must_not=list(e.own_cause_must_not))
         not_own = {f"{_CAUSE_WORD[obj.kind]} {obj.name}" for obj in others}
         decoy_by_workload[key] = [cand.cause for cand in candidates
                                   if cand.cause.split(" (", 1)[0] not in not_own]
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     user = _user_message(None, "", (), tuple(workloads), res.reads, key=group)
+    keys = [f"{n.ns}/{n.name}" for _e, n in pairs]
+    own_lines = gold.own_lines(user, keys)
+    rows = []
+    workloads_meta: dict[str, dict] = {}
+    for (e, n), key, candidates, result in zip(pairs, keys, res.candidates, res.results):
+        g = _entry_gold(e, n, sorted(own_lines[key]), gold.excluded_from(candidates, result))
+        cause = g.cause or c.NONE_OF_THESE
+        rows.append({"workload": key, "cause": cause, "confidence": g.confidence,
+                     "rationale": g.rationale})
+        workloads_meta[key] = workload_meta(
+            result, expected_cause=cause, own_cause_keywords=list(g.keys),
+            own_cause_must_not=list(e.own_cause_must_not) if g.verdict == "named" else [])
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     label = rules.label(rules.shared(tuple(res.results)))
@@ -946,7 +947,7 @@ def _thin_multi(e: CatalogEntry, n: Names, w: c.Workload, result: rules.Result,
     inventory = c.render_inventory(None, None, "", (), (w,))
     own = (inventory[inventory.index(f"- {n.ns}/{n.name} ("):]
            + c.render_candidates((w,))).lower()
-    return not all(k.lower() in own for k in e.own_cause_keywords)
+    return not all(k.lower() in own for k in e.answer.keys)
 
 
 def _foreign_objects(pairs: list[tuple[CatalogEntry, Names]], own: list[tuple],
@@ -1070,11 +1071,12 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     drop it.
 
     The gold, per workload:
-    - The rules decide it: their cause, and a rationale from their evidence.
-    - They do not: the entry's own cause and rationale.
+    - The rules decide it: their cause, at high confidence, and a rationale
+      from their evidence.
     - They do not, the gather never reached it, and its own lines miss a
-      keyword of that cause: none_of_these, at low confidence (see
-      `_thin_multi`). Nothing the prompt shows about it names the cause.
+      key of its kit: none_of_these, at low confidence (see `_thin_multi`).
+    - Otherwise the gate (`_entry_gold`): the kit's cause when its own
+      lines show the kit's anchor, none_of_these when they do not.
 
     Two workloads may not run on one node, or use one claim in one
     namespace: one object has one state in one scan. A clash raises
@@ -1101,38 +1103,46 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     res = gather.gather([gather_workload(e, n, objects)
                          for (e, n), objects in zip(pairs, combined_objects)],
                         budget=c.MAX_TOOL_CALLS - (healthy_read is not None))
-    workloads, rows = [], []
-    workloads_meta: dict[str, dict] = {}
+    workloads = []
     decoy_by_workload: dict[str, list[str]] = {}
     for (e, n), objects, candidates, result in zip(pairs, combined_objects,
                                                     res.candidates, res.results):
-        w = _workload(e, n, candidates, render.header_for(candidates), result=result)
-        workloads.append(w)
-        conf = _confidence(e)
-        if result.decided:
-            expected_cause = result.cause
-            rationale = _rule_rationale(result)
-        elif _thin_multi(e, n, w, result, res.reads):
-            expected_cause, conf = c.NONE_OF_THESE, "low"
-            rationale = _THIN_RATIONALE["ruled_out"]
-        else:
-            expected_cause = _fmt(e.own_cause, n)
-            rationale = _fmt(e.rationale, n)
-        rows.append({"workload": f"{n.ns}/{n.name}", "cause": expected_cause,
-                     "confidence": conf, "rationale": rationale})
-        key = f"{n.ns}/{n.name}"
+        workloads.append(_workload(e, n, candidates, render.header_for(candidates),
+                                   result=result))
         trace = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
         # decoy_by_workload holds the decoy's cause STRING, as the prompt
         # prints it, never the raw kind/name identifier.
-        decoy_by_workload[key] = [shown.cause for raw, shown in zip(trace, candidates)
-                                  if raw.obj.intent == "decoy"]
+        decoy_by_workload[f"{n.ns}/{n.name}"] = [
+            shown.cause for raw, shown in zip(trace, candidates) if raw.obj.intent == "decoy"]
+    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
+    reads = res.reads
+    if healthy_read is not None:
+        reads = (c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]), *reads)
+    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
+    keys = [f"{n.ns}/{n.name}" for _e, n in pairs]
+    own_lines = gold.own_lines(user, keys)
+    rows = []
+    workloads_meta: dict[str, dict] = {}
+    for (e, n), key, w, candidates, result in zip(pairs, keys, workloads, res.candidates,
+                                                  res.results):
+        if result.decided:
+            expected_cause, conf, keywords = result.cause, "high", []
+            rationale = _rule_rationale(result)
+        elif _thin_multi(e, n, w, result, res.reads):
+            expected_cause, conf, keywords = c.NONE_OF_THESE, "low", []
+            rationale = _THIN_RATIONALE["ruled_out"]
+        else:
+            g = _entry_gold(e, n, sorted(own_lines[key]),
+                            gold.excluded_from(candidates, result))
+            expected_cause, conf = g.cause or c.NONE_OF_THESE, g.confidence
+            keywords, rationale = list(g.keys), g.rationale
+        rows.append({"workload": key, "cause": expected_cause, "confidence": conf,
+                     "rationale": rationale})
         graded = not (result.decided or expected_cause == c.NONE_OF_THESE)
-        own_cause_keywords = list(e.own_cause_keywords) if graded else []
-        own_cause_must_not = list(e.own_cause_must_not) if graded else []
         workloads_meta[key] = render.workload_meta(
             result, expected_cause=expected_cause,
-            own_cause_keywords=own_cause_keywords,
-            own_cause_must_not=own_cause_must_not)
+            own_cause_keywords=keywords if graded else [],
+            own_cause_must_not=list(e.own_cause_must_not) if graded else [])
     # rules.shared groups the row's confirmed results by group_key and returns
     # either the group summary lines, the single "no shared cause among the..."
     # fallback (>=2 confirmed, every group size 1), or () (<2 confirmed) --
@@ -1143,11 +1153,6 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     label = rules.label(rules.shared(tuple(res.results)))
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
-    group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    reads = res.reads
-    if healthy_read is not None:
-        reads = (c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]), *reads)
-    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
     lines = [f"{len(pairs)} workloads are failing for separate reasons."]
     lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,

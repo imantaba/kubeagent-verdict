@@ -4,8 +4,9 @@ An entry is a template kit, not an example: the case builders in cases.py
 substitute synthetic names (names.py) into the {placeholder} fields and
 assemble full prompts through the contract renderers. A job-1 row's cause
 is never written here: the rules decide it from the entry's objects, in
-kubeagent's own words. The cause an entry does write is its own_cause, the
-answer when the rules leave the workload undecided. Reason phrasing echoes
+kubeagent's own words. The cause an entry does write is its answer kit's
+(`answer`), named when the rules leave the workload undecided and its own
+lines show the kit's anchor. Reason phrasing echoes
 kubeagent's own kubelet/API-server reason strings, not text copied from
 the known-issues snapshot. Literal braces inside a template must be
 doubled ({{ }}) because templates go through str.format.
@@ -61,10 +62,6 @@ class CatalogEntry:
     # `none_phrase`: "<none_phrase>; none of its own lines says why."
     answer: Answer | None = None
     none_phrase: str = ""
-    rationale: str = ""
-    direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
-    own_cause: str = ""  # the cause phrase when the winner is omitted from candidates
-    own_cause_keywords: tuple[str, ...] = ()
     # Words a right job-2 answer never holds. An answer that holds every
     # keyword and any one of these scores 0. Matched as lowercase
     # substrings, the same as the keywords.

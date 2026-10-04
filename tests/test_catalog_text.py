@@ -580,7 +580,8 @@ def test_no_generated_row_shows_a_restart_count_the_detector_would_not_print():
 
 KEYWORDS = {
     "deployment-bad-image-tag": ("image", "registry"),
-    "node-cordon-diskfull": ("node", "pod"),
+    # 2026-10-04 (Spec 4b-2): node-cordon-diskfull was ("node", "pod").
+    "node-cordon-diskfull": ("unschedulable", "taint"),
     "networkpolicy-deny-all": ("network", "policy"),
     "coredns-corefile-broken": ("coredns", "error"),
     "worker-containerd-stop": ("containerd", "deadline"),
@@ -597,14 +598,14 @@ KEYWORDS = {
 @pytest.mark.parametrize("key", sorted(KEYWORDS))
 def test_the_new_keywords_are_on_a_line_the_prompt_shows(key):
     e = _entry(key)
-    assert e.own_cause_keywords == KEYWORDS[key]
+    assert e.answer.keys == KEYWORDS[key]
     user = cases.own_cause_case(e, N).user.lower()
     for word in KEYWORDS[key]:
         assert word in user, word
 
 
 def test_worker_containerd_stop_names_containerd_in_its_own_cause():
-    assert _entry("worker-containerd-stop").own_cause == (
+    assert _entry("worker-containerd-stop").answer.cause == (
         "containerd on the pod's node is not responding (context deadline exceeded)")
 
 

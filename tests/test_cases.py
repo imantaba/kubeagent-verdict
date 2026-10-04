@@ -8,7 +8,7 @@ import re
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, catalog, gather, render
+from kubeagent_verdict.dataset import cases, catalog, gather, render, stories
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.evals import score
@@ -123,7 +123,9 @@ def test_every_job1_row_is_decided_and_its_gold_is_the_rules_cause(builder):
         assert row["rationale"] == cases._rule_rationale(rules.Result(
             decided=True, cause=wm["decided_cause"], outcome=wm["decided_outcome"],
             evidence=wm["decided_evidence"], group_key="", group_text="", decisions=()))
-        assert row["confidence"] == ex.meta["expected_confidence"] == "high"  # 2026-10-04 (Spec 4b-2): was the entry's
+        # 2026-10-04 (Spec 4b-2): a rules-decided row is high, whatever the
+        # entry once said.
+        assert row["confidence"] == ex.meta["expected_confidence"] == "high"
         assert json.loads(ex.assistant)["summary"] == f"{key} is failing: {row['cause']}."
         assert ex.meta["entry"] == e.key and ex.meta["case"] == builder
 
@@ -869,7 +871,8 @@ def test_multi_probe_answers_are_still_the_catalog_own_causes():
     n2 = names_mod.draw(random.Random(2))
     ex = cases.multi_misattribution_probe([(e1, n1), (e2, n2)], random.Random(7))
     causes = {r["cause"] for r in json.loads(ex.assistant)["verdicts"]}
-    assert causes == {cases._fmt(e1.own_cause, n1), cases._fmt(e2.own_cause, n2)}
+    # 2026-10-04 (Spec 4b-2): the cause is the kit's, through the gate.
+    assert causes == {cases._fmt(e1.answer.cause, n1), cases._fmt(e2.answer.cause, n2)}
 
 
 def test_multi_probe_meta_lists_every_decoy():
@@ -1124,24 +1127,29 @@ def test_the_fourth_workload_of_a_full_row_gets_no_read():
 
 
 def test_a_starved_workload_whose_block_names_its_cause_answers_it():
-    """node-cordon-diskfull's keywords, "node" and "pod", are both on its
-    finding line, so its own block names its cause with no read."""
+    """node-cordon-diskfull's keys, "unschedulable" and "taint", are both on
+    its finding line, so its own block names its cause with no read.
+    2026-10-04 (Spec 4b-2): the kit's keys and answer, through the gate."""
     e = _entry("node-cordon-diskfull")
     n = _names("shop", "gateway", "worker-4")
     ex = _starved_row(e)
     row = _verdict(ex, "shop/gateway")
-    assert (row["cause"], row["confidence"]) == (cases._fmt(e.own_cause, n), cases._confidence(e))
-    assert row["rationale"] == cases._fmt(e.rationale, n)
+    assert (row["cause"], row["confidence"]) == (cases._fmt(e.answer.cause, n),
+                                                 e.answer.confidence)
+    assert row["rationale"] == cases._fmt(e.answer.rationale, n)
     wm = ex.meta["workloads"]["shop/gateway"]
-    assert (wm["job"], wm["own_cause_keywords"]) == (2, list(e.own_cause_keywords))
+    assert (wm["job"], wm["own_cause_keywords"]) == (2, list(e.answer.keys))
 
 
 def test_a_starved_workload_whose_block_lacks_a_keyword_answers_none_of_these():
     """The same row, with keywords its block does not print. Nothing the
     prompt shows about the workload names the cause, so the gold is
     `none of these`, as on a thin row."""
-    e = dataclasses.replace(_entry("node-cordon-diskfull"),
-                            own_cause_keywords=("disk", "pressure"))
+    # 2026-10-04 (Spec 4b-2): a kit whose keys the block does not print.
+    e0 = _entry("node-cordon-diskfull")
+    e = dataclasses.replace(e0, answer=stories.Answer(
+        anchor=e0.answer.anchor, cause="the node reports disk pressure",
+        keys=("disk", "pressure"), rationale="x."))
     ex = _starved_row(e)
     row = _verdict(ex, "shop/gateway")
     assert (row["cause"], row["confidence"], row["rationale"]) == (
@@ -1815,5 +1823,5 @@ def test_a_thin_row_hides_at_least_one_keyword(key, shape):
     for seed in range(20):
         ex, _ = _undecided(key, case="none_of_these", shape=shape, evidence="thin", seed=seed)
         user = ex.user.lower()
-        shown = all(k.lower() in user for k in e.own_cause_keywords)
+        shown = all(k.lower() in user for k in e.answer.keys)
         assert shown == (key in THIN_SHOWS_EVERY_KEYWORD), (key, seed)

@@ -147,6 +147,7 @@ def excluded_from(candidates: Iterable, result: rules.Result) -> list[str]:
 
 
 def excluded_causes(row: so.Row) -> list[str]:
+    """Causes the rules threw out for one built row."""
     return excluded_from(row.candidates, row.result)
 
 
@@ -158,6 +159,7 @@ def drop_excluded(own: Iterable[str], excluded: Iterable[str]) -> list[str]:
 
 
 def anchor_lines(own: Iterable[str], row: so.Row) -> list[str]:
+    """The row's own lines minus every line that names an excluded cause."""
     return drop_excluded(own, excluded_causes(row))
 
 
