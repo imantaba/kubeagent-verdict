@@ -192,7 +192,7 @@ generators cannot move the exam without someone saying why. This is where
 the why is recorded.
 
 - **2026-10-04 — Spec 4b-2, the catalog gold.** Four hashes moved, old to
-  new (the full entry is the last one in this section):
+  new (details are in the last entry of this section):
   - `FROZEN_SLICE_SHA256`: `d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b`
     to `660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3`.
   - `EVAL_SET_SHA256`: `0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d`
@@ -202,7 +202,7 @@ the why is recorded.
   - `OTHER_FAMILIES_SHA256` (`tests/test_generate.py`): `09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a`
     to `745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a`.
 
- Both hashes moved.
+- **2026-09-16 — the missing `decided by rules:` line.** Both hashes moved.
   Not one of the 263 prompts carried that line, though job 1 grades the
   model on echoing it. The renderer in `contract.py` was right; the
   generators in `dataset/cases.py` built every workload without setting
@@ -950,8 +950,10 @@ the why is recorded.
   Confidence. Rules-decided rows are now high. The probe-failure and
   restart-loop named rows go to high. `networkpolicy-deny-all` stays
   medium. Counted against `out/dataset-1004`, medium to high:
-  - rules-decided rows: 441 in train, 60 in val, 15 on the exam;
-  - named rows: 258 in train, 34 in val, 12 on the exam.
+  - rules-decided verdicts: 441 in train, 60 in val, 15 on the exam. They
+    sit in 416, 58 and 15 rows, because one row can hold more than one;
+  - named verdicts: 258 in train, 34 in val, 12 on the exam. Here each row
+    holds one, so these are also 258, 34 and 12 rows.
 
   The 8 changed causes (the new text is in the kit in
   `src/kubeagent_verdict/dataset/entries_*.py`):
