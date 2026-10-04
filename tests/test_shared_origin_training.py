@@ -995,7 +995,17 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # retired.
 # 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69 ->
 # f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a
-FROZEN_SLICE_SHA256 = "f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a"
+#
+# 2026-10-04 (Spec 4b-1): the shared-origin family is rebuilt on kubeagent's
+# real pipeline (2026-10-03-shared-origin-rewrite-design.md). The slice
+# stays at 239 rows. Its 10 `shared_origin_probe` rows move: 10 user
+# messages, 10 gold answers and 10 metas; their meta drops
+# `distractor_cause`, `expected_confidence`, `wrong_summary_phrase`. The other 229 rows do not move
+# (`OTHER_FAMILIES_SHA256` in tests/test_generate.py). Every number banked
+# against the old bytes is retired.
+# f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a ->
+# d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b
+FROZEN_SLICE_SHA256 = "d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1136,7 +1146,14 @@ FROZEN_SLICE_SHA256 = "f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8
 # prompt, gold answer or decoy of theirs moves.
 # b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653 ->
 # a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2
-EVAL_SET_SHA256 = "a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2"
+#
+# 2026-10-04 (Spec 4b-1): the shared-origin rows are rebuilt on kubeagent's
+# real pipeline, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows move too: 10 user messages,
+# 10 gold answers and 10 metas.
+# a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2 ->
+# 0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d
+EVAL_SET_SHA256 = "0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d"
 
 
 def _digest(rows) -> str:

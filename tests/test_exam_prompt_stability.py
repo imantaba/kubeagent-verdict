@@ -1,12 +1,19 @@
 """The banked exam's prompts must not move.
 
-`out/dataset-0928/test.jsonl` is the exam the faithful prompts
-(2026-09-25-faithful-prompts-design.md) bank: 249 rows, and a new
+`out/dataset-1004/test.jsonl` is the exam Spec 4b-1
+(2026-10-03-shared-origin-rewrite-design.md) banks: 249 rows, and a new
 baseline. Every model scored after that change answers these questions.
 Re-scoring banked replies against a corrected `meta` is only honest if
 the QUESTIONS are the same ones the model saw. This module is that
 proof: regenerate the exam and compare `messages` row for row, byte for
 byte.
+
+Until 2026-10-04 it pointed at `out/dataset-0928/test.jsonl`. Spec 4b-1
+(2026-10-03-shared-origin-rewrite-design.md) rebuilds the 20
+shared-origin exam rows on kubeagent's real pipeline: 20 of their user
+messages and 20 of their gold answers move, so that bank no longer
+matches this generator. The other 229 rows' messages are the ones it
+banked.
 
 Until 2026-09-28 it pointed at `out/dataset-0926/test.jsonl`. The final
 review found that a `multi_misattribution_probe` row listed only each
@@ -49,7 +56,9 @@ from kubeagent_verdict.dataset import generate
 # 2026-09-26 (faithful prompts): re-pointed for the new exam, dataset-0924 -> dataset-0926
 # 2026-09-28 (final review): the multi probe lists every down node, so 20
 # exam user messages moved; re-pointed, dataset-0926 -> dataset-0928
-BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-0928" / "test.jsonl"
+# 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows are rebuilt on real
+# lines; re-pointed, dataset-0928 -> dataset-1004
+BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-1004" / "test.jsonl"
 
 pytestmark = pytest.mark.skipif(
     not BANK.exists(), reason=f"banked exam not present at {BANK}")
