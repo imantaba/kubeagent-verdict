@@ -55,6 +55,12 @@ def _gold_results(examples: list, *, grade_job2: bool = True) -> list[dict]:
     Job 2 on those pools is measured by `_job2_gate` below, over the
     population spec section 10 gate 1 defines. The exam passes nothing and
     is graded in full -- see `test_exam_oracle_job2_is_perfect`.
+
+    2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
+    No train or val workload is named without keys any more: the unkeyed counts above read 0 on both
+    sides (measured in step D3), because every named job-2 workload of a rebuilt row carries the
+    keys of its answer. `grade_job2=False` stays: the pools are still measured by `_job2_gate` and
+    `_job2_keyword_only` below, not by `evaluate`.
     """
     rows = [generate.to_row(e) for e in examples]
     gold = iter(r["messages"][2]["content"] for r in rows)
@@ -176,7 +182,9 @@ def test_oracle_job1_is_perfect_on_train():
     # later name moves, and so do the groups and the split (kept rows: 6415
     # train -> 6457, 749 val -> 721). The case mix is unchanged. 3058 ->
     # 3074. Rate unchanged.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3074}
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 3074.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3151}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -205,7 +213,9 @@ def test_oracle_job2_gate_is_perfect_on_train():
     # as job 1. 2859 -> 2999. Rate unchanged.
     # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
     # reason as job 1; the split moved. 2999 -> 3017. Rate unchanged.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 3017}
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 3017.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 8041}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
@@ -224,7 +234,9 @@ def test_oracle_job2_gate_is_perfect_on_val():
     # unchanged. (Train stays at 2999 by chance.)
     # 2026-09-26 (faithful prompts): coredns draws its restarts from 6, same
     # reason as job 1; the split moved. 321 -> 326. Rate unchanged.
-    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 326}
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 326.
+    assert _job2_gate(_train_and_val()[1]) == {"rate": 1.0, "n": 906}
 
 
 def test_oracle_job2_keyword_only_matches_the_spec_measurement():
@@ -252,10 +264,16 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
 
     2026-09-26 (faithful prompts): coredns-corefile-broken draws its
     restarts from 6, same reason as job 1 above. 2747 -> 2766. Rate still
-    1.0."""
+    1.0.
+
+    2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
+    2766 -> 6580. Every named job-2 workload of a rebuilt row is keyword-graded now, so the family
+    adds to this slice. Rate still 1.0."""
     # 2026-09-26 (faithful prompts): see the docstring. 2748 -> 2747.
     # 2026-09-26 (faithful prompts): see the docstring. 2747 -> 2766.
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 2766}
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 2766.
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 6580}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -318,17 +336,23 @@ def test_oracle_job3_is_perfect_on_train():
     `separate` rows still pair `pvc-unbound-unschedulable` (its PVC
     confirmed) with `worker-containerd-stop` (its node confirmed). The 13th
     is the self-pair row: it drew new names that no exam row holds, so
-    `drop_held_out` keeps it now. Rate still 1.0."""
+    `drop_held_out` keeps it now. Rate still 1.0.
+
+    2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
+    2830 -> 2812: `shared` 194 -> 712, `separate` 13 -> 13 (the `multi` rows only; the shared-origin
+    rows are labelled `shared` or `none`), `none` 2623 -> 2087. Rate still 1.0."""
     board = score.scoreboard(list(_train_results()))
     # 2026-09-26 (faithful prompts): see the docstring. 2792 -> 2766;
     # shared 190 -> 186, separate 13 -> 11, none 2589 -> 2569.
     # 2026-09-26 (faithful prompts): see the docstring. 2766 -> 2830;
     # shared 186 -> 194, separate 11 -> 13, none 2569 -> 2623.
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 2830: shared 194, separate 13, none 2623.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 2830,
-        "by_label": {"shared": {"rate": 1.0, "n": 194},
+        "rate": 1.0, "n": 2812,
+        "by_label": {"shared": {"rate": 1.0, "n": 712},
                      "separate": {"rate": 1.0, "n": 13},
-                     "none": {"rate": 1.0, "n": 2623}}}
+                     "none": {"rate": 1.0, "n": 2087}}}
 
 
 def test_oracle_job3_is_perfect_on_val():
@@ -358,17 +382,22 @@ def test_oracle_job3_is_perfect_on_val():
     2026-09-26 (faithful prompts): coredns-corefile-broken draws its
     restarts from 6, same reason as job 1 above; val shrank. 346 -> 308:
     `shared` 28 -> 20, `none` 318 -> 288, `separate` still 0. Rate still
-    1.0."""
+    1.0.
+
+    2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
+    308 -> 326: `shared` 20 -> 83, `none` 288 -> 243, `separate` still 0. Rate still 1.0."""
     board = score.scoreboard(list(_val_results()))
     # 2026-09-26 (faithful prompts): see the docstring. 313 -> 346;
     # shared 24 -> 28, separate 1 -> 0, none 288 -> 318.
     # 2026-09-26 (faithful prompts): see the docstring. 346 -> 308;
     # shared 28 -> 20, separate 0 -> 0, none 318 -> 288.
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 308: shared 20, none 288.
     assert board["jobs"]["job3"] == {
-        "rate": 1.0, "n": 308,
-        "by_label": {"shared": {"rate": 1.0, "n": 20},
+        "rate": 1.0, "n": 326,
+        "by_label": {"shared": {"rate": 1.0, "n": 83},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 288}}}
+                     "none": {"rate": 1.0, "n": 243}}}
 
 
 def test_oracle_multi_job1_matches_the_spec_measurement():
@@ -466,7 +495,10 @@ def test_exam_oracle_job1_is_perfect():
     job 1). In the `node-disk-pressure` probe row and its decoy twin, the
     drawn victims changed and one decided victim per row is now undecided
     (-2 job 1). The `multi_misattribution_probe` rows stay all job 2.
-    118 -> 120 graded, all 120 pass, still no misses."""
+    118 -> 120 graded, all 120 pass, still no misses.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. (120, 120.0)
+    -> (102, 102.0): every graded job-1 workload passes, still no misses."""
     exam, results = _exam()
     scores = [s for r in results for s in r["job1_scores"]]
     # 2026-09-26 (faithful prompts): oversized's contradiction row left
@@ -477,7 +509,9 @@ def test_exam_oracle_job1_is_perfect():
     # cause. (118, 101.0) -> (118, 118.0)
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws; see the docstring. (118, 118.0) -> (120, 120.0)
-    assert (len(scores), sum(scores)) == (120, 120.0)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (120,
+    # 120.0).
+    assert (len(scores), sum(scores)) == (102, 102.0)
     misses = [e.case for e, r in zip(exam, results)
              if sum(r["job1_scores"]) < len(r["job1_scores"])]
     # 2026-09-26 (faithful prompts): same reason. 19 -> 18.
@@ -501,14 +535,19 @@ def test_exam_oracle_job3_is_perfect():
 
     2026-09-26 (faithful prompts): the new `pvc-unbound-unschedulable`
     entry adds one `multi_misattribution_probe` row, labeled `none`. 39 ->
-    40 rows, `none` 34 -> 35. Still 1.0."""
+    40 rows, `none` 34 -> 35. Still 1.0.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam has
+    40 job-3 rows: 7 `shared` and 33 `none`, was 5 and 35. Still 1.0."""
     _, results = _exam()
     board = score.scoreboard(list(results))
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 40
+    # rows: shared 5, none 35.
     assert board["jobs"]["job3"] == {
         "rate": 1.0, "n": 40,
-        "by_label": {"shared": {"rate": 1.0, "n": 5},
+        "by_label": {"shared": {"rate": 1.0, "n": 7},
                      "separate": {"rate": None, "n": 0},
-                     "none": {"rate": 1.0, "n": 35}}}
+                     "none": {"rate": 1.0, "n": 33}}}
 
 
 def test_exam_oracle_job2_is_perfect():
@@ -546,8 +585,12 @@ def test_exam_oracle_job2_is_perfect():
     left job 2 and two joined it. The `multi_misattribution_probe` rows are
     built on the gather and keep their 40 job-2 workloads. 179 -> 177.
     Still perfect.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. 177 -> 197.
+    Still perfect.
     """
     _, results = _exam()
     board = score.scoreboard(list(results))
     # 2026-09-26 (faithful prompts): see the docstring. 179 -> 177.
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}

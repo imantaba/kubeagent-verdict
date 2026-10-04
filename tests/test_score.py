@@ -1504,11 +1504,15 @@ def test_the_gold_reply_names_no_decoy_on_any_exam_row():
     False on every one. Before, 190 rows were measured and the gold reply
     read True on 10 of them, all on the two shared-origin cases: there a
     decided workload's own cause is listed as its "decoy", and the right
-    answer names it. {0.0526, 190} -> {0.0, 128}."""
+    answer names it. {0.0526, 190} -> {0.0, 128}.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam now
+    has 121 job-2 workloads that carry a decoy, was 128. The gold reply still names none of them."""
     rows = _corpus_rows()
     replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
     results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
-    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 128}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 128.
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 121}
 
 
 # --------------------------------------------------- evaluate(): job1/job2/job3
@@ -1954,6 +1958,10 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     `shared_origin_probe` and `shared_origin_decoy_probe` (see
     `test_oracle.py::test_exam_oracle_job1_is_perfect`). Every
     keyword-graded job-2 workload is still fully exposed.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. 169 of 169
+    becomes 175 of 175. The new shared-origin workloads carry the keys of their story's answer, and
+    every key sits in a line of the workload's own prompt, so the two counts agree.
     """
     rows = [generate.to_row(ex) for ex in generate.test_set()]
     board = score.scoreboard(score.evaluate(rows, lambda m: ""))
@@ -1961,12 +1969,14 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     # rerouted to own_cause plus 6 from the new entry 134 -> 171
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws, and two keyword-graded job-2 workloads left 171 -> 169
-    assert board["overall"]["keyword_graded_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert board["overall"]["keyword_graded_n"] == 175
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
     # 2026-09-26 (faithful prompts): the 37 new job-2 workloads are all exposed 134 -> 171
     # 2026-09-26 (faithful prompts): same reason as the graded count 171 -> 169
-    assert board["overall"]["keyword_derivable_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert board["overall"]["keyword_derivable_n"] == 175
     # Every counted workload is a job-2 workload, which is what design spec
     # line 547's "over all job-2 rows" asks for.
     counted = sum(1 for r in rows for wm in r["meta"]["workloads"].values()
@@ -1976,7 +1986,8 @@ def test_the_footnote_counts_the_corpus_job2_keyword_population():
     # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws, and two keyword-graded job-2 workloads left 171 -> 169
-    assert counted == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert counted == 175
 
 
 # --- the length-gap decider -------------------------------------------------
@@ -2404,8 +2415,10 @@ def test_empty_reply_bot_scores_zero_on_every_job_with_full_n():
     # networkpolicy-deny-all pair four victims are now decided, and in the
     # node-disk-pressure pair two decided victims are not: job 1 118 -> 120,
     # job 2 179 -> 177
-    assert expected_job1_n == 120
-    assert expected_job2_n == 177
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 120.
+    assert expected_job1_n == 102
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert expected_job2_n == 197
 
 
 def _echo_the_decided_cause_bot(rows: list[dict]):
@@ -2465,6 +2478,10 @@ def _never_say_shared_bot(rows: list[dict]):
     2026-09-26 (faithful prompts): the new `pvc-unbound-unschedulable` entry
     adds a twentieth `multi_misattribution_probe` row, labelled `none`, so
     the exam goes from 34 none of 39 to 35 none of 40.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam is
+    now 7 shared / 0 separate / 33 none of 40, so this bot's job3 rate is 33/40. Was 5 shared / 0
+    separate / 35 none of 40.
     """
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
@@ -2478,7 +2495,9 @@ def _never_say_shared_bot(rows: list[dict]):
     return chat_fn
 
 
-def test_never_say_shared_bot_scores_35_of_40_on_job3():
+# 2026-10-04 (Spec 4b-1): Renamed from `test_never_say_shared_bot_scores_35_of_40_on_job3`: the
+# numbers in its name moved.
+def test_never_say_shared_bot_scores_33_of_40_on_job3():
     rows = _corpus_rows()
     results = score.evaluate(rows, _never_say_shared_bot(rows))
     board = score.scoreboard(results)
@@ -2487,11 +2506,15 @@ def test_never_say_shared_bot_scores_35_of_40_on_job3():
     # from the new entry, labelled none 39 -> 40
     assert board["jobs"]["job3"]["n"] == 40
     # 2026-09-26 (faithful prompts): same row 34/39 -> 35/40 (0.8718 -> 0.875)
-    assert board["jobs"]["job3"]["rate"] == round(35 / 40, 4)
-    assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 5
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 35 /
+    # 40.
+    assert board["jobs"]["job3"]["rate"] == round(33 / 40, 4)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 5.
+    assert board["jobs"]["job3"]["by_label"]["shared"]["n"] == 7
     assert board["jobs"]["job3"]["by_label"]["separate"]["n"] == 0
     # 2026-09-26 (faithful prompts): same row 34 -> 35
-    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 35
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 35.
+    assert board["jobs"]["job3"]["by_label"]["none"]["n"] == 33
     assert board["jobs"]["job3"]["by_label"]["shared"]["rate"] == 0.0
     assert board["jobs"]["job3"]["by_label"]["separate"]["rate"] is None
     assert board["jobs"]["job3"]["by_label"]["none"]["rate"] == 1.0
@@ -2562,7 +2585,8 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     # 2026-09-26 (faithful prompts): multi rows on the gather and five
     # workers; the networkpolicy-deny-all probe and decoy victims gain 4
     # decided workloads and the node-disk-pressure pair loses 2 118 -> 120
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 120}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 120.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 102}
     # 153 to 142 on 2026-09-24: the job-2 generator fix left 8
     # `none_of_these` rows in the exam, not 19.
     # 2026-09-26 (faithful prompts): that workload joins job 2 142 -> 143
@@ -2572,7 +2596,8 @@ def test_a_regex_copier_scores_the_job1_ceiling_the_model_card_states():
     # entries the rules decide; its two undecided (job-2) rows leave 181 -> 179
     # 2026-09-26 (faithful prompts): the same two moves as job 1, seen from
     # job 2's side 179 -> 177
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
 
 
 def _always_none_of_these_bot(rows: list[dict]):
@@ -2649,6 +2674,10 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     expect `none_of_these`, so this bot scores 8/177 = 0.0452. The old pin
     still passed inside its tolerance; it moves so that it reads the same
     figure as `test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest`.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. Job 2 counts
+    197 workloads and 22 of them expect `none_of_these`, so this bot scores 22/197 = 0.1117. The
+    tolerance and the bar do not move.
     """
     rows = _corpus_rows()
     results = score.evaluate(rows, _always_none_of_these_bot(rows))
@@ -2663,7 +2692,8 @@ def test_always_none_of_these_bot_scores_well_under_the_job2_bar():
     # workloads leave the exam 0.0552 -> 0.0447 (10/181 -> 8/179)
     # 2026-09-26 (faithful prompts): five workers; two job-2 workloads leave
     # net 0.0447 -> 0.0452 (8/179 -> 8/177)
-    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.0452, abs=0.005)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.0452.
+    assert board["jobs"]["job2"]["rate"] == pytest.approx(0.1117, abs=0.005)
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
 
 
@@ -2796,6 +2826,10 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     workloads net, so it counts 177 and 169 of them are graded and
     exposed. With no guard this bot scores 169/177 = 0.9548. The guarded
     rate is still 0.0.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. Job 2 counts
+    197 workloads and 175 of them are graded and exposed. With no guard this bot scores 175/197 =
+    0.8883. The guarded rate is still 0.0.
     """
     rows = _corpus_rows()
     bot = _paste_the_prompt_bot(rows)
@@ -2808,10 +2842,12 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     # exposed 134 -> 171
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws, and two keyword-graded job-2 workloads left 171 -> 169
-    assert board["overall"]["keyword_derivable_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert board["overall"]["keyword_derivable_n"] == 175
     # 2026-09-26 (faithful prompts): same 37 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): same two workloads 171 -> 169
-    assert board["overall"]["keyword_graded_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert board["overall"]["keyword_graded_n"] == 175
     # 2026-09-26 (faithful prompts): the oversized contradiction_probe workload
     # is undecided now 142 -> 143
     # 2026-09-26 (faithful prompts): 31 rerouted, 6 new, and node-cordon-diskfull's
@@ -2820,7 +2856,8 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     # workloads leave the exam 181 -> 179
     # 2026-09-26 (faithful prompts): multi rows on the gather and five
     # workers; two job-2 workloads leave net 179 -> 177
-    assert board["jobs"]["job2"]["n"] == 177
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"]["n"] == 197
     # 2026-09-26 (faithful prompts): the grader guard zeroes a pasted prompt 0.535 -> 0.0
     assert board["jobs"]["job2"]["rate"] == 0.0
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
@@ -2834,8 +2871,11 @@ def test_the_grader_guard_zeroes_a_bot_that_pastes_the_prompt():
     # leave (171, 181) -> (171, 179), 0.9448 -> 0.9553
     # 2026-09-26 (faithful prompts): five workers; two keyword-graded job-2
     # workloads leave (171, 179) -> (169, 177), 0.9553 -> 0.9548
-    assert (sum(unguarded), len(unguarded)) == (169, 177)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9548
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (169,
+    # 177).
+    assert (sum(unguarded), len(unguarded)) == (175, 197)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.9548.
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.8883
 
 
 def _own_entry(prompt: str, section: str, name: str) -> list[str]:
@@ -2906,6 +2946,9 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     shared-origin stories moved, and job 2 loses two keyword-graded
     workloads net. The echo wins all 169 keyword-graded workloads of 177
     unguarded: 0.9548. Guarded it is still 0.0.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The echo wins
+    161 of the 197 job-2 workloads unguarded: 0.8173. Guarded it is still 0.0.
     """
     rows = _corpus_rows()
     bot = _echo_the_own_entries_bot(rows)
@@ -2920,7 +2963,8 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     # workloads leave the exam 181 -> 179
     # 2026-09-26 (faithful prompts): multi rows on the gather and five
     # workers; two job-2 workloads leave net 179 -> 177
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on the finding
     # lines the echo copies (74, 142) -> (134, 143), 0.5211 -> 0.9371
     # 2026-09-26 (faithful prompts): the 37 new keyword-graded workloads are all
@@ -2929,8 +2973,11 @@ def test_the_grader_guard_zeroes_a_bot_that_echoes_its_own_entries():
     # leave (171, 181) -> (171, 179), 0.9448 -> 0.9553
     # 2026-09-26 (faithful prompts): five workers; two keyword-graded job-2
     # workloads leave (171, 179) -> (169, 177), 0.9553 -> 0.9548
-    assert (sum(unguarded), len(unguarded)) == (169, 177)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9548
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (169,
+    # 177).
+    assert (sum(unguarded), len(unguarded)) == (161, 197)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.9548.
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.8173
 
 
 def _label_names(label: str, names: list[str]) -> str | None:
@@ -3002,9 +3049,11 @@ def _trimmed_paste_bot(rows: list[dict], trim=_first_word_cut):
 
 
 @pytest.mark.parametrize(("trim", "unguarded_wins"), [
-    (_first_word_cut, 147),
-    (_first_2_words_cut, 147),
-    (_first_2_words_swapped, 153),
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 147,
+    # 147 and 153.
+    (_first_word_cut, 169),
+    (_first_2_words_cut, 167),
+    (_first_2_words_swapped, 175),
 ])
 def test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut(trim, unguarded_wins):
     """A bot that reads nothing copies its own lines with the front of each
@@ -3021,6 +3070,9 @@ def test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut(trim, unguarde
     which pinned the first-word bot at 147 of 177 = 0.8305 guarded, over
     the bar. The 2-word bots are new. The unguarded numbers measure the
     corpus, not the guard, and do not move.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. Unguarded the
+    three bots win 169, 167 and 175 of 197. The guard zeroes all of them: 0 of 197.
     """
     rows = _corpus_rows()
     bot = _trimmed_paste_bot(rows, trim)
@@ -3028,8 +3080,10 @@ def test_the_grader_guard_zeroes_a_paste_with_the_first_words_cut(trim, unguarde
     unguarded = _unguarded_job2_scores(rows, bot)
 
     # 2026-09-29 (Spec 4a): G3b crops 1 or 2 front words {0.8305, 177} -> {0.0, 177}
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 177}
-    assert (sum(unguarded), len(unguarded)) == (unguarded_wins, 177)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert (sum(unguarded), len(unguarded)) == (unguarded_wins, 197)
     assert sum(unguarded) / len(unguarded) >= score.JOB2_BAR
 
 
@@ -3055,6 +3109,10 @@ def test_a_right_bad_tag_answer_that_names_the_registry_host_passes_g2():
     `test_a_right_bad_tag_answer_that_names_the_registry_host_is_zeroed_by_g2`.
     Measured 2026-09-28, G2 zeroed 29 of the 30 and the reply scored 148 of
     177 = 0.8362.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. 30 of the 197
+    job-2 workloads have the gold bad-tag cause, and G2 zeroes 0 of them when the host is added. The
+    gold reply with the host added scores 197 of 197.
     """
     rows = _corpus_rows()
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
@@ -3085,14 +3143,21 @@ def test_a_right_bad_tag_answer_that_names_the_registry_host_passes_g2():
     assert (bad_tag, zeroed) == (30, 0)
     board = score.scoreboard(score.evaluate(rows, chat_fn))
     # 2026-09-29 (Spec 4a): same reason {0.8362, 177} -> {1.0, 177}
-    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
+
+
+_NO_DECOY_TO_NAME = "(no decoy offered)"
 
 
 def _name_the_decoy_bot(rows: list[dict]):
     """Answers every flagged workload with its first decoy: its own
     `decoy_by_workload` entries first, then the row's decoys. A workload
-    with no decoy at all gets `none_of_these`. It walks into the trap every
-    time it is offered one."""
+    with no decoy at all gets `_NO_DECOY_TO_NAME`, a reply that is never
+    right. It must not get `none_of_these`: a rebuilt shared-origin
+    workload can expect `none_of_these` and carry no decoy, and the old
+    fallback would have scored it. It walks into the trap every time it
+    is offered one."""
     by_prompt = {r["messages"][1]["content"]: r for r in rows}
 
     def chat_fn(messages: list[dict]) -> str:
@@ -3103,7 +3168,7 @@ def _name_the_decoy_bot(rows: list[dict]):
             decoys = [d for d in [*(meta.get("decoy_by_workload") or {}).get(name, []),
                                   *row_decoys] if d]
             verdicts.append({"workload": name,
-                             "cause": decoys[0] if decoys else NONE_OF_THESE,
+                             "cause": decoys[0] if decoys else _NO_DECOY_TO_NAME,
                              "confidence": "high",
                              "rationale": "the candidate the prompt offers"})
         return json.dumps({"verdicts": verdicts,
@@ -3120,7 +3185,12 @@ def test_a_bot_that_names_the_decoy_scores_zero_on_job2_with_or_without_the_guar
     decided by the rules: job 2 counts 179, and the rate is still 0.0 both
     ways. Re-pinned the same day, when the `multi` rows moved onto the
     gather and the node list grew from three workers to five: job 2 counts
-    177, and the rate is still 0.0 both ways."""
+    177, and the rate is still 0.0 both ways.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. Job 2 counts
+    197, the bot is offered a decoy on 144 of those workloads, and the rate is still 0.0 both ways.
+    A workload with no decoy gets `(no decoy offered)`, which is never right; it used to get
+    `none_of_these`, which a rebuilt workload can expect."""
     rows = _corpus_rows()
     bot = _name_the_decoy_bot(rows)
     board = score.scoreboard(score.evaluate(rows, bot))
@@ -3134,11 +3204,19 @@ def test_a_bot_that_names_the_decoy_scores_zero_on_job2_with_or_without_the_guar
     # workloads leave the exam 181 -> 179
     # 2026-09-26 (faithful prompts): multi rows on the gather and five
     # workers; two job-2 workloads leave net 179 -> 177
-    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
     # 2026-09-26 (faithful prompts): same 38 workloads (0, 143) -> (0, 181)
     # 2026-09-26 (faithful prompts): same two workloads (0, 181) -> (0, 179)
     # 2026-09-26 (faithful prompts): five workers (0, 179) -> (0, 177)
-    assert (sum(unguarded), len(unguarded)) == (0, 177)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (0,
+    # 177).
+    assert (sum(unguarded), len(unguarded)) == (0, 197)
+    # 2026-10-04 (Spec 4b-1): the bot's fallback is `(no decoy offered)` now, never
+    # `none_of_these`, so 0.0 only means something if decoys were on offer. Count them.
+    offered = sum(1 for r in rows for name, wm in r["meta"]["workloads"].items()
+                  if wm.get("job") == 2 and score._workload_decoys(r["meta"], name))
+    assert offered == 144
 
 
 def _hedge_bot(rows: list[dict]):
@@ -3210,6 +3288,10 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     registry.example.com`, so their hedge passes now. Guarded it is 32 + 29
     = 61 of 177 = 0.3446. That is the measured cost of letting a right
     answer name the registry host, and it stays under JOB2_BAR.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. Job 2 counts
+    197. Unguarded the hedge wins 184 of them, 0.934. Guarded it reads 0.4162, still under the job-2
+    bar.
     """
     rows = _corpus_rows()
     bot = _hedge_bot(rows)
@@ -3228,7 +3310,9 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     # (32 of 177)
     # 2026-09-29 (Spec 4a): G2 skips the 2-word registry decoy, 29 hedges pass
     # {0.1808, 177} -> {0.3446, 177} (61 of 177)
-    assert board["jobs"]["job2"] == {"rate": 0.3446, "n": 177}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was
+    # {"rate": 0.3446, "n": 177}.
+    assert board["jobs"]["job2"] == {"rate": 0.4162, "n": 197}
     assert board["jobs"]["job2"]["rate"] < score.JOB2_BAR
     # 2026-09-26 (faithful prompts): same workload (134, 142) -> (134, 143),
     # 0.9437 -> 0.9371
@@ -3238,8 +3322,11 @@ def test_the_grader_guard_zeroes_a_hedge_between_the_cause_and_a_decoy():
     # leave (171, 181) -> (171, 179), 0.9448 -> 0.9553
     # 2026-09-26 (faithful prompts): five workers; two keyword-graded job-2
     # workloads leave (171, 179) -> (169, 177), 0.9553 -> 0.9548
-    assert (sum(unguarded), len(unguarded)) == (169, 177)
-    assert round(sum(unguarded) / len(unguarded), 4) == 0.9548
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (169,
+    # 177).
+    assert (sum(unguarded), len(unguarded)) == (184, 197)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.9548.
+    assert round(sum(unguarded) / len(unguarded), 4) == 0.934
 
 
 def test_the_gold_answer_passes_the_grader_guard_on_every_exam_job2_workload():
@@ -3284,6 +3371,9 @@ def test_the_gold_answer_passes_the_grader_guard_on_every_training_pool_job2_wor
     to check it), so it runs on the full pool, not the 800-row seed set.
     If this fails, fix the row, not the guard, for the reason the exam's
     net gives.
+
+    2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
+    The pool now holds 9618 job-2 golds (was 9426), and the guard zeroes none of them.
     """
     checked = 0
     zeroed = []
@@ -3300,7 +3390,9 @@ def test_the_gold_answer_passes_the_grader_guard_on_every_training_pool_job2_wor
                 zeroed.append((meta["case"], name, gold[name]))
 
     assert zeroed == []
-    assert checked == 9426
+    # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
+    # lines; was 9426.
+    assert checked == 9618
 
 
 def _own_keyword_bot(rows: list[dict]):
@@ -3367,7 +3459,10 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
     `networkpolicy-deny-all` `shared_origin_probe` and
     `shared_origin_decoy_probe` rows drew new endings, and the rules now
     decide both workloads on each. Those two rows are all job 1 now, so 144
-    are checked."""
+    are checked.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. 154 rows are
+    checked now (was 144)."""
     rows = _corpus_rows()
     results = score.evaluate(rows, _own_keyword_bot(rows))
     checked = 0
@@ -3386,7 +3481,8 @@ def test_cause_accuracy_and_job2_agree_on_every_all_job2_exam_row():
     # leave the exam 148 -> 146
     # 2026-09-26 (faithful prompts): five workers; the networkpolicy-deny-all
     # shared-origin probe and decoy rows are all job 1 now 146 -> 144
-    assert checked == 144
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 144.
+    assert checked == 154
 
 
 def _rewrite_keyword_answer_keys(rows: list[dict], token: str) -> tuple[list[dict], int]:
@@ -3477,6 +3573,12 @@ def test_the_exposed_workloads_trace_back_to_twenty_catalog_entries():
     traces to a catalog key: 152 becomes 151, all catalog workloads. The
     eval-origin job-2 workloads fall from 20 to 18, so 151 plus 18 make the
     scoreboard's 169.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The
+    shared-origin workloads no longer come from `propagation.py`: each carries the keys of its
+    story's answer, and none of those keys is a catalog entry's. The catalog count (20 entries, 151
+    workloads) is the same, and the scoreboard's 175 is that count plus the 24 shared-origin
+    workloads.
     """
     declaring = {}
     for entry in catalog.all_entries():
@@ -3491,7 +3593,9 @@ def test_the_exposed_workloads_trace_back_to_twenty_catalog_entries():
                 continue
             keywords = tuple(wm.get("own_cause_keywords") or ())
             if not keywords or keywords not in declaring:
-                continue  # not a catalog entry -- an eval-only (propagation.py) pair
+                # 2026-10-04 (Spec 4b-1): the shared-origin workloads' keys come from the stories
+                # now, not from `propagation.py`. No catalog count moves.
+                continue  # not a catalog entry -- a shared-origin story's key (stories.py)
             seen = all(k.lower() in prompt for k in keywords)
             (exposed if seen else hidden)[keywords] += 1
 
@@ -3519,15 +3623,16 @@ def test_the_exposed_workloads_trace_back_to_twenty_catalog_entries():
     # 2026-09-26 (faithful prompts): same 37 workloads 115 -> 152
     # 2026-09-26 (faithful prompts): same eval-origin victim 152 -> 151
     assert n_fully + n_partly == 151
-    # The scoreboard's total is bigger now: the catalog's 151 plus the 18
-    # eval-origin workloads this test deliberately does not count above.
+    # The scoreboard's total is bigger now: the catalog's 151 plus the
+    # 24 shared-origin workloads this test deliberately does not count above.
     board = score.scoreboard(score.evaluate(_corpus_rows(), _own_keyword_bot(_corpus_rows())))
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
     # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws, and two keyword-graded job-2 workloads left 171 -> 169
-    assert board["overall"]["keyword_derivable_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert board["overall"]["keyword_derivable_n"] == 175
     assert n_fully + n_partly < board["overall"]["keyword_derivable_n"]
 
 
@@ -3663,6 +3768,12 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     That row now carries a length verdict, so `positional_probe` holds 8
     `length helps` rows, not 7, and this bot misses it: 40 of 48 = 0.8333
     before, 0 of 48 after. The set of cases that moves does not change.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam has
+    175 keyword-graded job-2 workloads (was 169). After the rewrite job 2 reads 0.1117, still the
+    always-none bot's figure. Cause accuracy reads 0.6185 before the rewrite and 0.0562 after.
+    Overconfidence's population is 95 before and 235 after. The length figures and the seven cases
+    that move do not change: no shared-origin row carries a row-level decoy cause.
     """
     rows = _corpus_rows()
     bot = _own_keyword_bot(rows)          # replies pinned to today's keys
@@ -3672,7 +3783,8 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): five workers moved two shared-origin
     # stories' draws, and two keyword-graded job-2 workloads left 171 -> 169
-    assert workload_level == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert workload_level == 175
 
     before = score.scoreboard(score.evaluate(rows, bot))
     after = score.scoreboard(score.evaluate(rewritten, bot))
@@ -3682,11 +3794,13 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     # 2026-09-26 (faithful prompts): the catalog's keywords sit on printed lines 81 -> 134
     # 2026-09-26 (faithful prompts): 31 rerouted and 6 new job-2 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): same two workloads as workload_level 171 -> 169
-    assert before["overall"]["keyword_derivable_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert before["overall"]["keyword_derivable_n"] == 175
     assert after["overall"]["keyword_derivable_n"] == 0
     # 2026-09-26 (faithful prompts): same 37 workloads 134 -> 171
     # 2026-09-26 (faithful prompts): same two workloads 171 -> 169
-    assert after["overall"]["keyword_graded_n"] == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert after["overall"]["keyword_graded_n"] == 175
 
     # Four numbers retire: the same replies now score differently.
     assert before["jobs"]["job2"]["rate"] == pytest.approx(1.0, abs=0.005)
@@ -3699,7 +3813,8 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     # workloads leave, the always-none bot's figure 0.0552 -> 0.0447 (8/179)
     # 2026-09-26 (faithful prompts): five workers; two job-2 workloads leave
     # net, still the always-none bot's figure 0.0447 -> 0.0452 (8/177)
-    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.0452, abs=0.005)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.0452.
+    assert after["jobs"]["job2"]["rate"] == pytest.approx(0.1117, abs=0.005)
     # 2026-09-26 (faithful prompts): 37 fewer job-1 rows, which this bot always
     # misses (110 -> 73) 0.5185 -> 0.664
     # 2026-09-26 (faithful prompts): the contradiction_probe gold is the rules'
@@ -3709,19 +3824,23 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
     # probe and decoy rows are job 1 now (1.0 -> 0.0 each) and the
     # node-disk-pressure pair gains a job-2 workload each (1/3 -> 2/3 each)
     # 0.593 -> 0.5877
-    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.5877, abs=0.005)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.5877.
+    assert before["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.6185, abs=0.005)
     # 2026-09-26 (faithful prompts): same move after the rewrite 0.1071 -> 0.1076
     # 2026-09-26 (faithful prompts): the same 19 fewer right rows 0.1076 -> 0.0321
-    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.0321, abs=0.005)
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 0.0321.
+    assert after["overall"]["cause_accuracy"]["rate"] == pytest.approx(0.0562, abs=0.005)
     # 2026-09-26 (faithful prompts): the same 37 fewer wrong job-1 rows 123 -> 86
     # 2026-09-26 (faithful prompts): 17 new wrong contradiction_probe rows 86 -> 103
     # 2026-09-26 (faithful prompts): the two networkpolicy-deny-all rows turn
     # wrong 103 -> 105
-    assert before["overall"]["overconfidence_rate"]["n"] == 105
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 105.
+    assert before["overall"]["overconfidence_rate"]["n"] == 95
     # 2026-09-26 (faithful prompts): 86 plus the 138 rows the rewrite turns wrong
     # (was 123 plus 102) 225 -> 224
     # 2026-09-26 (faithful prompts): the same 17 rows 224 -> 241
-    assert after["overall"]["overconfidence_rate"]["n"] == 241
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 241.
+    assert after["overall"]["overconfidence_rate"]["n"] == 235
     # 2026-09-26 (faithful prompts): 40 keyword-graded rows plus 7 positional_probe
     # rows (was 38 plus 18) {0.6786, 56} -> {0.8511, 47}
     # 2026-09-26 (faithful prompts): five workers; one positional_probe gold
