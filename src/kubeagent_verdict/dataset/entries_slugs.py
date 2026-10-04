@@ -2,6 +2,7 @@
 
 from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, CatalogEntry
 from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
+from kubeagent_verdict.dataset.stories import Answer
 
 ENTRIES = [
     CatalogEntry(
@@ -31,6 +32,13 @@ ENTRIES = [
         own_cause="container killed at its memory limit",
         own_cause_keywords=("memory", "limit"),
         own_cause_must_not=INIT_CONTAINER,
+        answer=Answer(
+            anchor="issue: oomkilled",
+            cause="container killed at its memory limit",
+            keys=("memory", "limit"),
+            rationale="Its finding says the container exceeded its memory limit and was killed, "
+                      "with exit code 137."),
+        none_phrase="its container keeps being killed for memory",
         grounding=("OOMKilled",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
@@ -59,6 +67,13 @@ ENTRIES = [
         own_cause="the image tag does not exist in the registry",
         own_cause_keywords=("image", "registry"),
         own_cause_must_not=INIT_CONTAINER,
+        answer=Answer(
+            anchor="\": not found",
+            cause="the image tag does not exist in the registry",
+            keys=("image", "registry"),
+            rationale="The pull of {image} fails with \"not found\", so the tag does not exist in "
+                      "the registry."),
+        none_phrase="its image cannot be pulled",
         grounding=("ImagePullBackOff",),
         objects=(
             Object(kind="registry", name="registry.example.com", scan_reason="2",
@@ -94,7 +109,7 @@ ENTRIES = [
         evidence="0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had "
                  "untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is "
                  "not helpful for scheduling.",
-        recommendation="uncordon the node or free disk space, then confirm DiskPressure clears",
+        recommendation="uncordon the node, or check why the other nodes are tainted",
         events=(
             ("FailedScheduling",
              ("0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had untolerated "
@@ -107,6 +122,14 @@ ENTRIES = [
         direct=True,
         own_cause="the pod's node is cordoned and reporting disk pressure",
         own_cause_keywords=("node", "pod"),
+        answer=Answer(
+            anchor="were unschedulable",
+            cause="one node is unschedulable (cordoned) and the others have taints the pod does "
+                  "not tolerate",
+            keys=("unschedulable", "taint"),
+            rationale="The scheduler says 1 node was unschedulable and 2 had taints the pod does "
+                      "not tolerate, so no node can take it."),
+        none_phrase="its pod cannot be scheduled",
         grounding=("Unschedulable",),
         # The pod is unscheduled, so no pod of the workload is on the node
         # and the rules rule it out: placement "off". No builder describes
@@ -144,6 +167,15 @@ ENTRIES = [
         direct=False,
         own_cause="a NetworkPolicy now blocks traffic to the pod's probe port",
         own_cause_keywords=("network", "policy"),
+        answer=Answer(
+            anchor="network policy: pods selected by",
+            cause="a default-deny network policy blocks the probe's traffic to the pod",
+            keys=("network", "policy"),
+            confidence="medium",
+            rationale="The readiness probe times out, and kubeagent names the default-deny "
+                      "network policy that selects its pods as a possible cause, so the policy "
+                      "likely blocks the probe."),
+        none_phrase="its readiness probe fails",
         network_policies=("default-deny",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
@@ -173,6 +205,14 @@ ENTRIES = [
         direct=True,
         own_cause="the Corefile has a syntax or plugin error that crashes CoreDNS on startup",
         own_cause_keywords=("coredns", "error"),
+        answer=Answer(
+            anchor="log cause: configuration parse",
+            cause="the Corefile has a syntax or plugin error that crashes CoreDNS on startup",
+            keys=("coredns", "error"),
+            rationale="The coredns container keeps crashing, and its previous log classifies as a "
+                      "configuration parse or validation error, so CoreDNS cannot load its "
+                      "Corefile."),
+        none_phrase="its container keeps crashing",
         grounding=("kube-system/coredns",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
@@ -220,7 +260,7 @@ ENTRIES = [
         reason="the container image was resolved but the container could not be started",
         evidence='container "{container}": RunContainerError: failed to create containerd task: '
                  "context deadline exceeded",
-        recommendation="check whether the container runtime on {node} is healthy",
+        recommendation="check whether the container runtime on the pod's node is healthy",
         events=(
             ("Failed",
              ("Error: RunContainerError: failed to create containerd task: context deadline "
@@ -232,6 +272,14 @@ ENTRIES = [
         direct=True,
         own_cause="containerd on the pod's node is not responding (context deadline exceeded)",
         own_cause_keywords=("containerd", "deadline"),
+        answer=Answer(
+            anchor="containerd task: context deadline exceeded",
+            cause="containerd on the pod's node is not responding (context deadline exceeded)",
+            keys=("containerd", "deadline"),
+            rationale="Starting the container fails with \"failed to create containerd task: "
+                      "context deadline exceeded\", so containerd on the pod's node does not "
+                      "answer in time."),
+        none_phrase="its container fails to start",
         grounding=("NotReady",),
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
@@ -280,6 +328,13 @@ ENTRIES = [
         own_cause="the pod's memory request is larger than any node can allocate",
         own_cause_keywords=("memory", "node"),
         own_cause_must_not=("cordon", "pressure"),
+        answer=Answer(
+            anchor="insufficient memory",
+            cause="the pod's memory request is larger than any node can allocate",
+            keys=("memory", "node"),
+            rationale="The scheduler rejects all 3 nodes for insufficient memory, so the pod's "
+                      "memory request is larger than any node can give."),
+        none_phrase="its pod cannot be scheduled",
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="off",
                    fresh=NODE_NOT_READY, intent="decoy"),
@@ -309,6 +364,13 @@ ENTRIES = [
         direct=True,
         own_cause="the container's command or entrypoint is wrong and it exits immediately",
         own_cause_keywords=("entrypoint", "exit"),
+        answer=Answer(
+            anchor="log cause: bad command or entrypoint",
+            cause="the container's command or entrypoint is wrong and it exits immediately",
+            keys=("entrypoint", "exit"),
+            rationale="The container keeps exiting after it starts, and its previous log "
+                      "classifies as a bad command or entrypoint."),
+        none_phrase="its container keeps crashing",
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),

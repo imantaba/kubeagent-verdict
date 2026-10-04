@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kubeagent_verdict.dataset.objects import Object
+from kubeagent_verdict.dataset.stories import Answer
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,13 @@ class CatalogEntry:
     # healthy and Ready on its lease ending, and pvc-unbound-unschedulable
     # was never written with one.
     contradiction_events: tuple[tuple[str, str, int | str], ...] = ()
+    # The answer kit (Spec 4b-2), on trainable entries only. An undecided
+    # row names `answer.cause` only when the workload's own lines, minus
+    # every line naming a ruled-out or refuted cause, hold `answer.anchor`.
+    # Otherwise the row answers none_of_these, and its reason opens with
+    # `none_phrase`: "<none_phrase>; none of its own lines says why."
+    answer: Answer | None = None
+    none_phrase: str = ""
     rationale: str = ""
     direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
     own_cause: str = ""  # the cause phrase when the winner is omitted from candidates

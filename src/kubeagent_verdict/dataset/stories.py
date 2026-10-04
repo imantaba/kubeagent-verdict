@@ -25,7 +25,8 @@ EXAM_KEYS = ("coredns-down", "node-not-ready", "storage-provisioner-down",
 RULED_ORDER = ("node-kubelet-halted", "node-kubelet-unresponsive",
                "pvc-provisioner-not-responding", "pvc-storageclass-missing",
                "registry-mirror-unreachable", "registry-rate-limited")
-_KEY = re.compile(r"^[a-z]{4,}$")
+# 2026-10-04 (Spec 4b-2): 3+ letters (was 4+), so the catalog kit for create-container-config-error keeps its "key" key. Built shared-origin rows still pin 4+ (tests/test_shared_origin_keywords.py).
+_KEY = re.compile(r"^[a-z]{3,}$")
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class Answer:
             raise ValueError(f"{self.cause!r}: 1 to 3 keys, got {len(self.keys)}")
         for k in self.keys:
             if not _KEY.match(k):
-                raise ValueError(f"{self.cause!r}: key {k!r} is not 4+ lowercase letters")
+                raise ValueError(f"{self.cause!r}: key {k!r} is not 3+ lowercase letters")
             if k not in self.cause.lower():
                 raise ValueError(f"{self.cause!r}: key {k!r} is not inside the cause")
         if "{" in "".join(self.keys):
