@@ -292,9 +292,9 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="liveness probe failing",
                 events=(("Unhealthy", "Liveness probe failed: dependency check timed out", 7),),
                 broken=Answer(anchor="default-deny",
-                              cause="the NetworkPolicy default-deny selects its pods and "
-                                    "blocks its traffic, so its liveness probe fails",
-                              keys=("policy", "deny"),
+                              cause="its pods are selected by the NetworkPolicy default-deny, "
+                                    "a possible cause of its failing liveness probe",
+                              keys=("policy", "deny"), confidence="medium",
                               rationale="its network policy line names default-deny",
                               link=True),
                 none_phrase="its liveness probe fails"),
@@ -303,9 +303,9 @@ _STORIES: tuple[Story, ...] = (
                 reason="Unhealthy", evidence="readiness probe failing",
                 events=(("Unhealthy", "Readiness probe failed: upstream check timed out", 5),),
                 broken=Answer(anchor="default-deny",
-                              cause="the NetworkPolicy default-deny selects its pods and "
-                                    "blocks its traffic, so its readiness probe fails",
-                              keys=("policy", "deny"),
+                              cause="its pods are selected by the NetworkPolicy default-deny, "
+                                    "a possible cause of its failing readiness probe",
+                              keys=("policy", "deny"), confidence="medium",
                               rationale="its network policy line names default-deny",
                               link=True),
                 none_phrase="its readiness probe fails"),

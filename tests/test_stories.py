@@ -248,7 +248,8 @@ def test_healthy_pending_victim_names_dedicated_taint_only(key, taint):
 
 _NP_KEYS = ("networkpolicy-egress-allowlist-stale", "networkpolicy-dns-egress-missing",
             "networkpolicy-namespace-label-drifted", "networkpolicy-port-mismatch",
-            "networkpolicy-allow-selector-typo", "networkpolicy-ingress-deny-all")
+            "networkpolicy-allow-selector-typo", "networkpolicy-ingress-deny-all",
+            "networkpolicy-deny-all")
 
 
 def _np_policy_answers(key):
@@ -265,7 +266,7 @@ def test_possible_cause_policy_answers_are_medium():
         for v, a in _np_policy_answers(key):
             seen += 1
             assert a.confidence == "medium", (key, v.workload_kind)
-    assert seen == 10
+    assert seen == 12
 
 
 @pytest.mark.parametrize("key", _NP_KEYS)
