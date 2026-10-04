@@ -4,45 +4,45 @@
       "desired": 0,
       "kind": "CronJob",
       "labels": {
-        "app": "s04"
+        "app": "s09"
       },
-      "name": "b-s04",
+      "name": "b-s09",
       "namespace": "svc"
     },
     {
       "desired": 0,
       "kind": "Job",
       "labels": {
-        "app": "s05"
+        "app": "s10"
       },
-      "name": "b-s05",
+      "name": "b-s10",
       "namespace": "svc"
     },
     {
       "desired": 0,
       "kind": "DaemonSet",
       "labels": {
-        "app": "s06"
+        "app": "s11"
       },
-      "name": "b-s06",
+      "name": "b-s11",
       "namespace": "svc"
     },
     {
       "desired": 0,
       "kind": "Deployment",
       "labels": {
-        "app": "s07"
+        "app": "s12"
       },
-      "name": "b-s07",
+      "name": "b-s12",
       "namespace": "svc"
     },
     {
       "desired": 0,
       "kind": "StatefulSet",
       "labels": {
-        "app": "s08"
+        "app": "s13"
       },
-      "name": "b-s08",
+      "name": "b-s13",
       "namespace": "svc"
     }
   ],
@@ -52,14 +52,14 @@
       "ready": [
         "true"
       ],
-      "service": "s01"
+      "service": "s06"
     },
     {
       "namespace": "svc",
       "ready": [
         "false"
       ],
-      "service": "s02"
+      "service": "s07"
     }
   ],
   "kubeagent": {
@@ -701,7 +701,7 @@
       "selector": {
         "app": "s01"
       },
-      "type": "LoadBalancer"
+      "type": "ClusterIP"
     },
     {
       "annotations": {},
@@ -714,9 +714,7 @@
       "type": "ClusterIP"
     },
     {
-      "annotations": {
-        "kubeagent.io/expected-empty": "true"
-      },
+      "annotations": {},
       "lb_ingress": false,
       "name": "s03",
       "namespace": "svc",
@@ -753,7 +751,7 @@
       "selector": {
         "app": "s06"
       },
-      "type": "ClusterIP"
+      "type": "LoadBalancer"
     },
     {
       "annotations": {},
@@ -766,7 +764,9 @@
       "type": "ClusterIP"
     },
     {
-      "annotations": {},
+      "annotations": {
+        "kubeagent.io/expected-empty": "true"
+      },
       "lb_ingress": false,
       "name": "s08",
       "namespace": "svc",
@@ -1278,56 +1278,6 @@
             "app": "s01"
           },
           "name": "backing-s01-0",
-          "node": "n16",
-          "ready": true
-        }
-      ],
-      "ready": 1,
-      "restarts": 0,
-      "status": "Running"
-    },
-    {
-      "decoy_events": [],
-      "desired": 1,
-      "events": [],
-      "events_failed": "",
-      "findings": [],
-      "kind": "Deployment",
-      "name": "backing-s02",
-      "namespace": "svc",
-      "pod": "backing-s02",
-      "pods": [
-        {
-          "claims": [],
-          "labels": {
-            "app": "s02"
-          },
-          "name": "backing-s02-0",
-          "node": "n16",
-          "ready": true
-        }
-      ],
-      "ready": 1,
-      "restarts": 0,
-      "status": "Running"
-    },
-    {
-      "decoy_events": [],
-      "desired": 1,
-      "events": [],
-      "events_failed": "",
-      "findings": [],
-      "kind": "Deployment",
-      "name": "backing-s10",
-      "namespace": "svc",
-      "pod": "backing-s10",
-      "pods": [
-        {
-          "claims": [],
-          "labels": {
-            "app": "s10"
-          },
-          "name": "backing-s10-0",
           "node": "n01",
           "ready": false
         }
@@ -1343,25 +1293,25 @@
       "events_failed": "",
       "findings": [],
       "kind": "Deployment",
-      "name": "backing-s11",
+      "name": "backing-s02",
       "namespace": "svc",
-      "pod": "backing-s11",
+      "pod": "backing-s02",
       "pods": [
         {
           "claims": [],
           "labels": {
-            "app": "s11"
+            "app": "s02"
           },
-          "name": "backing-s11-0",
+          "name": "backing-s02-0",
           "node": "n02",
           "ready": false
         },
         {
           "claims": [],
           "labels": {
-            "app": "s11"
+            "app": "s02"
           },
-          "name": "backing-s11-1",
+          "name": "backing-s02-1",
           "node": "n05",
           "ready": false
         }
@@ -1377,16 +1327,16 @@
       "events_failed": "",
       "findings": [],
       "kind": "Deployment",
-      "name": "backing-s12",
+      "name": "backing-s03",
       "namespace": "svc",
-      "pod": "backing-s12",
+      "pod": "backing-s03",
       "pods": [
         {
           "claims": [],
           "labels": {
-            "app": "s12"
+            "app": "s03"
           },
-          "name": "backing-s12-0",
+          "name": "backing-s03-0",
           "node": "n16",
           "ready": false
         }
@@ -1402,39 +1352,89 @@
       "events_failed": "",
       "findings": [],
       "kind": "Deployment",
-      "name": "backing-s13",
+      "name": "backing-s04",
       "namespace": "svc",
-      "pod": "backing-s13",
+      "pod": "backing-s04",
       "pods": [
         {
           "claims": [],
           "labels": {
-            "app": "s13"
+            "app": "s04"
           },
-          "name": "backing-s13-0",
+          "name": "backing-s04-0",
           "node": "n16",
           "ready": false
         },
         {
           "claims": [],
           "labels": {
-            "app": "s13"
+            "app": "s04"
           },
-          "name": "backing-s13-1",
+          "name": "backing-s04-1",
           "node": "n16",
           "ready": false
         },
         {
           "claims": [],
           "labels": {
-            "app": "s13"
+            "app": "s04"
           },
-          "name": "backing-s13-2",
+          "name": "backing-s04-2",
           "node": "n16",
           "ready": false
         }
       ],
       "ready": 3,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s06",
+      "namespace": "svc",
+      "pod": "backing-s06",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s06"
+          },
+          "name": "backing-s06-0",
+          "node": "n16",
+          "ready": true
+        }
+      ],
+      "ready": 1,
+      "restarts": 0,
+      "status": "Running"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [],
+      "events_failed": "",
+      "findings": [],
+      "kind": "Deployment",
+      "name": "backing-s07",
+      "namespace": "svc",
+      "pod": "backing-s07",
+      "pods": [
+        {
+          "claims": [],
+          "labels": {
+            "app": "s07"
+          },
+          "name": "backing-s07-0",
+          "node": "n16",
+          "ready": true
+        }
+      ],
+      "ready": 1,
       "restarts": 0,
       "status": "Running"
     }

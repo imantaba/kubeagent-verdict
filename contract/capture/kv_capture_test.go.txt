@@ -1797,9 +1797,9 @@ func kvCheckCluster(t *testing.T, prompt string) {
 	t.Helper()
 	for _, s := range []string{
 		"Cluster health (P1): DEGRADED — 11/16 nodes Ready.",
-		"  node n01 NotReady: KubeletNotReady — ", "…\n",
-		"  node n02 NotReady: NodeStatusUnknown — Kubelet stopped posting node status.",
-		"  node n03 NotReady: PLEG is not healthy",
+		"  node n01 NotReady: KubeletNotReady — container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx sta…\n",
+		"  node n02 NotReady: NodeStatusUnknown — Kubelet stopped posting node status.\n",
+		"  node n03 NotReady: PLEG is not healthy: pleg was last seen active 3m0s ago\n",
 		"  node n04 NotReady\n",
 		"  node n05 no kubelet lease", "  node n06 no kubelet lease",
 		"(lease 40s stale)", "(lease 43s stale)", "(lease 1m35s stale)",
@@ -1809,12 +1809,24 @@ func kvCheckCluster(t *testing.T, prompt string) {
 		"  node n15 DiskPressure\n  node n15 NotReady: KubeletNotReady — container runtime is down\n  node n15 SchedulingDisabled\n",
 		"  system kube-system/ks-cron Last run failed",
 		"network policy: pods selected by allow-web, deny-web",
+		// The ten service lines the prompt keeps: the five wordings of
+		// AnnotateEndpointCause, then the plain ones. s11 to s13 are past the cap.
+		"  - svc/s01 (ClusterIP): no ready endpoints — matching pods on down node n01 (NotReady)\n",
+		"  - svc/s02 (ClusterIP): no ready endpoints — matching pods on 2 down nodes\n",
+		"  - svc/s03 (ClusterIP): no ready endpoints — 1 matching pod, 0 ready\n",
+		"  - svc/s04 (ClusterIP): no ready endpoints — 3 matching pods, 0 ready\n",
+		"  - svc/s05 (ClusterIP): no ready endpoints — the selector matches no pods\n",
+		"  - svc/s06 (LoadBalancer): no external address\n",
+		"  - svc/s07 (ClusterIP): no ready endpoints\n",
+		"  - svc/s08 (ClusterIP): no ready endpoints — declared via kubeagent.io/expected-empty\n",
+		"  - svc/s09 (ClusterIP): no ready endpoints (backs CronJob — expected between runs)\n",
+		"  - svc/s10 (ClusterIP): no ready endpoints (backs Job — expected between runs)\n",
 	} {
 		if !strings.Contains(prompt, s) {
 			t.Errorf("cluster prompt is missing %q", s)
 		}
 	}
-	for _, s := range []string{"  node n12 ", "  node n16 ", "other-ns-policy"} {
+	for _, s := range []string{"  node n12 ", "  node n16 ", "other-ns-policy", "svc/s11", "svc/s12", "svc/s13"} {
 		if strings.Contains(prompt, s) {
 			t.Errorf("cluster prompt shows %q, which must not print", s)
 		}

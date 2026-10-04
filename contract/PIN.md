@@ -127,12 +127,19 @@ contract version.
   `contract/golden/` moved.
 - The Python tests check the registry dumps byte for byte. The cluster dumps
   are checked only for dump 0 until the Python cluster-health code exists.
+- The harness gates its logs check on `len(logRead) > 0`, because the cluster
+  and registry fixtures read no logs.
 - Built rows reach the registry no-pull sentence 0 times. The capture proves
   its bytes; reaching it needs a victim whose events have aged out.
 - **What the cluster capture does not pin.**
-  - Services s11 to s13 are cut by the prompt's 10-issue cap. So the "2 down
-    nodes" wording and the one-pod versus many-pods wording never reach a
-    dump. The Python port of those arms has no byte check.
+  - Services s11 to s13 are cut by the prompt's 10-issue cap. They are the
+    "backs DaemonSet", "backs Deployment" and "backs StatefulSet" wordings
+    (s11, s12, s13). The names are ordered so the five wordings of
+    `AnnotateEndpointCause` print first: s01 one down node, s02 "2 down
+    nodes", s03 "1 matching pod, 0 ready", s04 "3 matching pods, 0 ready",
+    s05 "the selector matches no pods". The harness checks all ten printed
+    service lines and that none of s11 to s13 prints. The three cut
+    "backs ..." wordings have no byte check.
   - n15's node attribution is the 12th of 12 candidates for each workload,
     and the prompt keeps 8. The line "decided by rules: node n15 (NotReady)"
     still shows.
@@ -142,15 +149,15 @@ contract version.
 
   | File | sha256 |
   |---|---|
-  | `gather_fixture_cluster.yaml` | `83f62faacfac972ade51aa8553f64c23f60743a896dbf44481fdfab058285b0f` |
+  | `gather_fixture_cluster.yaml` | `c060cfe9d1d2bd74c2629d1024768b9949c6c71d7026da73d4f4d6c1766dae37` |
   | `gather_fixture_registry.yaml` | `48811313b35ad24e27dc4e670a321fe6018a35b447c1a6baf61f9415ff308b05` |
 
 - sha256 of the dumps (`sha256sum` format). `05-pvcs.txt` is empty in both
   folders, and `04-nodes.txt` is empty in the registry folder
   (`e3b0c442…`).
 
-      fcdbc99f3a0e729bd0dca4101df4afb88bc9842ce644c0e7209ca6ba2714ef15  gather_go_cluster/00-fixture.json
-      4c77e595a5306377ed86cf80dd75e73e8b62067d36bae4f198fa0b94f163956f  gather_go_cluster/01-order.txt
+      558971d5f110a8127ad1aa5898249777341d5edc7ff60d991adb6f34e6a80e21  gather_go_cluster/00-fixture.json
+      72ae75b4b3ee69db15d16bab957445a7fda52f15c247a4fb284d38ba4acbabe2  gather_go_cluster/01-order.txt
       0dab56fb3d2835692df3988817f7e50224979e4c0c27fa70daf47c5cbb649106  gather_go_cluster/02-events.txt
       877956fd80b0dcecd3f3f0737a7f2aa179d1595b4b6c5d5ed7b50640ad69f5f0  gather_go_cluster/03-candidates.txt
       66bc3439671a6efc8c9e6422101daf0d754cb44a43d11d3ad44b9c32c40c943f  gather_go_cluster/04-nodes.txt
@@ -159,7 +166,7 @@ contract version.
       884f6dc71e7caaf660760e730ad83f3a30977a7a4ac7436aac017be67bca4322  gather_go_cluster/07-trail.txt
       e49370ca72bc319e0cd13862361edcf101c628f194ba784ea1dd16ca0d6ac63c  gather_go_cluster/08-bundle.txt
       ec5591ac409d83531f81ade0139c0c7903eb2be9532c5d859a2454877e6ea992  gather_go_cluster/09-decide.txt
-      72aae1ba7238ed920ea8e4602a91ee464775e32dfac98d60cddb8eb2a9fde228  gather_go_cluster/10-prompt.txt
+      1ed0774fb5a8af4bb00a7c9065229a1c2a767228ea20ea7209d5e7f8af4dfbde  gather_go_cluster/10-prompt.txt
       0ce4aa595c3eaf0ad3b3226a9928bc9534e2593ab1082e8db1fbfb323c209582  gather_go_registry/00-fixture.json
       6201f610bf496c64f84f910df9ef8e3a766b74b29d0aeed0a94db502ecbe8934  gather_go_registry/01-order.txt
       cc4115ae678b7b02bee1f18ee054462ea9d61462f8aa929d6fe77f5eb715d130  gather_go_registry/02-events.txt

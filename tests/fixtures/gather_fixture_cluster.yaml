@@ -45,7 +45,12 @@
 # healthy workloads that are never flagged.
 #
 # Services s01..s13 are one per wording of the service detail. The prompt keeps the
-# first 10, so s11, s12 and s13 are in the fixture but not in the prompt.
+# first 10, so the names are ordered to put the five wordings of
+# AnnotateEndpointCause first: s01 one down node, s02 two down nodes, s03 one pod
+# and none ready, s04 three pods and none ready, s05 a selector that matches no pods.
+# Then s06 no external address, s07 no ready endpoints, s08 declared expected-empty,
+# s09 backs a CronJob and s10 backs a Job. s11 (DaemonSet), s12 (Deployment) and
+# s13 (StatefulSet) are in the fixture but cut from the prompt.
 
 kubeagent:
   tag: "v1.24.0"
@@ -547,7 +552,7 @@ workloads:
     restarts: 0
     pod: "backing-s01"
     pods:
-      - {name: "backing-s01-0", node: "n16", claims: [], labels: {app: "s01"}, ready: true}
+      - {name: "backing-s01-0", node: "n01", claims: [], labels: {app: "s01"}, ready: false}
     findings: []
     events: []
     events_failed: ""
@@ -556,90 +561,90 @@ workloads:
   - namespace: "svc"
     name: "backing-s02"
     kind: "Deployment"
-    ready: 1
-    desired: 1
-    status: "Running"
-    restarts: 0
-    pod: "backing-s02"
-    pods:
-      - {name: "backing-s02-0", node: "n16", claims: [], labels: {app: "s02"}, ready: true}
-    findings: []
-    events: []
-    events_failed: ""
-    decoy_events: []
-
-  - namespace: "svc"
-    name: "backing-s10"
-    kind: "Deployment"
-    ready: 1
-    desired: 1
-    status: "Running"
-    restarts: 0
-    pod: "backing-s10"
-    pods:
-      - {name: "backing-s10-0", node: "n01", claims: [], labels: {app: "s10"}, ready: false}
-    findings: []
-    events: []
-    events_failed: ""
-    decoy_events: []
-
-  - namespace: "svc"
-    name: "backing-s11"
-    kind: "Deployment"
     ready: 2
     desired: 2
     status: "Running"
     restarts: 0
-    pod: "backing-s11"
+    pod: "backing-s02"
     pods:
-      - {name: "backing-s11-0", node: "n02", claims: [], labels: {app: "s11"}, ready: false}
-      - {name: "backing-s11-1", node: "n05", claims: [], labels: {app: "s11"}, ready: false}
+      - {name: "backing-s02-0", node: "n02", claims: [], labels: {app: "s02"}, ready: false}
+      - {name: "backing-s02-1", node: "n05", claims: [], labels: {app: "s02"}, ready: false}
     findings: []
     events: []
     events_failed: ""
     decoy_events: []
 
   - namespace: "svc"
-    name: "backing-s12"
+    name: "backing-s03"
     kind: "Deployment"
     ready: 1
     desired: 1
     status: "Running"
     restarts: 0
-    pod: "backing-s12"
+    pod: "backing-s03"
     pods:
-      - {name: "backing-s12-0", node: "n16", claims: [], labels: {app: "s12"}, ready: false}
+      - {name: "backing-s03-0", node: "n16", claims: [], labels: {app: "s03"}, ready: false}
     findings: []
     events: []
     events_failed: ""
     decoy_events: []
 
   - namespace: "svc"
-    name: "backing-s13"
+    name: "backing-s04"
     kind: "Deployment"
     ready: 3
     desired: 3
     status: "Running"
     restarts: 0
-    pod: "backing-s13"
+    pod: "backing-s04"
     pods:
-      - {name: "backing-s13-0", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
-      - {name: "backing-s13-1", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
-      - {name: "backing-s13-2", node: "n16", claims: [], labels: {app: "s13"}, ready: false}
+      - {name: "backing-s04-0", node: "n16", claims: [], labels: {app: "s04"}, ready: false}
+      - {name: "backing-s04-1", node: "n16", claims: [], labels: {app: "s04"}, ready: false}
+      - {name: "backing-s04-2", node: "n16", claims: [], labels: {app: "s04"}, ready: false}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s06"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s06"
+    pods:
+      - {name: "backing-s06-0", node: "n16", claims: [], labels: {app: "s06"}, ready: true}
+    findings: []
+    events: []
+    events_failed: ""
+    decoy_events: []
+
+  - namespace: "svc"
+    name: "backing-s07"
+    kind: "Deployment"
+    ready: 1
+    desired: 1
+    status: "Running"
+    restarts: 0
+    pod: "backing-s07"
+    pods:
+      - {name: "backing-s07-0", node: "n16", claims: [], labels: {app: "s07"}, ready: true}
     findings: []
     events: []
     events_failed: ""
     decoy_events: []
 
 services:
-  - {namespace: "svc", name: "s01", type: "LoadBalancer", selector: {app: "s01"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s01", type: "ClusterIP", selector: {app: "s01"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s02", type: "ClusterIP", selector: {app: "s02"}, annotations: {}, lb_ingress: false}
-  - {namespace: "svc", name: "s03", type: "ClusterIP", selector: {app: "s03"}, annotations: {"kubeagent.io/expected-empty": "true"}, lb_ingress: false}
+  - {namespace: "svc", name: "s03", type: "ClusterIP", selector: {app: "s03"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s04", type: "ClusterIP", selector: {app: "s04"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s05", type: "ClusterIP", selector: {app: "s05"}, annotations: {}, lb_ingress: false}
-  - {namespace: "svc", name: "s06", type: "ClusterIP", selector: {app: "s06"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s06", type: "LoadBalancer", selector: {app: "s06"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s07", type: "ClusterIP", selector: {app: "s07"}, annotations: {}, lb_ingress: false}
-  - {namespace: "svc", name: "s08", type: "ClusterIP", selector: {app: "s08"}, annotations: {}, lb_ingress: false}
+  - {namespace: "svc", name: "s08", type: "ClusterIP", selector: {app: "s08"}, annotations: {"kubeagent.io/expected-empty": "true"}, lb_ingress: false}
   - {namespace: "svc", name: "s09", type: "ClusterIP", selector: {app: "s09"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s10", type: "ClusterIP", selector: {app: "s10"}, annotations: {}, lb_ingress: false}
   - {namespace: "svc", name: "s11", type: "ClusterIP", selector: {app: "s11"}, annotations: {}, lb_ingress: false}
@@ -647,15 +652,15 @@ services:
   - {namespace: "svc", name: "s13", type: "ClusterIP", selector: {app: "s13"}, annotations: {}, lb_ingress: false}
 
 endpoint_slices:
-  - {namespace: "svc", service: "s01", ready: ["true"]}
-  - {namespace: "svc", service: "s02", ready: ["false"]}
+  - {namespace: "svc", service: "s06", ready: ["true"]}
+  - {namespace: "svc", service: "s07", ready: ["false"]}
 
 backends:
-  - {namespace: "svc", name: "b-s04", kind: "CronJob", labels: {app: "s04"}, desired: 0}
-  - {namespace: "svc", name: "b-s05", kind: "Job", labels: {app: "s05"}, desired: 0}
-  - {namespace: "svc", name: "b-s06", kind: "DaemonSet", labels: {app: "s06"}, desired: 0}
-  - {namespace: "svc", name: "b-s07", kind: "Deployment", labels: {app: "s07"}, desired: 0}
-  - {namespace: "svc", name: "b-s08", kind: "StatefulSet", labels: {app: "s08"}, desired: 0}
+  - {namespace: "svc", name: "b-s09", kind: "CronJob", labels: {app: "s09"}, desired: 0}
+  - {namespace: "svc", name: "b-s10", kind: "Job", labels: {app: "s10"}, desired: 0}
+  - {namespace: "svc", name: "b-s11", kind: "DaemonSet", labels: {app: "s11"}, desired: 0}
+  - {namespace: "svc", name: "b-s12", kind: "Deployment", labels: {app: "s12"}, desired: 0}
+  - {namespace: "svc", name: "b-s13", kind: "StatefulSet", labels: {app: "s13"}, desired: 0}
 
 network_policies:
   - {namespace: "app", name: "allow-web", pod_selector: {app: "web"}}

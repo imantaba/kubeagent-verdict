@@ -15,7 +15,7 @@ hidden_restarts	0
 hidden_cron	0
 dropped	svc	backing-s01	Deployment
 dropped	svc	backing-s02	Deployment
-dropped	svc	backing-s10	Deployment
-dropped	svc	backing-s11	Deployment
-dropped	svc	backing-s12	Deployment
-dropped	svc	backing-s13	Deployment
+dropped	svc	backing-s03	Deployment
+dropped	svc	backing-s04	Deployment
+dropped	svc	backing-s06	Deployment
+dropped	svc	backing-s07	Deployment

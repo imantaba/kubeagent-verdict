@@ -27,7 +27,7 @@ system_issue	kube-system/ks-e 0/1 CrashLoopBackOff
 system_issue	kube-system/ks-f 0/1 CrashLoopBackOff
 system_issue	kube-system/ks-job Failed
 system_issue	kube-system/ks-sts 0/1 Pending
-block	prompt	15573
+block	prompt	15561
 == BEGIN inventory ==
 Cluster health (P1): DEGRADED — 11/16 nodes Ready.
   node n01 NotReady: KubeletNotReady — container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx sta…
@@ -93,16 +93,16 @@ Workload problems (P2):
     issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=9)
       suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
 Service issues:
-  - svc/s01 (LoadBalancer): no external address
-  - svc/s02 (ClusterIP): no ready endpoints
-  - svc/s03 (ClusterIP): no ready endpoints — declared via kubeagent.io/expected-empty
-  - svc/s04 (ClusterIP): no ready endpoints (backs CronJob — expected between runs)
-  - svc/s05 (ClusterIP): no ready endpoints (backs Job — expected between runs)
-  - svc/s06 (ClusterIP): no ready endpoints (backs DaemonSet — 0 desired)
-  - svc/s07 (ClusterIP): no ready endpoints (backs Deployment — scaled to 0)
-  - svc/s08 (ClusterIP): no ready endpoints (backs StatefulSet — scaled to 0)
-  - svc/s09 (ClusterIP): no ready endpoints — the selector matches no pods
-  - svc/s10 (ClusterIP): no ready endpoints — matching pods on down node n01 (NotReady)
+  - svc/s01 (ClusterIP): no ready endpoints — matching pods on down node n01 (NotReady)
+  - svc/s02 (ClusterIP): no ready endpoints — matching pods on 2 down nodes
+  - svc/s03 (ClusterIP): no ready endpoints — 1 matching pod, 0 ready
+  - svc/s04 (ClusterIP): no ready endpoints — 3 matching pods, 0 ready
+  - svc/s05 (ClusterIP): no ready endpoints — the selector matches no pods
+  - svc/s06 (LoadBalancer): no external address
+  - svc/s07 (ClusterIP): no ready endpoints
+  - svc/s08 (ClusterIP): no ready endpoints — declared via kubeagent.io/expected-empty
+  - svc/s09 (ClusterIP): no ready endpoints (backs CronJob — expected between runs)
+  - svc/s10 (ClusterIP): no ready endpoints (backs Job — expected between runs)
 == END inventory ==
 
 == BEGIN candidates ==
