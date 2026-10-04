@@ -205,39 +205,18 @@ DECLARED = {
     # hits, and the 15 that carry a contradiction line are the 15 misses:
     # no training row prints those lines. 17 + 5 + 2 = 24.
     "contradiction_probe": (24, 39),
-    # THIS ROW WAS THE POINT OF THE ALLOWLIST at 0/34: its rows come from
-    # dataset.propagation, not the catalog, so an eval scenario itself is
-    # never trained on. That is still true. What moved is generic PVC
-    # boilerplate: Task 9 (2026-09-19) merged two ruled PVC-provisioning
-    # stories (`pvc-provisioner-not-responding`) into the trainable pool
-    # (spec section 6), and their provisioner-stall events -- "Normal
-    # WaitForFirstConsumer ... waiting for first consumer to be created" and
-    # "Unable to attach or mount volumes" -- are the same generic PVC-events
-    # vocabulary the eval-only `storage-provisioner-down` scenario reads.
-    # After identity masking the two are byte-identical, so 3 of the eval
-    # scenario's reads now land in the trained set. No eval SCENARIO is
-    # trained on; a training scenario now happens to narrate the same kind
-    # of PVC stall in the same event vocabulary, which is the sharing this
-    # guard is built to detect and re-declare, not to prevent.
-    "shared_origin_probe": (3, 34),
-    # Its healthy-origin twin, declared rather than left out on purpose: an
-    # undeclared slice is not measured at all, so the guard's coverage would
-    # silently lag the exam every time the exam grows. One hit is the same
-    # ruled-PVC boilerplate as `shared_origin_probe` above (the "Unable to
-    # attach or mount volumes" read). The other comes straight from Task 9's
-    # pool merge (spec section 6): "Normal Started kubelet Started container"
-    # is generic enough that it also appears verbatim on the two ruled
-    # node-story training rows (`node-kubelet-halted`,
-    # `node-kubelet-unresponsive`), and that merge is what first puts those
-    # two stories in the trained pool at all. The shared text is kubelet
-    # boilerplate both stories happen to narrate the same way, not the exam's
-    # own wording. It also still shares 6 of its 34 reads with
-    # `shared_origin_probe` itself, by construction: five of the sixteen
-    # eval victims carry evidence that reads the same whether the origin is
-    # broken or not, and those are rendered verbatim in both worlds. That is
-    # sharing WITHIN the exam, which this instrument does not measure and
-    # does not need to.
-    "shared_origin_decoy_probe": (2, 34),
+    # These rows are built from `stories.Story` objects, not from the catalog. An exam
+    # story is never trained on (`stories.EXAM_KEYS` is held out of the training pool), so
+    # a hit here is a read whose masked text a kept training row also prints: shared
+    # wording, never a shared scenario.
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines;
+    # was (3, 34).
+    "shared_origin_probe": (19, 40),
+    # Its healthy-origin twin, declared rather than left out on purpose: an undeclared
+    # slice is not measured at all, so the guard's coverage would silently lag the exam.
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines;
+    # was (2, 34).
+    "shared_origin_decoy_probe": (13, 30),
 }
 
 
@@ -312,7 +291,9 @@ def _fake(user: str) -> generate.Example:
 # 0 of 251 test rows. The contradiction rows moved to the gather on
 # 2026-09-26 too, and it still holds: 0 of 7151 kept rows and 0 of 249 test
 # rows. The `multi` rows moved to the gather on 2026-09-26 as well, and it
-# still holds: 0 of 7164 kept rows and 0 of 249 test rows. Such a row would
+# still holds: 0 of 7164 kept rows and 0 of 249 test rows. The shared-origin
+# family moved to real lines on 2026-10-04 (Spec 4b-1), and it still holds: 0 of
+# 7178 kept rows and 0 of 249 test rows. Such a row would
 # have no reads, so
 # it would add nothing to the trained set and nothing to a slice's count.
 # The `assert pairs` in the allowlist test still fails a slice that goes

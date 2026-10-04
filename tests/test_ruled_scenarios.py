@@ -10,12 +10,16 @@ floor and the same eval-disjointness rules the plain pool already clears,
 which is why several checks below mirror a named test in
 `test_shared_origin_training.py` rather than inventing a new shape.
 
-Mechanically, a ruled story's BROKEN twin puts every victim on the SAME
-origin object, so the rules pass confirms each one against the same group
-key and `rules.label` reports "shared"; the HEALTHY twin overrides that
-object's fresh read (`healthy_origin_fresh`), every victim comes back
-refuted, and the label flips to "none". That is asserted directly, by
-rendering both twins, rather than trusted from the story's shape.
+Two groups of tests live here. The table tests read `propagation.py`'s
+`ruled_scenarios()` directly: that data is unchanged and `multi` still
+draws it. The rendered-row tests (the last section) build the same six
+keys from `stories.py` through the real pipeline. A ruled story's BROKEN
+world puts a real object behind every victim (a NotReady node, a Pending
+claim, a registry whose pulls fail), so the rules pass confirms each one
+against the same group key and the label is "shared"; the HEALTHY world
+has no such object, no victim is decided, and the label is "none". That is
+asserted directly, by building both worlds, rather than trusted from the
+story's shape.
 """
 
 import json
@@ -25,7 +29,8 @@ import re
 import pytest
 
 from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import cases, propagation
+from kubeagent_verdict.dataset import cases, propagation, stories
+from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.evals import score
 
 RULED = propagation.ruled_scenarios()
@@ -159,43 +164,6 @@ def test_every_ruled_scenario_carries_a_healthy_origin_read():
         assert p.healthy_origin_content.strip(), p.key
 
 
-def test_every_ruled_scenario_declares_at_least_four_origin_variants():
-    for p in RULED:
-        assert len(p.origin_variants) >= 4, p.key
-        assert p.origin_variants[0] == (p.origin_read[1], p.healthy_origin_content), p.key
-
-
-def test_every_ruled_variant_first_line_is_literal_and_unique_within_its_scenario():
-    for p in RULED:
-        first_lines = []
-        for broken, healthy in p.origin_variants:
-            for text in (broken, healthy):
-                line = text.split("\n")[0]
-                assert line, p.key
-                assert "{" not in line, (p.key, line)
-                first_lines.append(line)
-        assert len(first_lines) == len(set(first_lines)), p.key
-
-
-def test_every_ruled_scenario_names_its_state_in_words():
-    for p in RULED:
-        broken_token, healthy_token = p.origin_state
-        assert broken_token and any(ch.isalpha() for ch in broken_token), p.key
-        assert healthy_token and any(ch.isalpha() for ch in healthy_token), p.key
-        for broken, healthy in p.origin_variants:
-            assert broken_token in broken and broken_token not in healthy, p.key
-            assert healthy_token in healthy and healthy_token not in broken, p.key
-
-
-def test_a_ruled_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
-    for p in RULED:
-        broken_token = p.origin_state[0]
-        for v in p.victims:
-            if broken_token in v.read[1]:
-                assert v.healthy_read_content, (p.key, v.workload_kind)
-                assert broken_token not in v.healthy_read_content, (p.key, v.workload_kind)
-
-
 def test_no_ruled_scenario_text_carries_a_banned_identifier_shape():
     """Mirrors `test_no_trainable_scenario_text_carries_a_banned_identifier_shape`."""
     for p in RULED:
@@ -315,56 +283,121 @@ def test_ruled_registry_content_carries_no_count_and_names_no_workload():
 
 # ----------------------------------------------------------- rendered rows
 
-@pytest.mark.parametrize("p", RULED, ids=[p.key for p in RULED])
-@pytest.mark.parametrize("victims", (2, 3))
-def test_ruled_scenario_renders_shared_on_broken_and_none_on_healthy(p, victims):
+# The rendered-row tests below build each ruled story through the real
+# pipeline (`so.draw` then `so.build`) and read the prompt it prints.
+# `propagation.ruled_scenarios()` above and `stories.RULED_ORDER` here must
+# name the same six keys, or the two halves of this file would be checking
+# different things.
+
+DECIDED = "    decided by rules: "
+REGISTRY_HOST = "registry.example.com"
+
+
+def _story(key):
+    return stories.by_key()[key]
+
+
+def _widths(st):
+    """Every row width the story can render: 2 up to all of its victims."""
+    return range(2, len(st.victims) + 1)
+
+
+def _built(st, world, width, salt=7, unverified=False):
+    d = so.draw(st, random.Random(salt), width=width)
+    return so.build(st, d, world=world, unverified=unverified)
+
+
+def _summary(ex):
+    return json.loads(ex.assistant)["summary"]
+
+
+RULED_ROWS = [(key, w) for key in stories.RULED_ORDER for w in _widths(_story(key))]
+RULED_IDS = [f"{key}-{w}" for key, w in RULED_ROWS]
+NODE_ROWS = [(key, w) for key, w in RULED_ROWS if key in NODE_KEYS]
+NODE_IDS = [f"{key}-{w}" for key, w in NODE_ROWS]
+
+PVC_KEYS = set(PVC_STORAGE_CLASSES)
+
+# What each node story's broken prompt prints for the origin node's state
+# (measured at Task 8): the halted node is NotReady; the unresponsive one is
+# Ready with a stale lease, and its cause reads "kubelet not heartbeating".
+NODE_STATE_MARK = {
+    "node-kubelet-halted": "NotReady",
+    "node-kubelet-unresponsive": "kubelet not heartbeating",
+}
+NODE_CAUSE_END = {
+    "node-kubelet-halted": "(NotReady)",
+    "node-kubelet-unresponsive": "(kubelet not heartbeating)",
+}
+NOT_NODE_KEYS = PVC_KEYS | REGISTRY_KEYS
+
+
+def test_the_ruled_stories_are_the_six_ruled_scenarios():
+    """The table tests read `propagation.ruled_scenarios()`; the rendered-row
+    tests read `stories.RULED_ORDER`. Both must name the same six keys."""
+    assert set(stories.RULED_ORDER) == {p.key for p in RULED}
+    assert len(stories.RULED_ORDER) == 6
+    assert set(stories.RULED_ORDER) == NODE_KEYS | PVC_KEYS | REGISTRY_KEYS
+
+
+@pytest.mark.parametrize("key,victims", RULED_ROWS, ids=RULED_IDS)
+def test_ruled_scenario_renders_shared_on_broken_and_none_on_healthy(key, victims):
+    st = _story(key)
     for salt in (1, 2, 3, 4, 5):
-        broken = cases.shared_origin(p, random.Random(salt), victims=victims)
-        healthy = cases.shared_origin_decoy(p, random.Random(salt), victims=victims)
-        assert broken.meta["label"] == "shared", (p.key, victims, salt)
-        assert healthy.meta["label"] == "none", (p.key, victims, salt)
+        broken = cases.shared_origin(st, random.Random(salt), victims=victims)
+        healthy = cases.shared_origin_decoy(st, random.Random(salt), victims=victims)
+        assert broken.meta["label"] == "shared", (key, victims, salt)
+        assert healthy.meta["label"] == "none", (key, victims, salt)
 
 
-@pytest.mark.parametrize("p", RULED, ids=[p.key for p in RULED])
-def test_ruled_scenario_coherence_across_victim_counts_and_salts(p):
-    """Spec section 4, 'Coherence', checked on the RENDERED row rather than
-    the literal alone: the broken twin's origin read carries the broken
-    state word, the healthy twin's carries the healthy one, and a node
-    story never renders a lease or heartbeat mention either way."""
-    broken_token, healthy_token = p.origin_state
-    for victims in (2, 3):
+@pytest.mark.parametrize("key", stories.RULED_ORDER)
+def test_ruled_scenario_coherence_across_victim_counts_and_salts(key):
+    """Spec section 4, 'Coherence', checked on the BUILT prompt: in the
+    broken world every victim is decided by the rules and the prompt shows
+    the origin's own state (a NotReady node, the claim's storage class, the
+    registry cause line); in the healthy world no victim is decided and none
+    of that state is printed."""
+    st = _story(key)
+    for victims in _widths(st):
         for salt in (1, 2, 3):
-            r_broken = cases._render_shared_origin(p, random.Random(salt), victims,
-                                                    healthy=False)
-            r_healthy = cases._render_shared_origin(p, random.Random(salt), victims,
-                                                     healthy=True)
-            assert broken_token in r_broken.user, (p.key, victims, salt)
-            assert healthy_token in r_healthy.user, (p.key, victims, salt)
-            if p.key in NODE_KEYS:
-                assert "lease" not in r_broken.user.lower()
-                assert "heartbeat" not in r_broken.user.lower()
-                assert "lease" not in r_healthy.user.lower()
-                assert "heartbeat" not in r_healthy.user.lower()
-            if p.key in PVC_STORAGE_CLASSES:
-                assert PVC_STORAGE_CLASSES[p.key] in r_broken.user
-            if p.key in REGISTRY_KEYS:
-                host = p.origin_object.name
-                assert host in r_broken.user
-                assert p.origin_object.fresh.literal in r_broken.user
+            broken = _built(st, "broken", victims, salt)
+            healthy = _built(st, "healthy", victims, salt)
+            where = (key, victims, salt)
+            assert all(r.result.decided for r in broken.rows), where
+            assert not any(r.result.decided for r in healthy.rows), where
+            assert broken.user.count(DECIDED) == victims, where
+            assert DECIDED not in healthy.user, where
+            if key in NODE_KEYS:
+                # Task 8: a halted kubelet's node is NotReady; an unresponsive
+                # kubelet's node is still Ready, with a stale lease, and the
+                # fresh read shows Ready=Unknown. The healthy prompt says
+                # neither.
+                mark = NODE_STATE_MARK[key]
+                assert mark in broken.user, where
+                assert mark not in healthy.user, where
+                assert "NotReady" not in healthy.user, where
+                assert "kubelet not heartbeating" not in healthy.user, where
+                if key == "node-kubelet-unresponsive":
+                    assert "NotReady" not in broken.user, where
+                    assert "Ready=Unknown (NodeStatusUnknown)" in broken.user, where
+            if key in PVC_KEYS:
+                mark = f"storageClass={st.broken.pvc_class}"
+                assert mark in broken.user, where
+                assert mark not in healthy.user, where
+            if key in REGISTRY_KEYS:
+                assert f"{DECIDED}registry {REGISTRY_HOST} (" in broken.user, where
 
 
-@pytest.mark.parametrize(
-    "key,host", [("registry-mirror-unreachable", "mirror.invalid"),
-                 ("registry-rate-limited", "registry.invalid")])
-def test_ruled_registry_row_names_its_own_rendered_victim_count(key, host):
+@pytest.mark.parametrize("key", sorted(REGISTRY_KEYS))
+def test_ruled_registry_row_names_its_own_rendered_victim_count(key):
     """The Task 6 fix (spec section 4, 'Registry count'), applied to the real
-    ruled registry stories rather than a scenario built in the test: the
-    rules pass's own cause line names however many victims THIS row draws,
-    never a fixed digit."""
-    p = next(s for s in RULED if s.key == key)
-    for victims in (2, 3):
-        r = cases._render_shared_origin(p, random.Random(7), victims, healthy=False)
-        assert f"registry {host} ({victims} workloads failing to pull)" in r.user
+    ruled registry stories: the rules pass's own cause line names however
+    many victims THIS row draws, never a fixed digit."""
+    st = _story(key)
+    for victims in _widths(st):
+        b = _built(st, "broken", victims)
+        cause = f"registry {REGISTRY_HOST} ({victims} workloads failing to pull)"
+        assert b.user.count(f"{DECIDED}{cause} — confirmed") == victims, (key, victims)
 
 
 # --------------------------------------------------- the unverified twin
@@ -372,66 +405,66 @@ def test_ruled_registry_row_names_its_own_rendered_victim_count(key, host):
 # Spec section 5: one node pair in three gets an unverified broken twin
 # instead of the confirmed one. `shared_origin(..., unverified=True)` is
 # only ever the BROKEN half -- there is no unverified decoy variant --
-# so every check below compares it against the plain broken twin's
-# names/menus/labels (both consume the rng identically: the origin
-# variant draw, then one draw per victim's own name) and against the
-# healthy twin's summary shape only where the two are expected to differ.
-
-PVC_KEYS = set(PVC_STORAGE_CLASSES)
-NOT_NODE_KEYS = PVC_KEYS | REGISTRY_KEYS
+# so every check below compares it against the healthy twin's names and
+# label only where the two are expected to agree, and reads its own
+# prompt, verdicts and meta everywhere else. (A refused read cannot be
+# unverified when there is no down node to refuse, hence the ValueError
+# guards: Ruling 31.)
 
 
 @pytest.mark.parametrize("key", sorted(NOT_NODE_KEYS))
 def test_unverified_true_raises_for_a_ruled_pvc_or_registry_story(key):
-    p = next(s for s in RULED if s.key == key)
+    st = _story(key)
     with pytest.raises(ValueError, match="unverified"):
-        cases._render_shared_origin(p, random.Random(1), 2, unverified=True)
+        _built(st, "broken", 2, salt=1, unverified=True)
+    with pytest.raises(ValueError, match="unverified"):
+        cases.shared_origin(st, random.Random(1), victims=2, unverified=True)
 
 
 def test_unverified_true_raises_for_a_plain_trainable_story():
-    plain = PLAIN[0]  # every PLAIN entry has origin_object is None, by definition
+    plain = next(st for st in stories.trainable() if st.cls == "P")
     with pytest.raises(ValueError, match="unverified"):
-        cases._render_shared_origin(plain, random.Random(1), 2, unverified=True)
+        _built(plain, "broken", 2, salt=1, unverified=True)
+    with pytest.raises(ValueError, match="unverified"):
+        cases.shared_origin(plain, random.Random(1), victims=2, unverified=True)
 
 
-@pytest.mark.parametrize("key", sorted(NODE_KEYS))
-@pytest.mark.parametrize("victims", (2, 3))
+@pytest.mark.parametrize("key,victims", NODE_ROWS, ids=NODE_IDS)
 def test_unverified_node_twin_labels_none_with_the_did_not_confirm_summary(key, victims):
-    p = next(s for s in RULED if s.key == key)
+    st = _story(key)
     for salt in (1, 2, 3, 4, 5):
-        r = cases._render_shared_origin(p, random.Random(salt), victims, unverified=True)
-        assert r.meta["label"] == "none", (key, victims, salt)
-        assert r.summary.startswith(
+        ex = cases.shared_origin(st, random.Random(salt), victims=victims, unverified=True)
+        assert ex.meta["label"] == "none", (key, victims, salt)
+        assert _summary(ex).startswith(
             f"{victims} workloads are failing, and kubeagent's rules did "
             "not confirm one cause on two or more of them."), (key, victims, salt)
 
 
 @pytest.mark.parametrize("key", sorted(NODE_KEYS))
 def test_unverified_node_twin_origin_read_says_read_failed_is_forbidden(key):
-    p = next(s for s in RULED if s.key == key)
-    r = cases._render_shared_origin(p, random.Random(1), 2, unverified=True)
-    node = p.origin_object.name  # "{node}" -- the template, not the drawn value
-    assert node == "{node}"
-    drawn_node = r.drawn[0].node
-    assert f'read failed: nodes "{drawn_node}" is forbidden' in r.user
+    st = _story(key)
+    b = _built(st, "broken", 2, salt=1, unverified=True)
+    node = b.draw.scope_value
+    assert node, key
+    assert f'read failed: nodes "{node}" is forbidden' in b.user
 
 
-@pytest.mark.parametrize("key", sorted(NODE_KEYS))
-@pytest.mark.parametrize("victims", (2, 3))
+@pytest.mark.parametrize("key,victims", NODE_ROWS, ids=NODE_IDS)
 def test_unverified_node_twin_every_row_decided_unverified_with_rules_cause(key, victims):
-    p = next(s for s in RULED if s.key == key)
-    r = cases._render_shared_origin(p, random.Random(2), victims, unverified=True)
-    assert len(r.rows) == victims
-    for row in r.rows:
-        assert row["cause"].startswith("node ") and row["cause"].endswith("(NotReady)"), row
+    st = _story(key)
+    ex = cases.shared_origin(st, random.Random(2), victims=victims, unverified=True)
+    rows = json.loads(ex.assistant)["verdicts"]
+    assert len(rows) == victims
+    for row in rows:
+        assert row["cause"].startswith("node ") and row["cause"].endswith(NODE_CAUSE_END[key]), row
         assert "did not clear the earlier finding" in row["rationale"], row
         assert "is forbidden" in row["rationale"], row
 
 
 @pytest.mark.parametrize("key", sorted(NODE_KEYS))
 def test_unverified_node_twin_workloads_meta_marks_decided_outcome_unverified(key):
-    p = next(s for s in RULED if s.key == key)
-    ex = cases.shared_origin(p, random.Random(3), victims=2, unverified=True)
+    st = _story(key)
+    ex = cases.shared_origin(st, random.Random(3), victims=2, unverified=True)
     assert ex.meta["workloads"], key
     for wm in ex.meta["workloads"].values():
         assert wm["decided"] is True, key
@@ -439,11 +472,10 @@ def test_unverified_node_twin_workloads_meta_marks_decided_outcome_unverified(ke
         assert wm["job"] == 1, key
 
 
-@pytest.mark.parametrize("key", sorted(NODE_KEYS))
-@pytest.mark.parametrize("victims", (2, 3))
+@pytest.mark.parametrize("key,victims", NODE_ROWS, ids=NODE_IDS)
 def test_unverified_node_twin_job1_accepts_every_row(key, victims):
-    p = next(s for s in RULED if s.key == key)
-    ex = cases.shared_origin(p, random.Random(4), victims=victims, unverified=True)
+    st = _story(key)
+    ex = cases.shared_origin(st, random.Random(4), victims=victims, unverified=True)
     verdicts = {row["workload"]: row for row in json.loads(ex.assistant)["verdicts"]}
     assert set(verdicts) == set(ex.meta["workloads"])
     for wkey, wm in ex.meta["workloads"].items():
@@ -451,23 +483,22 @@ def test_unverified_node_twin_job1_accepts_every_row(key, victims):
 
 
 @pytest.mark.parametrize("key", sorted(NODE_KEYS))
-def test_unverified_node_twin_matches_the_healthy_twins_names_menus_and_labels(key):
-    """Both calls draw the origin variant, then one name per victim, in the
-    same order and with no other rng draw (the origin-object branch takes
-    no `render.draw_ending` draw) -- so at the same salt the two twins'
-    drawn names, candidate menus and read labels line up exactly. Only the
-    origin read's own content, and the per-victim reads a broken origin
-    touches, are allowed to differ."""
-    p = next(s for s in RULED if s.key == key)
-    for victims in (2, 3):
+def test_unverified_node_twin_matches_the_healthy_twins_names_and_labels(key):
+    """`so.draw` makes every rng call before it looks at the world (Ruling
+    11), so at the same salt the unverified twin and the healthy twin share
+    a pair name, an origin node and the same workloads in the same order.
+    Both are labelled "none". What each prompt prints, and what each
+    verdict says, is allowed to differ and is not compared here."""
+    st = _story(key)
+    for victims in _widths(st):
         for salt in (1, 2, 3):
-            unverified = cases._render_shared_origin(
-                p, random.Random(salt), victims, unverified=True)
-            healthy = cases._render_shared_origin(
-                p, random.Random(salt), victims, healthy=True)
-            assert unverified.drawn == healthy.drawn, (key, victims, salt)
-            assert unverified.decoys == healthy.decoys, (key, victims, salt)
-            assert unverified.shared_cause == healthy.shared_cause, (key, victims, salt)
-            assert unverified.distractor_cause == healthy.distractor_cause, (key, victims, salt)
-            assert [r["workload"] for r in unverified.rows] == \
-                [r["workload"] for r in healthy.rows], (key, victims, salt)
+            unverified = cases.shared_origin(
+                st, random.Random(salt), victims=victims, unverified=True)
+            healthy = cases.shared_origin_decoy(st, random.Random(salt), victims=victims)
+            where = (key, victims, salt)
+            assert unverified.group == healthy.group, where
+            assert unverified.meta["origin"] == healthy.meta["origin"] == key, where
+            assert unverified.meta["scope_value"] == healthy.meta["scope_value"], where
+            assert list(unverified.meta["workloads"]) == list(healthy.meta["workloads"]), where
+            assert list(unverified.meta["expected"]) == list(healthy.meta["expected"]), where
+            assert unverified.meta["label"] == healthy.meta["label"] == "none", where
