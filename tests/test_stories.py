@@ -244,3 +244,42 @@ def test_healthy_pending_victim_names_dedicated_taint_only(key, taint):
         assert "dedicated=gpu" in healthy.user, (key, seed)
         assert taint not in healthy.user, (key, seed)
         assert taint in broken.user, (key, seed)
+
+
+_NP_KEYS = ("networkpolicy-egress-allowlist-stale", "networkpolicy-dns-egress-missing",
+            "networkpolicy-namespace-label-drifted", "networkpolicy-port-mismatch",
+            "networkpolicy-allow-selector-typo", "networkpolicy-ingress-deny-all")
+
+
+def _np_policy_answers(key):
+    """(victim, answer) for every victim whose broken answer cites the policy line."""
+    for v in s.by_key()[key].victims:
+        a = v.broken
+        if a is not None and "possible" in a.cause:
+            yield v, a
+
+
+def test_possible_cause_policy_answers_are_medium():
+    seen = 0
+    for key in _NP_KEYS:
+        for v, a in _np_policy_answers(key):
+            seen += 1
+            assert a.confidence == "medium", (key, v.workload_kind)
+    assert seen == 10
+
+
+@pytest.mark.parametrize("key", _NP_KEYS)
+def test_policy_answer_keys_sit_in_the_printed_anchor_lines(key):
+    st = s.by_key()[key]
+    for seed in range(5):
+        built = so.build(st, so.draw(st, random.Random(seed), width=len(st.victims)),
+                         world="broken")
+        own = gold.own_lines(built.user, [r.key for r in built.rows])
+        for row in built.rows:
+            ans = row.text.broken if row.role != "origin" else None
+            if ans is None or "possible" not in ans.cause or row.result.decided:
+                continue
+            anchors = gold.anchor_lines(sorted(own[row.key]), row)
+            assert any("network policy:" in ln for ln in anchors), (key, seed)
+            for k in ans.keys:
+                assert any(k in ln for ln in anchors), (key, seed, k)
