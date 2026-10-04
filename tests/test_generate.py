@@ -1,4 +1,5 @@
 import collections
+import hashlib
 import json
 import random
 import re
@@ -458,6 +459,11 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     case has one undecided workload fewer, so 171 -> 169 graded, all 169
     still derivable. The spec expected 171; the two lost workloads are job 1
     now, which is why job 1 reads 120 rather than 118.
+
+    2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The two
+    shared-origin cases read `shared_origin_probe` 14 graded and 14 derivable (was 3), and
+    `shared_origin_decoy_probe` 10 and 10 (was 15). The totals are 175 graded and 175 derivable, was
+    169 and 169. The other five cases do not move.
     """
     by_case = collections.Counter()
     graded = collections.Counter()
@@ -480,11 +486,13 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     # undecided workload fewer. shared_origin_probe 4 -> 3,
     # shared_origin_decoy_probe 16 -> 15. `multi_misattribution_probe` reads
     # through the gather now and keeps its 40.
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was
+    # shared_origin_probe 3 and shared_origin_decoy_probe 15.
     assert dict(graded) == {"own_cause": 51, "empty_candidates": 20,
                             "wrong_attribution": 20, "misattribution_probe": 20,
                             "multi_misattribution_probe": 40,
-                            "shared_origin_probe": 3,
-                            "shared_origin_decoy_probe": 15}
+                            "shared_origin_probe": 14,
+                            "shared_origin_decoy_probe": 10}
     # 2026-09-26 (faithful prompts): the cluster-health block prints "runtime" on
     # five worker-containerd-stop workloads: own_cause 9 -> 10, wrong_attribution
     # 9 -> 10, misattribution_probe 9 -> 10, multi_misattribution_probe 19 -> 21
@@ -500,17 +508,20 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     # 2026-09-26 (faithful prompts): the same two workloads leave job 2, and
     # every graded workload is still derivable: shared_origin_probe 4 -> 3,
     # shared_origin_decoy_probe 16 -> 15
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was
+    # shared_origin_probe 3 and shared_origin_decoy_probe 15.
     assert dict(by_case) == {"own_cause": 51, "empty_candidates": 20,
                              "wrong_attribution": 20, "misattribution_probe": 20,
                              "multi_misattribution_probe": 40,
-                             "shared_origin_probe": 3,
-                             "shared_origin_decoy_probe": 15}
+                             "shared_origin_probe": 14,
+                             "shared_origin_decoy_probe": 10}
     # 2026-09-26 (faithful prompts): the rerouted corpus rows and the new entry
     # 134 -> 171
     # 2026-09-26 (faithful prompts): `names.NODES` grew to five workers, and
     # one undecided shared-origin victim per probe case is decided now.
     # 171 -> 169
-    assert sum(graded.values()) == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert sum(graded.values()) == 175
     # 2026-09-26 (faithful prompts): the cluster-health block's "runtime" 76 -> 81
     # 2026-09-26 (faithful prompts): kubeagent's own text and the new keyword
     # pairs 81 -> 134
@@ -518,7 +529,8 @@ def test_the_job2_keyword_exposure_is_pinned_per_case():
     # all derivable 134 -> 171
     # 2026-09-26 (faithful prompts): the same two shared-origin workloads leave
     # job 2. Still 100%. 171 -> 169
-    assert sum(by_case.values()) == 169
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 169.
+    assert sum(by_case.values()) == 175
 
 
 def test_multi_probe_builder_rejects_colliding_workloads():
@@ -655,10 +667,14 @@ def test_job_population_counts_match_the_pinned_exam_shape():
     # draw a node decoy the rules now decide. The `multi_misattribution_probe`
     # rows moved onto the gather and stay all job 2. job1 118 -> 120,
     # job2 179 -> 177; job 3 does not move.
-    assert job1 == 120
-    assert job2 == 177
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 120.
+    assert job1 == 102
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 177.
+    assert job2 == 197
     assert job3_prompts == 40
-    assert job3_labels == {"shared": 5, "separate": 0, "none": 35}
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was shared
+    # 5 and none 35.
+    assert job3_labels == {"shared": 7, "separate": 0, "none": 33}
 
 
 def test_every_declared_down_node_appears_ruled_out_on_every_other_workload():
@@ -860,7 +876,8 @@ def test_every_job1_workload_prints_its_decided_line_and_no_job2_one_does():
     # job-1 rows. 156 -> 118
     # 2026-09-26 (faithful prompts): four shared-origin rows drew new victims
     # when `names.NODES` grew to five workers. 118 -> 120
-    assert decided_total == 120
+    # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 120.
+    assert decided_total == 102
 
 
 def test_every_decoy_probe_row_names_its_decoy_cause():
@@ -1099,10 +1116,6 @@ _CANDIDATE_HEAD = re.compile(r"^- (\S+) \(\w+\)(?: \[confidence: (\w+)\])?:$")
 _ATTRIBUTED = re.compile(r"^    considered (.+): attributed — ")
 # kubeagent's `ForRootCause` (internal/confidence/confidence.go:36-47 at v1.24.0).
 _RULE = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
-# The shared-origin builders still hand-pass their header. This branch leaves
-# them alone (spec: "Not touched here: the shared-origin builders").
-_HEADER_EXEMPT = {"shared_origin", "shared_origin_decoy", "shared_origin_probe",
-                  "shared_origin_decoy_probe"}
 
 
 def _headers(user: str) -> dict[str, tuple[str, list[str]]]:
@@ -1124,7 +1137,7 @@ def test_every_job2_header_follows_kubeagents_rule():
     candidate gives no header."""
     checked = collections.Counter()
     for ex in generate.generate(seed=17, size=8000) + generate.test_set():
-        if ex.case in _HEADER_EXEMPT or "== BEGIN candidates ==" not in ex.user:
+        if "== BEGIN candidates ==" not in ex.user:
             continue
         headers = _headers(ex.user)
         for workload, wm in ex.meta["workloads"].items():
@@ -1137,3 +1150,15 @@ def test_every_job2_header_follows_kubeagents_rule():
             assert header == want, (ex.case, ex.group, workload)
             checked[ex.case] += 1
     assert {"multi", "multi_misattribution_probe", "wrong_attribution"} <= set(checked)
+
+
+# 2026-10-03 (Spec 4b-1): measured on main @ ff6527e. The rewrite moves
+# only the 20 shared-origin exam rows; the other 229 must not move.
+OTHER_FAMILIES_SHA256 = "09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a"
+
+
+def test_the_other_families_exam_rows_did_not_move():
+    other = [e for e in generate.test_set() if not e.case.startswith("shared_origin")]
+    assert len(other) == 229
+    blob = json.dumps([generate.to_row(e) for e in other], sort_keys=True, ensure_ascii=False)
+    assert hashlib.sha256(blob.encode("utf-8")).hexdigest() == OTHER_FAMILIES_SHA256

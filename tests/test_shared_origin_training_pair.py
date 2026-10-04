@@ -1,53 +1,37 @@
-"""The curriculum's minimal contrast: the same scenario told both ways.
+"""The curriculum's minimal contrast: the same story told both ways.
 
-`tests/test_shared_origin_training.py` closed the first shortcut. `multi` rows
-carry a cluster-scoped origin read showing the component healthy, so "an origin
-read is present" stopped separating the two classes in the curriculum, and its
-own docstring named the residual it could not close.
+Every `shared_origin` row has a twin, `shared_origin_decoy`, drawn from the
+same salt. The twin names the same victims and prints the same story. Only the
+world differs. In the broken world the origin is broken. In the healthy world
+it is not. The right answer flips with the world.
 
-This is the residual, and the measurement that found it. The 0901 model was
-trained on that curriculum and answered the exam's ten minimal-contrast pairs
-*identically in both worlds on nine of them* -- including one where the decoy
-prompt states the node Ready and it still answered "2 workloads share one
-upstream cause: node worker-2 is NotReady". Its verdict was a function of which
-scenario it was looking at, not of what the reads said. It scored 0.1 paired
-against a 0.7 bar.
+This is what the 0901 model got wrong. It answered the exam's ten twin pairs
+the same way in both worlds on nine of them. Its verdict was a function of
+which story it was looking at, not of what the reads said. The fix is to teach
+every trainable story under BOTH answers, so nothing about the story predicts
+the label. The read does, and only the read.
 
-The reason is visible in the curriculum rather than in the model. A
-`shared_origin` row renders the scenario's OWN victims, whose local symptoms
-cohere with the origin. Its counter-example, a `multi` row with a healthy
-origin read, renders `rng.sample(entries)` -- arbitrary catalog entries whose
-symptoms have nothing to do with the read. So the two classes differed in the
-victims as well as in the read, and "do these symptoms look like they share a
-cause" separates them without reading the origin at all. It is a better
-shortcut than the label was, and the healthy-read counter-example does not
-touch it.
-
-`shared_origin_decoy` closes it the way the exam's pair did. It is
-`shared_origin` rendered from the same salt with the origin reading healthy:
-identical workloads, identical candidate menus with identical tags in identical
-order, identical read labels in identical order. Only the read contents differ,
-and the correct answer flips with them. Every trainable scenario is now
-presented under BOTH answers, so nothing about the scenario -- its origin key,
-its victims, their symptoms, the menu, the labels -- predicts the label. The
-read does, and only the read.
-
-What this does not claim. It cannot make the model read; it removes a shortcut
-that made not reading sufficient. Whether the shortcut was the cause is a
-question for the paired score on the next run, not for this file.
+What this does not claim. It cannot make the model read. It removes a shortcut
+that made not reading enough. Whether that shortcut was the cause is a question
+for the paired score on the next run, not for this file.
 """
 
 import json
+import re
 
 import pytest
 
-from kubeagent_verdict.dataset import generate, propagation
+from kubeagent_verdict.dataset import cases, generate, stories
+from kubeagent_verdict.evals.score import INDEPENDENCE_PHRASES
 
 SIZE = 800
 SEED = 17
 
 SHARED = "shared_origin"
 DECOY = "shared_origin_decoy"
+
+_SHARED_HEAD = re.compile(r"^\d+ workloads share one upstream cause: ")
+_SEPARATE_HEAD = re.compile(r"^\d+ workloads are failing for separate reasons\.")
 
 
 @pytest.fixture(scope="module")
@@ -66,20 +50,23 @@ def _by_case(rows, case):
     return [e for e in rows if e.case == case]
 
 
-def _workloads(example):
-    return tuple(sorted(example.meta["expected"]))
+def _victim_keys(example) -> set[str]:
+    """The victims a twin names, read off its group (`+`-joined segments)."""
+    return {seg.split(":", 2)[2] for seg in example.group.split("+")}
+
+
+def _summary(example) -> str:
+    return json.loads(example.assistant)["summary"]
 
 
 def _pairs(rows):
     """Twin rows, matched by emission order and checked by group.
 
-    The emitter writes each pair as two consecutive rows from one salt, so
-    the n-th `shared_origin` row and the n-th `shared_origin_decoy` row are
-    twins. The group check is what makes that sound: twins carry one group
-    string, which names the origin and its workloads. Matching on the
-    workload set alone stopped being unique when the mix moved: two origins
-    can draw the same two workloads by chance, and then a row loses its
-    twin to a stranger.
+    The emitter writes each pair as two consecutive rows from one salt, so the
+    n-th `shared_origin` row and the n-th `shared_origin_decoy` row are twins.
+    The group check is what makes that sound: twins carry one group string, and
+    it names the story and its victims. The workload sets are not compared. The
+    broken world can add an origin row that the healthy world lacks.
     """
     shared = _by_case(rows, SHARED)
     decoy = _by_case(rows, DECOY)
@@ -87,7 +74,7 @@ def _pairs(rows):
     assert len(shared) == len(decoy), "a row has no twin"
     for a, b in zip(shared, decoy):
         assert a.group == b.group, "rows out of step: not twins"
-        assert _workloads(a) == _workloads(b), "twins name different workloads"
+        assert a.meta["origin"] == b.meta["origin"], "twins name different stories"
     return list(zip(shared, decoy))
 
 
@@ -135,133 +122,83 @@ def test_the_optimizer_never_reads_a_one_sided_pair(kept):
     assert len(_by_case(kept, DECOY)) == len(_by_case(kept, SHARED))
 
 
-def test_every_trainable_scenario_is_taught_under_both_answers(rows):
-    """The claim the whole change rests on: origin does not predict the label."""
+def test_every_trainable_story_is_taught_under_both_answers(rows):
+    """The claim the whole change rests on: the story does not predict the label."""
     shared = {e.meta["origin"] for e in _by_case(rows, SHARED)}
     decoy = {e.meta["origin"] for e in _by_case(rows, DECOY)}
     assert shared == decoy
-    assert shared == {p.key for p in propagation.trainable_scenarios()}
+    assert shared == {st.key for st in stories.trainable()}
 
 
-# ------------------------------------------- only the reads differ, and do
+# ------------------------------------------- only the world differs, and it does
 
-def test_a_pair_shows_the_same_workloads_with_the_same_menus(rows):
+def test_a_pair_shows_the_same_victims(rows):
     for shared, decoy in _pairs(rows):
-        assert _workloads(shared) == _workloads(decoy)
-        assert _menu(shared.user) == _menu(decoy.user)
-
-
-def test_a_pair_reads_the_same_things_in_the_same_order(rows):
-    for shared, decoy in _pairs(rows):
-        assert _read_labels(shared.user) == _read_labels(decoy.user)
+        victims = _victim_keys(shared)
+        assert victims == _victim_keys(decoy)
+        assert victims <= set(shared.meta["expected"]), shared.group
+        assert victims <= set(decoy.meta["expected"]), shared.group
 
 
 def test_a_pair_does_not_read_the_same_things(rows):
-    """Non-vacuity: identical labels over identical menus must still differ."""
     for shared, decoy in _pairs(rows):
-        assert shared.user != decoy.user
-
-
-# A PVC-scoped origin groups by storage class (`rules.py`'s group-key
-# fallback), so several distinct PVC objects on the same class can decide to
-# several distinct per-PVC causes under one `shared` verdict -- see the same
-# exemption in tests/test_shared_origin_training.py. Re-measured 2026-09-19
-# (Task 9, spec section 6): the two ruled PVC stories now exercise this for
-# real, e.g. `{'PVC cache-0 (ProvisionerNotResponding)',
-# 'PVC media-assets (ProvisionerNotResponding)'}` on
-# `pvc-provisioner-not-responding`.
-_PVC_SCOPED_ORIGINS = frozenset({
-    "storage-provisioner-down",
-    "pvc-provisioner-not-responding",
-    "pvc-storageclass-missing",
-})
+        assert set(shared.user.splitlines()) != set(decoy.user.splitlines()), shared.group
 
 
 def test_the_answer_flips_with_the_read(rows):
+    """The decoy is always `none` and never claims sharing. The broken half
+    claims sharing exactly when its label is `shared`, and then its answer
+    differs from the decoy's on at least one workload both halves flag."""
+    flipped = 0
     for shared, decoy in _pairs(rows):
-        one = json.loads(shared.assistant)
-        sep = json.loads(decoy.assistant)
-        assert propagation.SEPARATE_REASONS not in one["summary"]
-        assert propagation.SEPARATE_REASONS in sep["summary"]
-        # One cause for every workload on the shared half, except a
-        # PVC-scoped origin, which may decide several workloads to several
-        # per-PVC causes; each workload's own local cause on the decoy half.
-        # Same workloads, different answers.
-        causes = {v["cause"] for v in one["verdicts"]}
-        if shared.meta["origin"] not in _PVC_SCOPED_ORIGINS:
-            assert len(causes) == 1
-        assert shared.meta["expected"] != decoy.meta["expected"]
+        decoy_head = _summary(decoy).split("\n")[0]
+        assert decoy.meta["label"] == "none", decoy.group
+        assert not _SHARED_HEAD.match(decoy_head), decoy.group
+        shared_head = _summary(shared).split("\n")[0]
+        claims = bool(_SHARED_HEAD.match(shared_head))
+        assert claims == (shared.meta["label"] == "shared"), shared.group
+        if shared.meta["label"] != "shared":
+            continue
+        common = set(shared.meta["expected"]) & set(decoy.meta["expected"])
+        assert any(shared.meta["expected"][w] != decoy.meta["expected"][w]
+                   for w in common), shared.group
+        assert _summary(shared) != _summary(decoy), shared.group
+        flipped += 1
+    assert flipped > 0
 
 
-def test_the_decoy_half_shows_the_component_healthy(rows):
-    """The read that carries the whole label, on the half that denies it."""
-    for _shared, decoy in _pairs(rows):
-        assert "BROKEN" not in decoy.user
-
-
-# The menu and the read labels are what a shortcut would key on, so the pair is
-# only a minimal contrast if these are identical across it.
-def _menu(user: str) -> list[str]:
-    return [ln.strip() for ln in user.splitlines()
-            if ln.strip().startswith(("- attributed", "- ruled_out", "- outranked"))]
-
-
-def _read_labels(user: str) -> list[str]:
-    return [ln.strip() for ln in user.splitlines()
-            if ln.strip().startswith("== ") and ln.strip().endswith(" ==")
-            and not ln.strip().startswith(("== BEGIN", "== END"))]
-
-
-def test_no_trainable_local_cause_speaks_the_language_of_a_shared_claim():
-    """A victim's own cause may not use the words that assert sharing.
+def test_no_none_labelled_training_cause_speaks_the_language_of_a_shared_claim(kept):
+    """A `none` row's verdicts may not use the words that assert sharing.
 
     The decoy half teaches "these have SEPARATE causes" by naming each
     workload's own. If one of those causes is worded with a shared-claim
-    phrase, the row teaches the grader's positive signal as part of a
-    negative answer -- and job3 reads the summary, which carries the
-    per-workload lines, so it would score a correct answer as a shared
-    claim.
+    phrase, the row teaches the grader's positive signal as part of a negative
+    answer. job3 reads the summary, which carries the per-workload lines, so it
+    would score a correct answer as a shared claim.
 
-    This is not the grader being crude. `kube-proxy-degraded`'s shared cause
-    IS that pods on the node reach no Service, so a victim whose "separate"
-    cause said the upstream refuses connections was restating the shared
-    story rather than contrasting with it -- the row's own teaching point,
-    lost. That scenario has exactly two victims, so `p.victims[:count]`
-    always drew it: every one of its decoy rows carried the collision.
-
-    Scoped to the TRAINING scenarios on purpose. The exam's six origins are
-    frozen and this test must never be the reason their bytes move -- and it
-    would have nothing to say about them in any case: measured across all
-    six, no eval scenario writes shared-claim language into a victim's own
-    cause. An earlier version of this docstring claimed an "eval-side
-    collision recorded in the runbook"; there is no such collision and it
-    was never in the runbook.
-
-    What does remain is in the training half and is not this defect.
-    `shared-dependency-scaled-to-zero` says "upstream" twice, and both are
-    correct: once as a decoy menu candidate, which a model reaches only by
-    being wrong, and once as a victim's `log_cause`, which is evidence text
-    a read may legitimately carry. Neither reaches a summary -- which is
-    what the answer-level test below measures, and why that test exists.
+    This reads the rendered verdict causes of every kept family row whose
+    label is `none`. A `shared` row is exempt, because its summary makes the
+    claim on purpose. The per-story version of this check (all 47 stories, both
+    worlds, origin rows included) is in tests/test_shared_origin_decided.py.
     """
-    from kubeagent_verdict.dataset.cases import SHARED_CLAIM_PHRASES
-
-    offenders = [
-        (s.key, i, p, v.local_cause)
-        for s in propagation._TRAINING_SCENARIOS
-        for i, v in enumerate(s.victims)
-        for p in SHARED_CLAIM_PHRASES
-        if p in v.local_cause.lower()
-    ]
+    checked = 0
+    offenders = []
+    for e in kept:
+        if e.case not in (SHARED, DECOY) or e.meta["label"] != "none":
+            continue
+        for v in json.loads(e.assistant)["verdicts"]:
+            checked += 1
+            low = v["cause"].lower()
+            offenders += [(e.meta["origin"], e.case, p, v["cause"])
+                          for p in cases.SHARED_CLAIM_PHRASES if p in low]
+    assert checked > 0
     assert offenders == [], (
-        "a trainable victim's local cause carries shared-claim language: "
-        + "; ".join(f"{k} victim[{i}] says {p!r} in {c!r}" for k, i, p, c in offenders))
+        "a none-labelled training cause carries shared-claim language: "
+        + "; ".join(f"{o} ({c}) says {p!r} in {t!r}" for o, c, p, t in offenders[:5]))
 
 
 def _denying_rows(kept):
     """Training rows whose rendered answer denies a shared origin."""
-    from kubeagent_verdict.evals.score import INDEPENDENCE_PHRASES
-
     out = []
     for e in kept:
         summary = str(json.loads(e.assistant).get("summary", "")).lower()
@@ -270,52 +207,37 @@ def _denying_rows(kept):
     return out
 
 
+# 2026-10-04 (Spec 4b-1): the shared-origin rows were rebuilt on real lines; was every
+# decoy row, because the old decoy summary always said "separate reasons".
+DENYING_ROWS = 67
+
+
 def test_no_trainable_answer_both_denies_sharing_and_speaks_its_language(kept):
-    """The invariant the `local_cause` test above only approximates.
+    """A summary that both claims sharing and denies it scores 0 on every label.
 
-    That one guards a field. This one guards the thing the field feeds: the
-    rendered answer. job3 scores 0 when a summary carries both a shared claim
-    and a denial, on either the `shared` or the `separate` label. A training
-    row in that shape teaches the model to produce answers the grader cannot
-    read, and no field-level check catches it, because a summary is built
-    from several fields and any of them can be the one that collides.
-
-    Guarding the field and guarding the answer are not the same guarantee, and
-    the gap between them is not hypothetical: `log_cause` carries "upstream"
-    in `shared-dependency-scaled-to-zero` today. That is correct and stays --
-    it is *evidence* text, and a read may well mention an upstream while the
-    right answer is still "separate reasons". Only a collision that reaches the
-    summary is a defect, which is precisely the line a field-level test cannot
-    draw.
+    The old guard said every decoy row denies. That is no longer true. A
+    healthy world says "failing for separate reasons" only when every row has
+    its own, different cause. Otherwise it says the rules did not confirm one
+    cause, and that header is not a denial. So the guard is now an equality:
+    the family rows that deny are exactly the family rows whose header says
+    "separate reasons". An equality cannot be lowered to make a red test
+    green. It can only be deleted.
     """
     denying = _denying_rows(kept)
-
-    # A denominator, asserted rather than assumed: an empty `denying` list
-    # would make the assertion below pass while measuring nothing, which is
-    # the failure mode this suite keeps finding in its own guards.
-    #
-    # The guard is an equality, not a threshold. Every decoy row denies a
-    # shared origin -- that is what the case IS -- so the honest floor is
-    # "all of them". A count would need re-tuning whenever SIZE moves, and
-    # a red test could be made green by lowering it; an equality cannot be
-    # lowered, only deleted. If `INDEPENDENCE_PHRASES` stops matching what
-    # the decoy half writes, this fails here and names it, rather than
-    # silently shrinking the set the check below runs over.
-    decoys = [e for e in kept if e.case == DECOY]
-    assert decoys, f"no {DECOY} rows in the kept pile -- the mix has moved"
-    denied = {id(e) for e, _ in denying}
-    missed = [e for e in decoys if id(e) not in denied]
-    assert missed == [], (
-        f"{len(missed)} of {len(decoys)} {DECOY} rows do not read as denying "
-        "a shared origin; the decoy half's wording and INDEPENDENCE_PHRASES "
-        "have drifted apart, so this check now measures less than it claims")
-
-    from kubeagent_verdict.dataset.cases import SHARED_CLAIM_PHRASES
+    family_denying = {id(e) for e, _ in denying if e.case in (SHARED, DECOY)}
+    earned = {id(e) for e in kept
+              if e.case in (SHARED, DECOY) and _SEPARATE_HEAD.match(_summary(e))}
+    # A denominator, asserted rather than assumed. An empty set would make the
+    # equality pass while measuring nothing.
+    assert earned, "no kept family row earned the 'separate reasons' header"
+    assert family_denying == earned, (
+        f"{len(family_denying)} family rows deny, {len(earned)} earn the header")
+    assert len(earned) == DENYING_ROWS
 
     offenders = [
-        (e.case, e.group, [p for p in SHARED_CLAIM_PHRASES if p in summary], summary)
+        (e.case, e.group, [p for p in cases.SHARED_CLAIM_PHRASES if p in summary], summary)
         for e, summary in denying
-        if any(p in summary for p in SHARED_CLAIM_PHRASES)
+        if any(p in summary for p in cases.SHARED_CLAIM_PHRASES)
     ]
     assert offenders == [], (
         f"{len(offenders)} of {len(denying)} denying answers also speak "

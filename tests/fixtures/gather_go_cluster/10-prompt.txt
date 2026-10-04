@@ -1,0 +1,245 @@
+cluster	Degraded	11	16
+node_issue	n01 NotReady: KubeletNotReady — container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx sta…
+node_issue	n02 NotReady: NodeStatusUnknown — Kubelet stopped posting node status.
+node_issue	n03 NotReady: PLEG is not healthy: pleg was last seen active 3m0s ago
+node_issue	n04 NotReady
+node_issue	n05 no kubelet lease
+node_issue	n06 no kubelet lease
+node_issue	n07 kubelet not heartbeating (lease 40s stale)
+node_issue	n08 kubelet not heartbeating (lease 43s stale)
+node_issue	n09 kubelet not heartbeating (lease 1m35s stale)
+node_issue	n10 kubelet not heartbeating (lease 1h0m0s stale)
+node_issue	n11 kubelet not heartbeating (lease 1h1m40s stale)
+node_issue	n13 MemoryPressure
+node_issue	n13 PIDPressure
+node_issue	n14 SchedulingDisabled
+node_issue	n15 DiskPressure
+node_issue	n15 NotReady: KubeletNotReady — container runtime is down
+node_issue	n15 SchedulingDisabled
+system_issue	kube-system/ks-a 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-b 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-c 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-cron Last run failed
+system_issue	kube-system/ks-d 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-deploy 0/2 CrashLoopBackOff
+system_issue	kube-system/ks-ds 3/4 Running
+system_issue	kube-system/ks-e 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-f 0/1 CrashLoopBackOff
+system_issue	kube-system/ks-job Failed
+system_issue	kube-system/ks-sts 0/1 Pending
+block	prompt	15561
+== BEGIN inventory ==
+Cluster health (P1): DEGRADED — 11/16 nodes Ready.
+  node n01 NotReady: KubeletNotReady — container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx sta…
+  node n02 NotReady: NodeStatusUnknown — Kubelet stopped posting node status.
+  node n03 NotReady: PLEG is not healthy: pleg was last seen active 3m0s ago
+  node n04 NotReady
+  node n05 no kubelet lease
+  node n06 no kubelet lease
+  node n07 kubelet not heartbeating (lease 40s stale)
+  node n08 kubelet not heartbeating (lease 43s stale)
+  node n09 kubelet not heartbeating (lease 1m35s stale)
+  node n10 kubelet not heartbeating (lease 1h0m0s stale)
+  node n11 kubelet not heartbeating (lease 1h1m40s stale)
+  node n13 MemoryPressure
+  node n13 PIDPressure
+  node n14 SchedulingDisabled
+  node n15 DiskPressure
+  node n15 NotReady: KubeletNotReady — container runtime is down
+  node n15 SchedulingDisabled
+  system kube-system/ks-a 0/1 CrashLoopBackOff
+  system kube-system/ks-b 0/1 CrashLoopBackOff
+  system kube-system/ks-c 0/1 CrashLoopBackOff
+  system kube-system/ks-cron Last run failed
+  system kube-system/ks-d 0/1 CrashLoopBackOff
+  system kube-system/ks-deploy 0/2 CrashLoopBackOff
+  system kube-system/ks-ds 3/4 Running
+  system kube-system/ks-e 0/1 CrashLoopBackOff
+  system kube-system/ks-f 0/1 CrashLoopBackOff
+  system kube-system/ks-job Failed
+  system kube-system/ks-sts 0/1 Pending
+
+Cluster resources:
+  CPU: allocatable 6 cores, requests 4200m (70%), limits 5400m (90%)
+  Memory: allocatable 12Gi, requests 9Gi (75%), limits 11Gi (91%)
+
+Workload problems (P2):
+
+- app/cart (Deployment): 0/1 ready, status Degraded, 12 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=12)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n app logs <pod> --previous
+- app/web (Deployment): 0/2 ready, status Degraded, 0 restarts
+    issue: ProbeFailure — the readiness probe keeps failing — the pod is kept out of Service endpoints (container "app": readiness — connection timed out) (×2)
+      suggested fix (deterministic, pre-reviewed — do not substitute): the probe keeps failing — check the probe config and the app's health endpoint | run: kubectl -n app describe pod <pod>
+    network policy: pods selected by allow-web, deny-web (possible cause)
+- kube-system/ks-a (Deployment): 0/1 ready, status CrashLoopBackOff, 5 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=5)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+- kube-system/ks-b (Deployment): 0/1 ready, status CrashLoopBackOff, 6 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=6)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+- kube-system/ks-c (Deployment): 0/1 ready, status CrashLoopBackOff, 7 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=7)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+- kube-system/ks-cron (CronJob): 0/1 ready, status Last run failed, 0 restarts
+- kube-system/ks-d (Deployment): 0/1 ready, status CrashLoopBackOff, 8 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=8)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+- kube-system/ks-deploy (Deployment): 0/2 ready, status CrashLoopBackOff, 9 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=9)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+- kube-system/ks-ds (DaemonSet): 3/4 ready, status Running, 0 restarts
+- kube-system/ks-e (Deployment): 0/1 ready, status CrashLoopBackOff, 9 restarts
+    issue: CrashLoopBackOff — Container repeatedly crashes after starting (container "app", restartCount=9)
+      suggested fix (deterministic, pre-reviewed — do not substitute): starts then crashes — inspect the crash output | run: kubectl -n kube-system logs <pod> --previous
+Service issues:
+  - svc/s01 (ClusterIP): no ready endpoints — matching pods on down node n01 (NotReady)
+  - svc/s02 (ClusterIP): no ready endpoints — matching pods on 2 down nodes
+  - svc/s03 (ClusterIP): no ready endpoints — 1 matching pod, 0 ready
+  - svc/s04 (ClusterIP): no ready endpoints — 3 matching pods, 0 ready
+  - svc/s05 (ClusterIP): no ready endpoints — the selector matches no pods
+  - svc/s06 (LoadBalancer): no external address
+  - svc/s07 (ClusterIP): no ready endpoints
+  - svc/s08 (ClusterIP): no ready endpoints — declared via kubeagent.io/expected-empty
+  - svc/s09 (ClusterIP): no ready endpoints (backs CronJob — expected between runs)
+  - svc/s10 (ClusterIP): no ready endpoints (backs Job — expected between runs)
+== END inventory ==
+
+== BEGIN candidates ==
+- app/cart (Deployment) [confidence: high]:
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+    decided by rules: node n15 (NotReady) — confirmed
+- app/web (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-a (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-b (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-c (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-cron (CronJob):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-d (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-deploy (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-ds (DaemonSet):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+- kube-system/ks-e (Deployment):
+    considered node n01 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n02 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n03 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n04 (NotReady): ruled out — no pod of this workload is scheduled on it
+    considered node n05 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n06 (no kubelet lease): ruled out — no pod of this workload is scheduled on it
+    considered node n07 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    considered node n08 (kubelet not heartbeating): ruled out — no pod of this workload is scheduled on it
+    [truncated by kubeagent]
+== END candidates ==
+
+== BEGIN evidence ==
+== events app/cart-6b8f5d7c4-r9t3w ==
+events for app/cart-6b8f5d7c4-r9t3w:
+  BackOff: Back-off restarting failed container app in pod cart-6b8f5d7c4-r9t3w (x18)
+  NodeNotReady: Node is not ready (x1)
+
+== describe node /n15 ==
+node n15: unschedulable=true
+  condition MemoryPressure=False (KubeletHasSufficientMemory): kubelet has sufficient memory available
+  condition DiskPressure=True (KubeletHasDiskPressure): kubelet has disk pressure
+  condition PIDPressure=False (KubeletHasSufficientPID): kubelet has sufficient PID available
+  condition Ready=False (KubeletNotReady): container runtime is down
+
+== events app/web-5d8f7c9b6-a1b2c ==
+events for app/web-5d8f7c9b6-a1b2c:
+  Unhealthy: Readiness probe failed: Get "http://web:8080/healthz": context deadline exceeded (x27)
+
+== events kube-system/ks-a-7c9d4b5f6-x0k2m ==
+no events for kube-system/ks-a-7c9d4b5f6-x0k2m
+
+== events kube-system/ks-b-7c9d4b5f6-x1k2m ==
+no events for kube-system/ks-b-7c9d4b5f6-x1k2m
+
+== events kube-system/ks-c-7c9d4b5f6-x2k2m ==
+no events for kube-system/ks-c-7c9d4b5f6-x2k2m
+
+== events kube-system/ks-cron ==
+no events for kube-system/ks-cron
+
+== events kube-system/ks-d-7c9d4b5f6-x3k2m ==
+no events for kube-system/ks-d-7c9d4b5f6-x3k2m
+== END evidence ==
+
+Judge each listed workload now and answer with the JSON object only.

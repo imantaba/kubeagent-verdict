@@ -1,0 +1,19 @@
+read_node	n15
+read_events	app/cart-6b8f5d7c4-r9t3w	2
+read_events	app/web-5d8f7c9b6-a1b2c	1
+read_events	kube-system/ks-a-7c9d4b5f6-x0k2m	0
+read_events	kube-system/ks-b-7c9d4b5f6-x1k2m	0
+read_events	kube-system/ks-c-7c9d4b5f6-x2k2m	0
+read_events	kube-system/ks-cron	0
+read_events	kube-system/ks-d-7c9d4b5f6-x3k2m	0
+result	1	app/cart	true	confirmed	node n15 (NotReady)	Ready condition is False now	node/n15	node n15 (NotReady)
+decision	node	n15	confirmed	node n15 (NotReady)	Ready condition is False now
+result	2	app/web	false					
+result	3	kube-system/ks-a	false					
+result	4	kube-system/ks-b	false					
+result	5	kube-system/ks-c	false					
+result	6	kube-system/ks-cron	false					
+result	7	kube-system/ks-d	false					
+result	8	kube-system/ks-deploy	false					
+result	9	kube-system/ks-ds	false					
+result	10	kube-system/ks-e	false					

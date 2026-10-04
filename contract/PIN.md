@@ -103,6 +103,82 @@ contract version.
   crash finding with a container gets a `-c <container>` suggestion.
   `golden/answer.json` was edited by hand to the new roster.
 
+## Capture record (v1.24.0, cluster and registry capture)
+
+- Captured from kubeagent tag `v1.24.0`, commit `15ec5649bbd2d07558eae945b71430afc8f231fd`.
+  Go: `go1.26.4 linux/amd64`.
+- The capture ran from a `git archive v1.24.0` copy in a scratch folder; the
+  kubeagent checkout was not touched.
+- Harness: `contract/capture/kv_capture_test.go.txt`. It now has four modes,
+  each with its own fixture env var: main (`KV_FIXTURE`), logs
+  (`KV_FIXTURE_LOGS`), cluster (`KV_FIXTURE_CLUSTER`) and registry
+  (`KV_FIXTURE_REGISTRY`). One `go test -count=1 -tags goldencapture -run
+  TestCaptureVerdictGolden ./internal/investigate` run writes all four dump
+  folders. The cluster mode also runs three pure scan steps in `scan.go`'s
+  order: `svchealth.Assess`, `svchealth.AnnotateEndpointCause` and
+  `netpolicy.Annotate` (before `rootcause.Annotate`).
+- New fixtures: `tests/fixtures/gather_fixture_cluster.yaml` (16 nodes, 19
+  workloads, 13 services) and `tests/fixtures/gather_fixture_registry.yaml`
+  (3 nodes, 6 Deployments that fail to pull).
+- New dumps: `tests/fixtures/gather_go_cluster/` and
+  `tests/fixtures/gather_go_registry/`, 11 files each, plus a README.
+- The 22 old dumps (`gather_go/` and `gather_go_logs/`) and the four golden
+  files came out of this run byte for byte as they were. Nothing under
+  `contract/golden/` moved.
+- The Python tests check the registry dumps byte for byte. The cluster dumps
+  are checked only for dump 0 until the Python cluster-health code exists.
+- The harness gates its logs check on `len(logRead) > 0`, because the cluster
+  and registry fixtures read no logs.
+- Built rows reach the registry no-pull sentence 0 times. The capture proves
+  its bytes; reaching it needs a victim whose events have aged out.
+- **What the cluster capture does not pin.**
+  - Services s11 to s13 are cut by the prompt's 10-issue cap. They are the
+    "backs DaemonSet", "backs Deployment" and "backs StatefulSet" wordings
+    (s11, s12, s13). The names are ordered so the five wordings of
+    `AnnotateEndpointCause` print first: s01 one down node, s02 "2 down
+    nodes", s03 "1 matching pod, 0 ready", s04 "3 matching pods, 0 ready",
+    s05 "the selector matches no pods". The harness checks all ten printed
+    service lines and that none of s11 to s13 prints. The three cut
+    "backs ..." wordings have no byte check.
+  - n15's node attribution is the 12th of 12 candidates for each workload,
+    and the prompt keeps 8. The line "decided by rules: node n15 (NotReady)"
+    still shows.
+  - No node describe beyond n15 happens. The 8 reads go to events reads before
+    ks-ds and ks-e are reached.
+- sha256 of the fixtures:
+
+  | File | sha256 |
+  |---|---|
+  | `gather_fixture_cluster.yaml` | `c060cfe9d1d2bd74c2629d1024768b9949c6c71d7026da73d4f4d6c1766dae37` |
+  | `gather_fixture_registry.yaml` | `48811313b35ad24e27dc4e670a321fe6018a35b447c1a6baf61f9415ff308b05` |
+
+- sha256 of the dumps (`sha256sum` format). `05-pvcs.txt` is empty in both
+  folders, and `04-nodes.txt` is empty in the registry folder
+  (`e3b0c442…`).
+
+      558971d5f110a8127ad1aa5898249777341d5edc7ff60d991adb6f34e6a80e21  gather_go_cluster/00-fixture.json
+      72ae75b4b3ee69db15d16bab957445a7fda52f15c247a4fb284d38ba4acbabe2  gather_go_cluster/01-order.txt
+      0dab56fb3d2835692df3988817f7e50224979e4c0c27fa70daf47c5cbb649106  gather_go_cluster/02-events.txt
+      877956fd80b0dcecd3f3f0737a7f2aa179d1595b4b6c5d5ed7b50640ad69f5f0  gather_go_cluster/03-candidates.txt
+      66bc3439671a6efc8c9e6422101daf0d754cb44a43d11d3ad44b9c32c40c943f  gather_go_cluster/04-nodes.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_cluster/05-pvcs.txt
+      34a2db7f46ce5d662f86998706a5eb158a8386f6857d6ac92f4b89d0579c998d  gather_go_cluster/06-logs.txt
+      884f6dc71e7caaf660760e730ad83f3a30977a7a4ac7436aac017be67bca4322  gather_go_cluster/07-trail.txt
+      e49370ca72bc319e0cd13862361edcf101c628f194ba784ea1dd16ca0d6ac63c  gather_go_cluster/08-bundle.txt
+      ec5591ac409d83531f81ade0139c0c7903eb2be9532c5d859a2454877e6ea992  gather_go_cluster/09-decide.txt
+      1ed0774fb5a8af4bb00a7c9065229a1c2a767228ea20ea7209d5e7f8af4dfbde  gather_go_cluster/10-prompt.txt
+      0ce4aa595c3eaf0ad3b3226a9928bc9534e2593ab1082e8db1fbfb323c209582  gather_go_registry/00-fixture.json
+      6201f610bf496c64f84f910df9ef8e3a766b74b29d0aeed0a94db502ecbe8934  gather_go_registry/01-order.txt
+      cc4115ae678b7b02bee1f18ee054462ea9d61462f8aa929d6fe77f5eb715d130  gather_go_registry/02-events.txt
+      17ffd057f40091e7bf97aa65f61567eefb491a462c9894a909ef7540d94c5a5a  gather_go_registry/03-candidates.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_registry/04-nodes.txt
+      e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  gather_go_registry/05-pvcs.txt
+      760caac51cc68b2a56aea7c908eb63b0b2f1853920d00d81a9e78a09f70970c1  gather_go_registry/06-logs.txt
+      dd3fc774ce3bb7abd0938aed62abe0a14363940a3e5e3d94f2ef5ed18da8c131  gather_go_registry/07-trail.txt
+      221bc8acb55538ba1a655de31062753f04fb0c3d7a665c139e916c0aac46a2ba  gather_go_registry/08-bundle.txt
+      747c808f00e5acc6247225cafa1f75bb8fbfa7d76db2ede15ab37485085a2b21  gather_go_registry/09-decide.txt
+      43d50c0b60ccce1ebdcdd9ec3b48e3c37c41af40ea3126f60104afb8d7edfeca  gather_go_registry/10-prompt.txt
+
 ## Dataset pin moves
 
 The exam's two hashes live in `tests/test_shared_origin_training.py`:
@@ -419,14 +495,29 @@ the why is recorded.
     ` (CSI status)`).
   - 14 shared-origin exam victims carry the gold `node worker-N
     (NotReady)`, which no line of theirs names.
+    (2026-10-04, Spec 4b-1: closed. The count was 14. Spec 4b-1 counted
+    again and found 20. A victim's gold now names a cause only when that
+    cause's anchor is in the victim's own lines. If it is not, the gold is
+    `none_of_these`. The pool check scores every family gold with the real
+    grader and wants full marks on every row.)
   - `volume-mount-error`'s P1 decoy.
   - No node carries the `node.kubernetes.io/not-ready` taint.
   - A flagged `kube-system` workload outside the first 10 gets a system
     line in Go but not here.
+    (2026-10-04, Spec 4b-1: closed. `render.cluster_health` is rebuilt on
+    `health.assess`, the port that the cluster capture pins. The cluster
+    fixture flags 13 workloads, 11 of them in `kube-system`, so 3
+    `kube-system` workloads fall past the first 10. Their system lines
+    print, and `tests/test_gather_byte_equal.py` holds the lines equal to
+    Go's.)
   - A `not_read` object's fresh value is typed by hand and is not checked
     against Go.
   - The candidate-cap marker is no longer in the golden; only a unit test
     covers it.
+    (2026-10-04, Spec 4b-1: closed. The cluster fixture has 12 down nodes
+    against Go's cap of 8 candidates per workload, so the cap is in the new
+    Go capture, `tests/fixtures/gather_go_cluster`. The byte test holds our
+    bytes equal to it.)
 
   The golden re-capture is recorded under "Capture record" above.
 
@@ -537,6 +628,12 @@ the why is recorded.
   - B4: three arms the generator reaches have no Go capture to check
     them byte for byte (the candidate-cap line, a registry auth sentence
     and the no-pull-event sentence). Covering them needs a new capture.
+    (2026-10-04, Spec 4b-1: the three arms are closed. The cluster and
+    registry captures, from kubeagent v1.24.0, cover the candidate-cap line,
+    the registry auth sentence and the no-pull-event sentence, and
+    `tests/test_gather_byte_equal.py` checks each one byte for byte. The
+    wording above was one arm short. A fourth arm, the shared-cause cap, has
+    no capture. It moves to 4b-4.)
   - B6: a refused read's message is shorter than the API server's real
     text.
   - C9: the guard's text cleaning has no NFKC step, so a look-alike
@@ -545,6 +642,10 @@ the why is recorded.
     what the prompt shows, so it can hold a decided workload's own gold.
     No grader reads it today.
   - A node's state at scan time: a cordon and a pressure condition.
+    (2026-10-04, Spec 4b-1: closed. A node read now prints `unschedulable=`
+    and every condition. The cluster lines carry a node's pressure,
+    NotReady, cordon and lease state, in that order. Each story sets all of
+    it, once per world.)
   - A stronger G3b.
   - A narrower G2.
 
@@ -645,10 +746,15 @@ the why is recorded.
 
   Left for 4b, from the same list:
   - B4: three arms with no Go capture.
+    (2026-10-04, Spec 4b-1: three arms closed, and a fourth found. See the
+    longer B4 note above. The fourth arm, the shared-cause cap, moves to
+    4b-4.)
   - B6: a refused read's message is shorter than the API server's real
     text.
   - D4: `multi`'s decoy list is keyed on each object's intent.
   - A node's state at scan time: a cordon and a pressure condition.
+    (2026-10-04, Spec 4b-1: closed. See the note under the same item in the
+    2026-09-26 entry.)
 
   Found by the final review, also left for 4b:
   - G3b zeroes a right answer written in a `log cause:` label's words,
@@ -672,3 +778,135 @@ the why is recorded.
   was found while writing 4a, the 21 weak pairs among them. It does not
   repeat the items above or the 2026-09-26 list. 4b starts from all
   three lists.
+
+- **2026-10-04 — Spec 4b-1, the shared-origin rewrite.** All three hashes
+  moved: `FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256` and `GRADED_VIEW_SHA256`.
+  The exam is still 249 rows and the frozen slice still 239. 229 exam rows,
+  from the other families, are byte for byte the old ones
+  (`OTHER_FAMILIES_SHA256` in `tests/test_generate.py`). The 20
+  shared-origin exam rows are rebuilt: 10 `shared_origin_probe` and 10
+  `shared_origin_decoy_probe`. Of those 20 rows, 20 user messages, 20 gold
+  answers, 20 flagged lists and 20 metas moved. 0 system messages moved.
+
+  Why. Until now this family showed the model text the generator made up:
+  a candidate menu and an origin read typed by hand. Now each row runs
+  kubeagent's own steps: the report order, the gather, the rules over
+  every candidate, and the render. The design is in
+  `docs/superpowers/specs/2026-10-03-shared-origin-rewrite-design.md`.
+  One line each on what changed:
+  - Real rows. There are 47 stories, each in two worlds, one broken and
+    one healthy. 41 are trainable (35 plain, 6 ruled) and 6 are
+    exam-only. 13 stories are gone: 12 whose only origin line was the
+    hand-typed read (the spec's X stories), and `runtime-class-removed`,
+    whose two worlds print the same lines. The trainable pool was 54 (48
+    plain, 6 ruled).
+  - The exemption is gone. The checker used to skip this family for some
+    rules (`EXEMPT_CASES`, `EVIDENCE_RULES` and `PROPAGATION_TEXT_RULES`).
+    All 50 rules now run on it, and the build's manifest shows 0
+    violations.
+  - The gold rules. A victim's gold names a cause only when the cause's
+    anchor is in that victim's own lines. If it is not, the gold is
+    `none_of_these`. The label is "shared" when the rules confirm one
+    cause on 2 or more workloads, or when 2 or more victims in a broken
+    world show link anchors in their own lines. Otherwise it is "none".
+  - B7, the checker's rule for the cluster-health block, is rewritten. A
+    node can have several lines, in the order pressure, NotReady, cordon,
+    lease, and a candidate is needed only for the down lines. The
+    checker's `_HEALTH_SYSTEM` pattern is fixed in the same change.
+
+  The hashes, old → new:
+
+  | Pin | Old | New |
+  |---|---|---|
+  | `FROZEN_SLICE_SHA256` | `f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a` | `d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b` |
+  | `EVAL_SET_SHA256` | `a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2` | `0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d` |
+  | `GRADED_VIEW_SHA256` | `efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4` | `b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5` |
+
+  The bank, `out/dataset-1004`, built with the same command (`--seed 17
+  --size 8000`), by sha256:
+  - `test.jsonl`: `01e7732e09553c227b4c13458ee04fed3146b0dd28346319711553d6a6fd71d0`
+  - `train.jsonl`: `30ac872a0f1a14025b71bbe8aaf7e36812e6216afe3686056d56a553b73e2a64`
+  - `val.jsonl`: `fd94f367e1f7f1f52607e23e405357c993427424e6e281123de766c5d2087643`
+
+  Rows: train 6,457 → 6,439, val 721 → 739, test 249 → 249. The bank holds
+  1,200 `shared_origin` and 1,200 `shared_origin_decoy` rows, which is 1,200
+  pairs. Every train and val row outside the family is byte for byte the
+  same as in `out/dataset-0929`. `out/dataset-0929` and `out/dataset-0928`
+  stay on disk. The prompt-stability test now reads
+  `out/dataset-1004/test.jsonl`.
+
+  What moved on the 20 exam rows:
+  - Their `meta` drops `distractor_cause`, `expected_confidence`,
+    `wrong_summary_phrase` and adds no key. The exam carries
+    `expected_cause` on 209 rows (was 209) and `expected_confidence` on 209
+    rows (was 219).
+  - Labels, was none 15, shared 5; now none 13, shared 7.
+  - Origins: unchanged. The 20 rows come from the same six stories,
+    `coredns-down`, `networkpolicy-deny-all`, `node-disk-pressure`,
+    `node-not-ready`, `registry-unreachable` and
+    `storage-provisioner-down`.
+  - The oracle's job counts, with the gold reply as the model's reply (every
+    one is full marks): job 1 120 → 102 workloads, job 2 177 → 197
+    workloads, job 3 40 rows (none 35, separate 0, shared 5) → 40 rows (none
+    33, separate 0, shared 7). The 20 family rows hold 12 of the job-1
+    workloads (was 30) and 38 of the job-2 workloads (was 18).
+  - No bar moved: 0.9, 0.7 and 0.9.
+  - The evidence-overlap pins moved: `shared_origin_probe` 3 → 19 of 40,
+    and `shared_origin_decoy_probe` 2 → 13 of 30. The real gather prints
+    the same line shapes in both worlds, and training rows print them too.
+
+  The mix, counted on the new `train.jsonl`. These are the numbers the
+  mix tests passed with:
+  - Pairs per story: 20 to 39. The bar is at least 12.
+  - `none_of_these` in broken rows: 533 of 2,931 = 18.2%. In healthy rows:
+    677 of 2,710 = 25.0%. The gap is 6.8 points. The bar is within 10.
+  - `none_of_these` in all train answers: 1,461 of 11,192 = 13.1%. The bar
+    is at most 30%. In `out/dataset-0929` it was 251 of 10,991 = 2.3%.
+  - Label cue: 20 plain stories end mostly "shared" and 14 end mostly "none"
+    (1 tied). The bar is at least 5 each.
+  - Three-verdict: 532 of 1,080 healthy rows = 49.3% carry 3 or more
+    verdicts. The bar is at least 40 of every 100.
+
+  Five older items close in place, each with a dated note and the old
+  text kept: the victims whose gold names a node their lines never show,
+  the `kube-system` line past the first 10 workloads, the candidate-cap
+  marker, B4, and a node's state at scan time. B4's wording is corrected:
+  it has a fourth arm.
+
+  The capture is recorded under "Capture record (v1.24.0, cluster and
+  registry capture)" above. In the new bank, 0 family rows show the registry
+  no-pull sentence and 28 show the registry auth sentence. The capture
+  proves the bytes of both.
+
+  The model card: limits 1 to 5 and 7 to 9 have a dated note with the new
+  numbers, limit 6 is rewritten, and limit 15 is new. The two 0920 sections
+  say they scored the exam's shared-origin rows as they were before
+  2026-10-04. 0920 has not been run on the new exam.
+
+  Left for 4b-2, 4b-3 and 4b-4:
+  - 4b-2: gold that says more than its prompt, in the other families. The
+    gold rule above, applied to them.
+  - 4b-3: `multi` rows and decoys.
+    - the container-name clash, 96 of 738 `multi` rows;
+    - `multi`'s `healthy_origin` and its `origin_read_label` path;
+    - D4.
+  - 4b-4: grader leftovers.
+    - model-card limits 13 and 14;
+    - hyphen and underscore folding in the cleaning step;
+    - the weak pairs: 21 on the 2026-09-29 exam, 9 on this one;
+    - image-pull-secret-expired graded as unverified;
+    - B6;
+    - the G2 registry skip;
+    - must-not words for this family;
+    - node-disk-pressure's ContainerStartError keys ("containerd",
+      "task") name no origin; re-key it to ("space", "containerd") with the
+      exam rebuild;
+    - B4's fourth arm, the shared-cause cap;
+    - tighter checker checks that real output does not need: service-line
+      wording and sort order, the network-policy gate, a message-only
+      NotReady line over 120 runes, lease ages from 0s to 39s, an extra
+      system line at 10 rows, and ANS-2 counting ruled-out lines.
+
+  The order after 4b-1: 4b-2, 4b-3 and 4b-4, then the exam rebuild and
+  re-pin, then 0920 live, then the one retrain (about 32 hours on the
+  training host), then the untuned baseline.

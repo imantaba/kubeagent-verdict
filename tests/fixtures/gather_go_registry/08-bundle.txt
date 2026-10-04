@@ -1,0 +1,27 @@
+block	bundle	1233
+== events pull/p-auth-5d8f7c9b6-d4e5f ==
+events for pull/p-auth-5d8f7c9b6-d4e5f:
+  Failed: Failed to pull image "reg.example.com/b:1": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required (x4)
+
+== events pull/p-conn-6b8f5d7c4-a1b2c ==
+events for pull/p-conn-6b8f5d7c4-a1b2c:
+  Failed: Failed to pull image "reg.example.com/a:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x6)
+  BackOff: Back-off pulling image "reg.example.com/a:1" (x14)
+
+== events pull/p-image-7c9d4b5f6-g7h8i ==
+events for pull/p-image-7c9d4b5f6-g7h8i:
+  Failed: Failed to pull image "reg.example.com/c:1": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown (x3)
+
+== events pull/p-nopull-6d5f7c8b9-j1k2l ==
+events for pull/p-nopull-6d5f7c8b9-j1k2l:
+  BackOff: Back-off pulling image "reg.example.com/d:1" (x22)
+
+== events pull/p-notread-5b8d7f6c9-m3n4o ==
+events for pull/p-notread-5b8d7f6c9-m3n4o:
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (x9)
+
+== events pull/solo-7c9d4b5f6-s7t8u ==
+events for pull/solo-7c9d4b5f6-s7t8u:
+  Failed: Failed to pull image "other.example.com/f:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x5)
+
+

@@ -1,5 +1,12 @@
 """Teaching shared-origin reasoning without teaching the test.
 
+This file guards the rows the model trains on. It asks two questions. Does
+training leak the exam? And does the training pile hand the model a cue, so
+it can score without reading the evidence?
+
+How it began (kept as history)
+------------------------------
+
 `propagation.py` shipped its six scenarios as EVAL-ONLY and said why: the
 measurement had to exist and had to fail before any attempt was made to teach
 the correction. It has now failed — on all ten `shared_origin_probe` rows the
@@ -15,28 +22,54 @@ So training gets its OWN origins and the six eval scenarios stay eval-only —
 the catalog's 19-trainable / 9-held-out split, applied to propagation. The
 eval set does not move, which is what keeps the 0830 scoreboard comparable.
 
-That closes the obvious shortcut. This module exists mostly for the second,
-which is not obvious: `multi` builds its reads per constituent
-(`_reads(e, n)[:2]`), so before this change a cluster-scoped read at the head
-of the list appeared in shared-origin rows and NOWHERE else. Train the
-positive case alone and "an origin read is present" separates the two classes
-perfectly — the model would pass the probe on the prompt's shape without
-reading a word of the evidence, and every rate on the slice would improve for
-a reason that is not the skill. The counterweight is a negative case: `multi`
-rows carrying the SAME origin read label with content showing the component
-HEALTHY, where "separate reasons" is still the right answer. Same shape, both
-answers, so only the evidence separates them.
+That closes the obvious shortcut. This module was written mostly for the
+second, which is not obvious: `multi` builds its reads per constituent
+(`_reads(e, n)[:2]`), so a cluster-scoped read at the head of the list used to
+appear in shared-origin rows and NOWHERE else. Train the positive case alone
+and "an origin read is present" separates the two classes perfectly — the
+model would pass the probe on the prompt's shape without reading a word of the
+evidence, and every rate on the slice would improve for a reason that is not
+the skill. The counterweight was a negative case: `multi` rows carrying the
+SAME origin read label with content showing the component HEALTHY, where
+"separate reasons" is still the right answer. Same shape, both answers, so
+only the evidence separates them.
 
-Two residuals, asserted below rather than claimed away. The counterweight is
-lighter than the generator makes it look: `drop_held_out` removes about a
+Two residuals were asserted rather than claimed away. The counterweight was
+lighter than the generator made it look: `drop_held_out` removes about a
 third of the `multi` counter-examples and none of the `shared_origin` rows,
-so the emitted ~48/52 reaches the optimizer as ~62/38. And the exam cannot
-detect this shortcut even now — seven of the ten `shared_origin_probe` rows
-carry a read label that appears in none of the other 243, so label-matching
-alone clears job 3 and the decoy rate. Fixing that is an exam-side change and
-does not belong in this module.
+so the emitted ~48/52 reached the optimizer as ~62/38 (the band is now held
+by `test_the_trained_pile_is_not_one_sided_among_origin_read_rows`). And the
+exam could not detect this shortcut even then — seven of the ten
+`shared_origin_probe` rows carried a read label that appeared in none of the
+other 243, so label-matching alone cleared job 3 and the decoy rate. The
+second residual is gone: the family has no read label now (see below).
+
+What changed on 2026-10-04 (Spec 4b-1)
+--------------------------------------
+
+The shared-origin family is rebuilt from `stories.py`: real lines, run
+through kubeagent's own pipeline. Three things follow for this file.
+
+1. The family's training pool is the 41 stories in `stories.trainable()`.
+   The 54 made-up scenarios in `propagation.py` are no longer its pool.
+2. The made-up candidate menu, the 12 X stories and the invented origin read
+   are gone from the family. So are the tests that checked them: the origin
+   variants, their states, their exam layouts, the read-layout floors and
+   cousins, and `origin_read_label` on this family.
+3. A family row's meta no longer carries `origin_read_label`,
+   `distractor_cause`, `wrong_summary_phrase` or `expected_confidence`.
+   `test_no_family_row_meta_carries_a_dropped_key` checks that on the train
+   pile, the exam, the wide probes and the cousin probes.
+
+`multi` was not rebuilt. It still draws from the 54 scenarios in
+`propagation.py`, which Spec 4b-1 does not change, and it is now the only
+case that carries `origin_read_label`. So the checks that only `multi` can
+answer stay in this file, in the block that holds `_template`. The family's
+side of the same shortcut is checked in `tests/test_shared_origin_floor.py`
+and `tests/test_shared_origin_pool.py`. Spec 4b-3 owns `multi`.
 """
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -44,8 +77,8 @@ from collections import Counter
 
 import pytest
 
-from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import generate, propagation
+from kubeagent_verdict import contract, vocab
+from kubeagent_verdict.dataset import generate, propagation, stories
 
 SIZE = 800
 SEED = 17
@@ -64,8 +97,9 @@ def kept(rows):
     this module has to be made about this pile instead, because the filter
     does not remove rows evenly. A `multi` row is a `+`-join of two to four
     catalog-entry groups and dies if ANY one of them collides with an exam
-    group; a `shared_origin` row is built from the train-only propagation
-    pool the exam never touches. So `multi` loses about a third of its
+    group; a `shared_origin` row is built from a train-only story the exam
+    never touches (before 2026-10-04 (Spec 4b-1) it was built from the
+    train-only propagation pool). So `multi` loses about a third of its
     origin-read rows here and `shared_origin` loses none.
 
     Per-row invariants stay on `rows`: it is a superset of this pile, so
@@ -80,32 +114,144 @@ def _by_case(rows, case):
     return [e for e in rows if e.case == case]
 
 
+FAMILY_CASES = ("shared_origin", "shared_origin_decoy",
+                "shared_origin_probe", "shared_origin_decoy_probe")
+
+# 2026-10-04 (Spec 4b-1): the four meta keys the made-up menu and the invented
+# origin read needed. The family does not carry them. `multi` still carries
+# `origin_read_label`, and nothing below looks at `multi`.
+_DROPPED_META_KEYS = ("origin_read_label", "distractor_cause",
+                      "wrong_summary_phrase", "expected_confidence")
+
+_BANNED = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
+           re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
+           re.compile(r"@"))
+
+
+def _origin_answers(story):
+    """Every answer that names the origin: each world's origin row answer, and
+    each victim answer that links to the origin."""
+    out = []
+    for world in (story.broken, story.healthy):
+        row = world.origin_row
+        if row is not None and row.answer is not None:
+            out.append(row.answer)
+    for v in story.victims:
+        out += [a for a in (v.broken, v.healthy) if a is not None and a.link]
+    return out
+
+
+def _authored_origin_text(story):
+    """The strings a story authors for the origin, which the exam grades.
+
+    Only a plain (P) story writes them: its `shown_cause`, and the cause of
+    each answer that names the origin. A ruled (R) story's cause is the
+    rules' wording, decided by code and not chosen by the model, and the
+    ruled stories may repeat it on purpose: the trainable node stories read
+    like the exam story `node-not-ready`. So a ruled story authors nothing
+    here.
+    """
+    if story.cls == "R":
+        return set()
+    text = {a.cause for a in _origin_answers(story)}
+    text.add(story.shown_cause)
+    return text
+
+
+def _strings(obj):
+    """Every string inside a story, however deep it sits."""
+    if isinstance(obj, str):
+        yield obj
+    elif dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        for f in dataclasses.fields(obj):
+            yield from _strings(getattr(obj, f.name))
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _strings(k)
+            yield from _strings(v)
+    elif isinstance(obj, (tuple, list, set, frozenset)):
+        for item in obj:
+            yield from _strings(item)
+
+
+def _banned_shapes(story):
+    blob = "\n".join(_strings(story))
+    return [pat.pattern for pat in _BANNED if pat.search(blob)]
+
+
+def _dropped_keys(node, path="meta"):
+    """Where a dropped key sits in a meta value, however deep."""
+    found = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{path}.{key}"
+            if key in _DROPPED_META_KEYS:
+                found.append(here)
+            found += _dropped_keys(value, here)
+    elif isinstance(node, (list, tuple)):
+        for i, value in enumerate(node):
+            found += _dropped_keys(value, f"{path}[{i}]")
+    return found
+
+
+def _rows_carrying_dropped_keys(piles):
+    return [(name, e.case, e.group, path)
+            for name, pile in piles.items() for e in pile
+            for path in _dropped_keys(e.meta)]
+
+
+@pytest.fixture(scope="module")
+def family_piles(rows):
+    """The four piles a family row can sit in."""
+    exam = generate.test_set()
+    return {"train": [e for e in rows if e.case in FAMILY_CASES],
+            "exam": [e for e in exam if e.case in FAMILY_CASES],
+            "wide": generate.shared_origin_wide_probes(),
+            "cousin": generate.shared_origin_cousin_probes()}
+
+
 # ------------------------------------------------- the held-out origin split
 
-def test_a_trainable_scenario_pool_exists():
+def test_both_trainable_pools_exist():
+    """`stories` feeds the shared-origin family. `propagation` still feeds `multi`."""
+    assert stories.trainable()
     assert propagation.trainable_scenarios()
 
 
 def test_no_trainable_origin_is_an_eval_origin():
-    """The whole point. A shared key would make the probe a memory test."""
-    train = {p.key for p in propagation.trainable_scenarios()}
-    held = {p.key for p in propagation.all_scenarios()}
-    assert train & held == set()
+    """The whole point. A shared key would make the probe a memory test.
+
+    2026-10-04 (Spec 4b-1): the family's two pools are `stories.exam()` and
+    `stories.trainable()`; `multi` still draws from the trainable
+    `propagation` scenarios. All three must stay clear of the six held-out
+    keys, and the six must still be the same six in both modules.
+    """
+    held = {st.key for st in stories.exam()}
+    assert held == {p.key for p in propagation.all_scenarios()}
+    assert {st.key for st in stories.trainable()} & held == set()
+    assert {p.key for p in propagation.trainable_scenarios()} & held == set()
 
 
-def test_no_trainable_scenario_reuses_an_eval_answer_string():
+def test_no_trainable_story_reuses_an_eval_answer_string():
     """Disjoint keys are not enough — the probe grades the cause STRING.
 
-    Two scenarios could carry different keys and the same `shared_cause`, and
+    Two stories could carry different keys and the same cause string, and
     then the model has seen the graded answer verbatim while `drop_held_out`
     reports a clean split, because it keys on group identity and never looks
     at the text.
+
+    2026-10-04 (Spec 4b-1): the strings compared are the ones a story writes
+    for its origin (`_authored_origin_text`). A victim's answer to its OWN
+    cause is left out on purpose: it is read off that victim's own lines, and
+    two stories may fail a pod the same way. A ruled story's cause is the
+    rules' wording, which the stories share on purpose.
     """
-    held = {p.shared_cause for p in propagation.all_scenarios()}
-    held |= {p.distractor_cause for p in propagation.all_scenarios()}
-    for p in propagation.trainable_scenarios():
-        assert p.shared_cause not in held, p.key
-        assert p.distractor_cause not in held, p.key
+    held = set()
+    for st in stories.exam():
+        held |= _authored_origin_text(st)
+    assert held, "the exam stories author no origin text, so this check is empty"
+    for st in stories.trainable():
+        assert not (_authored_origin_text(st) & held), st.key
 
 
 def test_every_trainable_scenario_carries_a_healthy_origin_read():
@@ -114,334 +260,83 @@ def test_every_trainable_scenario_carries_a_healthy_origin_read():
         assert p.healthy_origin_content.strip(), p.key
 
 
-def test_trainable_scenarios_obey_every_rule_the_eval_table_obeys():
-    for p in propagation.trainable_scenarios():
-        assert p.blast_radius in propagation.BLAST_RADII, p.key
-        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", p.key), p.key
-        assert 2 <= len(p.victims) <= 4, p.key
-        assert p.shared_verdict != "attributed", p.key
-        assert p.confidence in ("high", "medium", "low"), p.key
-        for v in p.victims:
-            assert v.issue in vocab.ISSUE_KINDS, f"{p.key}: {v.issue}"
-            assert v.pass_confidence in ("high", "medium", "low"), p.key
-        locals_ = [v.local_cause for v in p.victims]
-        assert len(set(locals_)) == len(locals_), f"{p.key}: duplicate decoys"
+# 2026-10-04 (Spec 4b-1): one story is wider than the two-to-four rule. It
+# gained the Init:ErrImagePull and Init:ImagePullBackOff victims, which makes
+# five. Its count is pinned exactly instead of the rule being loosened.
+_VICTIM_COUNTS = {"image-pull-secret-expired": range(5, 6)}
 
 
-def test_every_trainable_scenario_declares_at_least_four_origin_variants():
-    """Four literal strings per scenario is a lookup; several renderings of one
-    relation is not. Variant 0 must be the legacy pair because `multi`'s
-    healthy-origin read renders `healthy_origin_content` without going through
-    the draw, and the pool invariants below read `origin_read[1]` /
-    `healthy_origin_content` directly -- all of them must keep showing content
-    the model has actually seen.
+def test_trainable_stories_obey_every_rule_the_eval_table_obeys():
+    """The shape rules, on the 41 stories.
+
+    2026-10-04 (Spec 4b-1): the old checks on `shared_verdict`, `confidence`,
+    `pass_confidence` and a duplicate `local_cause` have no analog. A story
+    has no verdict to forbid, a confidence is a closed pair checked when an
+    `Answer` is built, and a victim's own cause is read off its own lines, not
+    chosen from a menu.
     """
-    for p in propagation.trainable_scenarios():
-        assert len(p.origin_variants) >= 4, f"{p.key}: {len(p.origin_variants)}"
-        assert p.origin_variants[0] == (p.origin_read[1], p.healthy_origin_content), (
-            f"{p.key}: variant 0 is not the legacy pair")
+    for st in stories.trainable():
+        assert st.cls in stories.CLASSES, st.key
+        assert st.blast_radius in propagation.BLAST_RADII, st.key
+        assert st.scope_field in stories.SCOPES, st.key
+        assert st.origin_kind in stories.ORIGIN_KINDS, st.key
+        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", st.key), st.key
+        assert len(st.victims) in _VICTIM_COUNTS.get(st.key, range(2, 5)), st.key
+        for v in st.victims:
+            assert v.issue in vocab.ISSUE_KINDS, f"{st.key}: {v.issue}"
 
 
-def test_every_variant_first_line_is_literal_and_unique_within_its_scenario():
-    """Two tests and one measurement identify a rendered variant by its first
-    line, so a first line carrying `{ns}` or repeated across variants would
-    make them silently unable to tell variants apart.
-    """
-    for p in propagation.trainable_scenarios():
-        firsts = []
-        for broken, healthy in p.origin_variants:
-            for content in (broken, healthy):
-                first = content.split("\n")[0]
-                assert "{" not in first, f"{p.key}: placeholder in {first!r}"
-                assert first.strip(), f"{p.key}: empty first line"
-                firsts.append(first)
-        assert len(set(firsts)) == len(firsts), f"{p.key}: duplicate first line"
-
-
-def test_every_trainable_scenario_names_its_state_in_words():
-    """The 0.5 in-distribution score decomposes into two scenarios read and two
-    constant. The two read are separated by a lexical state token; the two
-    constant by a quantity, and the UNIT ablation showed making the units
-    consistent moved nothing. So a discriminator that is only a number is a
-    discriminator two of four scenarios demonstrably did not read.
-
-    Necessary and demonstrably not sufficient: `internal-ca-expired` already
-    satisfies this and still failed. The other half -- "the token is not buried
-    in a numeric phrase" -- is authoring guidance in the module docstring,
-    because no honest test expresses it.
-    """
-    for p in propagation.trainable_scenarios():
-        broken_token, healthy_token = p.origin_state
-        assert broken_token.strip(), f"{p.key}: no broken state token"
-        assert healthy_token.strip(), f"{p.key}: no healthy state token"
-        assert re.search(r"[A-Za-z]", broken_token), f"{p.key}: {broken_token!r}"
-        assert re.search(r"[A-Za-z]", healthy_token), f"{p.key}: {healthy_token!r}"
-        for broken, healthy in p.origin_variants:
-            assert broken_token in broken, f"{p.key}: {broken_token!r} missing"
-            assert healthy_token not in broken, f"{p.key}: {healthy_token!r} in a broken read"
-            assert healthy_token in healthy, f"{p.key}: {healthy_token!r} missing"
-            assert broken_token not in healthy, f"{p.key}: {broken_token!r} in a healthy read"
-
-
-_SCOPE_FOR_RADIUS = {"cluster": None, "node": "node", "namespace": "ns"}
+_SCOPE_FOR_RADIUS = {"cluster": "", "node": "node", "namespace": "ns"}
 
 
 def test_blast_radius_and_scope_field_agree():
     """A node-scoped origin is only coherent if every victim is on that node.
-    `_propagation_names` pins the field named by `scope_field`, so a radius
+    `shared_origin.draw` pins the field named by `scope_field`, so a radius
     that disagrees with it asserts a blast radius its own inventory
     contradicts.
+
+    2026-10-04 (Spec 4b-1): a story names "no scope" with the empty string,
+    not `None`, so the cluster entry above changed from `None` to `""`.
     """
-    for p in propagation.trainable_scenarios():
-        assert p.scope_field == _SCOPE_FOR_RADIUS[p.blast_radius], p.key
+    for st in stories.trainable():
+        assert st.scope_field == _SCOPE_FOR_RADIUS[st.blast_radius], st.key
 
 
-def test_no_two_trainable_scenarios_share_an_answer_string():
-    """A cause string reused across scenarios is a lookup key spanning both."""
-    seen = {}
-    for p in propagation.trainable_scenarios():
-        for field, value in (("shared_cause", p.shared_cause),
-                             ("distractor_cause", p.distractor_cause)):
-            assert value not in seen, f"{p.key}.{field} repeats {seen[value]}"
-            seen[value] = f"{p.key}.{field}"
+def test_no_two_trainable_stories_share_an_origin_answer_string():
+    """A cause string reused across stories is a lookup key spanning both."""
+    owner = {}
+    for st in stories.trainable():
+        for value in sorted(_authored_origin_text(st)):
+            assert owner.setdefault(value, st.key) == st.key, (
+                f"{st.key} repeats an origin answer string of {owner[value]}: {value!r}")
 
 
-def test_no_two_trainable_scenarios_share_a_local_cause():
-    """Same reason, on the decoy half's answers."""
-    seen = {}
-    for p in propagation.trainable_scenarios():
-        for v in p.victims:
-            assert v.local_cause not in seen, (
-                f"{p.key}: local_cause repeats {seen[v.local_cause]}")
-            seen[v.local_cause] = p.key
-
-
-def test_pass_confidence_varies_within_every_trainable_scenario():
-    """Guidance in the module docstring until now. With sixteen new scenarios
-    written at once, "vary the confidence" as guidance will not hold, and a
-    scenario whose victims all carry one grade reopens the confidence-copy
-    shortcut the docstring says is closed.
-    """
-    for p in propagation.trainable_scenarios():
-        grades = {v.pass_confidence for v in p.victims}
-        assert len(grades) > 1, f"{p.key}: every victim carries {grades}"
-
-
-def test_every_trainable_scenario_has_at_least_three_victims():
+def test_every_trainable_story_has_at_least_three_victims():
     """The 0907 model failed decider 5 on three-victim decoy halves it had
     never seen: 15 of 24 trainable scenarios held two victims, so the
     generator could only ever render two. Three is the floor now."""
-    thin = {p.key: len(p.victims) for p in propagation.trainable_scenarios()
-            if len(p.victims) < 3}
-    assert thin == {}, f"scenarios with fewer than three victims: {thin}"
+    thin = {st.key: len(st.victims) for st in stories.trainable()
+            if len(st.victims) < 3}
+    assert thin == {}, f"stories with fewer than three victims: {thin}"
 
 
-def test_a_victim_read_never_asserts_a_broken_origin_on_the_healthy_half():
-    """The mechanised half of constraint 10.
-
-    On the decoy half the origin read shows the component healthy. A victim
-    read that still carries the scenario's broken state token contradicts it
-    in the same prompt, and the row teaches nothing except that the evidence
-    disagrees with itself. Deciding whether a read "asserts the origin is
-    broken" is a judgment about English and is not mechanised; the token is
-    the case where it is mechanical, and it is checked.
-    """
-    for p in propagation.trainable_scenarios():
-        broken_token = p.origin_state[0]
-        if not broken_token:
-            continue
-        for v in p.victims:
-            if broken_token not in v.read[1]:
-                continue
-            assert v.healthy_read_content, (
-                f"{p.key}: a victim read carries {broken_token!r} with no healthy swap")
-            assert broken_token not in v.healthy_read_content, (
-                f"{p.key}: the healthy swap still carries {broken_token!r}")
+def test_no_trainable_story_text_carries_a_banned_identifier_shape():
+    """Every string in a story, however deep, is checked. `_strings` walks the
+    dataclasses, so a new field is covered the day it is added."""
+    for st in stories.trainable():
+        assert _banned_shapes(st) == [], st.key
 
 
-# The exam's six reads use real kubectl layouts. These markers, with the
-# exam's own spacing, say "this half is laid out the way the exam is".
-_EXAM_LAYOUT_MARKERS = {
-    "node-pid-pressure": ("Conditions:\n", "Taints:  "),
-    "kube-proxy-degraded": ("Conditions:\n", "Taints:  "),
-    "csi-node-driver-crashed": ("Conditions:\n", "Taints:  "),
-    "node-runtime-restarting": ("Conditions:\n", "Taints:  "),
-    "node-clock-skew": ("Conditions:\n", "Taints:  "),
-    "node-conntrack-full": ("Conditions:\n", "Taints:  "),
-    "pod-identity-webhook-down": ("Replicas:  ", "Pods:      ", "Last log:  "),
-    "shared-dependency-scaled-to-zero": ("Replicas:  ", "Pods:      ",
-                                         "Last log:  "),
-    "namespace-egress-proxy-down": ("Replicas:  ", " total | ", "Pods:      ",
-                                    "Last log:  "),
-    "storageclass-pool-retired": ("provisioner: ",
-                                  "PersistentVolumes bound in the last 20m: "),
-    "networkpolicy-egress-allowlist-stale": ("podSelector: ", "policyTypes: ",
-                                             "\negress: ", "pods selected: "),
-}
-
-
-def test_the_eleven_named_scenarios_carry_an_exam_layout_variant():
-    """The 0907 model read `describe node` in the exam and had never seen a
-    `Conditions:` table with a `Taints:` line in training. Each scenario
-    named here shares a read kind with one of the six exam origins, and
-    must carry at least one variant laid out the way the exam is."""
-    by_key = {p.key: p for p in propagation.trainable_scenarios()}
-    missing = []
-    for key, markers in _EXAM_LAYOUT_MARKERS.items():
-        halves = [h for pair in by_key[key].origin_variants for h in pair]
-        if not any(all(m in half for m in markers) for half in halves):
-            missing.append(key)
-    assert missing == [], f"scenarios without an exam-layout variant: {missing}"
-
-
-def test_node_memory_pressure_spells_no_taint_the_way_kubectl_does():
-    """kubectl prints `Taints:  <none>`. The record said `Taints:  none`."""
-    p = {q.key: q for q in propagation.trainable_scenarios()}["node-memory-pressure"]
-    assert "Taints:  <none>" in p.healthy_origin_content
-    assert "Taints:  none" not in p.healthy_origin_content
-    healthy_halves = "\n".join(h for _b, h in p.origin_variants)
-    assert "Taints:  none" not in healthy_halves
-    assert p.origin_variants[0][1] == p.healthy_origin_content
-
-
-_QUANTITY = re.compile(r"\d+[A-Za-z]*")
-
-
-def _canonical_rendering(content: str) -> str:
-    """A variant with its quantities and its line order taken away.
-
-    Every number-plus-unit token collapses to `N` and the lines are sorted, so
-    two renderings that differ only in their numbers -- or only in the order
-    they present the same fields -- reduce to the same string. Two genuinely
-    different renderings do not.
-    """
-    return "\n".join(sorted(
-        re.sub(r"\s+", " ", _QUANTITY.sub("N", line)).strip()
-        for line in content.split("\n") if line.strip()))
-
-
-def test_no_two_variants_are_the_same_rendering_with_different_numbers():
-    """The variant axis is renderings, not numbers.
-
-    A scenario can satisfy the count check, the first-line check and the state
-    check with four copies of one template carrying different quantities --
-    which is exactly the lookup the variant axis exists to defeat, dressed as
-    diversity. This is the mechanical half of "vary the rendering". The rest
-    stays authoring guidance in the module docstring, because judging whether
-    two English sentences say the same thing in different words is not a test.
-
-    Not vacuous, and not hypothetically: `internal-ca-expired` and
-    `shared-dependency-scaled-to-zero` both failed this at `a861e91`, on both
-    halves, after passing every other test in this file and a full task
-    review. One was the same three-line template with two numbers swapped; the
-    other was those lines reordered. Sorting is what catches the second, and
-    collapsing the unit letter along with the digits is what catches the first
-    -- `2h` against `41m` leaves `h` against `m` if only digits are stripped,
-    and the collision is missed.
-    """
-    for p in propagation.trainable_scenarios():
-        for half, which in ((0, "broken"), (1, "healthy")):
-            seen = {}
-            for i, pair in enumerate(p.origin_variants):
-                form = _canonical_rendering(pair[half])
-                assert form not in seen, (
-                    f"{p.key}: {which} variant {i} is variant {seen[form]} with "
-                    f"different numbers or a different line order")
-                seen[form] = i
-
-
-def test_no_trainable_scenario_text_carries_a_banned_identifier_shape():
-    banned = (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), re.compile(r"https?://"),
-              re.compile(r"kubeconfig", re.IGNORECASE), re.compile(r"/home/"),
-              re.compile(r"@"))
-    for p in propagation.trainable_scenarios():
-        for v in p.victims:
-            assert isinstance(v.network_policies, tuple), (
-                f"{p.key}: network_policies must be a tuple, not "
-                f"{type(v.network_policies).__name__} -- a bare str is truthy, "
-                "survives the `or ()`, and would be joined character by "
-                "character, so every pattern below would silently miss it")
-        blob = "\n".join([p.origin, p.shared_cause, p.shared_reason,
-                          p.distractor_cause, p.distractor_reason, p.rationale,
-                          p.remedy, p.origin_read[0], p.origin_read[1],
-                          p.healthy_origin_content,
-                          p.origin_state[0], p.origin_state[1], p.notes]
-                         + [f"{b}\n{h}" for b, h in p.origin_variants]
-                         + [f"{v.reason}\n{v.evidence}\n{v.log_cause}\n"
-                            f"{v.local_cause}\n{v.local_reason}\n"
-                            f"{v.read[0]}\n{v.read[1]}\n{v.healthy_read_content}\n"
-                            + "\n".join(str(x) for x in (v.network_policies or ()))
-                            for v in p.victims])
-        for pat in banned:
-            assert not pat.search(blob), f"{p.key}: {pat.pattern}"
-
-
-def test_a_scenario_with_variants_renders_more_than_one_of_them():
-    """The mechanism, exercised on a scenario built for the test.
-
-    Asserted here rather than only on the real pool because the real pool's
-    scenarios are added in later commits, and a draw site that silently
-    ignored `origin_variants` would otherwise land green.
-    """
-    import dataclasses
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    base = propagation.trainable_scenarios()[0]
-    variants = tuple(
-        (f"state: broken variant {i}\n{base.origin_read[1]}",
-         f"state: healthy variant {i}\n{base.healthy_origin_content}")
-        for i in range(4))
-    p = dataclasses.replace(base, origin_variants=variants)
-
-    seen = set()
-    for salt in range(40):
-        e = cases.shared_origin(p, random.Random(salt), victims=2)
-        seen |= {i for i, (b, _h) in enumerate(variants)
-                 if b.split("\n")[0] in e.user}
-    assert len(seen) > 1, f"only variant(s) {seen} ever rendered"
-
-
-def test_a_pair_built_from_one_salt_draws_the_same_variant():
-    """`generate.py:156-159` spends one salt twice, so the twins replay one
-    stream. The draw sits before the `healthy` branch precisely so both halves
-    reach it in the same RNG state -- otherwise a pair could contrast variant
-    2's broken blob against variant 0's healthy one, which is two changes at
-    once and no longer isolates the origin's state.
-    """
-    import dataclasses
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    base = propagation.trainable_scenarios()[0]
-    variants = tuple(
-        (f"state: broken variant {i}\n{base.origin_read[1]}",
-         f"state: healthy variant {i}\n{base.healthy_origin_content}")
-        for i in range(4))
-    p = dataclasses.replace(base, origin_variants=variants)
-
-    for salt in range(40):
-        one = cases.shared_origin(p, random.Random(salt), victims=2)
-        other = cases.shared_origin_decoy(p, random.Random(salt), victims=2)
-        drawn = [i for i, (b, _h) in enumerate(variants)
-                 if b.split("\n")[0] in one.user]
-        assert len(drawn) == 1, f"salt {salt}: {len(drawn)} broken variants matched"
-        assert variants[drawn[0]][1].split("\n")[0] in other.user, (
-            f"salt {salt}: the twin drew a different variant")
-
-
-def test_a_scenario_without_variants_renders_exactly_what_it_did_before():
-    """The eval six declare none and must consume the RNG identically."""
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    for p in propagation.all_scenarios():
-        assert p.origin_variants == (), p.key
-        e = cases.shared_origin_probe(p, random.Random(3))
-        assert p.origin_read[1].split("\n")[0] in e.user, p.key
+def test_the_banned_shape_check_sees_a_planted_address():
+    """Not vacuous: the same check reports a pattern planted in a victim line
+    and one planted in a world."""
+    st = stories.trainable()[0]
+    victim = dataclasses.replace(st.victims[0], evidence="dial tcp 10.1.2.3:443 refused")
+    planted_ip = dataclasses.replace(st, victims=(victim,) + st.victims[1:])
+    assert _banned_shapes(planted_ip) == [_BANNED[0].pattern]
+    world = dataclasses.replace(st.broken, pull_literal="GET https://registry.example.com/v2/")
+    planted_url = dataclasses.replace(st, broken=world)
+    assert _banned_shapes(planted_url) == [_BANNED[1].pattern]
 
 
 # ---------------------------------------------------------- the curriculum mix
@@ -467,9 +362,82 @@ def test_generate_emits_shared_origin_rows(rows):
 
 
 def test_every_generated_shared_origin_row_names_a_trainable_origin(rows):
-    train = {p.key for p in propagation.trainable_scenarios()}
-    for e in _by_case(rows, "shared_origin"):
-        assert e.meta["origin"] in train, e.meta["origin"]
+    train = {st.key for st in stories.trainable()}
+    for case in ("shared_origin", "shared_origin_decoy"):
+        pile = _by_case(rows, case)
+        assert pile, case
+        for e in pile:
+            assert e.meta["origin"] in train, e.meta["origin"]
+
+
+def test_no_family_row_meta_carries_a_dropped_key(family_piles):
+    """2026-10-04 (Spec 4b-1): the family's meta lost `origin_read_label`,
+    `distractor_cause`, `wrong_summary_phrase` and `expected_confidence`.
+    Each had a reader in the old scorer or the old tests; a key that comes
+    back would be read by nothing, or by the wrong thing. The check covers
+    all four piles a family row can sit in, and looks inside the nested
+    per-workload meta as well.
+    """
+    cases = set()
+    for name, pile in family_piles.items():
+        assert pile, f"the {name} pile is empty"
+        cases |= {e.case for e in pile}
+    assert cases == set(FAMILY_CASES), sorted(cases ^ set(FAMILY_CASES))
+    assert _rows_carrying_dropped_keys(family_piles) == []
+
+
+def test_the_dropped_key_check_sees_a_planted_key(family_piles):
+    """Not vacuous: each dropped key, planted in the first row of each pile,
+    is reported with its pile, case, group and path."""
+    for pile, examples in family_piles.items():
+        for key in _DROPPED_META_KEYS:
+            planted = dataclasses.replace(examples[0], meta={"label": "none", key: "x"})
+            assert _rows_carrying_dropped_keys({pile: [planted]}) == [
+                (pile, planted.case, planted.group, f"meta.{key}")], (pile, key)
+
+
+def test_the_dropped_key_check_sees_a_key_nested_under_a_workload(family_piles):
+    """The per-workload meta is where `distractor_cause` used to sit."""
+    example = family_piles["train"][0]
+    planted = dataclasses.replace(example, meta={
+        "workloads": {"ns/w": {"job": 1, "distractor_cause": "x"}}})
+    assert _rows_carrying_dropped_keys({"train": [planted]}) == [
+        ("train", planted.case, planted.group, "meta.workloads.ns/w.distractor_cause")]
+
+
+def _unpaired_groups(pile):
+    """The groups where the broken half and the healthy half do not match one
+    for one. A pair is a `shared_origin` row and a `shared_origin_decoy` row
+    with the same `Example.group` (Ruling 32)."""
+    broken = Counter(e.group for e in _by_case(pile, "shared_origin"))
+    healthy = Counter(e.group for e in _by_case(pile, "shared_origin_decoy"))
+    return sorted((broken - healthy) + (healthy - broken))
+
+
+def test_the_cull_takes_every_family_pair_whole(kept):
+    """What the model reads holds both halves of every pair, or neither.
+
+    `split` and `drop_held_out` work on the group, and both halves of a pair
+    share one, so the cull takes a pair whole. Nothing else in the suite
+    checks that it still does. The twin is the counter-example that keeps
+    "a story is broken" from being a cue: a pile with the broken half and no
+    healthy half teaches the cue back.
+
+    2026-10-04 (Spec 4b-1): this replaces
+    `test_the_cull_never_leaves_an_origin_read_under_only_shared_answers`.
+    That test counted origin read labels, and the family has none now. The
+    thing it protected, whole pairs, is still true of the new rows, so it is
+    checked directly.
+    """
+    assert _by_case(kept, "shared_origin"), "the filter took every shared_origin row"
+    assert _unpaired_groups(kept) == []
+
+
+def test_the_pair_check_sees_half_a_pair(kept):
+    """Not vacuous: take one healthy twin out and its group is reported."""
+    twin = _by_case(kept, "shared_origin_decoy")[0]
+    cut = [e for e in kept if e is not twin]
+    assert _unpaired_groups(cut) == [twin.group]
 
 
 def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_rows(kept):
@@ -508,12 +476,22 @@ def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_r
     `none_of_these` to `own_cause` and `wrong_attribution` -- 0.3810 at this
     module's size, 0.3836 at the build size.
 
+    Re-measured 2026-10-04 (Spec 4b-1) -- 0.3810 at this module's size,
+    0.3824 at the build size. This spec did not move either one: the case
+    counts are the same. Main read 0.3810 and 0.3824 before the change, so
+    the 0.3836 written above was already out of date.
+
     That case-family share is not the share of multi-workload rows whose
     graded answer actually claims a shared origin. That answer-level share
-    is about 7 of every 100 -- 214 of 3,128 at build size 8000 (214 of
-    3,126 before the 2026-09-24 case-mix change), counted on the same kept
-    pile the numbers above come from -- and this test does not measure it
-    and does not guard it.
+    used to be about 7 of every 100 -- 22 of 315 at this module's size and
+    214 of 3,138 at build size 8000 (the 3,128 written here before was out
+    of date), counted on the same kept pile the numbers above come from.
+    Re-measured 2026-10-04 (Spec 4b-1): a plain-story `shared_origin` row
+    now has a `shared` label whenever two or more of its victims are linked
+    to the origin, not only a ruled row, so it is 78 of 315
+    (25 of every 100) at this module's size and 795 of 3,138
+    (25 of every 100) at build size 8000. This test still does not
+    measure it and does not guard it.
     """
     shared = len(_by_case(kept, "shared_origin"))
     separate = (len(_by_case(kept, "multi"))
@@ -534,6 +512,9 @@ def _template(label: str) -> str:
     the shared-origin rows still carry the template. The label maps back
     by pattern: `{node}` and `{ns}` each stand for one name with no space
     or slash in it, and exactly one template may match.
+
+    2026-10-04 (Spec 4b-1): only `multi` rows carry a label now, so only
+    `multi` rows reach this function.
     """
     hits = set()
     for p in propagation.trainable_scenarios():
@@ -547,87 +528,53 @@ def _template(label: str) -> str:
     return hits.pop()
 
 
-def _origin_labels(rows, *cases):
-    return {_template(e.meta["origin_read_label"]) if e.case == "multi"
-            else e.meta["origin_read_label"]
-            for e in rows if e.case in cases and "origin_read_label" in e.meta}
+# 2026-10-04 (Spec 4b-1): a comment stood here that argued about the family's
+# origin read label under both answers. The family has no label now, so the
+# argument went with its tests,
+# `test_the_small_build_offers_no_negative_the_shared_half_lacks` and
+# `test_the_cull_never_leaves_an_origin_read_under_only_shared_answers`.
+# What is left is the half only `multi` can answer: does the build offer every
+# origin read as a negative at all? The old text is in git, at main @ ff6527e.
+
+def _multi_templates(rows):
+    """The origin read templates `multi` rows carry. The family carries none."""
+    return {_template(e.meta["origin_read_label"])
+            for e in _by_case(rows, "multi") if "origin_read_label" in e.meta}
 
 
-# These two replace a single assertion that compared `shared_origin` against
-# `multi` on the KEPT pile and demanded the sets be equal. That assertion was
-# written before the decoy twin existed, and the twin superseded its premise:
-# it read the surviving `multi` negatives as the only thing standing between a
-# read label and a free giveaway, when the pair already carries every label
-# under both answers. Its docstring said a label the filter strips from every
-# `multi` row "is a giveaway in the data the model reads". Measured, it is not
-# — the twin survives the cull holding the same label and the opposite answer.
-#
-# It also could not have survived this branch. The negative budget is fixed at
-# ~30 rows however large the pool grows, the cull takes about 30% of them, and
-# the plan ends at twenty scenarios — 1.5 negatives each before the cull. The
-# equality first went red at eleven scenarios, and no arrangement of the data
-# fixes it: raising the negatives to ~4 per scenario would mean making nearly
-# every `multi` row a negative, which is the class balance
-# `test_the_generator_emits_the_two_classes_near_evenly` exists to hold.
-#
-# So the claim is narrowed to the two things that are separately true, each
-# checked where it is actually decided. Neither is vacuous: the first goes red
-# if the rotation stops offering some scenario a negative, the second if the
-# cull ever takes half a pair or the decoy stops being emitted.
-#
-# 2026-09-08: the emitter's half runs at BIG now; its docstring says why.
-
-def test_the_emitter_offers_every_origin_read_under_both_answers(big_rows):
+def test_the_multi_negatives_offer_every_origin_read_template(big_rows):
     """The emitter's half, checked before the cull, where it is the emitter's.
 
-    Every trainable origin read must be offered under a shared answer AND
-    under an independent one. The negatives rotate over the pool one `multi`
-    row in three, so the rotation completes only when the build holds at
-    least three `multi` rows per scenario. `SIZE` stopped holding that at
-    thirty-one scenarios; `BIG` holds it many times over. Asserting it on
-    the kept pile instead would be asserting the cull's behaviour under the
+    Every trainable origin read template must be offered by a `multi` row,
+    under an independent answer. The negatives rotate over the pool one
+    `multi` row in three, so the rotation completes only when the build holds
+    at least three `multi` rows per scenario. `SIZE` stopped holding that at
+    thirty-one scenarios; `BIG` holds it many times over. Asserting it on the
+    kept pile instead would be asserting the cull's behaviour under the
     emitter's name.
+
+    2026-10-04 (Spec 4b-1): this was `test_the_emitter_offers_every_origin_read_under_both_answers`,
+    which compared the shared half to the negatives. The family has no
+    origin read label now, so only the negatives side is left, and it is
+    compared to the pool itself: the set of templates the 54 `propagation`
+    scenarios declare.
     """
-    shared = _origin_labels(big_rows, "shared_origin")
-    negatives = _origin_labels(big_rows, "multi")
-    assert shared, "no shared_origin row carries an origin read"
+    pool = {p.origin_read[0] for p in propagation.trainable_scenarios()}
+    negatives = _multi_templates(big_rows)
     assert negatives, "no multi row carries an origin read — the cue is alive"
-    assert shared == negatives
+    assert negatives == pool, sorted(negatives ^ pool)
 
 
-def test_the_small_build_offers_no_negative_the_shared_half_lacks(rows):
-    """The small build's share of the same contract.
+def test_node_memory_pressure_spells_no_taint_the_way_kubectl_does():
+    """kubectl prints `Taints:  <none>`. The record said `Taints:  none`.
 
-    Every negative label is one the shared half also offers, so no label
-    appears under the independent answer alone. Coverage the other way
-    needs more rows than `SIZE` holds and is checked at `BIG` above.
+    2026-10-04 (Spec 4b-1): moved here from the origin-variant group. Its
+    variant checks went with the variants. What stays is the healthy read
+    that `multi`'s negative rows render.
     """
-    shared = _origin_labels(rows, "shared_origin")
-    negatives = _origin_labels(rows, "multi")
-    assert negatives, "no multi row carries an origin read — the cue is alive"
-    assert negatives <= shared
-
-
-def test_the_cull_never_leaves_an_origin_read_under_only_shared_answers(kept):
-    """The cue guarantee proper, in the data the model actually reads.
-
-    A read label is a giveaway only if, after the cull, it appears under a
-    shared answer and under no independent one ANYWHERE. Both independent
-    classes count: the `shared_origin_decoy` twin, which carries the label with
-    per-workload causes, and the surviving `multi` negatives. Counting only the
-    latter is what made the assertion this replaces go red over a label that
-    was never a giveaway.
-
-    This is what `drop_held_out` taking pairs whole buys, and nothing else in
-    the suite checks that it still does.
-    """
-    shared = _origin_labels(kept, "shared_origin")
-    independent = _origin_labels(kept, "shared_origin_decoy", "multi")
-    assert shared, "no shared_origin row survived the cull"
-    giveaways = sorted(shared - independent)
-    assert not giveaways, (
-        f"{len(giveaways)} origin read label(s) survive under a shared answer "
-        f"and under no independent one: {giveaways}")
+    p = {q.key: q for q in propagation.trainable_scenarios()}["node-memory-pressure"]
+    assert "Taints:  <none>" in p.healthy_origin_content
+    assert "Taints:  none" not in p.healthy_origin_content
 
 
 def _independent_share(rows):
@@ -637,6 +584,12 @@ def _independent_share(rows):
     counter-example class now. Leaving it out kept this instrument reading
     0.386 while the pile it measures had moved to 0.619 -- passing, and
     blind to the 169 rows the change was about.
+
+    2026-10-04 (Spec 4b-1): the family's rows carry no read label now, so the
+    family is counted by case: every `shared_origin` row on one side and every
+    `shared_origin_decoy` row on the other. `multi` is still counted by its
+    label, because only its negatives carry the read. The counts did not
+    move: 120 + 120 + 35 at this module's SIZE, which is 0.5636.
     """
     shared = len(_by_case(rows, "shared_origin"))
     independent = (len(_by_case(rows, "shared_origin_decoy"))
@@ -663,6 +616,12 @@ def test_the_generator_emits_the_two_classes_near_evenly(rows):
     the pair holds the victims fixed -- so removing them to reach 0.5 would
     trade coverage for a rounder number. The band is stated where the pile
     actually sits and still fails both degenerate ends.
+
+    2026-10-04 (Spec 4b-1): unchanged at 0.5636. The family is built from
+    stories now, but a pair is still one `shared_origin` row and one
+    `shared_origin_decoy` twin from the same salt, so the paired half is
+    still 120/120 at this module's SIZE, and `multi` was not touched, so its
+    35 negatives are the same 35.
     """
     assert 0.55 <= _independent_share(rows) <= 0.75
 
@@ -703,6 +662,13 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     the build size. Both readings moved down slightly toward the floor
     because the shared-origin pair grew faster than the surviving `multi`
     negatives; 0.52 still keeps room below both.
+
+    Re-measured 2026-10-04 (Spec 4b-1) -- 0.5385 at this size, 0.5461 at the
+    build size. Both are unchanged, because the rewrite moved no case count,
+    so the floor keeps 0.0185 and 0.0261 of room. The family has no read
+    label now, so "origin read rows" means the family's two cases, counted
+    by case, plus the `multi` rows that carry a label (see
+    `_independent_share`).
     """
     share = _independent_share(kept)
     assert 0.52 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
@@ -746,38 +712,34 @@ def test_a_shared_origin_training_row_never_says_separate_reasons(rows):
         assert propagation.SEPARATE_REASONS not in e.assistant
 
 
-_PVC_SCOPED_ORIGINS = frozenset({
-    "storage-provisioner-down",       # eval-only (propagation.py:425)
-    "pvc-provisioner-not-responding", # ruled, trainable (propagation.py:6932)
-    "pvc-storageclass-missing",       # ruled, trainable (propagation.py:7060)
-})
+def test_a_shared_ruled_row_decides_every_workload(rows):
+    """A ruled story is decided end to end, and its label says so.
 
+    Spec section 3, ruling C asked this of every `shared`-labelled row: every
+    workload decided, one cause for the origin, except a PVC-scoped origin
+    (`rules.py`'s group-key storage-class fallback), which can decide several
+    victims to several PVC causes and still be one `shared` group. The
+    exemption became a live path on 2026-09-19, when the two ruled PVC stories
+    joined the trainable pool.
 
-def test_every_shared_origin_row_names_one_cause_for_every_workload(rows):
-    """Label-aware (spec section 3, ruling C): a `shared`-labeled row is
-    decided end to end, one cause per victim, except a PVC-scoped origin
-    (`rules.py`'s group-key storage-class fallback) can decide several
-    victims to several PVC causes and still be one `shared` group.
-
-    Re-measured 2026-09-19 (Task 9, spec section 6): before Task 9 no
-    trainable scenario decided, so this exemption covered only the
-    eval-only `storage-provisioner-down` origin and was future-proofing
-    rather than a live path. Task 9 merged the two ruled PVC stories,
-    `pvc-provisioner-not-responding` and `pvc-storageclass-missing`, into
-    `trainable_scenarios()`; both are PVC-scoped by the same storage-class
-    group-key fallback and both now decide multiple victims to multiple PVC
-    causes under one `shared` group, confirmed by direct measurement
-    (distinct-cause counts of 1, 2 and 3 across their `shared`-labeled
-    rows). The exemption set below is closed and named, not inferred from
-    `rules.py` at test time, so widening it is a deliberate edit here.
+    2026-10-04 (Spec 4b-1): a plain story's broken-world row is `shared` too
+    now, whenever two or more of its victims are linked to the origin
+    (`gold.label_for`), and a plain story is not decided: the model names the
+    cause from the evidence. So the claim is narrowed to the ruled stories
+    (`cls == "R"`). The PVC exemption used to be a named set of keys. It is the
+    story's own `origin_kind` now, so no key list can drift.
     """
+    by_key = stories.by_key()
+    seen = 0
     for e in _by_case(rows, "shared_origin"):
-        if e.meta["label"] != "shared":
+        st = by_key[e.meta["origin"]]
+        if st.cls != "R" or e.meta["label"] != "shared":
             continue
-        causes = set(e.meta["expected"].values())
-        assert all(w["decided"] for w in e.meta["workloads"].values())
-        if e.meta["origin"] not in _PVC_SCOPED_ORIGINS:
-            assert len(causes) == 1, e.meta["origin"]
+        seen += 1
+        assert all(w["decided"] for w in e.meta["workloads"].values()), st.key
+        if st.origin_kind != "pvc":
+            assert len(set(e.meta["expected"].values())) == 1, st.key
+    assert seen, "no ruled shared_origin row reached the label shared"
 
 
 # ------------------------------------------------------ the eval must not move
@@ -1033,7 +995,17 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # retired.
 # 48787d98334850d255a1e70b7a1bf3aeaa09cf4c43892b302cced99d04ff4d69 ->
 # f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a
-FROZEN_SLICE_SHA256 = "f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a"
+#
+# 2026-10-04 (Spec 4b-1): the shared-origin family is rebuilt on kubeagent's
+# real pipeline (2026-10-03-shared-origin-rewrite-design.md). The slice
+# stays at 239 rows. Its 10 `shared_origin_probe` rows move: 10 user
+# messages, 10 gold answers and 10 metas; their meta drops
+# `distractor_cause`, `expected_confidence`, `wrong_summary_phrase`. The other 229 rows do not move
+# (`OTHER_FAMILIES_SHA256` in tests/test_generate.py). Every number banked
+# against the old bytes is retired.
+# f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a ->
+# d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b
+FROZEN_SLICE_SHA256 = "d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1174,7 +1146,14 @@ FROZEN_SLICE_SHA256 = "f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8
 # prompt, gold answer or decoy of theirs moves.
 # b8f75125a48d846388a852b1f88996630ae46c6ce853b86748d122fd7bbb5653 ->
 # a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2
-EVAL_SET_SHA256 = "a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2"
+#
+# 2026-10-04 (Spec 4b-1): the shared-origin rows are rebuilt on kubeagent's
+# real pipeline, which moved `FROZEN_SLICE_SHA256` above. The ten
+# `shared_origin_decoy_probe` rows move too: 10 user messages,
+# 10 gold answers and 10 metas.
+# a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2 ->
+# 0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d
+EVAL_SET_SHA256 = "0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d"
 
 
 def _digest(rows) -> str:
@@ -1210,6 +1189,7 @@ def test_the_eval_set_is_byte_identical_to_the_one_the_decoy_numbers_used():
 
 def test_no_eval_row_comes_from_the_trainable_pool():
     train = {p.key for p in propagation.trainable_scenarios()}
+    train |= {st.key for st in stories.trainable()}
     for e in generate.test_set():
         assert e.meta.get("origin") not in train
         for part in e.group.split("+"):
@@ -1217,11 +1197,13 @@ def test_no_eval_row_comes_from_the_trainable_pool():
 
 
 def test_the_probe_still_draws_only_held_out_origins():
-    held = {p.key for p in propagation.all_scenarios()}
-    probes = [e for e in generate.test_set() if e.case == "shared_origin_probe"]
-    assert len(probes) == 10
-    for e in probes:
-        assert e.meta["origin"] in held
+    held = {st.key for st in stories.exam()}
+    exam = generate.test_set()
+    for case in ("shared_origin_probe", "shared_origin_decoy_probe"):
+        probes = [e for e in exam if e.case == case]
+        assert len(probes) == 10, case
+        for e in probes:
+            assert e.meta["origin"] in held, (case, e.meta["origin"])
 
 
 def test_training_still_contaminates_nothing(rows):
@@ -1233,8 +1215,14 @@ def test_training_still_contaminates_nothing(rows):
         assert not any(part in held for part in e.group.split("+")), e.group
 
 
-DRAWS = 33  # plain-story shared_origin rows per scenario at BIG; see below.
-RULED_DRAWS = 66  # ruled-story shared_origin rows per scenario at BIG.
+DRAWS = 48  # plain-story shared_origin rows per story at BIG; see below.
+RULED_DRAWS = 70  # ruled-story shared_origin rows per story at BIG.
+# 2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, 35 plain
+# stories (`cls == "P"`) then 6 ruled ones (`cls == "R"`). 15% of 14000 is
+# 2100 pairs: four in five go to the plain stories (1680 = 35 x 48) and one
+# in five to the ruled ones (420 = 6 x 70). Origin variants are gone, so the
+# sampling argument below no longer applies: the two numbers now pin only
+# the equal shares inside each pool. The comment below is history.
 # Re-measured 2026-09-19 (Task 9, spec section 7 ruling A): `BIG` is now a
 # FIXED literal, not `275 * len(propagation.trainable_scenarios())`. Scaling
 # by pool size stopped being safe once the pool split into two differently
@@ -1252,7 +1240,7 @@ RULED_DRAWS = 66  # ruled-story shared_origin rows per scenario at BIG.
 # 7% across twenty-four -- a deterministic failure with correct data. At
 # n=33 it is 7.0e-10 per scenario, 3.4e-8 across forty-eight; n=66 is
 # smaller still.
-BIG = 13200
+BIG = 14000
 
 
 @pytest.fixture(scope="module")
@@ -1262,36 +1250,49 @@ def big_rows():
 
 def test_big_deals_exactly_draws_rows_per_scenario():
     """`BIG` promises DRAWS plain-story rows and RULED_DRAWS ruled-story
-    rows per scenario, not one uniform rate over the whole pool (spec
+    rows per story, not one uniform rate over the whole pool (spec
     section 7 ruling A: "within each pool every story gets an equal share",
-    checked per pool, not across them). Re-measured 2026-09-19, Task 9."""
-    pool = propagation.trainable_scenarios()
-    plain = sum(1 for p in pool if p.origin_object is None)
-    ruled = sum(1 for p in pool if p.origin_object is not None)
+    checked per pool, not across them). Re-measured 2026-09-19, Task 9.
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, split on
+    `Story.cls`."""
+    pool = stories.trainable()
+    plain = sum(1 for st in pool if st.cls == "P")
+    ruled = sum(1 for st in pool if st.cls == "R")
+    assert (plain, ruled) == (35, 6)
     assert generate.counts_for(BIG)["shared_origin"] == DRAWS * plain + RULED_DRAWS * ruled
 
 
 def test_the_trainable_pool_exercises_every_issue_kind():
     """A kind absent from the curriculum is a kind the shared-origin rule was
     never taught over -- and `vocab.ISSUE_KINDS` is what the eval draws from.
+
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`. Measured
+    before the named edits, the 41 kept stories' victims cover all 16 kinds;
+    three of them (Init:ErrImagePull, Init:ImagePullBackOff, Init:OOMKilled)
+    rest on one victim each.
     """
-    seen = {v.issue for p in propagation.trainable_scenarios() for v in p.victims}
+    seen = {v.issue for st in stories.trainable() for v in st.victims}
     missing = sorted(set(vocab.ISSUE_KINDS) - seen)
-    assert not missing, f"no trainable scenario exercises: {missing}"
+    assert not missing, f"no trainable story exercises: {missing}"
 
 
 # The pool grew by group across Tasks 5–9 of the 2026-09-08 coverage plan.
 # Twenty-four is what it held when the 0907 run failed deciders 1 and 5;
 # forty-eight was that plan's end. On 2026-09-19 the training-targets fix
 # merged six ruled stories on top (section 6 of its design): 48 to 54.
-EXPECTED_POOL = 54
+# On 2026-10-03 (Spec 4b-1) the family moved to `stories.trainable()`: the
+# 12 X stories and runtime-class-removed left it, 54 to 41 (35 plain, then 6
+# ruled). `multi` keeps `propagation.trainable_scenarios()`, still 54.
+EXPECTED_POOL = 41
 
 
 def test_the_trainable_pool_holds_the_planned_count():
-    """The pool is pinned so a scenario cannot fall out of the tuple unseen."""
-    pool = propagation.trainable_scenarios()
+    """The pool is pinned so a story cannot fall out of the tuple unseen."""
+    pool = stories.trainable()
     assert len(pool) == EXPECTED_POOL
-    assert len({p.key for p in pool}) == EXPECTED_POOL
+    assert len({st.key for st in pool}) == EXPECTED_POOL
+    assert [st.cls for st in pool] == ["P"] * 35 + ["R"] * 6
+    assert len(propagation.trainable_scenarios()) == 54
 
 
 # One marker per exam read layout, and the fewest trainable scenarios that
@@ -1402,44 +1403,22 @@ def test_every_trainable_scenario_is_taught_equally(big_rows):
     fail on the intended shape, not a bug. Equal shares still hold inside
     each pool: every plain story gets the same count and every ruled story
     gets the same count.
+
+    2026-10-03 (Spec 4b-1): the pool is `stories.trainable()`, split on
+    `Story.cls`, and the shares are pinned exactly: DRAWS for every plain
+    story and RULED_DRAWS for every ruled one.
     """
-    pool = propagation.trainable_scenarios()
-    plain_keys = {p.key for p in pool if p.origin_object is None}
-    ruled_keys = {p.key for p in pool if p.origin_object is not None}
+    pool = stories.trainable()
+    plain_keys = {st.key for st in pool if st.cls == "P"}
+    ruled_keys = {st.key for st in pool if st.cls == "R"}
     for case in ("shared_origin", "shared_origin_decoy"):
         counts = Counter(e.meta["origin"] for e in big_rows if e.case == case)
         assert set(counts) == plain_keys | ruled_keys, (
             f"{case}: {sorted((plain_keys | ruled_keys) ^ set(counts))}")
         plain_shares = {v for k, v in counts.items() if k in plain_keys}
         ruled_shares = {v for k, v in counts.items() if k in ruled_keys}
-        assert len(plain_shares) == 1, f"{case}: uneven plain shares {dict(counts)}"
-        assert len(ruled_shares) == 1, f"{case}: uneven ruled shares {dict(counts)}"
-
-
-def test_every_trainable_scenario_renders_at_least_three_origin_variants(big_rows):
-    """Declaring four variants is not the same as rendering them. If the draw
-    were keyed on something constant per scenario, every row would carry
-    variant 0 and the whole mechanism would be inert while its own unit test
-    still passed.
-
-    The bar is 3 of 4 rather than 4 of 4 because the draw is uniform and
-    random: this is a sampling check, and its strength is a function of
-    `DRAWS`. At 33 draws a correct pool trips it about once in thirty
-    million runs across a pool of forty-eight. Lowering `BIG` is not a free
-    speed-up -- at 11 draws it is about 7%, and the failure names a scenario
-    whose data is fine.
-    """
-    by_key = {p.key: p for p in propagation.trainable_scenarios()}
-    seen = {k: set() for k in by_key}
-    for e in big_rows:
-        if e.case != "shared_origin":
-            continue
-        p = by_key[e.meta["origin"]]
-        for i, (broken, _healthy) in enumerate(p.origin_variants):
-            if broken.split("\n")[0] in e.user:
-                seen[p.key].add(i)
-    thin = {k: sorted(v) for k, v in seen.items() if len(v) < 3}
-    assert not thin, f"scenarios rendering fewer than 3 variants: {thin}"
+        assert plain_shares == {DRAWS}, f"{case}: plain shares {dict(counts)}"
+        assert ruled_shares == {RULED_DRAWS}, f"{case}: ruled shares {dict(counts)}"
 
 
 def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
@@ -1463,10 +1442,18 @@ def test_no_shared_origin_cause_dominates_the_curriculum(big_rows):
     (`f"PVC {pvc} (...)"`), so each ruled PVC draw can add several new
     distinct causes at once. The bar stays 0.12 and 0.30; the new pool
     clears both with more room than the old one did.
+
+    Re-measured 2026-10-03 (Spec 4b-1: 41 stories, `BIG` = 14000).
+    `none_of_these` is left out of the count: it is the answer "nothing in
+    this workload's own lines says why", not a cause a model can name by
+    rote, and the ceiling test in test_shared_origin_floor.py bounds it on
+    its own. Measured: 97 distinct causes, top one 0.0665, top three
+    0.1228. The bar stays 0.12 and 0.30.
     """
     causes = Counter(cause
                      for e in big_rows if e.case == "shared_origin"
-                     for cause in e.meta["expected"].values())
+                     for cause in e.meta["expected"].values()
+                     if cause != contract.NONE_OF_THESE)
     total = sum(causes.values())
     top = causes.most_common(3)
     assert top[0][1] / total <= 0.12, (

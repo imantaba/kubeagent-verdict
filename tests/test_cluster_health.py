@@ -33,7 +33,7 @@ import re
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, gather, generate, render
+from kubeagent_verdict.dataset import cases, gather, generate, health, render, stories
 
 K4 = "NotReady: KubeletNotReady — container runtime is down"
 
@@ -280,8 +280,9 @@ def test_system_lines_are_in_go_order():
 
 
 def test_an_unknown_node_reason_raises():
-    """The dataset builds two node stories: NotReady and no kubelet lease.
-    Any other reason has no block text here, so it raises."""
+    """The dataset builds three node-down stories. This block has text for two
+    reasons: NotReady and no kubelet lease. Any other reason has no block
+    text here, so it raises."""
     w = _wl(candidates=(_node("worker-1", "kubelet not heartbeating"),))
     with pytest.raises(ValueError, match="worker-1"):
         render.cluster_health((w,), ())
@@ -315,6 +316,27 @@ def _section(user: str, name: str) -> str:
     return user.split(f"== BEGIN {name} ==\n", 1)[1].split(f"\n== END {name} ==", 1)[0]
 
 
+def _story_of(group: str) -> str:
+    """The story key of a propagation row: its group begins `propagation:<key>`
+    and joins the row's workloads with `+`, every part naming the same story.
+    Any other group has no story, and the caller fails on the empty string."""
+    keys = {part.split(":")[1] for part in group.split("+") if part.startswith("propagation:")}
+    return keys.pop() if group.startswith("propagation:") and len(keys) == 1 else ""
+
+
+def _story_block_line(story: str, node: str) -> str:
+    """The `  node` line the cluster-health block prints for `node` when the
+    node is in `story`'s broken-world state. It is read the way the real
+    pipeline reads it, through `health.assess` on the story's own node
+    fields, so no reason text or lease age is copied into this test."""
+    w = stories.by_key()[story].broken
+    got, _ = health.assess((health.Node(node, conditions=w.conditions,
+                                        unschedulable=w.unschedulable, lease=w.lease,
+                                        lease_age_ms=w.lease_age_ms),), ())
+    assert got is not None and len(got.node_issues) == 1, (story, node)
+    return "  node " + got.node_issues[0]
+
+
 def _check_rows(rows) -> tuple[int, int]:
     with_block = without = 0
     for ex in rows:
@@ -332,19 +354,39 @@ def _check_rows(rows) -> tuple[int, int]:
             continue
         with_block += 1
         block = user[len("== BEGIN inventory ==\n"):].split("\n\n", 1)[0]
+        lines = block.split("\n")
+        story = _story_of(ex.group)
         for name, reasons in shown.items():
             # A training row that names one node both ways gets the
             # NotReady line (see the precedence test above).
-            line = f"  node {name} " + (K4 if "NotReady" in reasons else "no kubelet lease")
-            assert line in block.split("\n"), (ex.group, name)
-        # A node line with no candidate on screen is a candidate past the
-        # per-workload cap of 8 (contract.py:200). Its describe read is
-        # still in the evidence.
+            if "NotReady" in reasons:
+                line = f"  node {name} " + K4
+            elif reasons == {"no kubelet lease"}:
+                line = f"  node {name} no kubelet lease"
+            elif reasons == {"kubelet not heartbeating"}:
+                # A stale lease on a Ready node: the block prints the age, which only
+                # the story's world knows.
+                assert story, (ex.group, name)
+                line = _story_block_line(story, name)
+            else:
+                raise AssertionError((ex.group, name, reasons))
+            assert line in lines, (ex.group, name)
+        # A node line with no candidate on screen has one of two causes. Either it
+        # is a candidate past the per-workload cap of 8 (contract.py:200), whose
+        # describe read is still in the evidence; or the row is a propagation
+        # row whose story breaks a node in a way no candidate names (a pressure
+        # condition, a cordon). The block reads node state, not candidates, so
+        # it prints exactly what the story's broken world makes of that node.
         described = set(_DESCRIBE.findall(_section(user, "evidence")))
-        for name in _NODE_LINE.findall(block):
-            if name not in shown:
-                assert c.TRUNCATION_MARKER in candidates, (ex.group, name)
-                assert name in described, (ex.group, name)
+        for line in lines:
+            m = _NODE_LINE.match(line)
+            if not m or m.group(1) in shown:
+                continue
+            name = m.group(1)
+            if c.TRUNCATION_MARKER in candidates and name in described:
+                continue
+            assert story, (ex.group, name)
+            assert line == _story_block_line(story, name), (ex.group, name, story)
     return with_block, without
 
 

@@ -1,28 +1,38 @@
-"""The cousin probe: one fresh twin pair per trainable scenario.
+"""The cousin probe: one fresh twin pair per trainable story.
 
-The wide probe (tests/test_probe_wide.py) asks the six held-out origins
-five times each. This probe asks the trained scenarios once each -- 54
-pairs, 108 rows since Task 9 merged the six ruled stories into
-`trainable_scenarios()` (spec section 6; was 48 pairs, 96 rows) -- every
-pair at full width, so every decoy half carries three or four verdicts. It
-is in-distribution on purpose. A model that reads the origin on the
-scenarios it studied and still fails the exam has a coverage problem; one
-that fails here has a recipe problem. It is written to its own file, scored
-on its own, and decides nothing. The frozen exam does not move.
+The wide probe (tests/test_probe_wide.py) asks the six held-out stories five
+times each. This probe asks each trained story once: 41 stories, so 41 pairs
+and 82 rows. (It was 54 pairs and 108 rows on the old made-up menu.) Every
+pair is at full width.
+
+A pair is one story told in two worlds. In the broken world the origin is
+broken. In the healthy world it is not. Both halves carry the same
+`Example.group`, and their printed lines differ. The probe is in-distribution
+on purpose. A model that reads the origin on the stories it studied and still
+fails the exam has a coverage problem. One that fails here has a recipe
+problem. It is written to its own file, scored on its own, and decides
+nothing. The frozen exam does not move.
 """
 
-from kubeagent_verdict.dataset import generate, propagation
+from kubeagent_verdict.dataset import generate, stories
 
 
-def _pair_key(ex) -> str:
-    return "|".join(sorted(ex.meta["expected"]))
+def _victim_keys(ex) -> set[str]:
+    """The victims a twin names, read off its group.
+
+    A group is `propagation:<story>:<ns>/<name>` for each victim, joined by
+    `+`. It names victims only, and it is the same in both worlds. The broken
+    world can add an origin row to `expected`. The group never lists it.
+    """
+    return {seg.split(":", 2)[2] for seg in ex.group.split("+")}
 
 
 def test_cousin_probe_counts_and_balance():
     rows = generate.shared_origin_cousin_probes()
-    trainable = {p.key for p in propagation.trainable_scenarios()}
-    # Re-measured 2026-09-19 (Task 9's pool merge, spec section 6): 48 to 54.
-    assert len(trainable) == 54
+    trainable = {st.key for st in stories.trainable()}
+    # 2026-10-04 (Spec 4b-1): the probe draws from stories.trainable(), 41 stories
+    # (35 plain, 6 ruled), one pair each; was 54 stories and 108 rows.
+    assert len(trainable) == 41
     assert len(rows) == len(trainable) * 2
     per: dict[str, list[str]] = {}
     for ex in rows:
@@ -35,61 +45,82 @@ def test_cousin_probe_counts_and_balance():
 
 def test_cousin_probe_uses_only_trainable_origins():
     # The mirror of the wide probe's leak guard. This probe is the
-    # in-distribution check, so a held-out origin here would score the exam
-    # twice and tell us nothing new.
-    held_out = {p.key for p in propagation.all_scenarios()}
+    # in-distribution check, so an exam story or a dropped story here would
+    # score the exam twice and tell us nothing new.
+    kept_out = set(stories.EXAM_KEYS) | set(stories.DROPPED)
     for ex in generate.shared_origin_cousin_probes():
-        assert ex.meta["origin"] not in held_out
+        assert ex.meta["origin"] not in kept_out, ex.meta["origin"]
 
 
-def test_cousin_rows_are_adjacent_twins_with_unique_pair_keys():
-    """Label-aware, the same way `test_probe_wide.py`'s twin check is (spec
-    section 3, ruling C). Re-measured 2026-09-19: before Task 9, no
-    trainable scenario decided, so every cousin pair was `none`-labeled and
-    the `shared` branch below was future-proofing rather than a live path.
-    Task 9 merged the six ruled stories into `trainable_scenarios()` (spec
-    section 6); their broken-origin twins DO decide, so 6 of the 54 cousin
-    pairs are now `shared`-labeled and this branch is live.
-    `test_cousin_probe_uses_only_trainable_origins` above already pins the
-    pool this draws from.
+def test_cousin_rows_are_adjacent_twins_with_unique_groups():
+    """Twins are matched on `Example.group`, not on the workload set.
+
+    The broken world can add an origin row that the healthy world lacks, so
+    the two halves may flag different workloads. They never name different
+    victims. Two things are checked per pair. The halves print different lines
+    (otherwise the pair asks nothing). And on a `shared` probe at least one
+    workload both halves flag gets a different cause, so the answer really
+    flips with the read.
+
+    A ruled (R) story is checked harder. Its probe is `shared`, every victim
+    is decided by the rules (job 1), and the victims' causes appear nowhere
+    in the decoy's answer. A plain (P) story is `shared` only when two or
+    more victims are linked, so a P pair may be `none` on both halves. Only
+    the decoy half is always `none`.
     """
     rows = generate.shared_origin_cousin_probes()
+    by_key = stories.by_key()
     seen: set[str] = set()
-    saw_shared = False
+    saw_shared = 0
     assert len(rows) % 2 == 0
     for probe, decoy in zip(rows[0::2], rows[1::2]):
         assert probe.case == "shared_origin_probe"
         assert decoy.case == "shared_origin_decoy_probe"
-        key = _pair_key(probe)
-        # Same workloads on both halves — that is what makes them one pair.
-        assert key == _pair_key(decoy)
-        # A repeated key would merge two pairs in the paired scoring.
-        assert key not in seen
-        seen.add(key)
-        # The discriminating read must differ, or the pair asks nothing.
-        assert probe.user != decoy.user
-        # A `shared`-labeled probe half is decided end to end and disjoint
-        # from its decoy twin. A `none`-labeled half makes neither promise:
-        # a decided victim's cause does not depend on `healthy`, so it can
-        # repeat across the pair.
+        origin = probe.meta["origin"]
+        assert origin == decoy.meta["origin"]
+        assert probe.group == decoy.group, origin
+        # A repeated group would merge two pairs in the paired scoring.
+        assert probe.group not in seen, origin
+        seen.add(probe.group)
+        victims = _victim_keys(probe)
+        assert victims <= set(probe.meta["expected"]), origin
+        assert victims <= set(decoy.meta["expected"]), origin
+        # The reads must differ, or the pair asks nothing.
+        assert set(probe.user.splitlines()) != set(decoy.user.splitlines()), origin
+        assert decoy.meta["label"] == "none", origin
+        if by_key[origin].cls == "R":
+            assert probe.meta["label"] == "shared", origin
+            for w in victims:
+                assert probe.meta["workloads"][w]["job"] == 1, (origin, w)
+            probe_causes = {probe.meta["expected"][w] for w in victims}
+            assert probe_causes.isdisjoint(set(decoy.meta["expected"].values())), origin
         if probe.meta["label"] == "shared":
-            saw_shared = True
-            shared = set(probe.meta["expected"].values())
-            assert all(w["decided"] for w in probe.meta["workloads"].values())
-            assert shared.isdisjoint(set(decoy.meta["expected"].values()))
-    # The branch above went live only when the ruled stories joined the
-    # pool (Task 9). This assertion is what keeps that comment true if the
-    # ruled stories ever fell back out of `trainable_scenarios()`.
-    assert saw_shared, "no cousin pair was `shared`-labelled"
+            saw_shared += 1
+            common = set(probe.meta["expected"]) & set(decoy.meta["expected"])
+            assert any(probe.meta["expected"][w] != decoy.meta["expected"][w]
+                       for w in common), origin
+    # The six ruled stories are always shared. If fewer than six pairs are,
+    # the ruled stories have fallen out of `stories.trainable()`.
+    assert saw_shared >= len(stories.RULED_ORDER), saw_shared
 
 
-def test_every_cousin_decoy_carries_three_or_more_verdicts():
-    # Full width on purpose: three-verdict decoy halves are the shape the
-    # 0907 model broke its JSON on, and every trainable scenario now has at
-    # least three victims, so every cousin decoy can carry three.
+def test_every_cousin_decoy_carries_a_verdict_for_every_victim():
+    # Full width on purpose. A ruled story has 3 or more victims, but a plain
+    # story can have only 2, so the old claim "three or more verdicts
+    # everywhere" is gone. What still holds is that every drawn victim gets its
+    # own verdict, and that some decoys are wide enough to carry three (the
+    # shape the 0907 model broke its JSON on).
+    by_key = stories.by_key()
+    wide = 0
     for ex in generate.shared_origin_cousin_probes():
-        if ex.case == "shared_origin_decoy_probe":
-            assert len(ex.meta["expected"]) >= 3, ex.meta["origin"]
+        if ex.case != "shared_origin_decoy_probe":
+            continue
+        story = by_key[ex.meta["origin"]]
+        assert len(_victim_keys(ex)) == len(story.victims), story.key
+        assert len(ex.meta["expected"]) >= len(story.victims), story.key
+        if len(ex.meta["expected"]) >= 3:
+            wide += 1
+    assert wide > 0
 
 
 def test_cousin_probe_is_deterministic():
@@ -132,8 +163,9 @@ def test_cli_probe_cousins_writes_only_the_standalone_file(tmp_path, monkeypatch
     monkeypatch.setattr("sys.argv", ["kv-dataset", "--probe-cousins", str(out)])
     cli.main()
     lines = out.read_text(encoding="utf-8").splitlines()
-    # Re-measured 2026-09-19 (Task 9's pool merge, spec section 6): 96 to 108.
-    assert len(lines) == 108
+    # 2026-10-04 (Spec 4b-1): the cousin probe draws from stories.trainable(),
+    # 41 stories, one pair each; was 108.
+    assert len(lines) == 82
     first = json.loads(lines[0])
     assert first["meta"]["case"] == "shared_origin_probe"
     # Standalone means standalone: no train/val/test/manifest beside it.

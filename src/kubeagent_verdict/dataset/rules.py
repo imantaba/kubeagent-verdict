@@ -398,6 +398,9 @@ _DISK_PRESSURE = ("DiskPressure", "True", "KubeletHasDiskPressure", "kubelet has
 _PID_OK = ("PIDPressure", "False", "KubeletHasSufficientPID",
            "kubelet has sufficient PID available")
 _READY_TRUE = ("Ready", "True", "KubeletReady", "kubelet is posting ready status")
+# The node lifecycle controller's text when the kubelet stops posting status.
+_UNKNOWN_REASON = "NodeStatusUnknown"
+_UNKNOWN_MESSAGE = "Kubelet stopped posting node status."
 
 
 def describe_node(name: str, *, unschedulable: bool,
@@ -431,13 +434,17 @@ def _node_conditions(obj: Object) -> tuple[tuple[str, str, str, str], ...]:
     carry the shared kubelet text (objects.NOT_READY_REASON and
     NOT_READY_MESSAGE); anything else raises ValueError. "missing" is a
     node that reports no conditions, so it prints none, as describeNode
-    does for such a node. "Unknown" raises: its text would come from the
-    node lifecycle controller, not the kubelet, and no dataset read needs
-    it.
+    does for such a node. "Unknown" prints the node lifecycle controller's
+    text, not the kubelet's: the kubelet stopped posting status, so the
+    controller marks every condition Unknown (2026-10-03, for the
+    unresponsive-kubelet story).
     """
     fresh = obj.fresh
     if fresh.ready == "missing":
         return ()
+    if fresh.ready == "Unknown":
+        return tuple((typ, "Unknown", _UNKNOWN_REASON, _UNKNOWN_MESSAGE)
+                     for typ in ("MemoryPressure", "DiskPressure", "PIDPressure", "Ready"))
     disk = _DISK_PRESSURE if fresh.disk_pressure else _DISK_OK
     if fresh.ready == "True":
         return (_MEMORY_OK, disk, _PID_OK, _READY_TRUE)
@@ -464,8 +471,8 @@ def read_text(obj: Object, *, ns: str, pod: str) -> tuple[str, str]:
     A read node's content is `describe_node` fed the kubelet's four
     conditions for the node's `fresh.ready` (see `_node_conditions`), with
     DiskPressure=True when `fresh.disk_pressure` is set, then the node's
-    `fresh.taints`. A Ready=False node without the shared kubelet text, and
-    a Ready=Unknown node, raise ValueError.
+    `fresh.taints`. A Ready=False node without the shared kubelet text
+    raises ValueError; a Ready=Unknown node prints the node controller's text.
 
     `pod` is accepted for signature symmetry with the events read this
     function does not cover; neither the node nor the PVC read format uses

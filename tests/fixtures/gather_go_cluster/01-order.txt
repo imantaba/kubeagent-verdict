@@ -1,0 +1,21 @@
+row	1	app	cart	Deployment	2	scoped
+row	2	app	web	Deployment	2	scoped
+row	3	kube-system	ks-a	Deployment	2	scoped
+row	4	kube-system	ks-b	Deployment	2	scoped
+row	5	kube-system	ks-c	Deployment	2	scoped
+row	6	kube-system	ks-cron	CronJob	2	scoped
+row	7	kube-system	ks-d	Deployment	2	scoped
+row	8	kube-system	ks-deploy	Deployment	2	scoped
+row	9	kube-system	ks-ds	DaemonSet	2	scoped
+row	10	kube-system	ks-e	Deployment	2	scoped
+row	11	kube-system	ks-f	Deployment	2	unscoped
+row	12	kube-system	ks-job	Job	2	unscoped
+row	13	kube-system	ks-sts	StatefulSet	2	unscoped
+hidden_restarts	0
+hidden_cron	0
+dropped	svc	backing-s01	Deployment
+dropped	svc	backing-s02	Deployment
+dropped	svc	backing-s03	Deployment
+dropped	svc	backing-s04	Deployment
+dropped	svc	backing-s06	Deployment
+dropped	svc	backing-s07	Deployment

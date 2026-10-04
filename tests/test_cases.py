@@ -1251,24 +1251,29 @@ def _is_build_user_message_call(node: ast.AST) -> bool:
     return False
 
 
+# The two functions allowed to call `build_user_message`. Each must also call
+# `render.check_prompt_size`, which `test_each_funnel_checks_the_prompt_size`
+# pins, so a third call site cannot slip past the byte cap (Ruling 34).
+_FUNNELS = {("cases.py", "_user_message"), ("shared_origin.py", "build")}
+
+
 def _build_user_message_calls_outside_the_funnel() -> list[str]:
     """Every call to `build_user_message` found by parsing every module under
-    `src/kubeagent_verdict/dataset/`, except the one call inside
-    `cases._user_message` itself -- the funnel. Returns "path:lineno" strings
-    for whatever is left; an empty list means every call site in the package
-    is routed through the funnel (and so through `render.check_prompt_size`).
+    `src/kubeagent_verdict/dataset/`, except the calls inside the two funnels
+    in `_FUNNELS`: `cases._user_message` and `shared_origin.build`. Returns
+    "path:lineno" strings for whatever is left; an empty list means every call
+    site in the package goes through a funnel (and so through
+    `render.check_prompt_size`).
     """
     dataset_dir = pathlib.Path(cases.__file__).parent
-    funnel_call_ids: set[int] = set()
     findings: list[str] = []
     for path in sorted(dataset_dir.glob("*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
-        if path.name == "cases.py":
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == "_user_message":
-                    funnel_call_ids = {
-                        id(sub) for sub in ast.walk(node) if _is_build_user_message_call(sub)
-                    }
+        funnel_call_ids: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and (path.name, node.name) in _FUNNELS:
+                funnel_call_ids |= {id(sub) for sub in ast.walk(node)
+                                    if _is_build_user_message_call(sub)}
         for node in ast.walk(tree):
             if _is_build_user_message_call(node) and id(node) not in funnel_call_ids:
                 findings.append(f"{path.name}:{node.lineno}")
@@ -1277,10 +1282,11 @@ def _build_user_message_calls_outside_the_funnel() -> list[str]:
 
 def test_every_build_user_message_call_goes_through_the_checked_funnel():
     """`check_prompt_size` only ever runs if every `build_user_message(...)`
-    call routes through `cases._user_message`, the one funnel that pairs the
+    call routes through one of the two funnels in `_FUNNELS`
+    (`cases._user_message` and `shared_origin.build`), each of which pairs the
     two. This parses every module under `src/kubeagent_verdict/dataset/` with
-    `ast` and flags any `build_user_message` call it finds outside that one
-    funnel function -- by attribute, under any import alias
+    `ast` and flags any `build_user_message` call it finds outside those two
+    funnel functions -- by attribute, under any import alias
     (`c.build_user_message`, `contract.build_user_message`, ...), or by bare
     name (a direct `from ... import build_user_message`). That covers a call
     added under any spelling in any module in the package, not just the
@@ -1294,9 +1300,20 @@ def test_every_build_user_message_call_goes_through_the_checked_funnel():
     findings = _build_user_message_calls_outside_the_funnel()
     assert findings == [], (
         f"expected every build_user_message(...) call under "
-        f"src/kubeagent_verdict/dataset/ to route through cases._user_message "
-        f"(the shared funnel); found call(s) outside it: {findings}"
+        f"src/kubeagent_verdict/dataset/ to route through a funnel in _FUNNELS; "
+        f"found call(s) outside it: {findings}"
     )
+
+
+def test_each_funnel_checks_the_prompt_size():
+    dataset_dir = pathlib.Path(cases.__file__).parent
+    for fname, func in sorted(_FUNNELS):
+        tree = ast.parse((dataset_dir / fname).read_text())
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == func)
+        calls = {s.func.attr if isinstance(s.func, ast.Attribute) else getattr(s.func, "id", "")
+                 for s in ast.walk(fn) if isinstance(s, ast.Call)}
+        assert "check_prompt_size" in calls, (fname, func)
 
 
 # kubeagent's previous-log read, pinned to its source at v1.24.0. The label

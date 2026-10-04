@@ -1,0 +1,142 @@
+down	n01	NotReady
+down	n02	NotReady
+down	n03	NotReady
+down	n04	NotReady
+down	n05	no kubelet lease
+down	n06	no kubelet lease
+down	n07	kubelet not heartbeating
+down	n08	kubelet not heartbeating
+down	n09	kubelet not heartbeating
+down	n10	kubelet not heartbeating
+down	n11	kubelet not heartbeating
+down	n15	NotReady
+workload	1	app	cart	node n15 (NotReady)	high
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	attributed	read	2	node n15 (NotReady)	pod cart-6b8f5d7c4-r9t3w is scheduled on it
+workload	2	app	web		
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	ruled_out		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	3	kube-system	ks-a		
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	ruled_out		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	4	kube-system	ks-b		
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	ruled_out		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	5	kube-system	ks-c		
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	ruled_out		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	6	kube-system	ks-cron		
+candidate	node	n01	ruled_out	ruled_out		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	ruled_out		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	ruled_out		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	ruled_out		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	ruled_out		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	ruled_out		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	ruled_out		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	ruled_out		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	ruled_out		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	ruled_out		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	ruled_out		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	ruled_out		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	7	kube-system	ks-d		
+candidate	node	n01	ruled_out	budget		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	budget		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	budget		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	budget		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	budget		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	budget		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	budget		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	budget		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	budget		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	budget		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	budget		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	budget		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	8	kube-system	ks-deploy		
+candidate	node	n01	ruled_out	budget		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	budget		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	budget		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	budget		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	budget		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	budget		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	budget		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	budget		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	budget		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	budget		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	budget		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	budget		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	9	kube-system	ks-ds		
+candidate	node	n01	ruled_out	budget		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	budget		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	budget		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	budget		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	budget		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	budget		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	budget		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	budget		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	budget		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	budget		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	budget		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	budget		node n15 (NotReady)	no pod of this workload is scheduled on it
+workload	10	kube-system	ks-e		
+candidate	node	n01	ruled_out	budget		node n01 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n02	ruled_out	budget		node n02 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n03	ruled_out	budget		node n03 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n04	ruled_out	budget		node n04 (NotReady)	no pod of this workload is scheduled on it
+candidate	node	n05	ruled_out	budget		node n05 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n06	ruled_out	budget		node n06 (no kubelet lease)	no pod of this workload is scheduled on it
+candidate	node	n07	ruled_out	budget		node n07 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n08	ruled_out	budget		node n08 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n09	ruled_out	budget		node n09 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n10	ruled_out	budget		node n10 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n11	ruled_out	budget		node n11 (kubelet not heartbeating)	no pod of this workload is scheduled on it
+candidate	node	n15	ruled_out	budget		node n15 (NotReady)	no pod of this workload is scheduled on it

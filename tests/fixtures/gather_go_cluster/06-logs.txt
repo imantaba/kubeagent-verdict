@@ -1,0 +1,9 @@
+log	1	app	cart-6b8f5d7c4-r9t3w		CrashLoopBackOff	skip	
+log	2	app	web-5d8f7c9b6-a1b2c	app	ProbeFailure	skip	
+log	2	app	web-5d8f7c9b6-d4e5f	app	ProbeFailure	skip	
+log	3	kube-system	ks-a-7c9d4b5f6-x0k2m		CrashLoopBackOff	skip	
+log	4	kube-system	ks-b-7c9d4b5f6-x1k2m		CrashLoopBackOff	skip	
+log	5	kube-system	ks-c-7c9d4b5f6-x2k2m		CrashLoopBackOff	skip	
+log	7	kube-system	ks-d-7c9d4b5f6-x3k2m		CrashLoopBackOff	budget	
+log	8	kube-system	ks-deploy-5b8d7f6c9-q2w3e		CrashLoopBackOff	budget	
+log	10	kube-system	ks-e-7c9d4b5f6-x4k2m		CrashLoopBackOff	budget	

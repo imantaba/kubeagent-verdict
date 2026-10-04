@@ -1,0 +1,7 @@
+log	1	pull	p-auth-5d8f7c9b6-d4e5f		ImagePullBackOff	skip	
+log	2	pull	p-conn-6b8f5d7c4-a1b2c		ImagePullBackOff	skip	
+log	3	pull	p-image-7c9d4b5f6-g7h8i		ErrImagePull	skip	
+log	4	pull	p-nopull-6d5f7c8b9-j1k2l		ImagePullBackOff	skip	
+log	5	pull	p-notread-5b8d7f6c9-m3n4o	app	ProbeFailure	skip	
+log	5	pull	p-notread-5b8d7f6c9-p5q6r		ImagePullBackOff	skip	
+log	6	pull	solo-7c9d4b5f6-s7t8u		ImagePullBackOff	skip	

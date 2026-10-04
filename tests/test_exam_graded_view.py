@@ -12,7 +12,9 @@ match).
 
 Two gold fields do survive, at the top of `meta`, where a
 single-workload row mirrors them: `expected_cause` on 209 of the 249
-rows and `expected_confidence` on 219 (211 and 221 of 251 before the
+rows and `expected_confidence` on 209 (209 and 219 until 2026-10-04,
+when the 10 `shared_origin_probe` rows stopped carrying
+`expected_confidence`; 211 and 221 of 251 before the
 contradiction rows were decided by the rules on 2026-09-26; 213 and 223
 of 252 before the job-1 rows moved onto the gather that day; 224 and 234
 of 263 before the 2026-09-24 generator fix removed 11 `none_of_these`
@@ -143,6 +145,16 @@ the pod `<pod>`, as kubeagent's prompt does. All 249 user messages change,
 and only in their fix lines: each of the 297 fix commands names `<pod>`
 where it named a drawn pod. No meta field, `flagged` list, gold answer or
 system message moves.
+
+Re-pinned on 2026-10-04 for Spec 4b-1
+(2026-10-03-shared-origin-rewrite-design.md). The 20 shared-origin exam
+rows -- 10 `shared_origin_probe` and 10 `shared_origin_decoy_probe` --
+are rebuilt on kubeagent's real pipeline: real report order, the gather,
+the rules over every candidate, and gold taken from each victim's own
+lines. 20 of their 20 user messages and 20 of their 20 gold answers
+change, and the `flagged` list moves on 20 of them. Their meta drops
+`distractor_cause`, `expected_confidence`, `wrong_summary_phrase`. The other 229 rows are byte for byte the old
+ones (`OTHER_FAMILIES_SHA256` in `tests/test_generate.py`). No system message moves.
 """
 
 from __future__ import annotations
@@ -212,7 +224,12 @@ def view(row):
 # their own_cause_keywords; no flagged list, gold or prompt moves
 # 396844d5b57420ea983c36e75976ef69f9b616938fc8430be776a4b6d137a108 ->
 # efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4
-GRADED_VIEW_SHA256 = "efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4"
+# 2026-10-04 (Spec 4b-1): the 20 shared-origin rows are rebuilt on kubeagent's
+# real pipeline; 20 user messages and 20 flagged lists move, and
+# no other row moves
+# efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4 ->
+# b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5
+GRADED_VIEW_SHA256 = "b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5"
 
 
 def _digest(views) -> str:

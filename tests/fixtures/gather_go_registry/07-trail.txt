@@ -1,0 +1,6 @@
+1	events pull/p-auth-5d8f7c9b6-d4e5f
+2	events pull/p-conn-6b8f5d7c4-a1b2c
+3	events pull/p-image-7c9d4b5f6-g7h8i
+4	events pull/p-nopull-6d5f7c8b9-j1k2l
+5	events pull/p-notread-5b8d7f6c9-m3n4o
+6	events pull/solo-7c9d4b5f6-s7t8u

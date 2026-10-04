@@ -15,11 +15,13 @@ any attempt is made to correct it.
 """
 
 import json
+import random
 from dataclasses import replace
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import vocab
-from kubeagent_verdict.dataset import objects, propagation
+from kubeagent_verdict.dataset import cases, generate, objects, propagation, stories
+from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.objects import Fresh, Object
 
 
@@ -176,171 +178,162 @@ def test_no_scenario_text_carries_a_banned_identifier_shape():
 
 
 # ---------------------------------------------------------------- the builder
+#
+# Spec 4b-1: the shared-origin family is built from `stories.Story` through
+# the real pipeline, so the tests below read the rows a story produces and
+# the lines a model sees. `propagation` is still the source of `multi`'s
+# scenarios, which is why the data tests above stay.
 
-def _first():
-    return propagation.all_scenarios()[0]
+
+def _probe(st, **kw):
+    return cases.shared_origin_probe(st, generate._entry_rng("t", st.key), **kw)
+
+
+def _built(st, world, width=None, seed=7):
+    d = so.draw(st, random.Random(seed), width=width or len(st.victims))
+    return so.build(st, d, world=world)
+
+
+def _candidate_blocks(user):
+    """The candidate section, split into one block of lines per workload."""
+    menu = user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
+    blocks, key = {}, None
+    for line in menu.split("\n"):
+        if line.startswith("- "):
+            key = line[2:].split(" (")[0]
+            blocks[key] = []
+        elif key is not None:
+            blocks[key].append(line)
+    return {k: "\n".join(v) for k, v in blocks.items()}
 
 
 def test_builder_renders_one_verdict_row_per_victim():
-    from kubeagent_verdict.dataset import cases, generate
-    p = _first()
-    ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    rows = json.loads(ex.assistant)["verdicts"]
-    assert len(rows) == len(p.victims)
-    assert len({r["workload"] for r in rows}) == len(rows)
+    """One verdict per flagged workload: the victims, plus the origin's own
+    row when the broken world has one (`coredns-down` lists kube-system/coredns)."""
+    for st in stories.exam():
+        rows = json.loads(_probe(st).assistant)["verdicts"]
+        extra = 1 if st.broken.origin_row is not None else 0
+        assert len(rows) == len(st.victims) + extra, st.key
+        assert len({r["workload"] for r in rows}) == len(rows), st.key
 
 
 def test_every_row_names_the_same_shared_cause():
-    """The whole point, on a `shared`-labeled row: every victim's cause
-    comes from ONE `rules.shared()` group, and every victim is decided.
+    """The whole point, on a ruled exam story: the rules confirmed one cause
+    group on every victim.
 
-    `multi` renders N different causes and says so. A `shared`-labeled
-    shared-origin row instead renders N workloads the rules confirmed
-    together under one shared-origin object. On the two scope-pinned
-    stories (`node-not-ready`, `registry-unreachable`) that means the
-    identical cause string, because every victim binds the same node or
-    registry name. `storage-provisioner-down`'s origin binds a PER-VICTIM
-    PVC name, so its `shared` group holds one storage class across
-    DIFFERENT PVC causes (`rules.py`'s group-key storage-class fallback)
-    -- still one group, not one string. A `none`-labeled row makes neither
-    promise (spec section 3): its undecided victims still share
-    `p.shared_cause`, but a victim the rules separately decided, off its
-    own unrelated evidence, carries its own cause instead.
-    `test_a_shared_label_only_comes_from_an_origin_object` in
-    `tests/test_shared_origin_decided.py` is the reverse check: no
-    `none`-labeled row is ever mistaken for a `shared` one.
+    A node story and a registry story bind one name, so the cause string is
+    identical on every victim. A PVC story binds one claim per victim, so the
+    strings differ and every one names a PVC. The plain exam stories make no
+    such promise: their victims are named from their own lines, and the label
+    follows the gold rule (two or more linked victims). The exam must still
+    hold both labels, or this check proves nothing about either.
     """
-    from kubeagent_verdict.dataset import cases, generate
     saw_shared = saw_none = False
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
+    for st in stories.exam():
+        ex = _probe(st)
+        saw_shared |= ex.meta["label"] == "shared"
+        saw_none |= ex.meta["label"] == "none"
+        if st.cls != "R":
+            continue
         verdicts = json.loads(ex.assistant)["verdicts"]
-        if ex.meta["label"] == "shared":
-            saw_shared = True
-            assert all(ex.meta["workloads"][v["workload"]]["decided"]
-                      for v in verdicts), p.key
-            causes = {v["cause"] for v in verdicts}
-            if p.key != "storage-provisioner-down":
-                assert len(causes) == 1, p.key
+        assert ex.meta["label"] == "shared", st.key
+        for v in verdicts:
+            meta = ex.meta["workloads"][v["workload"]]
+            assert meta["decided"] and meta["decided_outcome"] == "confirmed", st.key
+        causes = {v["cause"] for v in verdicts}
+        if st.origin_kind == "pvc":
+            assert len(causes) >= 2, st.key
+            assert all(cause.startswith("PVC ") for cause in causes), st.key
         else:
-            saw_none = True
+            assert len(causes) == 1, st.key
     assert saw_shared and saw_none, "both labels must be exercised"
 
 
 def test_the_summary_never_says_the_workloads_fail_for_separate_reasons():
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        summary = json.loads(ex.assistant)["summary"]
-        assert propagation.SEPARATE_REASONS not in summary, p.key
-        assert len([ln for ln in summary.split("\n") if ln.strip()]) <= c.MAX_SUMMARY_LINES
-
-
-def _menu_blocks(ex):
-    """The candidate section, split into one list of candidate lines per workload."""
-    menu = ex.user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
-    blocks = []
-    for line in menu.split("\n"):
-        if line.startswith("- "):
-            blocks.append([])
-        elif line.strip().startswith("considered "):
-            blocks[-1].append(line.strip()[len("considered "):])
-    return blocks
-
-
-def test_the_decoy_leads_every_candidate_menu_and_the_answer_trails():
-    """Tag AND position both point away from the shared-cause candidate, on
-    every workload.
-
-    Three candidates per victim in a fixed order: the local decoy carrying
-    `attributed` first, the evidence-refuted distractor second, the shared
-    cause carrying `outranked` last. A model answering by index or by tag
-    scores zero; a model reading the evidence is unaffected.
-
-    The menu is built from `p.shared_cause`/`p.shared_verdict` regardless of
-    what the rules later decide (spec section 3), so its shape never moves;
-    what CAN move off it is a workload's own verdict, checked by
-    `test_every_row_names_the_same_shared_cause` above. This reads the
-    shared-cause candidate straight off the menu rather than off
-    `verdicts[0]`, which a decided workload can now carry a cause the menu
-    never lists.
-    """
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        blocks = _menu_blocks(ex)
-        assert len(blocks) == len(p.victims), p.key
-        for block, decoy in zip(blocks, ex.meta["decoy_causes"]):
-            assert len(block) == 3, p.key
-            assert block[0].startswith(f"{decoy}: attributed "), p.key
-            assert block[1].startswith(f"{ex.meta['distractor_cause']}: ruled out "), p.key
-            assert f": {p.shared_verdict} " in block[2], p.key
+    """A broken world never calls its workloads separate: the rules either
+    confirmed one cause ("share one upstream cause") or did not confirm it
+    ("did not confirm one cause"). The phrase belongs to a healthy world only
+    (Ruling 33), so only the broken probe is checked here."""
+    for st in stories.exam():
+        summary = json.loads(_probe(st).assistant)["summary"]
+        assert propagation.SEPARATE_REASONS not in summary, st.key
+        lines = [ln for ln in summary.split("\n") if ln.strip()]
+        assert len(lines) <= c.MAX_SUMMARY_LINES, st.key
 
 
 def test_the_shared_cause_is_a_candidate_line_on_every_workload():
-    """Verbatim-matchable, which is what `score.evaluate` compares.
+    """The rules' cause is a candidate line on every workload it decides.
 
     The contract tells the model it may answer with "a candidate cause
-    verbatim". Putting the shared cause on each menu keeps the correct answer
-    inside that vocabulary, so a wrong answer is a judgement failure and never
-    a phrasing one.
-
-    Read off the menu's own shared-cause candidate (every block's third line,
-    byte-identical across a row's workloads by construction) rather than off
-    `verdicts[0]["cause"]`, which a decided workload can now move off the
-    menu entirely (spec section 3).
+    verbatim". When the rules confirm a cause, that cause is printed as a
+    `considered` line in the workload's own block, so the right answer is
+    inside the model's vocabulary and a wrong answer is a judgement failure,
+    never a phrasing one. Read off the built rows and the printed section,
+    not off a menu the test invented.
     """
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        menu = ex.user.split("== BEGIN candidates ==")[1].split("== END candidates ==")[0]
-        blocks = _menu_blocks(ex)
-        cause = blocks[0][2].split(f": {p.shared_verdict} ")[0]
-        assert menu.count(f"considered {cause}: ") == len(p.victims), p.key
+    for st in stories.exam():
+        if st.cls != "R":
+            continue
+        b = _built(st, "broken")
+        blocks = _candidate_blocks(b.user)
+        for row in b.rows:
+            assert row.result.decided, (st.key, row.key)
+            assert row.result.cause in {cd.cause for cd in row.candidates}, (st.key, row.key)
+            assert f"considered {row.result.cause}: " in blocks[row.key], (st.key, row.key)
 
 
-def test_the_origin_evidence_is_read_once_and_leads():
+def test_the_origin_is_read_once_not_once_per_victim():
     """One shared cause means one read of the origin, not N copies of it.
 
     Restating the origin under every victim would make "the same sentence
-    appears N times" a countable shortcut, which is the opposite of what this
-    slice asks for.
+    appears N times" a countable shortcut. The gather reads each node or
+    claim once across the row, and prints each read once. (The old test also
+    asked that the origin read come first. The real gather orders reads per
+    workload, events then describe then log, so that half no longer holds and
+    is not asserted.)
     """
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        evidence = ex.user.split("== BEGIN evidence ==")[1].split("== END evidence ==")[0]
-        labels = [ln for ln in evidence.split("\n") if ln.startswith("== ")]
-        assert len(labels) == len(p.victims) + 1, p.key
-        assert len(set(labels)) == len(labels), p.key
-        first_line = p.origin_read[1].split("\n")[0].split("{")[0]
-        assert evidence.count(first_line) == 1, p.key
-        assert evidence.lstrip("\n").index(labels[0]) == 0, p.key
+    for st in stories.exam():
+        b = _built(st, "broken")
+        labels = [r.label for r in b.gathered.reads]
+        assert len(set(labels)) == len(labels), st.key
+        evidence = b.user.split("== BEGIN evidence ==")[1].split("== END evidence ==")[0]
+        for label in labels:
+            assert evidence.count(f"== {label} ==") == 1, (st.key, label)
+        if st.cls == "R" and st.origin_kind == "node":
+            node = [lb for lb in labels if lb.startswith("describe node ")]
+            assert node == [f"describe node /{b.draw.scope_value}"], st.key
 
 
-def test_meta_carries_every_local_decoy_so_the_scorer_can_see_tag_following():
-    from kubeagent_verdict.dataset import cases, generate
-    p = _first()
-    ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    assert ex.meta["case"] == "shared_origin_probe"
-    assert len(ex.meta["decoy_causes"]) == len(p.victims)
-    for decoy in ex.meta["decoy_causes"]:
-        assert decoy in ex.user
-    assert ex.meta["origin"] == p.key
-    assert ex.meta["blast_radius"] == p.blast_radius
+def test_meta_names_the_story_and_has_no_made_up_decoys():
+    for st in stories.exam():
+        ex = _probe(st)
+        assert ex.meta["case"] == "shared_origin_probe", st.key
+        assert ex.meta["origin"] == st.key
+        assert ex.meta["blast_radius"] == st.blast_radius
+        assert ex.meta["decoy_causes"] == [], st.key
+        assert set(ex.meta["decoy_by_workload"]) == set(ex.meta["workloads"]), st.key
+        for decoys in ex.meta["decoy_by_workload"].values():
+            for decoy in decoys:
+                assert decoy in ex.user, (st.key, decoy)
 
 
-def test_meta_names_the_memorised_summary_phrase_to_score_against():
-    from kubeagent_verdict.dataset import cases, generate
-    p = _first()
-    ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    assert ex.meta["wrong_summary_phrase"] == propagation.SEPARATE_REASONS
+def test_meta_drops_the_keys_the_made_up_menu_needed():
+    """`origin_read_label`, `distractor_cause`, `wrong_summary_phrase` and
+    `expected_confidence` described the invented origin read, the invented
+    distractor and the old per-story confidence. The new rows have none of
+    them (Ruling 8), on any of the four cases."""
+    st = stories.by_key()["node-not-ready"]
+    for build in (cases.shared_origin, cases.shared_origin_decoy,
+                  cases.shared_origin_probe, cases.shared_origin_decoy_probe):
+        meta = build(st, random.Random(3)).meta
+        for gone in ("origin_read_label", "distractor_cause", "wrong_summary_phrase",
+                     "expected_confidence"):
+            assert gone not in meta, (build.__name__, gone)
 
 
 def test_the_prompt_is_contract_valid():
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
+    for st in stories.exam():
+        ex = _probe(st)
         assert ex.system == c.SYSTEM_PROMPT
         assert ex.user.endswith(c.CLOSING_INSTRUCTION)
         assert len(ex.user.encode("utf-8")) <= c.MAX_PROMPT_BYTES
@@ -353,28 +346,34 @@ def test_the_prompt_is_contract_valid():
 
 
 def test_a_pinned_scope_is_the_same_for_every_victim():
-    from kubeagent_verdict.dataset import cases, generate
-    for p in propagation.all_scenarios():
-        if p.scope_field is None:
+    for st in stories.exam():
+        if not st.scope_field:
             continue
-        ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-        assert ex.meta["scope_value"]
-        assert ex.meta["scope_value"] in json.loads(ex.assistant)["verdicts"][0]["cause"]
+        b = _built(st, "broken")
+        scope = b.draw.scope_value
+        assert scope, st.key
+        pinned = [n.node if st.scope_field == "node" else n.ns for n in b.draw.victims]
+        assert pinned == [scope] * len(pinned), st.key
+        ex = _probe(st)
+        assert ex.meta["scope_value"], st.key
+        if st.cls == "R" and st.origin_kind == "node":
+            causes = {v["cause"] for v in json.loads(ex.assistant)["verdicts"]}
+            assert all(ex.meta["scope_value"] in cause for cause in causes), st.key
 
 
 def test_the_builder_is_deterministic():
-    from kubeagent_verdict.dataset import cases, generate
-    p = _first()
-    a = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    b = cases.shared_origin_probe(p, generate._entry_rng("t", p.key))
-    assert generate.to_row(a) == generate.to_row(b)
+    for st in stories.exam():
+        a = _probe(st)
+        b = _probe(st)
+        assert generate.to_row(a) == generate.to_row(b), st.key
 
 
 def test_a_subset_row_renders_fewer_victims_from_the_same_scenario():
-    from kubeagent_verdict.dataset import cases, generate
-    p = next(s for s in propagation.all_scenarios() if len(s.victims) >= 3)
-    ex = cases.shared_origin_probe(p, generate._entry_rng("t", p.key), victims=2)
-    assert len(json.loads(ex.assistant)["verdicts"]) == 2
+    st = next(s for s in stories.exam() if len(s.victims) >= 3)
+    ex = _probe(st, victims=2)
+    extra = 1 if st.broken.origin_row is not None else 0
+    assert len(json.loads(ex.assistant)["verdicts"]) == 2 + extra
+    assert ex.group.count("propagation:") == 2
 
 
 def test_the_eval_six_declare_no_variants_and_no_state():
@@ -509,156 +508,110 @@ def test_victim_decoy_objects_declare_their_contents():
         "kubelet not heartbeating")
 
 
-def test_shared_origin_meta_is_derived_from_the_object_not_declared():
-    """R21: job/decided_* meta for a shared-origin victim comes from running rules.decide
-    over the bound origin_object, not from a hand-set 'job: 1' literal."""
-    import random
+def test_shared_origin_meta_is_derived_from_the_rules_not_declared():
+    """R21: job/decided_* meta for a shared-origin victim comes from the rules
+    pass over the built world, not from a hand-set 'job: 1' literal."""
+    st = stories.by_key()["node-not-ready"]
+    ex = cases.shared_origin(st, random.Random(7), victims=2)
+    b = _built(st, "broken", width=2)
 
-    from kubeagent_verdict.dataset import cases
-
-    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
-    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
-
-    assert set(r.meta) == {"workloads", "label", "decoy_by_workload"}
-    assert len(r.meta["workloads"]) == 2
-    for meta in r.meta["workloads"].values():
+    metas = ex.meta["workloads"]
+    assert len(metas) == 2
+    for row in b.rows:
+        meta = metas[row.key]
         assert set(meta) == {
             "job", "decided", "decided_cause", "decided_outcome",
             "decided_evidence", "expected_cause", "own_cause_keywords",
             "own_cause_must_not"}
-        # Shared-origin keys come from propagation.py, not from a catalog
-        # entry, so there are no must-not words.
+        # Shared-origin keys come from stories, not from a catalog entry,
+        # so there are no must-not words.
         assert meta["own_cause_must_not"] == []
         assert meta["job"] == 1
         assert meta["decided"] is True
-    assert r.meta["label"] in ("shared", "separate", "none")
-    assert set(r.meta["decoy_by_workload"]) == set(r.meta["workloads"])
+        assert meta["decided_outcome"] == "confirmed"
+        assert meta["decided_cause"] == row.result.cause
+        assert meta["decided_evidence"] == row.result.evidence
+    assert ex.meta["label"] in ("shared", "none")
+    assert set(ex.meta["decoy_by_workload"]) == set(metas)
 
 
 def test_shared_origin_decoy_meta_is_not_decided_when_healthy():
-    """The healthy half swaps in healthy_origin_fresh; 0 victims are confirmed on the
-    origin, so none of them are decided by it."""
-    import random
+    """The healthy world has the origin fixed; no victim is confirmed on it,
+    so the rules decide none of them and every workload is graded on job 2."""
+    st = stories.by_key()["node-not-ready"]
+    ex = cases.shared_origin_decoy(st, random.Random(7), victims=2)
 
-    from kubeagent_verdict.dataset import cases
-
-    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
-    r = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
-
-    assert all(meta["decided"] is False for meta in r.meta["workloads"].values())
-
-
-def test_registry_unreachable_shared_read_agrees_with_the_declared_object():
-    """The registry-events consistency rule, checked the one place _render_shared_origin
-    renders a registry object: rules.decide on the declared origin_object/healthy_origin_fresh
-    must land on the same outcome the origin_read/healthy_origin_content prose already tells."""
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
-    assert "dial tcp" in p.origin_read[1]
-    assert p.origin_object.fresh.literal == "dial tcp"
-    broken = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=False)
-    for meta in broken.meta["workloads"].values():
-        assert meta["decided"] is True
-        assert meta["decided_outcome"] == "confirmed"
-
-    assert "manifest unknown" in p.healthy_origin_content
-    assert p.healthy_origin_fresh.literal == "manifest unknown"
-    healthy = cases._render_shared_origin(p, random.Random(7), victims=2, healthy=True)
-    for meta in healthy.meta["workloads"].values():
+    assert len(ex.meta["workloads"]) == 2
+    for meta in ex.meta["workloads"].values():
         assert meta["decided"] is False
+        assert meta["job"] == 2
+    assert ex.meta["label"] == "none"
+
+
+def test_registry_unreachable_shared_read_agrees_with_the_decision():
+    """The registry-events consistency rule: the rules decide a registry from
+    the pulling pod's own events, so the broken world must print a connection
+    error there and the healthy world must not."""
+    st = stories.by_key()["registry-unreachable"]
+    broken = _built(st, "broken", width=2)
+    healthy = _built(st, "healthy", width=2)
+
+    for row in broken.rows:
+        assert row.result.decided, row.key
+        assert row.result.outcome == "confirmed", row.key
+    assert not any(row.result.decided for row in healthy.rows)
+
+    def pull_events(built):
+        return [r.content.lower() for r in built.gathered.reads if r.label.startswith("events ")]
+
+    for text in pull_events(broken):
+        assert any(lit in text for lit in objects.CONNECTION_LITERALS), text
+    for text in pull_events(healthy):
+        assert not any(lit in text for lit in objects.CONNECTION_LITERALS), text
 
 
 def test_registry_count_template_fills_in_the_rendered_victim_count():
-    """A ruled registry story's `scan_reason` is the literal `"{count}"`
-    template (spec section 4, "Registry count"): `_render_shared_origin`
-    fills it in with however many victims that row actually renders. This
-    is the fix for the bug the exam's row 252 disclosed, where a fixed
-    count baked into `scan_reason` (`"3"`) stayed "3" even on a row that
-    rendered only 2 victims, so the rules pass's own cause line claimed
-    more workloads than the row showed.
+    """A registry cause counts the workloads the row renders (spec section 4,
+    "Registry count"): 2 victims say 2 and 3 victims say 3. This is the fix
+    for the bug the exam's row 252 disclosed, where a count fixed in the data
+    stayed "3" on a row that showed only 2 victims, so the rules pass's own
+    cause line claimed more workloads than the row showed.
+
+    Victim images always pull from `registry.example.com`, so that is the host
+    the cause names, and no other host is printed.
     """
-    import random
+    st = stories.by_key()["registry-unreachable"]
+    assert len(st.victims) >= 3
 
-    from kubeagent_verdict.dataset import cases
+    two = cases.shared_origin(st, random.Random(1), victims=2)
+    assert "registry registry.example.com (2 workloads failing to pull)" in two.user
+    assert "(3 workloads failing to pull)" not in two.user
 
-    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
-    p = replace(base, origin_object=replace(
-        base.origin_object, name="mirror.invalid", scan_reason="{count}"))
+    three = cases.shared_origin(st, random.Random(1), victims=3)
+    assert "registry registry.example.com (3 workloads failing to pull)" in three.user
+    assert "(2 workloads failing to pull)" not in three.user
 
-    two = cases.shared_origin(p, random.Random(1), victims=2)
-    assert "registry mirror.invalid (2 workloads failing to pull)" in two.user
-
-    three = cases.shared_origin(p, random.Random(1), victims=3)
-    assert "registry mirror.invalid (3 workloads failing to pull)" in three.user
-
-
-def test_registry_origin_rewrites_victim_images_to_the_declared_host():
-    """Spec section 4, "Registry hosts": a ruled registry story's victim
-    images are rewritten to the story's own host at render time, with no
-    random draw, so the row never shows a victim pulling from a registry
-    other than the one the origin object names."""
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    base = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
-    p = replace(base, origin_object=replace(base.origin_object, name="mirror.invalid"))
-
-    e = cases.shared_origin(p, random.Random(4), victims=3)
-    assert "registry.example.com/" not in e.user
-    assert e.user.count("mirror.invalid/") >= 3
-
-
-def test_registry_example_com_host_is_a_no_op_rewrite():
-    """The exam's own registry story already names `registry.example.com`
-    -- the rewrite must leave its images untouched so the exam's rows and
-    hashes do not move."""
-    import dataclasses
-    import random
-
-    from kubeagent_verdict.dataset import cases
-
-    p = next(s for s in propagation.all_scenarios() if s.key == "registry-unreachable")
-    assert p.origin_object.name == "registry.example.com"
-
-    drawn, _scope = cases._propagation_names(p, random.Random(9), 3)
-    rewritten = [
-        dataclasses.replace(n, image=p.origin_object.name + n.image[n.image.index("/"):])
-        for n in drawn
-    ]
-    assert [n.image for n in drawn] == [n.image for n in rewritten]
+    for row in _built(st, "broken", width=3).rows:
+        assert row.names.image.startswith("registry.example.com/"), row.key
 
 
 def test_shared_origin_wrappers_merge_the_new_meta_without_losing_existing_keys():
-    """The four thin wrappers keep every key they write today and gain 'workloads',
-    'label', 'decoy_by_workload' from _render_shared_origin's r.meta."""
-    import random
+    """The four thin wrappers share one meta builder: each keeps the keys it
+    writes today and gains 'workloads', 'label' and 'decoy_by_workload'. The
+    four keys the made-up menu needed are gone (Ruling 8)."""
+    st = stories.by_key()["node-not-ready"]
+    common = ("workloads", "label", "decoy_by_workload", "case", "origin", "blast_radius",
+              "scope_value", "expected", "decoy_causes")
 
-    from kubeagent_verdict.dataset import cases
+    for build in (cases.shared_origin, cases.shared_origin_decoy,
+                  cases.shared_origin_probe, cases.shared_origin_decoy_probe):
+        meta = build(st, random.Random(3)).meta
+        for key in common:
+            assert key in meta, (build.__name__, key)
+        assert meta["decoy_causes"] == [], build.__name__
 
-    p = next(s for s in propagation.all_scenarios() if s.key == "node-not-ready")
-
-    ex = cases.shared_origin(p, random.Random(3))
-    for key in ("case", "origin", "expected", "expected_confidence", "origin_read_label"):
-        assert key in ex.meta
-    for key in ("workloads", "label", "decoy_by_workload"):
-        assert key in ex.meta
-
-    ex_decoy = cases.shared_origin_decoy(p, random.Random(3))
-    assert "expected_confidence" not in ex_decoy.meta
-    for key in ("workloads", "label", "decoy_by_workload"):
-        assert key in ex_decoy.meta
-
-    ex_probe = cases.shared_origin_probe(p, random.Random(3))
-    for key in ("decoy_causes", "distractor_cause", "wrong_summary_phrase"):
-        assert key in ex_probe.meta
-    for key in ("workloads", "label", "decoy_by_workload"):
-        assert key in ex_probe.meta
-
-    ex_decoy_probe = cases.shared_origin_decoy_probe(p, random.Random(3))
-    assert "shared_claim_phrases" in ex_decoy_probe.meta
-    for key in ("workloads", "label", "decoy_by_workload"):
-        assert key in ex_decoy_probe.meta
+    probe = cases.shared_origin_decoy_probe(st, random.Random(3))
+    phrases = probe.meta["shared_claim_phrases"]
+    assert phrases and all(isinstance(p, str) and p for p in phrases)
+    for build in (cases.shared_origin, cases.shared_origin_decoy, cases.shared_origin_probe):
+        assert "shared_claim_phrases" not in build(st, random.Random(3)).meta, build.__name__

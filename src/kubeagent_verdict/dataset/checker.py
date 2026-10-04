@@ -16,9 +16,8 @@ the spec's "read index 0"), `answer`, `prompt` or `system`.
 
 What the checker reads from `meta`, and nothing else:
 
-- `meta["case"]`: rows of the four shared-origin cases skip the evidence
-  rules and the rules propagation.py's own text fails (EXEMPT_CASES,
-  EVIDENCE_RULES, PROPAGATION_TEXT_RULES).
+- `meta["case"]`: nothing. Every case, shared-origin included, is checked by
+  all 50 rules.
 - `meta["origin_read_label"]`: the healthy-origin read at index 0 is left
   out of the gathered reads (`_Ctx.gathered`) and so out of the per-workload
   read groups. The rules that walk those, E2-order, E4 and E6-E10 among
@@ -27,12 +26,13 @@ What the checker reads from `meta`, and nothing else:
 - the keys of `meta["workloads"]`: ANS-1's workload set.
 - each workload's `own_cause_keywords`: ANS-2.
 
-With `meta=None` (the golden file has none), no exemption applies, ANS-1
-skips its meta clause, ANS-2 is skipped, and every other rule runs.
+With `meta=None` (the golden file has none), ANS-1 skips its meta clause,
+ANS-2 is skipped, and every other rule runs.
 
 A few rules check the builder's own model where kubeagent's output depends
-on cluster state the prompt does not show (B7's node count, for one). Each
-such rule says so.
+on cluster state the prompt does not show. Each such rule says so. B7 is
+one: the health header's node total is a count the prompt cannot show, so B7
+only checks that it is at least the number of nodes the row names.
 """
 from __future__ import annotations
 
@@ -174,23 +174,7 @@ ADDR = re.compile(
 # investigate/local.go:34-45. Found the way generate.manifest finds data/.
 _SYSTEM_PROMPT_PATH = Path(__file__).resolve().parents[3] / "contract" / "system_prompt.txt"
 
-# --- the rules and the exemptions ----------------------------------------
-
-EXEMPT_CASES = frozenset({
-    "shared_origin", "shared_origin_decoy", "shared_origin_probe", "shared_origin_decoy_probe",
-})
-# The shared-origin cases skip two sets of rules. The first is every rule
-# that reads the evidence section.
-EVIDENCE_RULES = frozenset({
-    "E1", "E2-order", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10", "E-min", "D3",
-})
-# The second: propagation.py writes its own inventory and candidate text, not
-# only its reads, and these are the rules that text fails. Spec 4 rewrites it
-# and removes both sets (spec lines 776-777). tests/test_checker.py checks
-# that each rule here still fires on a shared-origin row.
-PROPAGATION_TEXT_RULES = frozenset({
-    "B1", "C1-conf", "C1-cause", "C5/D4", "D1-onefresh", "TXT-IS9", "TXT-IS11",
-})
+# --- the rules ------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -229,7 +213,7 @@ _HEALTH_NODE = re.compile(
     r"^  node (\S+) (MemoryPressure|DiskPressure|PIDPressure|SchedulingDisabled|no kubelet lease"
     r"|kubelet not heartbeating \(lease \S+ stale\)|NotReady(?:: .+)?"
     r"|expected but absent from the cluster)$")
-_HEALTH_SYSTEM = re.compile(r"^  system kube-system/(\S+) (?:(\d+)/(\d+) )?(\S+)$")
+_HEALTH_SYSTEM = re.compile(r"^  system kube-system/(\S+) (?:(\d+)/(\d+) )?(.+)$")
 _CPU_LINE = re.compile(r"^  CPU: allocatable \S+ cores, requests \S+ \(\d+%\), limits \S+ \(\d+%\)"
                        r"(, usage \S+ \(\d+%\))?$")
 _MEMORY_LINE = re.compile(r"^  Memory: allocatable \S+, requests \S+ \(\d+%\), limits \S+ \(\d+%\)"
@@ -948,22 +932,32 @@ def _b6(x: _Ctx) -> tuple[int, _Finding]:
     return len(x.p.services), out
 
 
-# The builder's node-count floor (render._MIN_NODES). kubeagent's count is
-# the cluster's, which the prompt does not show; B7 checks the builder's model.
-_B7_MIN_NODES = 3
+# The health-line issues that make a node a down node, the list rootcause
+# walks (clusterhealth/clusterhealth.go:33-38, :71 and :79). A pressure, a
+# cordon or an absent node is on the health block but is not down.
+_DOWN_ISSUES = ("NotReady", "kubelet not heartbeating", "no kubelet lease")
+
+# Inside one node: pressure, NotReady, SchedulingDisabled, lease
+# (clusterhealth/clusterhealth.go:60-110).
+_NODE_LINE_ORDER = ("MemoryPressure", "DiskPressure", "PIDPressure", "NotReady",
+                    "SchedulingDisabled", "no kubelet lease", "kubelet not heartbeating",
+                    "expected but absent from the cluster")
+
+
+def _node_rank(issue: str) -> int:
+    return next(i for i, p in enumerate(_NODE_LINE_ORDER) if issue.startswith(p))
 
 
 def _b7(x: _Ctx) -> tuple[int, _Finding]:
-    """The cluster-health block appears if and only if there is a node
-    candidate or a flagged kube-system workload, with the lines the builder's
-    model gives (clusterhealth/clusterhealth.go:60-110; the node count is
-    the builder's, see _B7_MIN_NODES)."""
+    """The cluster-health block, as kubeagent prints it: several lines per
+    node in a fixed order, a down line only with its candidate, a header
+    total at least the nodes it names, never header-only."""
     blocks = x.p.blocks
     truncated = any(b.truncated for b in blocks)
     nodes: dict[str, set[str]] = {}
     for b in blocks:
-        for c in b.cands:
-            s = _shape(c.cause)
+        for cd in b.cands:
+            s = _shape(cd.cause)
             if s and s[0] == "node":
                 nodes.setdefault(s[1], set()).add(s[2])
     system = [e for e in x.p.entries if e.ns == SYSTEM_NAMESPACE]
@@ -971,37 +965,33 @@ def _b7(x: _Ctx) -> tuple[int, _Finding]:
     lines = [(ln, _HEALTH_NODE.match(ln.text)) for ln in h[1:]]
     node_lines = [(ln, m) for ln, m in lines if m]
     where = f"inventory line {h[0].no}" if h else "inventory"
-    expected = bool(nodes) or bool(system)
-    if bool(h) != expected and not (h and not expected and node_lines and truncated):
-        return 1, [(where, h[0].text if h else "no cluster-health block")]
+    if (nodes or system) and not h:
+        return 1, [(where, "no cluster-health block")]
     if not h:
         return 1, []
     out = []
-    names = [m.group(1) for _, m in node_lines]
-    if names != sorted(set(names)):
-        out.append((where, "node lines are not one per node in name order"))
-    for ln, m in node_lines:
-        issue = m.group(2)
-        if not (issue.startswith(("NotReady", "kubelet not heartbeating"))
-                or issue == "no kubelet lease"):
-            out.append((f"inventory line {ln.no}", ln.text))
+    if len(h) == 1:
+        out.append((where, "a cluster-health header with no lines"))
+    keys = [(m.group(1), _node_rank(m.group(2))) for _, m in node_lines]
+    if keys != sorted(keys) or len(set(keys)) != len(keys):
+        out.append((where, ("node lines are not in name order, then pressure, NotReady, "
+                            "SchedulingDisabled, lease")))
+    down = [(ln, m) for ln, m in node_lines if m.group(2).startswith(_DOWN_ISSUES)]
+    for ln, m in down:
         if m.group(1) not in nodes and not truncated:
             out.append((f"inventory line {ln.no}", ln.text))
-    by_name = {m.group(1): m.group(2) for _, m in node_lines}
+    by_name = {m.group(1): m.group(2) for _, m in down}
     for name, reasons in sorted(nodes.items()):
         want = ("NotReady" if "NotReady" in reasons else
                 "no kubelet lease" if "no kubelet lease" in reasons else "kubelet not heartbeating")
         got = by_name.get(name, "")
-        if not (got.startswith(want) and (want != "NotReady" or got == want or got.startswith("NotReady: "))):
+        if not (got.startswith(want) and (want != "NotReady" or got == want
+                                          or got.startswith("NotReady: "))):
             out.append((where, f"node {name} ({want}): {got or 'no line'}"))
-    described = set()
-    for r in x.p.reads:
-        if r.label.startswith("describe node /"):
-            described.add(r.label[len("describe node /"):].split(" ", 1)[0])
-    total = max(_B7_MIN_NODES, len(set(names) | described) + 1)
+    named = {m.group(1) for _, m in node_lines}
     head = _HEALTH_HEADER.match(h[0].text)
-    if head and int(head.group(2)) != total:
-        out.append((where, f"{total} nodes expected: {h[0].text}"))
+    if head and int(head.group(2)) < len(named):
+        out.append((where, f"at least {len(named)} nodes expected: {h[0].text}"))
     want_sys = []
     for e in system:
         if not e.match:
@@ -1012,19 +1002,11 @@ def _b7(x: _Ctx) -> tuple[int, _Finding]:
         else:
             want_sys.append(f"  system {e.ns}/{e.name} {ready}/{desired} {status}")
     got_sys = [ln.text for ln, m in lines if not m]
-    if len(x.p.entries) >= MAX_GATHER_WORKLOADS:
-        ok = got_sys[:len(want_sys)] == want_sys
-    else:
-        ok = got_sys == want_sys
+    ok = (got_sys[:len(want_sys)] == want_sys if len(x.p.entries) >= MAX_GATHER_WORKLOADS
+          else got_sys == want_sys)
     if not ok:
         out.append((where, f"system lines {got_sys} expected {want_sys}"))
     return len(h), out
-
-
-# The health-line issues that make a node a down node, the list rootcause
-# walks (clusterhealth/clusterhealth.go:33-38, :71 and :79). A pressure, a
-# cordon or an absent node is on the health block but is not down.
-_DOWN_ISSUES = ("NotReady", "kubelet not heartbeating", "no kubelet lease")
 
 
 def _b8(x: _Ctx) -> tuple[int, _Finding]:
@@ -2049,13 +2031,9 @@ RULES: tuple[str, ...] = tuple(_RULE_FUNCS)
 def check(system: str, user: str, assistant: str, meta: dict | None) -> Report:
     """Every place one row differs from what kubeagent v1.24.0 can send."""
     x = _context(system, user, assistant, meta)
-    exempt = meta is not None and meta.get("case") in EXEMPT_CASES
     violations: list[Violation] = []
     inspected: dict[str, int] = {}
     for rule, func in _RULE_FUNCS.items():
-        if exempt and (rule in EVIDENCE_RULES or rule in PROPAGATION_TEXT_RULES):
-            inspected[rule] = 0
-            continue
         n, found = func(x)
         inspected[rule] = n
         violations.extend(Violation(rule, where, str(quote)[:200]) for where, quote in found)

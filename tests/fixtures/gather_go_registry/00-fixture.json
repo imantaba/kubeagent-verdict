@@ -1,0 +1,288 @@
+{
+  "kubeagent": {
+    "commit": "15ec5649bbd2d07558eae945b71430afc8f231fd",
+    "tag": "v1.24.0"
+  },
+  "nodes": [
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "name": "w1",
+      "scan_reason": ""
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "name": "w2",
+      "scan_reason": ""
+    },
+    {
+      "fresh": {
+        "how": "read",
+        "ready": "True"
+      },
+      "name": "w3",
+      "scan_reason": ""
+    }
+  ],
+  "platform_line": "",
+  "pvcs": [],
+  "service_issues": [],
+  "summary": {
+    "cpu": {
+      "allocatable": "6",
+      "limits": "5400m",
+      "limits_pct": 90,
+      "requests": "4200m",
+      "requests_pct": 70
+    },
+    "memory": {
+      "allocatable": "12Gi",
+      "limits": "11Gi",
+      "limits_pct": 91,
+      "requests": "9Gi",
+      "requests_pct": 75
+    },
+    "metrics_available": false
+  },
+  "workloads": [
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"reg.example.com/a:1\": rpc error: code = Unavailable desc = dial tcp: i/o timeout",
+          6
+        ],
+        [
+          "BackOff",
+          "Back-off pulling image \"reg.example.com/a:1\"",
+          14
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"reg.example.com/a:1\"",
+          "image": "reg.example.com/a:1",
+          "issue": "ImagePullBackOff",
+          "pod": "pull/p-conn-6b8f5d7c4-a1b2c",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "p-conn",
+      "namespace": "pull",
+      "pod": "p-conn-6b8f5d7c4-a1b2c",
+      "pods": [
+        {
+          "claims": [],
+          "name": "p-conn-6b8f5d7c4-a1b2c",
+          "node": "w1"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"reg.example.com/b:1\": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required",
+          4
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"reg.example.com/b:1\"",
+          "image": "reg.example.com/b:1",
+          "issue": "ImagePullBackOff",
+          "pod": "pull/p-auth-5d8f7c9b6-d4e5f",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "p-auth",
+      "namespace": "pull",
+      "pod": "p-auth-5d8f7c9b6-d4e5f",
+      "pods": [
+        {
+          "claims": [],
+          "name": "p-auth-5d8f7c9b6-d4e5f",
+          "node": "w2"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"reg.example.com/c:1\": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown",
+          3
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"reg.example.com/c:1\"",
+          "image": "reg.example.com/c:1",
+          "issue": "ErrImagePull",
+          "pod": "pull/p-image-7c9d4b5f6-g7h8i",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "p-image",
+      "namespace": "pull",
+      "pod": "p-image-7c9d4b5f6-g7h8i",
+      "pods": [
+        {
+          "claims": [],
+          "name": "p-image-7c9d4b5f6-g7h8i",
+          "node": "w3"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "BackOff",
+          "Back-off pulling image \"reg.example.com/d:1\"",
+          22
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Back-off pulling image \"reg.example.com/d:1\"",
+          "image": "reg.example.com/d:1",
+          "issue": "ImagePullBackOff",
+          "pod": "pull/p-nopull-6d5f7c8b9-j1k2l",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "p-nopull",
+      "namespace": "pull",
+      "pod": "p-nopull-6d5f7c8b9-j1k2l",
+      "pods": [
+        {
+          "claims": [],
+          "name": "p-nopull-6d5f7c8b9-j1k2l",
+          "node": "w1"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 2,
+      "events": [
+        [
+          "Unhealthy",
+          "Readiness probe failed: HTTP probe failed with statuscode: 503",
+          9
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "app",
+          "evidence": "container \"app\": readiness — HTTP 503",
+          "image": "",
+          "issue": "ProbeFailure",
+          "pod": "pull/p-notread-5b8d7f6c9-m3n4o",
+          "reason": "the readiness probe keeps failing — the pod is kept out of Service endpoints"
+        },
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"reg.example.com/e:1\"",
+          "image": "reg.example.com/e:1",
+          "issue": "ImagePullBackOff",
+          "pod": "pull/p-notread-5b8d7f6c9-p5q6r",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "p-notread",
+      "namespace": "pull",
+      "pod": "p-notread-5b8d7f6c9-m3n4o",
+      "pods": [
+        {
+          "claims": [],
+          "name": "p-notread-5b8d7f6c9-m3n4o",
+          "node": "w2"
+        },
+        {
+          "claims": [],
+          "name": "p-notread-5b8d7f6c9-p5q6r",
+          "node": "w3"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    },
+    {
+      "decoy_events": [],
+      "desired": 1,
+      "events": [
+        [
+          "Failed",
+          "Failed to pull image \"other.example.com/f:1\": rpc error: code = Unavailable desc = dial tcp: i/o timeout",
+          5
+        ]
+      ],
+      "events_failed": "",
+      "findings": [
+        {
+          "container": "",
+          "evidence": "Failed to pull image \"other.example.com/f:1\"",
+          "image": "other.example.com/f:1",
+          "issue": "ImagePullBackOff",
+          "pod": "pull/solo-7c9d4b5f6-s7t8u",
+          "reason": "image pull keeps failing"
+        }
+      ],
+      "kind": "Deployment",
+      "name": "solo",
+      "namespace": "pull",
+      "pod": "solo-7c9d4b5f6-s7t8u",
+      "pods": [
+        {
+          "claims": [],
+          "name": "solo-7c9d4b5f6-s7t8u",
+          "node": "w1"
+        }
+      ],
+      "ready": 0,
+      "restarts": 0,
+      "status": "Degraded"
+    }
+  ]
+}

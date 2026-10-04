@@ -1,0 +1,83 @@
+cluster	Healthy	3	3
+block	prompt	6173
+== BEGIN inventory ==
+Cluster resources:
+  CPU: allocatable 6 cores, requests 4200m (70%), limits 5400m (90%)
+  Memory: allocatable 12Gi, requests 9Gi (75%), limits 11Gi (91%)
+
+Workload problems (P2):
+
+- pull/p-auth (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "reg.example.com/b:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+- pull/p-conn (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "reg.example.com/a:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+- pull/p-image (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ErrImagePull — image pull keeps failing (Failed to pull image "reg.example.com/c:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+- pull/p-nopull (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Back-off pulling image "reg.example.com/d:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+- pull/p-notread (Deployment): 0/2 ready, status Degraded, 0 restarts
+    issue: ProbeFailure — the readiness probe keeps failing — the pod is kept out of Service endpoints (container "app": readiness — HTTP 503)
+      suggested fix (deterministic, pre-reviewed — do not substitute): the probe keeps failing — check the probe config and the app's health endpoint | run: kubectl -n pull describe pod <pod>
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "reg.example.com/e:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+- pull/solo (Deployment): 0/1 ready, status Degraded, 0 restarts
+    issue: ImagePullBackOff — image pull keeps failing (Failed to pull image "other.example.com/f:1")
+      suggested fix (deterministic, pre-reviewed — do not substitute): the image can't be pulled — verify the tag exists and the registry credentials | run: kubectl -n pull describe pod <pod>
+== END inventory ==
+
+== BEGIN candidates ==
+- pull/p-auth (Deployment) [confidence: medium]:
+    considered registry reg.example.com (5 workloads failing to pull): attributed — 5 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — a pull event shows an auth error: unauthorized; that can be one image or the whole host
+    decided by rules: registry reg.example.com (5 workloads failing to pull) — unverified
+- pull/p-conn (Deployment) [confidence: medium]:
+    considered registry reg.example.com (5 workloads failing to pull): attributed — 5 workloads failing to pull from this host clear the threshold of 2
+      fresh read: confirmed — a pull event shows a connection error: dial tcp
+    decided by rules: registry reg.example.com (5 workloads failing to pull) — confirmed
+- pull/p-image (Deployment) [confidence: medium]:
+    considered registry reg.example.com (5 workloads failing to pull): attributed — 5 workloads failing to pull from this host clear the threshold of 2
+      fresh read: refuted — a pull event shows an image error: manifest unknown; this pull fails for this image, not the host
+- pull/p-nopull (Deployment) [confidence: medium]:
+    considered registry reg.example.com (5 workloads failing to pull): attributed — 5 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — no pull event names the failure; events may have aged out
+    decided by rules: registry reg.example.com (5 workloads failing to pull) — unverified
+- pull/p-notread (Deployment) [confidence: medium]:
+    considered registry reg.example.com (5 workloads failing to pull): attributed — 5 workloads failing to pull from this host clear the threshold of 2
+      fresh read: unverified — events of the pulling pod were not read
+    decided by rules: registry reg.example.com (5 workloads failing to pull) — unverified
+- pull/solo (Deployment):
+    considered registry other.example.com: ruled out — only workload failing to pull from this host; threshold is 2
+== END candidates ==
+
+== BEGIN evidence ==
+== events pull/p-auth-5d8f7c9b6-d4e5f ==
+events for pull/p-auth-5d8f7c9b6-d4e5f:
+  Failed: Failed to pull image "reg.example.com/b:1": rpc error: code = Unknown desc = failed to authorize: unauthorized: authentication required (x4)
+
+== events pull/p-conn-6b8f5d7c4-a1b2c ==
+events for pull/p-conn-6b8f5d7c4-a1b2c:
+  Failed: Failed to pull image "reg.example.com/a:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x6)
+  BackOff: Back-off pulling image "reg.example.com/a:1" (x14)
+
+== events pull/p-image-7c9d4b5f6-g7h8i ==
+events for pull/p-image-7c9d4b5f6-g7h8i:
+  Failed: Failed to pull image "reg.example.com/c:1": rpc error: code = NotFound desc = failed to resolve reference: manifest unknown (x3)
+
+== events pull/p-nopull-6d5f7c8b9-j1k2l ==
+events for pull/p-nopull-6d5f7c8b9-j1k2l:
+  BackOff: Back-off pulling image "reg.example.com/d:1" (x22)
+
+== events pull/p-notread-5b8d7f6c9-m3n4o ==
+events for pull/p-notread-5b8d7f6c9-m3n4o:
+  Unhealthy: Readiness probe failed: HTTP probe failed with statuscode: 503 (x9)
+
+== events pull/solo-7c9d4b5f6-s7t8u ==
+events for pull/solo-7c9d4b5f6-s7t8u:
+  Failed: Failed to pull image "other.example.com/f:1": rpc error: code = Unavailable desc = dial tcp: i/o timeout (x5)
+== END evidence ==
+
+Judge each listed workload now and answer with the JSON object only.

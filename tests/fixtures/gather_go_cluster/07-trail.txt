@@ -1,0 +1,8 @@
+1	events app/cart-6b8f5d7c4-r9t3w
+2	describe node /n15
+3	events app/web-5d8f7c9b6-a1b2c
+4	events kube-system/ks-a-7c9d4b5f6-x0k2m
+5	events kube-system/ks-b-7c9d4b5f6-x1k2m
+6	events kube-system/ks-c-7c9d4b5f6-x2k2m
+7	events kube-system/ks-cron
+8	events kube-system/ks-d-7c9d4b5f6-x3k2m

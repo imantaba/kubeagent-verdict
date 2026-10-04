@@ -14,10 +14,16 @@
 // One run writes the golden files and the ten stage dumps
 // (tests/fixtures/gather_go/README.md gives their format).
 //
-// The same run then does it all again over the log fixture,
-// tests/fixtures/gather_fixture_logs.yaml, whose reads are mostly log
-// reads: the main fixture spends its 8 reads before the gather reaches a
-// crashed container. That pass writes its own dumps and no golden file.
+// The same run then does it all again over three more fixtures, one per
+// mode (kvMode). Each pass writes its own dumps and no golden file:
+//   - logs: tests/fixtures/gather_fixture_logs.yaml, whose reads are mostly
+//     log reads (the main fixture spends its 8 reads before the gather
+//     reaches a crashed container);
+//   - cluster: tests/fixtures/gather_fixture_cluster.yaml, a 16-node cluster
+//     with every node-health line, many service-issue wordings and a
+//     network-policy hint (the prompt's cluster block);
+//   - registry: tests/fixtures/gather_fixture_registry.yaml, one workload per
+//     registry outcome.
 //
 // The seven steps. KV is the kubeagent-verdict checkout, SCRATCH a new
 // folder outside both repos; run the git commands in the kubeagent repo.
@@ -26,6 +32,8 @@
 //      git ls-tree -r v1.24.0 --name-only | wc -l    # the file count
 //   2. cp "$KV/tests/fixtures/gather_fixture.yaml" \
 //         "$KV/tests/fixtures/gather_fixture_logs.yaml" \
+//         "$KV/tests/fixtures/gather_fixture_cluster.yaml" \
+//         "$KV/tests/fixtures/gather_fixture_registry.yaml" \
 //         "$KV/contract/capture/kv_capture_test.go.txt" "$SCRATCH/"
 //   3. mkdir "$SCRATCH/ka" && tar -xzf "$SCRATCH/ka.tar.gz" -C "$SCRATCH/ka"
 //      find "$SCRATCH/ka" ! -type d | wc -l    # must equal the count in step 1
@@ -33,14 +41,17 @@
 //         "$SCRATCH/ka/internal/investigate/kv_capture_test.go"
 //   4. cd "$SCRATCH/ka" && export PATH=$PATH:/usr/local/go/bin && \
 //      KV_FIXTURE="$SCRATCH/gather_fixture.yaml" \
-//      KV_FIXTURE_LOGS="$SCRATCH/gather_fixture_logs.yaml" KV_GOLDEN_DIR="$SCRATCH/out" \
+//      KV_FIXTURE_LOGS="$SCRATCH/gather_fixture_logs.yaml" \
+//      KV_FIXTURE_CLUSTER="$SCRATCH/gather_fixture_cluster.yaml" \
+//      KV_FIXTURE_REGISTRY="$SCRATCH/gather_fixture_registry.yaml" KV_GOLDEN_DIR="$SCRATCH/out" \
 //      go test -count=1 -tags goldencapture -run TestCaptureVerdictGolden ./internal/investigate -v
 //   5. copy back into KV: out/input.json and out/user_message.txt to
 //      contract/golden/, out/system_prompt.txt to contract/,
 //      out/rules_golden.json to tests/fixtures/, out/gather_go/* to
 //      tests/fixtures/gather_go/, out/gather_go_logs/* to
-//      tests/fixtures/gather_go_logs/; record the tag and commit in
-//      contract/PIN.md
+//      tests/fixtures/gather_go_logs/, and the whole folders
+//      out/gather_go_cluster and out/gather_go_registry to tests/fixtures/;
+//      record the tag and commit in contract/PIN.md
 //   6. check that the fixture still exercises every rule path the old
 //      rules_golden.json did (each attribution rule and each Decide
 //      outcome, at least once), and that the refused reads of node
@@ -50,8 +61,9 @@
 // The run needs no API server. Three stand-ins replace one:
 //   - no read that needs a real RESTClient runs: the harness never calls
 //     scan.Evaluate (whose kubelet, CoreDNS, readyz and stats reads are
-//     proxied through one), and the wrapped CoreV1 panics if anything asks
-//     for its RESTClient;
+//     proxied through one; in mode cluster it calls the pure svchealth and
+//     netpolicy steps Evaluate calls itself), and the wrapped CoreV1 panics
+//     if anything asks for its RESTClient;
 //   - a previous-log read goes to an httptest server that serves the
 //     fixture's log text (the fake clientset's GetLogs always answers
 //     "fake logs"), or answers 403 where the fixture sets log_refused;
@@ -80,6 +92,8 @@ import (
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -96,12 +110,23 @@ import (
 	"github.com/imantaba/kubeagent/internal/diagnose"
 	"github.com/imantaba/kubeagent/internal/hypothesis"
 	"github.com/imantaba/kubeagent/internal/inventory"
+	"github.com/imantaba/kubeagent/internal/netpolicy"
 	"github.com/imantaba/kubeagent/internal/pvchealth"
 	"github.com/imantaba/kubeagent/internal/redact"
 	"github.com/imantaba/kubeagent/internal/remediation"
 	"github.com/imantaba/kubeagent/internal/resources"
 	"github.com/imantaba/kubeagent/internal/rootcause"
 	"github.com/imantaba/kubeagent/internal/svchealth"
+)
+
+// kvMode says which fixture a capture runs and what it checks.
+type kvMode string
+
+const (
+	kvModeMain     kvMode = "main"     // writes the golden files and gather_go/
+	kvModeLogs     kvMode = "logs"     // gather_go_logs/: every log-loop action
+	kvModeCluster  kvMode = "cluster"  // gather_go_cluster/: health, services, netpols
+	kvModeRegistry kvMode = "registry" // gather_go_registry/: every registry outcome
 )
 
 // ---------------------------------------------------------------------------
@@ -118,6 +143,51 @@ type kvFixture struct {
 	Nodes         []kvNode         `json:"nodes"`
 	PVCs          []kvPVC          `json:"pvcs"`
 	Workloads     []kvWorkload     `json:"workloads"`
+
+	// Optional, and read only in mode cluster (kvCapture refuses them in every
+	// other mode): the Services, EndpointSlices, backing controllers and
+	// NetworkPolicies the scan's svchealth and netpolicy steps read.
+	Services        []kvService `json:"services"`
+	EndpointSlices  []kvSlice   `json:"endpoint_slices"`
+	Backends        []kvBackend `json:"backends"`
+	NetworkPolicies []kvNetpol  `json:"network_policies"`
+}
+
+// kvCondition is one node condition as the scan listed it.
+type kvCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+}
+
+type kvService struct {
+	Namespace   string            `json:"namespace"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Selector    map[string]string `json:"selector"`
+	Annotations map[string]string `json:"annotations"`
+	LBIngress   bool              `json:"lb_ingress"`
+}
+
+type kvSlice struct {
+	Namespace string   `json:"namespace"`
+	Service   string   `json:"service"`
+	Ready     []string `json:"ready"` // "true", "false" or "unset", one per address
+}
+
+type kvBackend struct {
+	Namespace string            `json:"namespace"`
+	Name      string            `json:"name"`
+	Kind      string            `json:"kind"`
+	Labels    map[string]string `json:"labels"`
+	Desired   int32             `json:"desired"`
+}
+
+type kvNetpol struct {
+	Namespace   string            `json:"namespace"`
+	Name        string            `json:"name"`
+	PodSelector map[string]string `json:"pod_selector"`
 }
 
 type kvVersion struct {
@@ -163,10 +233,19 @@ type kvFresh struct {
 	Volume        string     `json:"volume"`
 }
 
+// kvNode is one node. With conditions set, they are the node's scan-time
+// conditions in the order given, and scan_reason is only the reason DownNodes
+// must give it ("" for a node that is not down). Without them, scan_reason
+// builds the conditions (kvScanNode). lease is "" (the old rule, from
+// scan_reason), "renewed" (renewed lease_age_ms ago), "missing" or "no_renew".
 type kvNode struct {
-	Name       string  `json:"name"`
-	ScanReason string  `json:"scan_reason"`
-	Fresh      kvFresh `json:"fresh"`
+	Name          string        `json:"name"`
+	ScanReason    string        `json:"scan_reason"`
+	Fresh         kvFresh       `json:"fresh"`
+	Conditions    []kvCondition `json:"conditions"`
+	Unschedulable bool          `json:"unschedulable"`
+	Lease         string        `json:"lease"`
+	LeaseAgeMs    int64         `json:"lease_age_ms"`
 }
 
 type kvPVC struct {
@@ -177,9 +256,11 @@ type kvPVC struct {
 }
 
 type kvPod struct {
-	Name   string   `json:"name"`
-	Node   string   `json:"node"`
-	Claims []string `json:"claims"`
+	Name   string            `json:"name"`
+	Node   string            `json:"node"`
+	Claims []string          `json:"claims"`
+	Labels map[string]string `json:"labels"`
+	Ready  bool              `json:"ready"`
 }
 
 type kvFinding struct {
@@ -256,11 +337,12 @@ var (
 	kvReadyFalse   = kvCond(corev1.NodeReady, "False", "KubeletNotReady", "container runtime is down")
 )
 
-// The heartbeat check's inputs, which the fixture does not carry: a fixed
-// clock, scan's 40s default threshold, and a lease renewed 10s ago for
-// every node whose scan_reason is empty. A node with scan_reason
-// "no kubelet lease" gets no lease; a NotReady node needs none, because
-// Assess only checks the lease of a Ready node.
+// The heartbeat check's inputs: a fixed clock, scan's 40s default threshold,
+// and each node's lease. A node with no lease key in the fixture gets a lease
+// renewed 10s ago when its scan_reason is empty, and none when it is
+// "no kubelet lease"; a NotReady node needs none, because Assess only checks
+// the lease of a Ready node. A node with a lease key says what its lease
+// looks like (see kvNode).
 var kvNow = time.Date(2026, time.September, 26, 12, 0, 0, 0, time.UTC)
 
 const kvThreshold = 40 * time.Second
@@ -269,13 +351,25 @@ func kvCond(t corev1.NodeConditionType, status, reason, msg string) corev1.NodeC
 	return corev1.NodeCondition{Type: t, Status: corev1.ConditionStatus(status), Reason: reason, Message: msg}
 }
 
-// kvScanNode is the node as the scan listed it. Its Ready condition follows
-// scan_reason; the other three are healthy. It is never cordoned either:
-// Spec.Unschedulable stays false, even for a node whose fresh read finds a
-// cordon (kvFreshNode). So Assess prints no MemoryPressure, DiskPressure,
-// PIDPressure or SchedulingDisabled line here, and the byte-equal check says
-// nothing about them. Spec 4 owns scan-time node state.
+// kvScanNode is the node as the scan listed it. A node with conditions in the
+// fixture gets exactly those, in order, and its cordon from unschedulable;
+// scan_reason is then only what DownNodes must say (the self-check in
+// kvCapture). Any other node has its Ready condition follow scan_reason and
+// the other three healthy, and is never cordoned: Spec.Unschedulable stays
+// false, even for a node whose fresh read finds a cordon (kvFreshNode). So
+// Assess prints no MemoryPressure, DiskPressure, PIDPressure or
+// SchedulingDisabled line for such a node, and the old fixtures' byte-equal
+// check says nothing about them.
 func kvScanNode(n kvNode) (corev1.Node, error) {
+	if len(n.Conditions) > 0 {
+		node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: n.Name}}
+		for _, c := range n.Conditions {
+			node.Status.Conditions = append(node.Status.Conditions,
+				kvCond(corev1.NodeConditionType(c.Type), c.Status, c.Reason, c.Message))
+		}
+		node.Spec.Unschedulable = n.Unschedulable
+		return node, nil
+	}
 	ready := kvReadyTrue
 	switch n.ScanReason {
 	case "NotReady":
@@ -287,6 +381,26 @@ func kvScanNode(n kvNode) (corev1.Node, error) {
 	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: n.Name}}
 	node.Status.Conditions = []corev1.NodeCondition{kvMemoryOK, kvDiskOK, kvPIDOK, ready}
 	return node, nil
+}
+
+// kvLease is a node lease renewed at the given time.
+func kvLease(name string, renewed time.Time) coordinationv1.Lease {
+	renew := metav1.NewMicroTime(renewed)
+	return coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-node-lease", Name: name},
+		Spec:       coordinationv1.LeaseSpec{RenewTime: &renew},
+	}
+}
+
+// kvHasConditions reports whether a fixture spells out node conditions,
+// so its node count is the cluster's own, not max(3, named+1).
+func kvHasConditions(nodes []kvNode) bool {
+	for _, n := range nodes {
+		if len(n.Conditions) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // kvFreshNode is the node a fresh describe finds, with the conditions in
@@ -752,26 +866,33 @@ func TestCaptureVerdictGolden(t *testing.T) {
 	if dir == "" {
 		t.Skip("KV_GOLDEN_DIR not set")
 	}
-	fixturePath := os.Getenv("KV_FIXTURE")
-	if fixturePath == "" {
-		t.Fatal("KV_FIXTURE must name tests/fixtures/gather_fixture.yaml")
+	runs := []struct {
+		env, want, dump string
+		mode            kvMode
+	}{
+		{"KV_FIXTURE", "tests/fixtures/gather_fixture.yaml", "gather_go", kvModeMain},
+		{"KV_FIXTURE_LOGS", "tests/fixtures/gather_fixture_logs.yaml", "gather_go_logs", kvModeLogs},
+		{"KV_FIXTURE_CLUSTER", "tests/fixtures/gather_fixture_cluster.yaml", "gather_go_cluster", kvModeCluster},
+		{"KV_FIXTURE_REGISTRY", "tests/fixtures/gather_fixture_registry.yaml", "gather_go_registry", kvModeRegistry},
 	}
-	logsPath := os.Getenv("KV_FIXTURE_LOGS")
-	if logsPath == "" {
-		t.Fatal("KV_FIXTURE_LOGS must name tests/fixtures/gather_fixture_logs.yaml")
+	for _, r := range runs {
+		path := os.Getenv(r.env)
+		if path == "" {
+			t.Fatalf("%s must name %s", r.env, r.want)
+		}
+		r := r
+		// The main run writes the golden files; the others only their dumps.
+		if !t.Run(string(r.mode), func(t *testing.T) { kvCapture(t, path, dir, r.dump, r.mode) }) {
+			return
+		}
 	}
-	// The main fixture writes the golden files and gather_go/; the log
-	// fixture writes gather_go_logs/ and nothing else.
-	if !t.Run("main", func(t *testing.T) { kvCapture(t, fixturePath, dir, "gather_go", true) }) {
-		return
-	}
-	t.Run("logs", func(t *testing.T) { kvCapture(t, logsPath, dir, "gather_go_logs", false) })
 }
 
 // kvCapture runs the pipeline over one fixture and writes its eleven dump
-// files under dir/dumpName. With golden set it also writes the four golden
-// files to dir; without, it checks that the log loop reached every action.
-func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
+// files under dir/dumpName. Mode main also writes the four golden files to
+// dir; mode logs checks that the log loop reached every action; modes cluster
+// and registry check the lines their fixture exists to capture.
+func kvCapture(t *testing.T, fixturePath, dir, dumpName string, mode kvMode) {
 	dumpDir := filepath.Join(dir, dumpName)
 	if err := os.MkdirAll(dumpDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -811,6 +932,15 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	for _, s := range fx.ServiceIssues {
 		serviceIssues = append(serviceIssues, svchealth.Issue{Namespace: s.Namespace, Name: s.Name, Type: s.Type, Detail: s.Detail})
 	}
+	// The service lists belong to mode cluster, where the harness computes
+	// the issues from them; the hand-written service_issues belong to the
+	// others.
+	if mode == kvModeCluster && len(fx.ServiceIssues) > 0 {
+		t.Fatal("service_issues must be empty in mode cluster: the harness computes them from services")
+	}
+	if mode != kvModeCluster && (len(fx.Services) > 0 || len(fx.EndpointSlices) > 0 || len(fx.Backends) > 0 || len(fx.NetworkPolicies) > 0) {
+		t.Fatal("services, endpoint_slices, backends and network_policies belong to mode cluster only")
+	}
 
 	// The cluster: scan-time nodes and leases for Assess, fresh objects for
 	// the fake, and the refused reads for the reactors.
@@ -833,12 +963,18 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 			t.Fatal(err)
 		}
 		scanNodes = append(scanNodes, sn)
-		if n.ScanReason == "" {
-			renew := metav1.NewMicroTime(kvNow.Add(-10 * time.Second))
-			leases = append(leases, coordinationv1.Lease{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "kube-node-lease", Name: n.Name},
-				Spec:       coordinationv1.LeaseSpec{RenewTime: &renew},
-			})
+		switch n.Lease {
+		case "":
+			if n.ScanReason == "" { // today's rule, unchanged for the old fixtures
+				leases = append(leases, kvLease(n.Name, kvNow.Add(-10*time.Second)))
+			}
+		case "renewed":
+			leases = append(leases, kvLease(n.Name, kvNow.Add(-time.Duration(n.LeaseAgeMs)*time.Millisecond)))
+		case "no_renew":
+			leases = append(leases, coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: "kube-node-lease", Name: n.Name}})
+		case "missing":
+		default:
+			t.Fatalf("node %s: lease %q is not renewed, no_renew or missing", n.Name, n.Lease)
 		}
 		switch n.Fresh.How {
 		case "read":
@@ -875,6 +1011,8 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	logText := map[string]string{}       // "ns/pod/container"
 	refusedLogs := map[string]bool{}     // "ns/pod/container"
 	logFinding := map[string]kvFinding{} // "ns/pod/container" -> its first finding
+	var allPods []corev1.Pod             // every fixture pod, for the service and policy steps
+	podLabels := map[string]map[string]string{}
 	for _, fw := range fx.Workloads {
 		if _, dup := fxByKey[fw.key()]; dup {
 			t.Fatalf("workload %s appears twice", fw.key())
@@ -892,6 +1030,15 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 			if len(p.Claims) > 0 {
 				podPVCs[fw.Namespace+"/"+p.Name] = append([]string(nil), p.Claims...)
 			}
+			pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fw.Namespace, Name: p.Name, Labels: p.Labels}}
+			pod.Spec.NodeName = p.Node
+			status := corev1.ConditionFalse
+			if p.Ready {
+				status = corev1.ConditionTrue
+			}
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: status}}
+			allPods = append(allPods, pod)
+			podLabels[fw.Namespace+"/"+p.Name] = p.Labels
 		}
 		for _, f := range fw.Findings {
 			if !strings.HasPrefix(f.Pod, fw.Namespace+"/") {
@@ -1033,6 +1180,60 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	health := clusterhealth.Assess(scanNodes, clusterhealth.Heartbeat{Leases: leases, Now: kvNow, Threshold: kvThreshold}, nil, assessed)
 	prioritized := inventory.Prioritize(workloads, inventory.Opts{})
 	wl := prioritized.Workloads
+	if mode == kvModeCluster {
+		// scan.go:752-754 and :813: the Service issues, the cause each broken
+		// one gets from the down nodes, and the NetworkPolicy hint, which runs
+		// on the prioritized workloads before rootcause.
+		var svcs []corev1.Service
+		for _, s := range fx.Services {
+			svc := corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: s.Name, Annotations: s.Annotations}}
+			svc.Spec.Type = corev1.ServiceType(s.Type)
+			svc.Spec.Selector = s.Selector
+			if s.LBIngress {
+				svc.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{{IP: "203.0.113.10"}}
+			}
+			svcs = append(svcs, svc)
+		}
+		var slices []discoveryv1.EndpointSlice
+		for i, sl := range fx.EndpointSlices {
+			es := discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{
+				Namespace: sl.Namespace, Name: fmt.Sprintf("%s-%d", sl.Service, i),
+				Labels: map[string]string{discoveryv1.LabelServiceName: sl.Service}}}
+			for j, r := range sl.Ready {
+				ep := discoveryv1.Endpoint{Addresses: []string{fmt.Sprintf("10.0.%d.%d", i, j+1)}}
+				switch r {
+				case "true", "false":
+					v := r == "true"
+					ep.Conditions.Ready = &v
+				case "unset":
+				default:
+					t.Fatalf("endpoint slice for %s/%s: ready entry %q is not true, false or unset", sl.Namespace, sl.Service, r)
+				}
+				es.Endpoints = append(es.Endpoints, ep)
+			}
+			slices = append(slices, es)
+		}
+		var backends []svchealth.Backend
+		for _, b := range fx.Backends {
+			switch b.Kind {
+			case "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob":
+			default:
+				t.Fatalf("backend %s/%s: kind %q is not one scan reads", b.Namespace, b.Name, b.Kind)
+			}
+			backends = append(backends, svchealth.Backend{Kind: b.Kind, Namespace: b.Namespace, TemplateLabels: b.Labels,
+				Desired: int(b.Desired), Ephemeral: b.Kind == "Job" || b.Kind == "CronJob"})
+		}
+		serviceIssues = svchealth.Assess(svcs, slices, backends)
+		svchealth.AnnotateEndpointCause(serviceIssues, svcs, allPods, health.DownNodes)
+		var nps []networkingv1.NetworkPolicy
+		for _, np := range fx.NetworkPolicies {
+			nps = append(nps, networkingv1.NetworkPolicy{
+				ObjectMeta: metav1.ObjectMeta{Namespace: np.Namespace, Name: np.Name},
+				Spec:       networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: np.PodSelector}},
+			})
+		}
+		netpolicy.Annotate(wl, podLabels, nps)
+	}
 	rootcause.Annotate(wl, health.DownNodes)
 	rootcause.AnnotatePVC(wl, podPVCs, pvcIssues)
 	rootcause.AnnotateRegistry(wl)
@@ -1075,12 +1276,14 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 			named[n] = true
 		}
 	}
-	if want := max(3, len(named)+1); len(nodes) != want {
-		t.Fatalf("%d nodes, want max(3, %d named + 1) = %d", len(nodes), len(named), want)
-	}
-	for _, n := range nodes {
-		if !named[n.Name] && n.ScanReason != "" {
-			t.Fatalf("node %s is unnamed but not healthy", n.Name)
+	if !kvHasConditions(nodes) {
+		if want := max(3, len(named)+1); len(nodes) != want {
+			t.Fatalf("%d nodes, want max(3, %d named + 1) = %d", len(nodes), len(named), want)
+		}
+		for _, n := range nodes {
+			if !named[n.Name] && n.ScanReason != "" {
+				t.Fatalf("node %s is unnamed but not healthy", n.Name)
+			}
 		}
 	}
 
@@ -1163,12 +1366,9 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 		}
 		contents[i] = c
 	}
-	// The main fixture keeps every read under the cap; the log fixture cuts
-	// exactly one, on purpose.
-	wantCuts := 1
-	if golden {
-		wantCuts = 0
-	}
+	// Every fixture keeps its reads under the cap, except the log fixture,
+	// which cuts exactly one, on purpose.
+	wantCuts := map[kvMode]int{kvModeMain: 0, kvModeLogs: 1, kvModeCluster: 0, kvModeRegistry: 0}[mode]
 	if cuts != wantCuts {
 		t.Fatalf("%d reads were cut at %d bytes, want %d", cuts, maxReadBytes, wantCuts)
 	}
@@ -1220,14 +1420,14 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 			}
 		}
 	}
-	if logsServed == gatherLogs {
+	if len(logRead) > 0 && logsServed == gatherLogs {
 		t.Fatal("the log self-check read nothing through the httptest server")
 	}
 
 	// ---- The golden files. ----
 
-	// The main fixture's run writes them; the log fixture's writes none.
-	if golden {
+	// The main fixture's run writes them; the other runs write none.
+	if mode == kvModeMain {
 		writeFile(t, dir, "user_message.txt", []byte(prompt))
 		writeFile(t, dir, "system_prompt.txt", []byte(verdictSystemPrompt))
 		bundleReads := make([]readJSON, len(mirror))
@@ -1486,7 +1686,7 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	// Dump 10's prompt is the prompt this run built, byte for byte: for the
 	// main fixture, user_message.txt as written to disk.
 	want := []byte(prompt)
-	if golden {
+	if mode == kvModeMain {
 		um, err := os.ReadFile(filepath.Join(dir, "user_message.txt"))
 		if err != nil {
 			t.Fatal(err)
@@ -1500,15 +1700,26 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	head := fmt.Sprintf("block\tprompt\t%d\n", len(want))
 	i := bytes.Index(d10b, []byte(head))
 	if i < 0 || !bytes.Equal(d10b[i+len(head):], append(append([]byte(nil), want...), '\n')) {
-		if golden {
+		if mode == kvModeMain {
 			t.Fatal("10-prompt.txt's prompt block is not user_message.txt")
 		}
 		t.Fatal("10-prompt.txt's prompt block is not the prompt this run built")
 	}
 
-	if golden {
-		t.Logf("wrote 4 golden files under %s and 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d shared lines",
-			dir, dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), len(shared))
+	switch mode {
+	case kvModeCluster:
+		kvCheckCluster(t, prompt)
+	case kvModeRegistry:
+		kvCheckRegistry(t, d3.b.String(), d9.b.String())
+	}
+	if mode != kvModeLogs {
+		if mode == kvModeMain {
+			t.Logf("wrote 4 golden files under %s and 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d shared lines",
+				dir, dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), len(shared))
+		} else {
+			t.Logf("wrote 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d shared lines",
+				dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), len(shared))
+		}
 		return
 	}
 
@@ -1578,4 +1789,76 @@ func kvCapture(t *testing.T, fixturePath, dir, dumpName string, golden bool) {
 	}
 	t.Logf("wrote 11 dumps under %s; %d workloads in the fixture, %d shown, %d in scope, %d reads, %d of them log reads",
 		dumpDir, len(fx.Workloads), len(wl), len(scoped), len(trail), logReads)
+}
+
+// kvCheckCluster fails unless the prompt shows every line the CLUSTER
+// fixture exists to capture.
+func kvCheckCluster(t *testing.T, prompt string) {
+	t.Helper()
+	for _, s := range []string{
+		"Cluster health (P1): DEGRADED — 11/16 nodes Ready.",
+		"  node n01 NotReady: KubeletNotReady — container runtime network not ready: cni plugin not initialized on this node; the kubelet keeps retrying the sandbéx sta…\n",
+		"  node n02 NotReady: NodeStatusUnknown — Kubelet stopped posting node status.\n",
+		"  node n03 NotReady: PLEG is not healthy: pleg was last seen active 3m0s ago\n",
+		"  node n04 NotReady\n",
+		"  node n05 no kubelet lease", "  node n06 no kubelet lease",
+		"(lease 40s stale)", "(lease 43s stale)", "(lease 1m35s stale)",
+		"(lease 1h0m0s stale)", "(lease 1h1m40s stale)",
+		"  node n13 MemoryPressure\n  node n13 PIDPressure\n",
+		"  node n14 SchedulingDisabled",
+		"  node n15 DiskPressure\n  node n15 NotReady: KubeletNotReady — container runtime is down\n  node n15 SchedulingDisabled\n",
+		"  system kube-system/ks-cron Last run failed",
+		"network policy: pods selected by allow-web, deny-web",
+		// The ten service lines the prompt keeps: the five wordings of
+		// AnnotateEndpointCause, then the plain ones. s11 to s13 are past the cap.
+		"  - svc/s01 (ClusterIP): no ready endpoints — matching pods on down node n01 (NotReady)\n",
+		"  - svc/s02 (ClusterIP): no ready endpoints — matching pods on 2 down nodes\n",
+		"  - svc/s03 (ClusterIP): no ready endpoints — 1 matching pod, 0 ready\n",
+		"  - svc/s04 (ClusterIP): no ready endpoints — 3 matching pods, 0 ready\n",
+		"  - svc/s05 (ClusterIP): no ready endpoints — the selector matches no pods\n",
+		"  - svc/s06 (LoadBalancer): no external address\n",
+		"  - svc/s07 (ClusterIP): no ready endpoints\n",
+		"  - svc/s08 (ClusterIP): no ready endpoints — declared via kubeagent.io/expected-empty\n",
+		"  - svc/s09 (ClusterIP): no ready endpoints (backs CronJob — expected between runs)\n",
+		"  - svc/s10 (ClusterIP): no ready endpoints (backs Job — expected between runs)\n",
+	} {
+		if !strings.Contains(prompt, s) {
+			t.Errorf("cluster prompt is missing %q", s)
+		}
+	}
+	for _, s := range []string{"  node n12 ", "  node n16 ", "other-ns-policy", "svc/s11", "svc/s12", "svc/s13"} {
+		if strings.Contains(prompt, s) {
+			t.Errorf("cluster prompt shows %q, which must not print", s)
+		}
+	}
+	if got := strings.Count(prompt, "\n  system kube-system/"); got < 11 {
+		t.Errorf("%d system lines, want every flagged kube-system workload (at least 11)", got)
+	}
+}
+
+// kvCheckRegistry fails unless the candidate dump holds both registry
+// verdicts of the attribution pass (the pull threshold met, and not met) and
+// the decide dump holds every outcome the rules give a registry candidate.
+func kvCheckRegistry(t *testing.T, candidates, decide string) {
+	t.Helper()
+	for _, s := range []string{
+		"only workload failing to pull from this host; threshold is 2",
+		"workloads failing to pull from this host clear the threshold of 2",
+	} {
+		if !strings.Contains(candidates, s) {
+			t.Errorf("registry candidate dump is missing %q", s)
+		}
+	}
+	for _, s := range []string{
+		"\tconfirmed\t", "\tunverified\t", "\trefuted\t",
+		"a pull event shows a connection error: dial tcp",
+		"a pull event shows an auth error: unauthorized; that can be one image or the whole host",
+		"a pull event shows an image error: manifest unknown; this pull fails for this image, not the host",
+		"no pull event names the failure; events may have aged out",
+		"events of the pulling pod were not read",
+	} {
+		if !strings.Contains(decide, s) {
+			t.Errorf("registry decide dump is missing %q", s)
+		}
+	}
 }

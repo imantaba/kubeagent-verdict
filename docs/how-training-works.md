@@ -89,8 +89,8 @@ proportions, and each kind teaches one specific skill:
 | `multi` | 13% | Several broken workloads in one question, each broken for its **own separate reason** |
 | `truncated` | 5% | The evidence was cut short. Answer honestly and lower your confidence. |
 | `empty_candidates` | 5% | Nothing is actually wrong. Do not invent a problem. |
-| `shared_origin` | 15% | Several broken workloads, all downstream of one thing — name that thing on every one (in the rules' own words where the rules checked it), and call it one shared cause only when the rules confirm it |
-| `shared_origin_decoy` | 15% | The *same* question with the one thing shown **healthy** — so the answer is separate reasons after all |
+| `shared_origin` | 15% | Several broken workloads, all downstream of one thing. Name that thing on a workload only when that workload's own lines show it, and answer `none_of_these` when they do not. Call it one shared cause only when the rules confirm it, or when two or more workloads' own lines show the link |
+| `shared_origin_decoy` | 15% | The *same* story with the one thing shown **healthy**. Each workload's answer is its own cause when its lines show one, and `none_of_these` when they do not |
 
 Those last two rows are new, and they are one row really: every
 `shared_origin` question is generated together with its `shared_origin_decoy`
@@ -106,6 +106,10 @@ The generator then splits everything into three piles:
 2026-09-28 with `--seed 17 --size 8000`. It replaced `out/dataset-0926`
 that day, and the three counts did not move. Before 2026-09-26 the three
 piles were 6,496, 655 and 252.)
+
+*Update, 2026-10-04 (Spec 4b-1).* The bank is now `out/dataset-1004`, built
+the same way. It has 6,439 train questions and 739 validation questions. The
+exam is still 249 questions. The numbers above stay as history.
 
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
@@ -210,7 +214,7 @@ built specifically to catch a model that is cheating rather than reasoning:
 | `misattribution_probe` | 20 | A model that leans on the candidate menu instead of naming its own cause. Every candidate is ruled out, so there is no tag to trust. | 2 |
 | `multi_misattribution_probe` | 20 | Two workloads at once. 34 of the 40 candidate menus attribute a decoy that a fresh read refutes, and the other 6 rule out every candidate — so trusting the tag anywhere in a multi-workload prompt still loses. | 2, plus 3 |
 | `shared_origin_probe` | 10 | A model that always says workloads fail **independently**. Here they do not. | 1 or 2, plus 3 |
-| `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* ten scenarios: same workloads, same candidate menus, same order. Only the reads differ — here the cluster-wide thing is **healthy**, so the answer really is separate causes. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
+| `shared_origin_decoy_probe` | 10 | The mirror of the row above, from the *same* six stories: the same fault, with the cluster-wide thing **healthy**. The lines differ, because each world is built from kubeagent's own steps. Each workload's answer is its own cause, or `none_of_these`. A model that learned "say shared" scores zero. | 1 or 2, plus 3 |
 | `contradiction_probe` | 17 | Evidence that contradicts itself. | 1, always decided |
 | the other 7 slices: `attributed`, `own_cause`, `wrong_attribution`, `truncated`, `injection`, `empty_candidates`, `none_of_these` | 155 | Ordinary competence on the seven single-workload question types (all but `multi` and the `shared_origin` pair) | 1 or 2 |
 
@@ -388,6 +392,14 @@ because the symptoms are byte-identical. Scenario identity cannot, because
 every scenario is now taught under both answers. The safety filter keeps each
 pair together (both halves carry the same group key), so the balanced core
 survives it exactly: **169 against 169.**
+
+*Update, 2026-10-04 (Spec 4b-1).* The twins are no longer line-for-line
+copies. Each world is now built by running kubeagent's own steps on a story,
+so the lines change with the fault. A broken world shows the fault in the
+victims' own lines. A healthy world shows the same story with the one thing
+healthy. Each workload's answer is its own cause when its lines show one,
+and `none_of_these` when they do not. Every question is still asked in both
+worlds. The text above describes the first design, and it stays as history.
 
 **Change 3 — we paid for it out of the mix, not by growing it.**
 

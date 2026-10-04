@@ -15,7 +15,7 @@ import random
 import re
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import names, rules
+from kubeagent_verdict.dataset import health, names, rules
 from kubeagent_verdict.dataset import objects as o
 from kubeagent_verdict.dataset.objects import drop, refute, unverify
 
@@ -24,7 +24,7 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # has a window where an already-imported name looks unused.
 __all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
            "draw_ending", "drop", "header_for", "prompt_meta", "refute",
-           "unverify", "workload_meta"]
+           "rule_rationale", "unverify", "workload_meta"]
 
 MAX_PROMPT_BYTES = 64 * 1024
 
@@ -246,38 +246,12 @@ _NODE_CAUSE = re.compile(r"^node ([^ ()]+) \((.+)\)$")
 _DESCRIBE_NODE = "describe node /"
 
 
-def _trim_line(s: str, limit: int) -> str:
-    """A port of `trimLine` (clusterhealth.go:218-229): the first line,
-    stripped, cut to `limit` runes plus an ellipsis when it is longer."""
-    i = s.find("\n")
-    if i >= 0:
-        s = s[:i]
-    s = s.strip()
-    if len(s) > limit:
-        return s[:limit] + "…"
-    return s
-
-
-def _not_ready_issue(reason: str, message: str) -> str:
-    """A port of `notReadyIssue` (clusterhealth.go:197-216): `NotReady`,
-    plus the condition's reason and its trimmed message when they are
-    there. kubeagent passes both through `safetext.Line` first
-    (clusterhealth.go:181); the caller here does the same or passes
-    constants."""
-    s = "NotReady"
-    m = _trim_line(message, 120)
-    if reason and m:
-        s += ": " + reason + " — " + m
-    elif reason:
-        s += ": " + reason
-    elif m:
-        s += ": " + m
-    return s
-
-
-def _flagged(w: c.Workload) -> bool:
-    """A port of `Workload.Flagged` (inventory/inventory.go:102-104)."""
-    return len(w.findings) > 0 or w.ready < w.desired or w.status == "Failed"
+# Kept for the callers that import these names from render (the checker's
+# docs, tests/test_checker.py, tests/test_cluster_health.py and
+# tests/test_gather_byte_equal.py). The code lives in health.py.
+_trim_line = health.trim_line
+_not_ready_issue = health.not_ready_issue
+_flagged = health.flagged
 
 
 def cluster_health(workloads: tuple[c.Workload, ...],
@@ -311,6 +285,9 @@ def cluster_health(workloads: tuple[c.Workload, ...],
 
     With no node issue and no system issue the cluster is Healthy and
     kubeagent prints no block, so this returns None.
+
+    It builds synthetic nodes from the candidates and hands them to
+    `health.assess`, the port the CLUSTER capture pins.
     """
     reasons: dict[str, set[str]] = {}
     for w in workloads:
@@ -318,29 +295,48 @@ def cluster_health(workloads: tuple[c.Workload, ...],
             m = _NODE_CAUSE.match(cand.cause)
             if m:
                 reasons.setdefault(m.group(1), set()).add(m.group(2))
-    system = []
-    flagged = [w for w in workloads if w.namespace == _SYSTEM_NAMESPACE and _flagged(w)]
-    for w in sorted(flagged, key=lambda w: (w.name, w.kind)):
-        if w.kind in ("Job", "CronJob"):
-            system.append(f"{w.namespace}/{w.name} {w.status}")
-        else:
-            system.append(f"{w.namespace}/{w.name} {w.ready}/{w.desired} {w.status}")
-    if not reasons and not system:
-        return None
     named = set(reasons) | {r.label[len(_DESCRIBE_NODE):] for r in reads
                             if r.label.startswith(_DESCRIBE_NODE)}
-    total = max(_MIN_NODES, len(named) + 1)
-    node_issues = []
-    for name in sorted(reasons):
-        unknown = reasons[name] - {"NotReady", _NO_LEASE}
+    nodes = []
+    for name in sorted(named):
+        rs = reasons.get(name, set())
+        unknown = rs - {"NotReady", _NO_LEASE}
         if unknown:
             raise ValueError(f"node {name}: no cluster-health text for reason "
                              f"{min(unknown)!r}")
-        if "NotReady" in reasons[name]:
-            node_issues.append(name + " " + _not_ready_issue(o.NOT_READY_REASON,
-                                                             o.NOT_READY_MESSAGE))
+        if "NotReady" in rs:
+            nodes.append(health.Node(name, (health.Condition(
+                "Ready", "False", o.NOT_READY_REASON, o.NOT_READY_MESSAGE),)))
+        elif rs:
+            nodes.append(health.Node(name, (health.READY,), lease="missing"))
         else:
-            node_issues.append(name + " " + _NO_LEASE)
-    not_ready = sum(1 for rs in reasons.values() if "NotReady" in rs)
-    return c.ClusterHealth(degraded=True, nodes_ready=total - not_ready, nodes_total=total,
-                           node_issues=tuple(node_issues), system_issues=tuple(system))
+            nodes.append(health.Node(name, (health.READY,)))
+    total = max(_MIN_NODES, len(named) + 1)
+    # Healthy nodes the prompt never names. They print nothing; only the
+    # count T sees them. The leading space keeps them off any real name.
+    nodes += [health.Node(f" healthy-{i}", (health.READY,)) for i in range(total - len(nodes))]
+    block, _down = health.assess(nodes, workloads)
+    return block
+
+
+_NOUN = {"node": "node", "pvc": "claim", "registry": "registry"}
+
+
+def rule_rationale(result: rules.Result) -> str:
+    """A decided rule row's rationale, built from the rules' own evidence.
+
+    Every rule row's cause comes straight from `rules.decide` (never a
+    hand-written string), so the rationale explaining it must agree with
+    the same evidence the rules found -- this is what makes that true.
+    `result.outcome` is always "confirmed" or "unverified" here:
+    `rules.decide` never returns a decided Result with any other outcome.
+    """
+    kind, name = result.cause.split(" ", 2)[:2]
+    noun = _NOUN[kind.lower()]
+    evidence = result.evidence[0].lower() + result.evidence[1:]
+    if result.outcome == "confirmed":
+        return (f"The fresh read of {noun} {name} confirms it: {evidence}, "
+                f"so the {noun}'s own state is why the flagged workload is failing.")
+    return (f"The fresh read of {noun} {name} did not clear the earlier finding: "
+            f"{evidence}, so {name} stays the named cause rather than something "
+            f"the read ruled out.")

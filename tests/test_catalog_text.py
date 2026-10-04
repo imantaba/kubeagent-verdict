@@ -138,11 +138,17 @@ def test_a_not_ready_node_with_other_text_is_refused():
         r.read_text(_node(fresh), ns="shop", pod="p")
 
 
-def test_an_unknown_node_is_refused():
-    # No dataset node that reaches a read is Unknown, and there is no
-    # kubelet text for one: the kubelet is the thing that stopped talking.
-    with pytest.raises(ValueError, match="Unknown"):
-        r.read_text(_node(o.Fresh(ready="Unknown")), ns="shop", pod="p")
+def test_an_unknown_node_prints_the_node_controllers_text():
+    # 2026-10-03: the unresponsive-kubelet story needs it. The kubelet stopped
+    # talking, so the node lifecycle controller marks every condition Unknown
+    # (NodeStatusUnknown, "Kubelet stopped posting node status.").
+    _, content = r.read_text(_node(o.Fresh(ready="Unknown")), ns="shop", pod="p")
+    assert content == (
+        "node worker-2: unschedulable=false\n"
+        "  condition MemoryPressure=Unknown (NodeStatusUnknown): Kubelet stopped posting node status.\n"
+        "  condition DiskPressure=Unknown (NodeStatusUnknown): Kubelet stopped posting node status.\n"
+        "  condition PIDPressure=Unknown (NodeStatusUnknown): Kubelet stopped posting node status.\n"
+        "  condition Ready=Unknown (NodeStatusUnknown): Kubelet stopped posting node status.\n")
 
 
 def test_a_node_with_no_conditions_prints_its_header_and_taints():
