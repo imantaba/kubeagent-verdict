@@ -1154,7 +1154,12 @@ def test_every_job2_header_follows_kubeagents_rule():
 
 # 2026-10-03 (Spec 4b-1): measured on main @ ff6527e. The rewrite moves
 # only the 20 shared-origin exam rows; the other 229 must not move.
-OTHER_FAMILIES_SHA256 = "09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a"
+# 2026-10-04 (Spec 4b-2): the catalog gold rests on anchors in own lines. It
+# moves these 229 rows' answers and meta (reasons, causes, confidence, two
+# entries' keys), not their prompts (Plan ruling 6; tests/test_catalog_gold.py).
+# 09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a ->
+# 745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a
+OTHER_FAMILIES_SHA256 = "745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a"
 
 
 def test_the_other_families_exam_rows_did_not_move():

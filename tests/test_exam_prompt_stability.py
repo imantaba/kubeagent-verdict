@@ -8,6 +8,11 @@ the QUESTIONS are the same ones the model saw. This module is that
 proof: regenerate the exam and compare `messages` row for row, byte for
 byte.
 
+Until 2026-10-04 (Spec 4b-2) it pointed at `out/dataset-1004/test.jsonl`.
+The exam's gold answers moved (catalog gold rests on anchors in own lines);
+its prompts did not. tests/test_catalog_gold.py proves no prompt byte moved
+against out/dataset-1004. The bank is now `out/dataset-1004-4b2/test.jsonl`.
+
 Until 2026-10-04 it pointed at `out/dataset-0928/test.jsonl`. Spec 4b-1
 (2026-10-03-shared-origin-rewrite-design.md) rebuilds the 20
 shared-origin exam rows on kubeagent's real pipeline: 20 of their user
@@ -58,7 +63,11 @@ from kubeagent_verdict.dataset import generate
 # exam user messages moved; re-pointed, dataset-0926 -> dataset-0928
 # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows are rebuilt on real
 # lines; re-pointed, dataset-0928 -> dataset-1004
-BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-1004" / "test.jsonl"
+# 2026-10-04 (Spec 4b-2): the exam's gold answers moved (catalog gold rests on
+# anchors in own lines); its prompts did not -- tests/test_catalog_gold.py
+# proves no prompt byte moved against out/dataset-1004. Was
+# out/dataset-1004/test.jsonl.
+BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-1004-4b2" / "test.jsonl"
 
 pytestmark = pytest.mark.skipif(
     not BANK.exists(), reason=f"banked exam not present at {BANK}")
