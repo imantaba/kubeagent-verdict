@@ -1021,10 +1021,11 @@ against these.
    and 12 of 12 in the exam; across every case, 3,151 of 3,151 decided
    workloads in train. Before, on `out/dataset-0929`: 540 of 540 decided
    family workloads in train, 54 of 54 in val and 30 of 30 in the exam;
-   across every case, 3,074 of 3,074 decided workloads in train. These two
-   are counted by one rule on both builds. The numbers in the text above
-   were counted another way, so read the two against each other and not
-   against that text.)
+   across every case, 3,074 of 3,074 decided workloads in train. The 617 and
+   3,151 figures above, and the 540 and 3,074 before them, are counted by
+   one rule on both builds. The numbers in the text above were counted
+   another way, so read the two against each other and not against that
+   text.)
 6. **A broken twin is labelled "shared" only when the prompt shows why.**
    (Rewritten 2026-10-04, Spec 4b-1. The limit used to say that plain broken
    twins always deny a shared cause. That is no longer true.) A story is one
@@ -1035,14 +1036,16 @@ against these.
    two cases. The rules confirm one cause on 2 or more workloads. Or 2 or
    more victims show the origin's link in their own lines. Every other row
    is labelled "none". That covers every healthy world, and every
-   "unverified" twin, where the origin read fails and the rules can neither
-   confirm nor deny. In train, 35 plain stories give 860 pairs, and 6 ruled
-   stories give 220 pairs. Of the plain pairs, 509 are labelled "shared" and
-   325 "none". Of the ruled pairs that are not "unverified", 197 are
-   "shared" and 0 are "none". A further 49 ruled pairs are "unverified", and
-   43 of those carry the label "none". In val, 65 plain pairs and 17 ruled
-   pairs are labelled "shared". Every story keeps at least 12 pairs in
-   train, a bar a test holds. The lowest story has 20 and the highest has
+   "unverified" twin where fewer than 2 victims show the link. An
+   "unverified" twin is one where the origin read fails, so the rules can
+   neither confirm nor deny. In train, 35 plain stories give 860 pairs, and
+   6 ruled stories give 220 pairs. Of the plain pairs, 509 are labelled
+   "shared" and 325 "none", and 26 more are "unverified". Of the ruled
+   pairs, 197 are "shared" and 23 are "unverified". Of the 49 "unverified"
+   pairs, 43 carry "none". The other 6 are plain pairs where 2 or more
+   victims show the link, so they are "shared". In val, 66 plain pairs and
+   17 ruled pairs are labelled "shared". Every story keeps at least 12 pairs
+   in train, a bar a test holds. The lowest story has 20 and the highest has
    39. The risk is a cue. If a story's name decided its label, a model could
    learn the name and skip the evidence. A test checks that 20 plain stories
    end mostly "shared" and 14 end mostly "none" (1 tied), at least 5 each,

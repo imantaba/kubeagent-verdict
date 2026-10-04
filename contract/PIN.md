@@ -841,11 +841,10 @@ the why is recorded.
     `expected_cause` on 209 rows (was 209) and `expected_confidence` on 209
     rows (was 219).
   - Labels, was none 15, shared 5; now none 13, shared 7.
-  - Origins, was `coredns-down`, `networkpolicy-deny-all`,
-    `node-disk-pressure`, `node-not-ready`, `registry-unreachable`,
-    `storage-provisioner-down`; now `coredns-down`,
-    `networkpolicy-deny-all`, `node-disk-pressure`, `node-not-ready`,
-    `registry-unreachable`, `storage-provisioner-down`.
+  - Origins: unchanged. The 20 rows come from the same six stories,
+    `coredns-down`, `networkpolicy-deny-all`, `node-disk-pressure`,
+    `node-not-ready`, `registry-unreachable` and
+    `storage-provisioner-down`.
   - The oracle's job counts, with the gold reply as the model's reply (every
     one is full marks): job 1 120 → 102 workloads, job 2 177 → 197
     workloads, job 3 40 rows (none 35, separate 0, shared 5) → 40 rows (none

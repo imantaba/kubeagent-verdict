@@ -107,6 +107,10 @@ The generator then splits everything into three piles:
 that day, and the three counts did not move. Before 2026-09-26 the three
 piles were 6,496, 655 and 252.)
 
+*Update, 2026-10-04 (Spec 4b-1).* The bank is now `out/dataset-1004`, built
+the same way. It has 6,439 train questions and 739 validation questions. The
+exam is still 249 questions. The numbers above stay as history.
+
 The split is not random row-by-row. It is by *scenario family*: if a particular
 broken workload appears in the exam, every training question that touches that
 same workload is thrown away. That job is done by a function called
