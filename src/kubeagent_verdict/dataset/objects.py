@@ -70,6 +70,9 @@ NOT_READY_REASON = "KubeletNotReady"
 NOT_READY_MESSAGE = "container runtime is down"
 NODE_NOT_READY = Fresh(ready="False", ready_reason=NOT_READY_REASON,
                        ready_message=NOT_READY_MESSAGE)
+# A node whose kubelet stopped posting status: the node lifecycle controller
+# marks it Ready=Unknown (rules._node_conditions prints its text).
+NODE_UNKNOWN = Fresh(ready="Unknown")
 
 
 @dataclass(frozen=True)

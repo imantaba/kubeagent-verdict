@@ -4,7 +4,7 @@ import random
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import health, rules, stories
+from kubeagent_verdict.dataset import gold, health, rules, stories
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.checker import LOG_CAUSE_PREFIX, LOG_CAUSES
@@ -220,7 +220,13 @@ def test_node_r_stories_describe_the_down_node(key):
     b, h = _twins(key)
     assert all(r.result.decided for r in b.rows)
     assert f"describe node /{b.draw.scope_value}" in b.user
-    assert "NotReady" in b.user and "NotReady" not in h.user
+    assert "NotReady" not in h.user
+    if key == "node-kubelet-halted":
+        assert "NotReady" in b.user
+    else:
+        # 2026-10-03: this node is Ready at scan time and the kubelet stopped
+        # renewing its lease, so its story never says NotReady (see below).
+        assert "kubelet not heartbeating" in b.user
 
 
 def test_unresponsive_node_carries_a_lease_older_than_the_threshold():
@@ -230,6 +236,36 @@ def test_unresponsive_node_carries_a_lease_older_than_the_threshold():
     st = stories.by_key()["node-kubelet-unresponsive"]
     assert st.broken.lease == "renewed" and st.broken.lease_age_ms == 95_000
     assert st.broken.lease_age_ms > health.THRESHOLD_MS
+
+
+def test_unresponsive_node_read_agrees_with_a_node_that_stopped_heartbeating():
+    """The scan sees a Ready node with a stale lease, and the fresh read finds
+    the node controller's Ready=Unknown (Kubelet stopped posting node status)
+    -- never the kubelet's own "container runtime is down", which is the
+    halted story's text."""
+    b, h = _twins("node-kubelet-unresponsive")
+    assert "kubelet not heartbeating (lease 1m35s stale)" in b.user
+    assert "condition Ready=Unknown (NodeStatusUnknown): Kubelet stopped posting node status." in b.user
+    for text in ("Ready=False", "KubeletNotReady", "runtime is down", "NotReady"):
+        assert text not in b.user, text
+    assert all(r.result.outcome == "confirmed" for r in b.rows)
+    assert all(r.result.cause == f"node {b.draw.scope_value} (kubelet not heartbeating)"
+               for r in b.rows)
+    assert gold.gold_for(b).label == "shared"
+    g = gold.gold_for(b)
+    for text in ("NotReady", "Ready False", "runtime is down"):
+        assert text not in g.summary, text
+    assert "lease" in g.summary
+    assert gold.gold_for(h).label == "none"
+
+
+def test_the_two_node_r_stories_print_different_worlds():
+    halted, _ = _twins("node-kubelet-halted")
+    lease, _ = _twins("node-kubelet-unresponsive")
+    assert halted.world_name == lease.world_name == "broken"
+    assert gold.gold_for(halted).summary != gold.gold_for(lease).summary
+    assert "condition Ready=False" in halted.user
+    assert "condition Ready=Unknown" in lease.user
 
 
 def _family_rows():

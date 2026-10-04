@@ -330,6 +330,16 @@ _STORIES: tuple[Story, ...] = (
                 events=(("Failed", ("Error: RunContainerError: failed to create containerd "
                            "task: failed to create shim task: context deadline exceeded"), 3),),
                 log=NO_PREVIOUS, on_origin=True,
+                evidence_healthy=('RunContainerError: exec: "/app/serve": stat /app/serve: '
+                                  "no such file or directory"),
+                events_healthy=(("Failed", ('Error: RunContainerError: exec: "/app/serve": stat '
+                                 "/app/serve: no such file or directory"), 3),),
+                healthy=Answer(anchor="stat /app/serve: no such file or directory",
+                               cause="its container cannot start because the file /app/serve "
+                                     "is missing from the image",
+                               keys=("serve", "file"),
+                               rationale="its start event names an entrypoint file that is "
+                                         "missing"),
                 none_phrase="its container fails to start"),
             VictimText(
                 workload_kind="StatefulSet", status="ContainerCreating",
@@ -377,6 +387,10 @@ _STORIES: tuple[Story, ...] = (
                 events_healthy=(("FailedAttachVolume", ('Multi-Attach error for volume '
                            '"pvc-{pvc}" Volume is already exclusively attached to one node '
                            "and can't be attached to another"), 4),),
+                healthy=Answer(anchor="already exclusively attached to one node",
+                               cause="its volume is exclusively attached to a different node",
+                               keys=("exclusively", "attached"),
+                               rationale="its attach event says another node holds the volume"),
                 on_origin=True, none_phrase="its volume cannot attach"),
             VictimText(
                 workload_kind="DaemonSet", status="Degraded", issue="ProbeFailure",
@@ -385,10 +399,10 @@ _STORIES: tuple[Story, ...] = (
                 events=(("Unhealthy", "Readiness probe failed: dial tcp: i/o timeout", 5),),
                 on_origin=True, none_phrase="its readiness probe fails"),
         ),
-        broken=World(conditions=(_NOT_READY,), lease="renewed", lease_age_ms=95_000),
+        broken=World(conditions=(health.READY,), lease="renewed", lease_age_ms=95_000),
         healthy=World(),
-        shown_origin="node {node} is NotReady",
-        shown_cause="node {node} reports Ready False: container runtime is down",
+        shown_origin="node {node} stopped renewing its lease",
+        shown_cause="node {node} kubelet stopped renewing its lease and posting status",
         shown_remedy="Recover or drain {node}; the flagged workloads need no change.",
     ),
     Story(
@@ -400,6 +414,12 @@ _STORIES: tuple[Story, ...] = (
                 reason=_UNBOUND,
                 evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims",
                 events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims", 4),),
+                evidence_healthy="0/{nodes} nodes are available: {nodes} node(s) didn't find available persistent volumes to bind",
+                events_healthy=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} node(s) didn't find available persistent volumes to bind", 4),),
+                healthy=Answer(anchor="didn't find available persistent volumes to bind",
+                               cause="no available persistent volumes exist for its claim to bind",
+                               keys=("available", "volumes"),
+                               rationale="its scheduling event says no persistent volume is free"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
                 workload_kind="Job", status="Pending", issue="Unschedulable",
@@ -441,6 +461,12 @@ _STORIES: tuple[Story, ...] = (
                 reason=_UNBOUND,
                 evidence="0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.",
                 events=(("FailedScheduling", "0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.", 7),),
+                evidence_healthy="0/{nodes} nodes are available: {nodes} node(s) had volume node affinity conflict",
+                events_healthy=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} node(s) had volume node affinity conflict", 7),),
+                healthy=Answer(anchor="had volume node affinity conflict",
+                               cause="its volume node affinity conflicts with every node",
+                               keys=("volume", "affinity"),
+                               rationale="its scheduling event names a volume that no node fits"),
                 none_phrase="its pod cannot be scheduled"),
         ),
         broken=World(pvc_reason="MissingStorageClass", pvc_phase="Pending", pvc_class="fast-ssd"),
@@ -458,7 +484,11 @@ _STORIES: tuple[Story, ...] = (
                 reason="container cannot pull its image",
                 evidence='Back-off pulling image "{image}"',
                 events=_pull(_REGISTRY_MIRROR_UNREACHABLE),
-                events_healthy=_PULL_HEALTHY,
+                events_healthy=_pull("rpc error: code = NotFound desc = repository does not exist"),
+                healthy=Answer(anchor="repository does not exist",
+                               cause="its image repository does not exist in the registry",
+                               keys=("repository", "exist"),
+                               rationale="its pull event says the repository does not exist"),
                 pulls=True, none_phrase="its image cannot be pulled"),
             VictimText(
                 workload_kind="DaemonSet", status="ErrImagePull", issue="ErrImagePull",
@@ -497,7 +527,11 @@ _STORIES: tuple[Story, ...] = (
                 reason="container cannot pull its image",
                 evidence='failed to resolve reference for {image}',
                 events=_pull(_REGISTRY_RATE_LIMITED),
-                events_healthy=_PULL_HEALTHY,
+                events_healthy=_pull("name unknown: the image was retired by its owner"),
+                healthy=Answer(anchor="the image was retired by its owner",
+                               cause="its image name is unknown because the registry retired it",
+                               keys=("retired", "unknown"),
+                               rationale="its pull event says the image was retired"),
                 pulls=True, none_phrase="its image cannot be pulled"),
             VictimText(
                 workload_kind="Job", status="ImagePullBackOff", issue="ImagePullBackOff",
@@ -2015,6 +2049,49 @@ _STORIES: tuple[Story, ...] = (
                 events=_pull(_PULL_SECRET_EXPIRED),
                 events_healthy=_PULL_HEALTHY,
                 pulls=True, none_phrase="its job image cannot be pulled"),
+            # 2026-10-03 (T8-initpull): an init container pulling with the
+            # expired secret. Evidence follows diagnose/initcontainer.go; no
+            # registry candidate (Init: kinds never qualify), so pulls stays off.
+            VictimText(
+                workload_kind="Job", status="Init:ErrImagePull", issue="Init:ErrImagePull",
+                reason="an init container's image cannot be pulled — the pod cannot start",
+                evidence=('init container "{init_container}" (1/1): '
+                          "unauthorized: authentication token has expired"),
+                events=_pull(_PULL_SECRET_EXPIRED),
+                evidence_healthy=('init container "{init_container}" (1/1): '
+                                  "rpc error: code = NotFound desc = manifest unknown"),
+                events_healthy=_PULL_HEALTHY,
+                broken=Answer(anchor="authentication token has expired",
+                    cause="its init image pull is unauthorized because the registry "
+                                    "authentication token has expired",
+                              keys=("unauthorized", "expired"),
+                              rationale="its init pull event says the authentication token expired",
+                              link=True),
+                healthy=Answer(anchor="manifest unknown",
+                               cause="its init image manifest is unknown to the registry",
+                               keys=("manifest", "unknown"),
+                               rationale="its init pull event says the manifest is unknown"),
+                none_phrase="its init image cannot be pulled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Init:ImagePullBackOff",
+                issue="Init:ImagePullBackOff",
+                reason="an init container's image cannot be pulled — the pod cannot start",
+                evidence=('init container "{init_container}" (1/1): '
+                          'Back-off pulling image "{image}"'),
+                events=_pull(_PULL_SECRET_EXPIRED),
+                events_healthy=_PULL_HEALTHY,
+                broken=Answer(anchor="authentication token has expired",
+                              cause="its init container keeps backing off because the registry "
+                                    "authentication token has expired",
+                              keys=("authentication", "expired"),
+                              rationale="its pull event says the authentication token expired",
+                              link=True),
+                healthy=Answer(anchor="manifest unknown",
+                               cause="its init pull is backed off because the manifest is "
+                                     "unknown to the registry",
+                               keys=("manifest", "unknown"),
+                               rationale="its pull event says the manifest is unknown"),
+                none_phrase="its init image cannot be pulled"),
         ),
         broken=World(pull_literal=_PULL_SECRET_EXPIRED),
         healthy=World(),
@@ -2037,7 +2114,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="couldn't find key api-token in secret shared-credentials",
                               cause="the key api-token it reads is missing from the Secret "
                                     "shared-credentials",
-                              keys=("token", "secret"),
+                              keys=("missing", "shared"),
                               rationale="its evidence says api-token is missing from the shared Secret",
                               link=True),
                 evidence_healthy="couldn't find key legacy-token in Secret {ns}/app-secrets",

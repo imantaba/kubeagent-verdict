@@ -112,7 +112,8 @@ def _sub(text: str, n: Names | None, d: Draw) -> str:
         "scope": d.scope_value, "node": n.node if n else d.scope_value,
         "ns": n.ns if n else d.scope_value, "name": n.name if n else "",
         "pod": n.pod if n else "", "pvc": n.pvc if n else "",
-        "image": n.image if n else "", "nodes": str(len(d.nodes))})
+        "image": n.image if n else "", "nodes": str(len(d.nodes)),
+        "init_container": n.init_container if n else ""})
 
 
 def _scheduler_text(text: str, nodes: int) -> str:
@@ -220,7 +221,8 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
         for dn in down:
             o = objects.Object(kind="node", name=dn.name, scan_reason=dn.reason,
                                placement="on" if n.node == dn.name else "off",
-                               fresh=objects.NODE_NOT_READY, intent="cause")
+                               fresh=(objects.NODE_UNKNOWN if dn.reason == health.NOT_HEARTBEATING
+                                      else objects.NODE_NOT_READY), intent="cause")
             ob.append(objects.unverify(o, "read_failed") if unverified else o)
         if ei in own_pvc:
             ob.append(own_pvc[ei])

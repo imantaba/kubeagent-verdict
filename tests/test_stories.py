@@ -284,3 +284,40 @@ def test_policy_answer_keys_sit_in_the_printed_anchor_lines(key):
             assert any("network policy:" in ln for ln in anchors), (key, seed)
             for k in ans.keys:
                 assert any(k in ln for ln in anchors), (key, seed, k)
+
+
+def test_the_expired_pull_secret_story_has_init_container_pull_victims():
+    """2026-10-03 (T8-initpull): no other kept story carries Init:ErrImagePull
+    or Init:ImagePullBackOff, so the family would miss two of the sixteen kinds.
+    Their evidence follows diagnose/initcontainer.go: the init container's
+    name and position, then the waiting message."""
+    st = s.by_key()["image-pull-secret-expired"]
+    init = {v.issue: v for v in st.victims if v.issue.startswith("Init:")}
+    assert set(init) == {"Init:ErrImagePull", "Init:ImagePullBackOff"}
+    for issue, v in init.items():
+        assert v.status == issue and not v.pulls, issue
+        assert v.evidence.startswith('init container "{init_container}" (1/1): '), issue
+        assert v.broken is not None and v.healthy is not None, issue
+    built = so.build(st, so.draw(st, random.Random(1), width=len(st.victims)), world="broken")
+    for issue in init:
+        assert any(f"{issue}" in ln for ln in built.user.splitlines()), issue
+    assert 'init container "' in built.user and "{" not in built.user
+
+
+def test_every_ruled_story_gives_a_victim_a_healthy_own_cause():
+    """2026-10-03 (T8-balance): a ruled story's healthy twin used to answer
+    none_of_these on every workload, which made the broken half and the
+    healthy half of the family differ by 14 points. One victim per ruled story
+    now has a healthy text and a healthy answer, and no two stories share a
+    cause."""
+    causes = []
+    for key in s.RULED_ORDER:
+        st = s.by_key()[key]
+        owners = [v for v in st.victims if v.healthy is not None]
+        assert owners, key
+        for v in owners:
+            assert v.broken is None, (key, v.workload_kind)
+            assert any(x is not None for x in (v.events_healthy, v.evidence_healthy,
+                                               v.log_healthy)), (key, v.workload_kind)
+            causes.append(v.healthy.cause)
+    assert len(causes) == len(set(causes))
