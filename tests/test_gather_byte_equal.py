@@ -43,7 +43,7 @@ import yaml
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
-from kubeagent_verdict.dataset import cases, gather, render, rules
+from kubeagent_verdict.dataset import cases, gather, health, render, rules
 from kubeagent_verdict.dataset import objects as o
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -300,7 +300,44 @@ class Run:
     gathered: tuple[gather.GatherWorkload, ...]  # every shown workload, in report order
     result: gather.GatherResult
     workloads: tuple[c.Workload, ...]  # the scoped workloads, as the prompt prints them
+    cluster: c.ClusterHealth | None
     prompt: str
+
+
+def _cluster_mode(doc: dict) -> bool:
+    """The CLUSTER fixture spells out node conditions. The Python port then
+    computes the health block, the service issues and the network-policy
+    lines from the fixture's objects, the way kubeagent's scan does."""
+    return any("conditions" in n for n in doc["nodes"])
+
+
+def _labels(d: dict | None) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((d or {}).items()))
+
+
+def _health_nodes(doc: dict) -> tuple[health.Node, ...]:
+    return tuple(health.Node(n["name"], tuple(health.Condition(**x) for x in n["conditions"]),
+                             unschedulable=n.get("unschedulable", False), lease=n["lease"],
+                             lease_age_ms=n.get("lease_age_ms", 0))
+                 for n in doc["nodes"])
+
+
+def _health_pods(w: dict) -> tuple[health.Pod, ...]:
+    return tuple(health.Pod(w["namespace"], p["name"], p["node"], _labels(p.get("labels")),
+                            p.get("ready", False)) for p in w["pods"])
+
+
+def _cluster_services(doc: dict, down: tuple[health.DownNode, ...]) -> tuple[c.ServiceIssue, ...]:
+    services = tuple(health.Service(s["namespace"], s["name"], s["type"], _labels(s["selector"]),
+                                    _labels(s["annotations"]), s["lb_ingress"])
+                     for s in doc.get("services", []))
+    slices = tuple(health.EndpointSlice(s["namespace"], s["service"], tuple(s["ready"]))
+                   for s in doc.get("endpoint_slices", []))
+    backends = tuple(health.Backend(b["namespace"], b["kind"], _labels(b["labels"]), b["desired"])
+                     for b in doc.get("backends", []))
+    pods = tuple(p for w in doc["workloads"] for p in _health_pods(w))
+    issues = health.service_issues(services, slices, backends)
+    return tuple(i.contract() for i in health.annotate_endpoint_cause(issues, services, pods, down))
 
 
 @functools.cache
@@ -317,11 +354,27 @@ def run(fixture: str) -> Run:
     s = doc["summary"]
     summary = c.ResourceSummary(c.ResourceLine(**s["cpu"]), c.ResourceLine(**s["memory"]),
                                 s["metrics_available"])
-    services = tuple(c.ServiceIssue(**x) for x in doc["service_issues"])
-    prompt = cases._user_message(summary, doc["platform_line"], services, tuple(workloads),
-                                 result.reads, key=fixture)
+    if _cluster_mode(doc):
+        cluster, down = health.assess(_health_nodes(doc),
+                                      [_prompt_workload(w) for w in doc["workloads"]])
+        assert [(d.name, d.reason) for d in down] == \
+            [(n["name"], n["scan_reason"]) for n in doc["nodes"] if n["scan_reason"]]
+        policies = tuple(health.NetworkPolicy(p["namespace"], p["name"], _labels(p["pod_selector"]))
+                         for p in doc.get("network_policies", []))
+        workloads = [dataclasses.replace(pw, network_policies=health.network_policies_for(
+                         pw, _health_pods(w), policies))
+                     for pw, (_, w) in zip(workloads, shown)]
+        services = _cluster_services(doc, down)
+        prompt = c.build_user_message(cluster, summary, doc["platform_line"], services,
+                                      tuple(workloads), result.reads)
+        render.check_prompt_size(prompt, entry_or_scenario_key=fixture)
+    else:
+        cluster = render.cluster_health(tuple(workloads), result.reads)
+        services = tuple(c.ServiceIssue(**x) for x in doc["service_issues"])
+        prompt = cases._user_message(summary, doc["platform_line"], services, tuple(workloads),
+                                     result.reads, key=fixture)
     return Run(doc, tuple(shown), hidden_restarts, hidden_cron, tuple(dropped), gathered,
-               result, tuple(workloads), prompt)
+               result, tuple(workloads), cluster, prompt)
 
 
 # --- The dumps. Formatting only: every value comes from `run()`.
@@ -498,17 +551,17 @@ def dump_decide(r: Run) -> str:
 
 
 def dump_prompt(r: Run) -> str:
-    health = render.cluster_health(r.workloads, r.result.reads)
-    if health is None:
+    block = r.cluster
+    if block is None:
         # Python models no counts for a Healthy cluster: it prints no block.
         # Every fixture node is Ready then.
         total = len(r.doc["nodes"])
         out = [_rec("cluster", "Healthy", total, total)]
     else:
-        out = [_rec("cluster", "Degraded" if health.degraded else "Healthy",
-                    health.nodes_ready, health.nodes_total)]
-        out += [_rec("node_issue", x) for x in health.node_issues]
-        out += [_rec("system_issue", x) for x in health.system_issues]
+        out = [_rec("cluster", "Degraded" if block.degraded else "Healthy",
+                    block.nodes_ready, block.nodes_total)]
+        out += [_rec("node_issue", x) for x in block.node_issues]
+        out += [_rec("system_issue", x) for x in block.system_issues]
     out += [_rec("shared", line) for line in rules.shared(r.result.results)]
     out.append(_block("prompt", r.prompt))
     return "".join(out)
@@ -526,8 +579,7 @@ def test_dump0_is_the_fixture_as_python_loads_it(fixture, folder):
 
 
 @pytest.mark.parametrize("dump", DUMPS)
-# CLUSTER joins this list when the Python cluster-health code exists.
-@pytest.mark.parametrize("fixture, folder", [MAIN, LOGS, REGISTRY])
+@pytest.mark.parametrize("fixture, folder", FOLDERS)
 def test_the_dump_matches_kubeagent_byte_for_byte(fixture, folder, dump):
     want = (FIXTURES / folder / dump).read_bytes()
     got = _DUMPERS[dump](run(fixture)).encode("utf-8")
