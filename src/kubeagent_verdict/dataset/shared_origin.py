@@ -199,11 +199,14 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
         f = gather.GatherFinding(issue=t.issue, pod=f"{n.ns}/{n.pod}", container=container,
                                  log_read=_log_body(log) if reads_log else None,
                                  image=n.image if getattr(t, "pulls", False) else "")
-        events = tuple((r, _sub(m, n, d), k) for r, m, k in _pick(t, "events", healthy))
+        refused = role == "origin" and bool(origin_events_failed)
+        # gather refuses a workload with both events and events_failed set.
+        events = () if refused else tuple(
+            (r, _sub(m, n, d), k) for r, m, k in _pick(t, "events", healthy))
         gws.append(gather.GatherWorkload(
             namespace=n.ns, name=n.name, pod=n.pod, issue=t.issue, objects=tuple(ob),
             events=events, findings=(f,),
-            events_failed=origin_events_failed if role == "origin" else ""))
+            events_failed=origin_events_failed if refused else ""))
     gathered = gather.gather(gws, budget=budget)
 
     # The same fill gather.gather does (gather.py:538-541): the trace below must
