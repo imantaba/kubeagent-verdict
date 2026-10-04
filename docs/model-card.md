@@ -1141,12 +1141,13 @@ against these.
     (Closed 2026-10-04, Spec 4b-2: the answer now reads "one node is
     unschedulable (cordoned) and the others have taints the pod does not
     tolerate", with keys `unschedulable` and `taint`. Both sit on the
-    finding line the prompt prints. In the new `out/dataset-1004-4b2`,
-    rows whose reason names a fact the workload's own lines never show:
-    train 714 of 5,300 named verdicts before and 0 of 5,299 after; exam 32
-    of 241 before and 0 of 241 after. Counted as rows, reason only:
-    553, 52 and 26 rows in train, val and exam before, and 0 in all three
-    after.)
+    finding line the prompt prints. Rows whose reason
+    names a fact the workload's own lines never show: train 714 of 5,300
+    named verdicts before and 0 of 5,299 after; exam 32 of 241 before and
+    0 of 241 after. Counted as rows, reason only: 553, 52 and 26 rows in
+    train, val and exam before, and 0 in all three after. The "before"
+    numbers come from `out/dataset-1004`. The "after" numbers come from
+    the new `out/dataset-1004-4b2`.)
 11. **The job-2 guard stops a verbatim copy, not a near-copy.** (Added
     2026-09-28.) Job 2 zeroes an answer in two cases: it names one of the
     row's decoys (G2), or it holds a whole line of the workload's own

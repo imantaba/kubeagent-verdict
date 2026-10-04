@@ -276,7 +276,7 @@ def test_a_reply_built_from_the_old_init_keys_loses_the_12_init_bad_tag_workload
     """The own-keyword bot, with the two init bad-tag entries answered from
     their old lists ("tag registry", "registry tag"). The exam's 12
     workloads on those two keys lose their point: the old answer lacks
-    `init`. Every other workload keeps it. 177 of 177 -> 165 of 177."""
+    `init`. Every other workload keeps it. 197 of 197 -> 185 of 197 (rate 0.9391)."""
     # 2026-10-04 (Spec 4b-2): init-imagepullbackoff's key is now `init`, `pull`; its old answer is
     # still "registry tag", which lacks both. Was ("init", "tag", "registry").
     old = {("init", "registry", "tag"): ["tag", "registry"],

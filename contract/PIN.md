@@ -980,8 +980,10 @@ the why is recorded.
   stay.
 
   What moved, counted against `out/dataset-1004` (train / val / exam):
-  - Cause changed: 1,158 / 92 / 52 rows.
-  - Reason changed: 2,766 / 298 / 151 rows.
+  - Cause changed: 1,158 / 92 / 52 verdicts. Counted as rows: 1,118 /
+    89 / 47 rows.
+  - Reason changed: 2,766 / 298 / 151 verdicts. Counted as rows: 2,531 /
+    271 / 131 rows.
   - Moved to `none_of_these`: 1 / 0 / 0 rows.
   - Unshown facts, counted as verdicts (cause and reason both checked,
     shared-origin rows left out): train 714 of 5,300 named verdicts before,
@@ -992,8 +994,10 @@ the why is recorded.
     7.36%.
   - The checker: 0 violations of every kind in the manifest.
   - Weak pairs: 9 to 3. The key count stays 34. The 3 left are two for the
-    default-deny network policy key against the probe-failure golds, and
-    one for "deadline", "exceeded" against the containerd gold.
+    default-deny network policy key. The golds it clashes with are the
+    liveness and readiness victim golds of the shared default-deny story,
+    not the catalog `probe-failure` entry. The third is one for
+    "deadline", "exceeded" against the containerd gold.
     `node-cordon-diskfull`'s key is now "unschedulable", "taint".
   - Exam job counts, before and after: job 1 102 workloads, job 2 197
     workloads. They are the same.

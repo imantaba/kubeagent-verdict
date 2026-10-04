@@ -307,7 +307,8 @@ def _job1_example(e: CatalogEntry, n: Names, menu: tuple, case: str, *,
     go after the entry's own events. The row must be decided: an entry
     the rules leave undecided has no rule cause to be its gold, so it
     raises. The answer is the decided cause, `_rule_rationale` over the
-    rules' evidence, and the entry's confidence; `decoy_by_workload`
+    rules' evidence, and the confidence, which is always "high" for a
+    rules-decided row; `decoy_by_workload`
     holds every other candidate's cause.
     """
     gw = gather_workload(e, n, menu)
@@ -637,7 +638,8 @@ def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
     its `decided by rules:` line.
 
     The gold is the rules' decision: `result.cause`, `_rule_rationale`,
-    the entry's confidence, and the one-line rule summary. The row has one
+    the confidence (always "high" for a rules-decided row), and the
+    one-line rule summary. The row has one
     candidate, and it is the cause, so it names no decoy.
 
     What the slice checks: that the answer keeps to the rules' decision
@@ -939,8 +941,8 @@ def _thin_multi(e: CatalogEntry, n: Names, w: c.Workload, result: rules.Result,
     Three things must all hold. The rules leave the workload undecided. The
     budget ran out before the gather reached it, so it has no reads. And
     its own lines, its inventory entry and its candidate entry, miss at
-    least one keyword of its own cause. Keywords match the way the grader
-    matches them: lowercase, as substrings.
+    least one of its kit's keys (`e.answer.keys`). Keywords match the way
+    the grader matches them: lowercase, as substrings.
     """
     if result.decided or not _starved(n, reads):
         return False
