@@ -10,13 +10,13 @@ import dataclasses
 import json
 import random
 from collections.abc import Sequence
-from typing import NamedTuple
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
-from kubeagent_verdict.dataset import gather, render, rules
+from kubeagent_verdict.dataset import gather, gold, render, rules, stories
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import propagation as prop
+from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.catalog import CatalogEntry
 from kubeagent_verdict.dataset.generate import Example
 from kubeagent_verdict.dataset.names import Names
@@ -766,545 +766,100 @@ def _draw_in(rng: random.Random, ns: str | None) -> Names:
         image=f"registry.example.com/{ns}/{n.name}:{n.image.rsplit(':', 1)[1]}")
 
 
-def _propagation_names(p: prop.Propagation, rng: random.Random,
-                       count: int) -> tuple[list[Names], str | None]:
-    """One name set per victim, all agreeing on whatever the origin pins.
-
-    A node-scoped origin is only coherent if every victim really is on that
-    node, and a namespace-scoped one only if every victim really is in that
-    namespace — otherwise the row asserts a blast radius its own inventory
-    contradicts. `scope_value` is what the answer string names.
-    """
-    scope_value = None
-    if p.scope_field == "ns":
-        scope_value = rng.choice(names_mod.NAMESPACES)
-    elif p.scope_field == "node":
-        scope_value = rng.choice(names_mod.NODES)
-
-    drawn: list[Names] = []
-    seen: set[tuple[str, str]] = set()
-    for _ in range(count):
-        while True:
-            n = _draw_in(rng, scope_value if p.scope_field == "ns" else None)
-            if p.scope_field == "node":
-                n = dataclasses.replace(n, node=scope_value)
-            if (n.ns, n.name) not in seen:
-                break
-        seen.add((n.ns, n.name))
-        drawn.append(n)
-    return drawn, scope_value
+def _shared_origin_example(case: str, built: so.Built, **extra) -> Example:
+    """One family row from a built world: gold from `gold.gold_for`, meta per
+    Ruling 8, decoys per Ruling 12. `extra` adds case-specific meta keys."""
+    g = gold.gold_for(built)
+    answer_rows, metas, decoys = [], {}, {}
+    for row in built.rows:
+        rg = g.rows[row.key]
+        cause = rg.cause if rg.verdict != "none_of_these" else "none_of_these"
+        answer_rows.append({"workload": row.key, "cause": cause,
+                            "confidence": rg.confidence, "rationale": rg.rationale})
+        metas[row.key] = render.workload_meta(row.result, expected_cause=cause,
+                                              own_cause_keywords=list(rg.keys),
+                                              own_cause_must_not=[])
+        # `rules.decide` skips ruled-out candidates, so decisions and
+        # candidates do not line up: ask gold which causes the rules threw out.
+        decoys[row.key] = gold.excluded_causes(row)
+    meta = render.prompt_meta(metas, label=g.label, decoy_by_workload=decoys)
+    st, d = built.story, built.draw
+    meta.update(case=case, origin=st.key, blast_radius=st.blast_radius,
+                scope_value=d.scope_value,
+                expected={r["workload"]: r["cause"] for r in answer_rows},
+                decoy_causes=[], **extra)
+    return Example(case=case, group=built.group, system=c.SYSTEM_PROMPT, user=built.user,
+                   assistant=_answer(answer_rows, g.summary), meta=meta)
 
 
-def _victim_finding(v: prop.Victim, n: Names, healthy: bool = False) -> c.Finding:
-    sug = _suggestion(v.issue, n)
-    evidence = (v.healthy_evidence or v.evidence) if healthy else v.evidence
-    return c.Finding(
-        issue=v.issue, reason=_fmt(v.reason, n), evidence=_fmt(evidence, n),
-        log_cause=_fmt(v.log_cause, n) if v.log_cause else "",
-        next_step=sug.next_step, command=sug.command,
-    )
-
-
-def _shared_origin_row(result: rules.Result, *, healthy: bool, decoy: str,
-                       shared_cause: str,
-                       decoy_keywords: tuple[str, ...],
-                       shared_keywords: tuple[str, ...],
-                       ) -> tuple[str, str | None, list[str]]:
-    """One victim's (cause, rationale, job-2 keywords) for a shared-origin row.
-
-    A decided workload -- confirmed or unverified -- gets the rules' own
-    cause and rationale, exactly as `multi` already does (spec section 3):
-    a decided workload never disagrees with what the rules found, whatever
-    world the row is rendered in. An undecided workload keeps today's
-    answer, held fixed by `healthy` alone: the decoy in the healthy world,
-    the shared cause in the broken one. The `None` rationale tells the
-    caller to keep applying its own per-world template, since there is no
-    rules evidence to build one from.
-
-    The keyword list is decided in the SAME branch as the cause, which is
-    the point of returning it from here rather than from a second `if
-    healthy` at the call site: job 2 grades the reply against whichever
-    string this function chose, so a branch that could pick one without the
-    other is a branch that could grade an answer by another answer's words.
-    A decided workload is job 1 and is graded by echo, not by keyword, so
-    its list is empty.
-    """
-    if result.decided:
-        return result.cause, _rule_rationale(result), []
-    if healthy:
-        return decoy, None, list(decoy_keywords)
-    return shared_cause, None, list(shared_keywords)
-
-
-def _shared_origin_summary(label: str, *, healthy: bool, count: int, origin: str,
-                           shared_cause: str, remedy: str, rows: list[dict],
-                           key: str) -> list[str]:
-    """The shared-origin row's summary lines, chosen by `rules.label` rather
-    than by `healthy` alone (spec section 3).
-
-    `label == "shared"` means the rules themselves confirmed one group
-    across two or more victims: today's unchanged three-line summary.
-    `label == "separate"` cannot happen here and is refused rather than
-    silently mis-rendered -- every victim in one propagation scenario binds
-    the SAME origin object (or none), so two confirmed results always fall
-    in one `rules.shared` group; `label` only reads `separate` off a lone
-    size-1 group, which this builder cannot produce. Otherwise (`"none"`):
-    a healthy-world row whose per-workload causes are now all distinct
-    still reads as ordinary independent failures; every other `"none"` row
-    -- broken-world, or healthy with a repeated cause -- says plainly that
-    the rules did not confirm one cause on two or more workloads, and
-    carries no remedy, because none was confirmed.
-    """
-    if label == "separate":
-        raise ValueError(
-            f"{key}: rules.label returned 'separate' for a shared-origin row, "
-            "which _render_shared_origin cannot produce -- every victim in "
-            "one propagation scenario binds the same origin object (or none), "
-            "so two confirmed results always share one rules.shared group")
-    if label == "shared":
-        lines = [f"{count} workloads share one upstream cause: {origin}.",
-                f"Root cause: {shared_cause}.", remedy]
-    else:
-        causes = {r["cause"] for r in rows}
-        if healthy and len(causes) == len(rows):
-            lines = [f"{count} workloads are failing for separate reasons."]
-        else:
-            lines = [(f"{count} workloads are failing, and kubeagent's rules "
-                     "did not confirm one cause on two or more of them.")]
-        lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
-    return lines
-
-
-class _SharedOrigin(NamedTuple):
-    """Everything both shared-origin builders need, rendered once.
-
-    `shared_origin_probe` (eval) and `shared_origin` (training) must render
-    the SAME prompt shape from different scenarios -- if they diverged even in
-    read order, the probe would measure the divergence rather than the skill.
-    They differ only in the case name and the meta the scorer reads.
-    """
-
-    drawn: list[Names]
-    scope_value: str | None
-    anchor: Names
-    shared_cause: str
-    distractor_cause: str
-    decoys: list[str]
-    user: str
-    summary: str
-    group: str
-    rows: list[dict]
-    meta: dict
-
-
-def _render_shared_origin(p: prop.Propagation, rng: random.Random,
-                          victims: int | None,
-                          healthy: bool = False,
-                          unverified: bool = False) -> _SharedOrigin:
-    """Render one propagation scenario, in the broken world or the healthy one.
-
-    `healthy=True` swaps the CONTENT of the origin read for
-    `healthy_origin_content`, swaps any victim read that asserts the origin is
-    broken for its `healthy_read_content`, and takes the opposite answer: each
-    workload's own local cause, under the ordinary "separate reasons" summary.
-    Everything else is held fixed on purpose -- the same rng draw gives the
-    same names, so the candidate menus come out byte-identical, the reads
-    carry identical labels in identical order, and so does the inventory,
-    with one exception: a finding whose `evidence` names the origin's fact
-    renders its `healthy_evidence` instead, so the inventory cannot assert
-    what the reads deny. Only what the reads SAY differs, plus that one
-    evidence line, and the reads are still the only thing that may decide
-    the answer.
-
-    The menu is NOT re-tagged. The local cause keeps `attributed` and the
-    shared cause keeps `outranked` in both worlds, so "trust the attributed
-    tag" sweeps the healthy slice and scores zero on the broken one, and
-    "take the outranked candidate" does exactly the reverse. Swapping the tags
-    here would let one heuristic win both and cost the pair its whole point.
-
-    A consequence, stated rather than hidden: in the healthy world the shared
-    candidate's `reason` still asserts the broken fact -- it is the
-    deterministic pass's claim, and the read contradicts it. Resolving that in
-    favour of the read is precisely the skill this slice measures. The same
-    staleness reaches one `distractor_reason` (registry-unreachable's), which
-    is collateral rather than the subject; the healthy origin read refutes
-    that distractor on its own.
-
-    `unverified=True` (spec section 5) is a third, BROKEN-world variant: the
-    origin read fails outright rather than confirming or refuting anything.
-    It requires a node `origin_object` -- a PVC story's origin is named per
-    claim, one read per victim, and a registry story's unverified endings all
-    contradict the broken pull events the victims already show (see the
-    spec) -- and it is mutually exclusive with `healthy`, which is a
-    different, refuting world. The origin variant is still drawn, spending
-    the same rng call the healthy and plain-broken twins spend, so all three
-    stay in lockstep and a caller building more than one from the same salt
-    gets the same names and the same candidate menus. Only the origin read's
-    own content, and `objects.unverify`'s fresh read on the decided object,
-    differ.
-    """
-    if unverified and (p.origin_object is None or p.origin_object.kind != "node"):
-        raise ValueError(f"{p.key}: unverified=True requires a node origin_object "
-                         "(spec section 5) -- this story has none, or a different kind")
-    if unverified and healthy:
-        raise ValueError(f"{p.key}: unverified and healthy are different broken/healthy "
-                         "worlds and cannot both be rendered in one call")
-    count = len(p.victims) if victims is None else victims
-    if not 2 <= count <= len(p.victims):
-        raise ValueError(f"{p.key}: cannot render {count} of {len(p.victims)} victims")
-    if 1 + count > c.MAX_TOOL_CALLS:
-        raise ValueError(f"{p.key}: {count} victims plus the origin read exceeds the budget")
-
-    drawn, scope_value = _propagation_names(p, rng, count)
-    # A ruled registry story's victim images move to the origin's own host
-    # (spec section 4, "Registry hosts"): every drawn Names' image is
-    # rewritten from names.draw()'s default `registry.example.com/...` to
-    # `<host>/...`, no rng draw. For registry.example.com -- the exam's own
-    # host -- the two strings are equal, so this is a no-op and the exam's
-    # rows and hashes do not move.
-    if p.origin_object is not None and p.origin_object.kind == "registry":
-        host = p.origin_object.name
-        drawn = [dataclasses.replace(n, image=host + n.image[n.image.index("/"):])
-                for n in drawn]
-    # The pinned field is identical across `drawn`, so formatting the shared
-    # strings against any one of them yields the one answer every row repeats.
-    # The discriminating read varies inside a scenario, so what separates the
-    # two halves is the relation the contents stand for rather than two literal
-    # strings the model can memorise. Drawn from the passed-in rng, before the
-    # `healthy` branch: `generate.generate`'s shared-origin selection loop
-    # draws ONE salt and builds a separate `random.Random(salt)` for each
-    # half, so both replay an identical stream and both draw the SAME
-    # variant -- exactly the way they already draw the same names. Only when
-    # the scenario declares variants; the eval six declare none and must
-    # consume the RNG exactly as they did before.
-    broken_origin, healthy_origin = p.origin_read[1], p.healthy_origin_content
-    if p.origin_variants:
-        broken_origin, healthy_origin = rng.choice(p.origin_variants)
-    anchor = drawn[0]
-    shared_cause = _fmt(p.shared_cause, anchor)
-    shared_reason = _fmt(p.shared_reason, anchor)
-    distractor_cause = _fmt(p.distractor_cause, anchor)
-    distractor_reason = _fmt(p.distractor_reason, anchor)
-
-    workloads, rows, decoys = [], [], []
-    workloads_meta: dict[str, dict] = {}
-    decoy_by_workload: dict[str, list[str]] = {}
-    results: list[rules.Result] = []
-    # The origin read leads: the evidence for the one cause is stated once,
-    # not restated per victim, which is how a real gather would present it.
-    origin_content = healthy_origin if healthy else broken_origin
-    if unverified:
-        # Spec section 5: the origin read fails outright. `{node}` is the
-        # same anchor field the origin_object's own name template binds to
-        # below, so the read names the same node the decided cause does.
-        origin_content = 'read failed: nodes "{node}" is forbidden'
-    reads = [c.EvidenceRead(label=_fmt(p.origin_read[0], anchor),
-                            content=_fmt(origin_content, anchor))]
-    for v, n in zip(p.victims[:count], drawn):
-        # The rules pass runs FIRST, because the rendered workload carries
-        # its decision: `decided by rules: <cause> — <outcome>` is what job 1
-        # grades an echo of. The only rng draw in this block is
-        # `render.draw_ending`, and it stays the only rng draw in the loop
-        # body, so the names and the endings come out byte-identical to the
-        # order this block used to run in.
-        names_dict = dataclasses.asdict(n)
-        # A ruled registry story's scan_reason may be the literal "{count}"
-        # template (spec section 4, "Registry count"): filled in here with
-        # however many victims THIS row renders, so the rules pass's own
-        # cause line never claims a workload count the row does not show.
-        # A harmless no-op for every other story -- render.bind's .format()
-        # only consumes a key a template actually names.
-        names_dict["count"] = str(count)
-        key = f"{n.ns}/{n.name}"
-        if p.origin_object is not None:
-            decide_obj = render.bind(p.origin_object, names_dict)
-            if healthy:
-                decide_obj = dataclasses.replace(decide_obj, fresh=p.healthy_origin_fresh)
-            elif unverified:
-                # Spec section 5: `objects.unverify`'s own "read_failed"
-                # message for a node is `nodes "{name}" is forbidden` --
-                # exactly what the origin read above already says, prefixed
-                # with "read failed: " there and with "fresh read failed: "
-                # by `rules._check_node` in the rationale.
-                decide_obj = unverify(decide_obj, "read_failed")
-            decide_objects: tuple = (decide_obj,)
-        elif v.objects:
-            decoy_obj = render.draw_ending(render.bind(v.objects[0], names_dict), rng)
-            decide_objects = (decoy_obj,)
-        else:
-            decide_objects = ()
-        candidates = rules.attribute(decide_objects, ns=n.ns, pod=n.pod, issue=v.issue)
-        result = rules.decide(candidates)
-
-        decoy = _fmt(v.local_cause, n)
-        decoys.append(decoy)
-        menu = (
-            c.Candidate(cause=decoy, verdict="attributed", reason=_fmt(v.local_reason, n)),
-            c.Candidate(cause=distractor_cause, verdict=p.distractor_verdict,
-                        reason=distractor_reason),
-            c.Candidate(cause=shared_cause, verdict=p.shared_verdict, reason=shared_reason),
-        )
-        workloads.append(c.Workload(
-            namespace=n.ns, name=n.name, kind=v.workload_kind, ready=0, desired=2,
-            status=v.status, restarts=n.restarts,
-            findings=(_victim_finding(v, n, healthy=healthy),),
-            candidates=menu, confidence=v.pass_confidence,
-            network_policies=tuple(_fmt(x, n) for x in v.network_policies),
-            decided=result.decided, decided_cause=result.cause,
-            decided_outcome=result.outcome))
-        content = (v.healthy_read_content or v.read[1]) if healthy else v.read[1]
-        reads.append(c.EvidenceRead(label=_fmt(v.read[0], n), content=_fmt(content, n)))
-        row_cause, row_rationale, row_keywords = _shared_origin_row(
-            result, healthy=healthy, decoy=decoy, shared_cause=shared_cause,
-            decoy_keywords=v.own_cause_keywords,
-            shared_keywords=p.own_cause_keywords)
-        if row_rationale is None:
-            row_rationale = _fmt(v.local_reason if healthy else p.rationale, n)
-        rows.append({"workload": f"{n.ns}/{n.name}",
-                     "cause": row_cause,
-                     # The pass's own grade for its own attribution. When that
-                     # attribution is right, so is the grade -- see
-                     # `shared_origin_decoy_probe` on what that costs.
-                     "confidence": v.pass_confidence if healthy else p.confidence,
-                     "rationale": row_rationale})
-
-        # decoy_by_workload holds the decoy's cause STRING (rules.Candidate.cause),
-        # never the raw kind/name identifier. The origin-object branch carries this
-        # workload's own copy of the shared read, not a decoy, so its list is empty;
-        # the empty-objects branch produces no candidates, so its list is empty too.
-        decoy_by_workload[key] = ([] if p.origin_object is not None
-                                  else [cand.cause for cand in candidates])
-        # The keywords come from the SAME branch that chose `row_cause`, so
-        # job 2 grades this workload by the distinguishing words of the very
-        # string that is its expected answer -- the victim's own pair in the
-        # healthy world, the scenario's shared pair in the broken one. Empty
-        # only on a decided workload, which is job 1 and graded by echo.
-        # No must-not words: these keys come from propagation.py, not from a
-        # catalog entry.
-        workloads_meta[key] = render.workload_meta(
-            result, expected_cause=row_cause, own_cause_keywords=row_keywords,
-            own_cause_must_not=[])
-        results.append(result)
-
-    label = rules.label(rules.shared(tuple(results)))
-    extra_meta = render.prompt_meta(workloads_meta, label=label,
-                                    decoy_by_workload=decoy_by_workload)
-
-    group = "+".join(f"propagation:{p.key}:{n.ns}/{n.name}" for n in drawn)
-    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
-    lines = _shared_origin_summary(
-        label, healthy=healthy, count=count, origin=_fmt(p.origin, anchor),
-        shared_cause=shared_cause, remedy=_fmt(p.remedy, anchor), rows=rows,
-        key=p.key)
-    return _SharedOrigin(drawn=drawn, scope_value=scope_value, anchor=anchor,
-                         shared_cause=shared_cause, distractor_cause=distractor_cause,
-                         decoys=decoys, user=user,
-                         summary="\n".join(lines[:c.MAX_SUMMARY_LINES]),
-                         group=group, rows=rows, meta=extra_meta)
-
-
-def shared_origin(p: prop.Propagation, rng: random.Random,
-                  victims: int | None = None,
+def shared_origin(p: stories.Story, rng: random.Random, victims: int | None = None,
                   unverified: bool = False) -> Example:
     """TRAINING: the counterexample `multi` never gave the model.
 
-    Same shape as `shared_origin_probe` and deliberately so, drawn from
-    `propagation.trainable_scenarios()` -- a pool disjoint from the eval six in
-    key AND in graded answer string, so a pass on the probe still cannot be
-    explained by having seen the probe.
+    The row comes from a `stories.Story` through kubeagent's real pipeline
+    (`shared_origin.build`): the report order, one gather, the rules over every
+    candidate, the prompt. Its answers are named, decided by the rules, or
+    `none_of_these`. Drawn from `stories.trainable()` -- a pool disjoint from
+    the six exam stories in key, so a pass on the probe cannot be explained
+    by having seen the probe.
 
-    `origin_read_label` travels as meta because the negative case needs it:
-    `multi` puts the SAME label on a third of its rows with content showing the
-    component healthy, and the two sets are asserted equal. It is the RAW
-    template, not the formatted label -- `describe node {node}` renders
-    differently per row, and a set of formatted labels would never match.
-
-    `unverified=True` (spec section 5) renders the third, unverified-origin
-    world instead of the plain broken one -- see `_render_shared_origin`.
+    `unverified=True` builds the third world: the origin node's read was
+    refused, so the rules cannot confirm the cause and say so.
     """
-    r = _render_shared_origin(p, rng, victims, unverified=unverified)
-    return Example(
-        case="shared_origin", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
-        assistant=_answer(r.rows, r.summary),
-        meta={"case": "shared_origin", "origin": p.key,
-              "expected": {row["workload"]: row["cause"] for row in r.rows},
-              "expected_confidence": p.confidence,
-              "origin_read_label": p.origin_read[0],
-              **r.meta})
+    d = so.draw(p, rng, width=victims or len(p.victims))
+    return _shared_origin_example("shared_origin",
+                                  so.build(p, d, world="broken", unverified=unverified))
 
 
-def shared_origin_decoy(p: prop.Propagation, rng: random.Random,
+def shared_origin_decoy(p: stories.Story, rng: random.Random,
                         victims: int | None = None) -> Example:
-    """TRAINING: `shared_origin` with the origin READING HEALTHY.
+    """TRAINING: `shared_origin` in the story's HEALTHY world.
 
-    The counter-example `multi` could not be. A `multi` row with a healthy
-    origin read closes one shortcut -- "an origin read is present, therefore
-    one shared cause" -- and leaves a better one open, because its victims are
-    `rng.sample(entries)`: arbitrary catalog entries whose local symptoms have
-    nothing to do with the read. A `shared_origin` row's victims are the
-    scenario's OWN, and their symptoms cohere with the origin. So the two
-    classes differed in the victims as well as in the read, and "do these
-    symptoms look like they share a cause" separated them without reading the
-    origin at all.
-
-    This row is the same scenario as its twin, rendered from the same salt with
-    the origin healthy: identical workloads, identical candidate menus carrying
-    identical tags in identical order, identical read labels in identical
-    order. Only the read contents differ, and the correct answer flips with
-    them -- each workload's own local cause, under the ordinary "N workloads
-    are failing for separate reasons" summary. Every trainable scenario is now
-    taught under both answers, so nothing about the scenario predicts the
-    label.
-
-    It carries no `expected_confidence`, and that is not an omission. On the
-    shared half every victim inherits the origin's grade, so one grade
-    describes the row; here each workload keeps the deterministic pass's own
-    per-workload grade, exactly as `shared_origin_decoy_probe` does.
+    The twin of `shared_origin`, built from the same draw: the same victims
+    and names, with the origin healthy. The twins differ in at least one
+    printed line, and the correct answer flips with it -- each workload's own
+    cause, or `none_of_these` where its own lines say nothing, under a summary
+    that does not claim one shared cause. Every trainable story is taught
+    under both answers, so nothing about the story predicts the label.
     """
-    r = _render_shared_origin(p, rng, victims, healthy=True)
-    return Example(
-        case="shared_origin_decoy", group=r.group, system=c.SYSTEM_PROMPT,
-        user=r.user, assistant=_answer(r.rows, r.summary),
-        meta={"case": "shared_origin_decoy", "origin": p.key,
-              "expected": {row["workload"]: row["cause"] for row in r.rows},
-              "origin_read_label": p.origin_read[0],
-              **r.meta})
+    d = so.draw(p, rng, width=victims or len(p.victims))
+    return _shared_origin_example("shared_origin_decoy", so.build(p, d, world="healthy"))
 
 
-def shared_origin_probe(p: prop.Propagation, rng: random.Random,
+def shared_origin_probe(p: stories.Story, rng: random.Random,
                         victims: int | None = None) -> Example:
     """EVAL-ONLY: several flagged workloads, one upstream cause.
 
-    Every other multi-workload row in this repo — training and eval alike —
-    is built by `multi`, which samples DISTINCT catalog entries and summarises
-    them as "N workloads are failing for separate reasons." At release size
-    that is 825 of 5500 training rows with no counterexample anywhere, so the
-    model was trained to assert independence in exactly the prompt shape
-    `--investigate` sends. This row is the counterexample.
-
-    Four shortcuts are closed by construction, because each one would score
-    the slice without reading the evidence:
-
-    * the tag — the local decoy carries `attributed`, the shared cause carries
-      `outranked`. `multi_misattribution_probe` uses the same `attributed`
-      decoy trick, but the correct cause is never on a candidate line there,
-      so it is never `outranked` in that row;
-    * the position — the menu is deterministic and never shuffled, decoy
-      first, shared cause last;
-    * "name the string common to every menu" — a second common cause, the
-      scenario's `distractor`, sits on all N menus too and is refuted by the
-      evidence. Its effect lands in `cause_acc`; it is deliberately NOT in
-      `decoy_causes`, which measures tag-following only;
-    * "copy the bracketed confidence" — the per-workload `[confidence: X]` in
-      the prompt is the deterministic pass's grade for its own wrong local
-      attribution and varies within a row, while the expected answer is one
-      scenario-level grade.
-
-    What it cannot do is separate a model that reasons from one that has
-    memorised these six scenarios — the same limit every probe here has. That
-    holds only while the scenarios stay out of training. Training DOES teach
-    this shape now, from `propagation.trainable_scenarios()`; what keeps the
-    sentence true is that the two pools share no key and no graded answer
-    string, asserted by `tests/test_shared_origin_training.py`.
+    Every other multi-workload row in this repo is built by `multi`, which
+    samples DISTINCT catalog entries and summarises them as "N workloads are
+    failing for separate reasons." This row is the counterexample, built from
+    one of the six `stories.exam()` stories through the real pipeline. It
+    cannot separate a model that reasons from one that has memorised these
+    six stories; that holds only while they stay out of training, which
+    `stories.trainable()` and `stories.exam()` keep disjoint.
     """
-    r = _render_shared_origin(p, rng, victims)
-    return Example(
-        case="shared_origin_probe", group=r.group, system=c.SYSTEM_PROMPT, user=r.user,
-        assistant=_answer(r.rows, r.summary),
-        meta={"case": "shared_origin_probe", "origin": p.key,
-              "blast_radius": p.blast_radius, "scope_value": r.scope_value,
-              "expected": {row["workload"]: row["cause"] for row in r.rows},
-              "expected_confidence": p.confidence,
-              "decoy_causes": r.decoys, "distractor_cause": r.distractor_cause,
-              # The memorised sentence this slice exists to measure: a model
-              # that names the shared cause on every row and then summarises
-              # the workloads as independent has half-learned the correction.
-              # No scorer reads this field anymore -- job3 grades the summary
-              # against the row's own `label`, which is `shared` where the
-              # deterministic pass confirms a shared group and `none` on the
-              # rest (5 and 5 in the frozen exam). The half-learned answer
-              # scores 0 on the `shared` rows and 1.0 on the `none` rows, so
-              # this slice only penalises it half the time.
-              "wrong_summary_phrase": prop.SEPARATE_REASONS,
-              **r.meta})
+    d = so.draw(p, rng, width=victims or len(p.victims))
+    return _shared_origin_example("shared_origin_probe", so.build(p, d, world="broken"))
 
 
-def shared_origin_decoy_probe(p: prop.Propagation, rng: random.Random,
+def shared_origin_decoy_probe(p: stories.Story, rng: random.Random,
                               victims: int | None = None) -> Example:
-    """EVAL-ONLY: the same six scenarios with the origin READING HEALTHY.
+    """EVAL-ONLY: the same exam stories in their HEALTHY world.
 
     `shared_origin_probe` alone cannot tell a model that reads the evidence
-    from one that matches the label. Seven of its ten rows carry an origin read
-    label -- `describe kube-system/coredns (Deployment)`, `describe node
-    {node}` -- that appears on no other row in the exam, and on every row
-    carrying it the answer is one shared cause. So "a cluster-wide read is
-    present, therefore one shared cause" scores that slice perfectly while
-    reading nothing, and clears job 3 and the decoy rate doing it.
+    from one that matches the shape. This is the counter-example, drawn from
+    the SAME rng salt as its twin, so the two rows are a minimal contrast: the
+    same victims and names, and at least one printed line that differs. The
+    correct answer becomes each workload's own cause (or `none_of_these`), under
+    a summary that does not claim one shared cause. Job 3 grades each row
+    against its own label, so neither constant summary wins both slices.
 
-    This is the counter-example. Drawn from the SAME rng salt as its twin, so
-    the two rows are a minimal contrast: identical candidate menus, identical
-    read labels in identical order, and an identical inventory except where a
-    finding's evidence would have named the origin's fact (`healthy_evidence`
-    on the victim). Only the contents differ -- the origin read shows the
-    component healthy, and each victim read that would have asserted
-    otherwise shows its local symptom instead. The correct answer becomes each workload's own local cause, under
-    the ordinary "N workloads are failing for separate reasons" summary.
-
-    That gives the pair teeth on three axes:
-
-    * the label -- every origin read label in the exam now appears under both
-      answers, so seeing one predicts nothing;
-    * the tag -- the menu is byte-identical across the pair, decoy
-      `attributed` and shared cause `outranked` on BOTH. "Trust the attributed
-      tag" sweeps this slice and scores zero on the twin; "take the outranked
-      candidate" does exactly the reverse. Neither wins both, and the menu
-      offers no third tag;
-    * the summary -- job3 grades each row against its own label, and
-      neither constant answer wins both slices: a constant "shared origin"
-      scores 0 of 10 here and 5 of 10 on the probe twin. The twin does not
-      mirror this slice -- a constant "separate reasons" sweeps this slice
-      10 of 10 and still only reaches 5 of 10 there, because half the probe
-      rows carry label `none`, which a denial passes. `wrong_summary_phrase`
-      is deliberately ABSENT from this row's meta: independence is the CORRECT
-      summary here, and carrying it would score the right answer as a failure.
-
-    Two things this slice does NOT do, stated rather than implied.
-
-    It could not have failed the model it was written for. The 0830 model
-    answered independence on all ten twin rows, which is this slice's correct
-    answer, so it would have scored perfectly here -- and an eval change that
-    could not fail the model it replaced is not a fix. This one is not offered
-    as one. It is the second half of a pair, and the PAIR could always fail
-    0830. What it guards is the opposite failure, the one a correction trained
-    on counter-examples can plausibly introduce.
-
-    And `confidence_carried` is copyable here in a way it is not on the twin.
-    The expected grade is the deterministic pass's own per-workload grade,
-    printed in the prompt, because when the local attribution is right its
-    grade is right too. That is a property of the scenario rather than a
-    choice; inventing a different grade to defeat the copy would be inventing
-    evidence. The twin remains the row where that shortcut costs something.
+    `shared_claim_phrases` travels in meta but no scorer reads it; job 3 checks
+    the summary against score.py's own SHARED_CLAIM_PHRASES tuple.
     """
-    r = _render_shared_origin(p, rng, victims, healthy=True)
-    return Example(
-        case="shared_origin_decoy_probe", group=r.group, system=c.SYSTEM_PROMPT,
-        user=r.user, assistant=_answer(r.rows, r.summary),
-        meta={"case": "shared_origin_decoy_probe", "origin": p.key,
-              "blast_radius": p.blast_radius, "scope_value": r.scope_value,
-              "expected": {row["workload"]: row["cause"] for row in r.rows},
-              # The trap this slice sets, and the one `named_decoy` watches:
-              # the shared cause is on every menu and is now WRONG. The local
-              # decoys are the correct answers here, so they are not listed.
-              "decoy_causes": [r.shared_cause],
-              "distractor_cause": r.distractor_cause,
-              # job3's honesty check is real -- a summary that names shared
-              # phrasing only to deny it is not counted as a shared claim --
-              # but job3 never reads this field: it takes a label and a
-              # summary, and checks the summary against score.py's own
-              # SHARED_CLAIM_PHRASES tuple. This key is kept for the
-              # pinned hash blob and read by no scorer.
-              "shared_claim_phrases": list(SHARED_CLAIM_PHRASES),
-              **r.meta})
+    d = so.draw(p, rng, width=victims or len(p.victims))
+    return _shared_origin_example("shared_origin_decoy_probe", so.build(p, d, world="healthy"),
+                                  shared_claim_phrases=list(SHARED_CLAIM_PHRASES))
 
 
 def _report_order(pairs: list[tuple[CatalogEntry, Names]]) -> list[tuple[CatalogEntry, Names]]:

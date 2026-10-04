@@ -160,7 +160,7 @@ def _pull(literal: str) -> tuple[tuple[str, str, int], ...]:
 _PULL_HEALTHY = _pull(_IMAGE_SIDE)
 _REGISTRY_MIRROR_UNREACHABLE = "dial tcp: lookup registry.example.com: i/o timeout"
 _REGISTRY_RATE_LIMITED = "429 Too Many Requests: toomanyrequests: rate limit exceeded"
-_REGISTRY_UNREACHABLE = "dial tcp 10.0.0.9:443: connect: connection refused"
+_REGISTRY_UNREACHABLE = "dial tcp registry.example.com:443: connect: connection refused"
 _PULL_SECRET_EXPIRED = "unauthorized: authentication token has expired"
 _UNBOUND = "pod has unbound immediate PersistentVolumeClaims"
 
@@ -218,28 +218,27 @@ _STORIES: tuple[Story, ...] = (
                               rationale="its log read names a DNS lookup failure"),
                 log_healthy="cannot reach a dependency — connection refused",
                 healthy=Answer(anchor="log cause: cannot reach a dependency — connection refused",
-                               cause="its container crashes because a dependency refuses "
-                                     "connections",
-                               keys=("refuses", "connections"),
+                               cause="its container crashes because a dependency has connection "
+                                     "refused",
+                               keys=("refused", "dependency"),
                                rationale="its log read names a refused connection"),
                 none_phrase="its container keeps crashing"),
             VictimText(
                 workload_kind="Deployment", status="Running",
                 issue="ProbeFailure", reason="Unhealthy",
                 evidence="readiness probe failing",
-                events=(("Unhealthy", ("Readiness probe failed: Get \"http://10.0.0.1:8080/ready\": "
+                events=(("Unhealthy", ("Readiness probe failed: "
                            "lookup sessions.auth.svc.cluster.local: server misbehaving"), 6),),
                 broken=Answer(anchor="lookup sessions.auth.svc.cluster.local: server misbehaving",
                               cause="its readiness probe fails because DNS lookups are "
                                     "misbehaving",
-                              keys=("lookups", "misbehaving"), confidence="medium",
+                              keys=("lookup", "misbehaving"), confidence="medium",
                               rationale="its probe event shows a failed DNS lookup", link=True),
-                events_healthy=(("Unhealthy", ("Readiness probe failed: Get "
-                           "\"http://10.0.0.1:8080/ready\": context deadline exceeded "
-                           "after 1s"), 6),),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: "
+                           "context deadline exceeded after 1s"), 6),),
                 healthy=Answer(anchor="context deadline exceeded after 1s",
-                               cause="its readiness probe hits a timeout on a slow dependency",
-                               keys=("timeout", "dependency"), confidence="medium",
+                               cause="its readiness probe exceeded its deadline on a slow dependency",
+                               keys=("deadline", "exceeded"), confidence="medium",
                                rationale="its probe event shows a deadline exceeded"),
                 none_phrase="its readiness probe fails"),
             VictimText(
@@ -251,7 +250,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="svc.cluster.local: server misbehaving",
                               cause="its readiness probe fails because DNS lookups are "
                                     "misbehaving",
-                              keys=("lookups", "misbehaving"), confidence="medium",
+                              keys=("lookup", "misbehaving"), confidence="medium",
                               rationale="its probe event shows a failed DNS lookup", link=True),
                 events_healthy=(("Unhealthy", ("Readiness probe failed: HTTP probe failed "
                            "with statuscode: 503"), 5),),
@@ -382,7 +381,7 @@ _STORIES: tuple[Story, ...] = (
             VictimText(
                 workload_kind="DaemonSet", status="Degraded", issue="ProbeFailure",
                 reason="container's readiness probe fails from this node",
-                evidence="Readiness probe failed: dial tcp: i/o timeout",
+                evidence="readiness probe failed — connection timed out",
                 events=(("Unhealthy", "Readiness probe failed: dial tcp: i/o timeout", 5),),
                 on_origin=True, none_phrase="its readiness probe fails"),
         ),
@@ -572,7 +571,7 @@ _STORIES: tuple[Story, ...] = (
         broken=World(pull_literal=_REGISTRY_UNREACHABLE),
         healthy=World(),
         shown_origin="registry registry.example.com is unreachable",
-        shown_cause="pulls from registry.example.com fail with: dial tcp 10.0.0.9:443: connect: connection refused",
+        shown_cause="pulls from registry.example.com fail with: dial tcp registry.example.com:443: connect: connection refused",
         shown_remedy="Restore access to registry.example.com; the flagged workloads need no change.",
     ),
     Story(
@@ -891,8 +890,8 @@ _STORIES: tuple[Story, ...] = (
                                  "volume node affinity conflict"), 4),),
                 healthy=Answer(anchor="3 node(s) had volume node affinity conflict",
                                cause="its pod cannot be scheduled because its volume is "
-                                     "pinned to a zone the nodes are not in",
-                               keys=("volume", "zone"),
+                                     "pinned by its node affinity to a zone the nodes are not in",
+                               keys=("volume", "affinity"),
                                rationale="its scheduling event names a volume node affinity "
                                          "conflict on every node"),
                 none_phrase="its pod cannot be scheduled"),
@@ -963,8 +962,8 @@ _STORIES: tuple[Story, ...] = (
                                  "unpack image layer: unexpected EOF in its last layer"), 3),),
                 healthy=Answer(anchor="unexpected eof in its last layer",
                                cause="its container cannot start because its image's last "
-                                     "layer is truncated",
-                               keys=("layer", "truncated"),
+                                     "layer ends unexpectedly",
+                               keys=("layer", "unexpected"),
                                rationale="its start event shows an unexpected end of file in "
                                          "its last layer"),
                 none_phrase="its container fails to start"),
@@ -981,9 +980,9 @@ _STORIES: tuple[Story, ...] = (
                                         "while loading a library", link=True),
                 evidence_healthy="exec: unable to load shared library libssl.so.3: no such file",
                 healthy=Answer(anchor="shared library libssl.so.3: no such file",
-                               cause="its container crashes because the libssl library is "
+                               cause="its container crashes because the libssl library file is "
                                      "missing from its image",
-                               keys=("libssl", "missing"),
+                               keys=("libssl", "file"),
                                rationale="its crash evidence names a library that is missing"),
                 none_phrase="its container keeps crashing"),
             VictimText(
@@ -994,14 +993,14 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="read /etc/app/schema.sql: input/output error",
                               cause="its init container fails to read a bundled file, with an "
                                     "input/output error",
-                              keys=("bundled", "output"), confidence="medium",
+                              keys=("read", "output"), confidence="medium",
                               rationale="its init evidence shows an input/output error on a read",
                               link=True),
                 evidence_healthy="init: parse /etc/app/schema.sql: file is empty, the image ships a placeholder",
                 healthy=Answer(anchor="file is empty, the image ships a placeholder",
                                cause="its init container parses a seed file that its image "
                                      "ships as an empty placeholder",
-                               keys=("seed", "placeholder"),
+                               keys=("empty", "placeholder"),
                                rationale="its init evidence says the file is an empty placeholder"),
                 none_phrase="its init container keeps crashing"),
         ),
@@ -1100,8 +1099,8 @@ _STORIES: tuple[Story, ...] = (
                 events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) "
                                  "didn't match Pod's node affinity/selector"), 5),),
                 healthy=Answer(anchor="didn't match pod's node affinity/selector",
-                               cause="its pod asks for an instance type that no node carries",
-                               keys=("instance", "carries"),
+                               cause="its pod asks for a node selector that no node can match",
+                               keys=("selector", "match"),
                                rationale="its scheduling event says no node matches its affinity"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
@@ -1120,7 +1119,7 @@ _STORIES: tuple[Story, ...] = (
                                  "didn't match pod anti-affinity rules"), 5),),
                 healthy=Answer(anchor="didn't match pod anti-affinity rules",
                                cause="its pod anti-affinity leaves no node for another replica",
-                               keys=("anti", "replica"),
+                               keys=("anti", "affinity"),
                                rationale="its scheduling event names pod anti-affinity"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
@@ -1305,21 +1304,21 @@ _STORIES: tuple[Story, ...] = (
                 events_healthy=(("Unhealthy", ("Readiness probe failed: outbound check exceeded its "
                                  "own 900ms timeout budget"), 10),),
                 healthy=Answer(anchor="outbound check exceeded its own 900ms timeout budget",
-                               cause="its readiness probe gives up on its own short timeout budget",
-                               keys=("budget", "short"),
+                               cause="its readiness probe gives up on its own timeout budget",
+                               keys=("budget", "timeout"),
                                rationale="its probe event names its own timeout budget"),
                 none_phrase="its readiness probe fails"),
             VictimText(
                 workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
                 reason="container keeps restarting",
-                evidence="dial tcp: i/o timeout while establishing an outbound connection",
+                evidence="connect attempt hit a timeout while establishing an outbound connection",
                 events=_backoff(7), log=_NO_SIGNATURE,
-                broken=Answer(anchor="i/o timeout while establishing an outbound connection",
+                broken=Answer(anchor="hit a timeout while establishing an outbound connection",
                               cause="its container exits after a timeout while it opens an "
                                     "outbound connection",
-                              keys=("timeout", "opens"), confidence="medium",
+                              keys=("timeout", "outbound"), confidence="medium",
                               rationale="its crash evidence shows an outbound connect timing out"),
-                evidence_healthy="dial tcp: connect timeout of 200ms, set below a normal round trip",
+                evidence_healthy="connect timeout of 200ms, set below a normal round trip",
                 healthy=Answer(anchor="connect timeout of 200ms, set below a normal round trip",
                                cause="its connect timeout is set below a normal round trip",
                                keys=("connect", "round"),
@@ -1448,8 +1447,8 @@ _STORIES: tuple[Story, ...] = (
                 events_healthy=(("Failed", ("Error: secret \"{name}-credentails\" not found, a "
                                  "Secret one letter off exists in the namespace"), 5),),
                 healthy=Answer(anchor="a secret one letter off exists in the namespace",
-                               cause="its pod spec misspells the Secret name by one letter",
-                               keys=("misspells", "letter"),
+                               cause="its pod spec names a Secret that is one letter off from one that exists",
+                               keys=("letter", "exists"),
                                rationale="its event says a similar Secret name exists"),
                 none_phrase="its container cannot build its environment"),
             VictimText(
@@ -1465,8 +1464,8 @@ _STORIES: tuple[Story, ...] = (
                 events_healthy=(("Failed", ("Error: couldn't find key DB_PASSWORD in Secret "
                                  "{ns}/{name}-db, the chart now writes DATABASE_PASSWORD"), 5),),
                 healthy=Answer(anchor="the chart now writes database_password",
-                               cause="its chart renamed the key to DATABASE_PASSWORD",
-                               keys=("chart", "renamed"),
+                               cause="its chart now writes the key as DATABASE_PASSWORD",
+                               keys=("chart", "writes"),
                                rationale="its event names the renamed key"),
                 none_phrase="its init container cannot build its environment"),
             VictimText(
@@ -1548,11 +1547,11 @@ _STORIES: tuple[Story, ...] = (
             VictimText(
                 workload_kind="Job", status="Init:CrashLoopBackOff", issue="Init:CrashLoopBackOff",
                 reason="init container keeps restarting",
-                evidence="wait-for-db: dial tcp: i/o timeout reaching a pod on another node",
+                evidence="wait-for-db: timeout reaching a pod on another node",
                 events=_backoff(5),
-                broken=Answer(anchor="i/o timeout reaching a pod on another node",
-                              cause="its init wait for the database times out",
-                              keys=("database", "times"), confidence="medium",
+                broken=Answer(anchor="timeout reaching a pod on another node",
+                              cause="its wait-for-db init step hits a timeout reaching a pod",
+                              keys=("timeout", "reaching"), confidence="medium",
                               rationale="its init evidence shows a timeout reaching a pod"),
                 evidence_healthy="wait-for-db: reads a stale address file instead of the Service name",
                 healthy=Answer(anchor="reads a stale address file instead of the service name",
@@ -1757,8 +1756,8 @@ _STORIES: tuple[Story, ...] = (
                                  "\"pvc-{pvc}\": two volumeMounts name the same claim with "
                                  "conflicting options"), 4),),
                 healthy=Answer(anchor="two volumemounts name the same claim",
-                               cause="its pod mounts the same claim twice with conflicting options",
-                               keys=("twice", "conflicting"),
+                               cause="its pod mounts the same claim in two volumeMounts with conflicting options",
+                               keys=("volumemounts", "conflicting"),
                                rationale="its mount event names a doubled mount"),
                 none_phrase="its volume cannot be mounted"),
         ),
@@ -1796,7 +1795,7 @@ _STORIES: tuple[Story, ...] = (
                                  "volume held by another claim"), 5),),
                 healthy=Answer(anchor="its volumename points at a volume held by another claim",
                                cause="its claim pins a volume that another claim already holds",
-                               keys=("pins", "holds"),
+                               keys=("volume", "another"),
                                rationale="its event names a volume held by another claim"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
@@ -1809,8 +1808,8 @@ _STORIES: tuple[Story, ...] = (
                                  "immediate PersistentVolumeClaims, its claim asks for "
                                  "ReadWriteMany but the class offers ReadWriteOnce"), 5),),
                 healthy=Answer(anchor="its claim asks for readwritemany but the class offers readwriteonce",
-                               cause="its claim asks for an access mode the class cannot offer",
-                               keys=("access", "offer"),
+                               cause="its claim asks for ReadWriteMany but the class offers only ReadWriteOnce",
+                               keys=("readwritemany", "offers"),
                                rationale="its event names an access mode the class lacks"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
@@ -1819,8 +1818,8 @@ _STORIES: tuple[Story, ...] = (
                 evidence="init step waited 120s for its data volume and gave up",
                 events=_backoff(6),
                 broken=Answer(anchor="waited 120s for its data volume and gave up",
-                              cause="its init step gave up after waiting for its data volume",
-                              keys=("waiting", "volume"), confidence="medium",
+                              cause="its init step waited for its data volume and gave up",
+                              keys=("waited", "volume"), confidence="medium",
                               rationale="its init evidence says the data volume never showed up"),
                 evidence_healthy="init step polls a volume path that its last chart release renamed",
                 healthy=Answer(anchor="a volume path that its last chart release renamed",
@@ -1866,9 +1865,9 @@ _STORIES: tuple[Story, ...] = (
                 evidence_healthy="couldn't find key api-timeout in ConfigMap {ns}/checkout-settings",
                 events_healthy=(("Failed", "Error: couldn't find key api-timeout in ConfigMap {ns}/checkout-settings", 4),),
                 healthy=Answer(anchor="couldn't find key api-timeout",
-                               cause="the api-timeout key its container reads was removed from "
+                               cause="the api-timeout key its container reads is one it cannot find in "
                                      "its own ConfigMap",
-                               keys=("removed", "reads"),
+                               keys=("timeout", "find"),
                                rationale="its evidence names one missing key in its own ConfigMap"),
                 none_phrase="its container cannot build its environment"),
             VictimText(
@@ -1905,9 +1904,9 @@ _STORIES: tuple[Story, ...] = (
                 evidence_healthy="configmap {name}-revision-settings not found",
                 events_healthy=(("Failed", 'Error: configmap "{name}-revision-settings" not found', 5),),
                 healthy=Answer(anchor="configmap {name}-revision-settings not found",
-                               cause="its newest revision mounts a ConfigMap that was never "
+                               cause="its newest revision mounts a settings ConfigMap that was never "
                                      "created",
-                               keys=("revision", "mounts"),
+                               keys=("revision", "settings"),
                                rationale="its evidence names a revision-specific ConfigMap"),
                 none_phrase="its container cannot build its environment"),
         ),
@@ -2057,7 +2056,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="required credential api-token not found in environment",
                               cause="its container panics because the credential api-token it "
                                     "requires is not in its environment",
-                              keys=("panics", "credential"),
+                              keys=("panic", "credential"),
                               rationale="its crash evidence says a required credential is missing",
                               link=True),
                 evidence_healthy="panic: environment variable api-token never declared in this replica's own manifest",
@@ -2073,9 +2072,9 @@ _STORIES: tuple[Story, ...] = (
                 evidence="secret key not found for env var API_TOKEN",
                 events=(("Failed", "Error: secret key not found for env var API_TOKEN", 3),),
                 broken=Answer(anchor="secret key not found for env var api_token",
-                              cause="its init container cannot find the secret key for the env "
-                                    "var API_TOKEN",
-                              keys=("secret", "cannot"),
+                              cause="its init container reports the secret key for the env "
+                                    "var API_TOKEN was not found",
+                              keys=("secret", "found"),
                               rationale="its init event says the secret key was not found"),
                 none_phrase="its init container cannot build its environment"),
         ),
@@ -2371,7 +2370,7 @@ _STORIES: tuple[Story, ...] = (
                                  "different namespace"), 5),),
                 healthy=Answer(anchor="claim was rendered into a different namespace",
                                cause="its chart rendered the claim into a different namespace",
-                               keys=("chart", "namespace"),
+                               keys=("rendered", "namespace"),
                                rationale="its scheduling event says the claim is in another namespace"),
                 none_phrase="its pod cannot be scheduled"),
             VictimText(
@@ -2495,7 +2494,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="api version mismatch with controller",
                               cause="its volume cannot attach because the node plugin's API "
                                     "version mismatches the controller",
-                              keys=("version", "mismatches"), confidence="medium",
+                              keys=("version", "mismatch"), confidence="medium",
                               rationale="its attach event names an API version mismatch",
                               link=True),
                 evidence_healthy='AttachVolume.Attach failed for volume "{pvc}": attachment names a node removed from the cluster',
@@ -2562,7 +2561,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="wait-for-datastore gave up after 120s",
                               cause="its init container gave up waiting for the datastore "
                                     "after 120s",
-                              keys=("datastore", "waiting"),
+                              keys=("datastore", "gave"),
                               rationale="its init evidence says the datastore wait gave up"),
                 evidence_healthy="wait-for-datastore gave up after 120s, a deadline shorter than the datastore's own startup time",
                 healthy=Answer(anchor="a deadline shorter than the datastore's own startup time",
@@ -2746,7 +2745,7 @@ _STORIES: tuple[Story, ...] = (
                 evidence="wait-for-api gave up after 120s", events=_backoff(5),
                 broken=Answer(anchor="wait-for-api gave up after 120s",
                               cause="its init container gave up waiting for the API after 120s",
-                              keys=("waiting", "gave"),
+                              keys=("gave", "after"),
                               rationale="its init evidence says the API wait gave up"),
                 evidence_healthy="wait-for-api gave up after 120s: its proxy variable points at a host that was decommissioned",
                 healthy=Answer(anchor="its proxy variable points at a host that was decommissioned",

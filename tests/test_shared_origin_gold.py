@@ -193,3 +193,10 @@ def test_budget_cut_victim_falls_back_to_none_of_these():
         assert g.n == (max(linked, confirmed) if g.label == "shared" else len(b.rows))
         assert g.label == ("shared" if linked >= 2 else "none")
     assert cut_seen, "no budget in 1..8 cut a victim's anchor; the test proves nothing"
+
+
+def test_a_key_that_sits_in_no_own_line_is_refused():
+    # A typo in a story's keys used to pass: the key was in neither the
+    # anchor lines nor the excluded ones, so nothing complained.
+    with pytest.raises(ValueError, match="sits in no own line"):
+        gold.check_keys(("lookups",), anchors=["dns failed"], own=["dns failed"])

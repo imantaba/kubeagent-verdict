@@ -6,7 +6,7 @@ tests pin four things:
 - the rows pass: the golden, the seed set and the exam pool, 0 violations;
 - each rule catches something: one broken copy per rule, and no rule that
   never looks at anything;
-- the exemptions stay exactly as ruled;
+- no case is exempt: the shared-origin family is checked by every rule;
 - the checker stays independent: stdlib only, and its own copies of
   kubeagent's strings still equal the builder's.
 """
@@ -19,12 +19,23 @@ import random
 import re
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from kubeagent_verdict import contract
-from kubeagent_verdict.dataset import cases, checker, gather, generate, objects, render, rules
+from kubeagent_verdict.dataset import (
+    cases,
+    checker,
+    gather,
+    generate,
+    health,
+    objects,
+    render,
+    rules,
+    stories,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = Path(__file__).resolve().parent
@@ -278,11 +289,18 @@ def test_every_rule_has_a_broken_copy():
     assert len(checker.RULES) == len(set(checker.RULES)) == 50
 
 
+# `_source` and two other pickers keep skipping the shared-origin family so
+# each broken copy keeps the source row it had before Spec 4b-1 (the other
+# families' rows are byte-identical). The family's own rows are checked by
+# test_shared_origin_row_passes_every_rule and the manifest test.
+def _family(row: dict) -> bool:
+    return row["meta"]["case"].startswith("shared_origin")
+
+
 def _source(pick, seed_rows) -> tuple:
     if pick is None:
         return _golden()
-    row = next(r for r in seed_rows
-               if r["meta"]["case"] not in checker.EXEMPT_CASES and pick(r))
+    row = next(r for r in seed_rows if not _family(r) and pick(r))
     return _parts(row)
 
 
@@ -315,8 +333,8 @@ _CRASH_FIX = re.compile(
 def test_a_crash_findings_logs_command_names_its_own_container(seed_rows):
     """TXT-IS17 reads the container from the finding, so it guards generated
     rows too, whose workload names are drawn."""
-    row = next(r for r in seed_rows if r["meta"]["case"] not in checker.EXEMPT_CASES
-               and _CRASH_FIX.search(r["messages"][1]["content"]))
+    row = next(r for r in seed_rows
+               if not _family(r) and _CRASH_FIX.search(r["messages"][1]["content"]))
     system, user, assistant, meta = _parts(row)
     report = checker.check(system, user, assistant, meta)
     assert report.inspected["TXT-IS17"] > 0
@@ -568,22 +586,32 @@ def test_b8_exempts_a_truncated_block():
     assert "B8" not in _fired(checker.check(system, cut, assistant, meta))
 
 
-# --- the exemptions -------------------------------------------------------
+# --- no exemptions (Spec 4b-1) --------------------------------------------
 
-def test_the_exempt_cases_are_the_four_shared_origin_cases():
-    assert checker.EXEMPT_CASES == frozenset({
-        "shared_origin", "shared_origin_decoy", "shared_origin_probe", "shared_origin_decoy_probe"})
-
-
-def test_the_evidence_rules_are_as_ruled():
-    assert checker.EVIDENCE_RULES == frozenset({
-        "E1", "E2-order", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10", "E-min", "D3"})
+# The 19 rules the shared-origin family skipped until Spec 4b-1 (the old
+# EVIDENCE_RULES and PROPAGATION_TEXT_RULES). The family's rows now pass them.
+_ONCE_EXEMPT = frozenset({"E1", "E2-order", "E3", "E4", "E5", "E6", "E7", "E8", "E9", "E10",
+                          "E-min", "D3", "B1", "C1-conf", "C1-cause", "C5/D4", "D1-onefresh",
+                          "TXT-IS9", "TXT-IS11"})
 
 
-def test_the_propagation_text_rules_are_as_ruled():
-    assert checker.PROPAGATION_TEXT_RULES == frozenset({
-        "B1", "C1-conf", "C1-cause", "C5/D4", "D1-onefresh", "TXT-IS9", "TXT-IS11"})
+def test_each_once_exempt_rule_still_fires_on_its_own_bad_row(seed_rows):
+    """Each rule still fires on a bad row built for it (its BROKEN copy), and
+    a bad row whose meta names a shared-origin case fails the same way: no
+    case name turns a rule off."""
+    assert _ONCE_EXEMPT <= set(BROKEN)
+    for rule in sorted(_ONCE_EXEMPT):
+        pick, brk = BROKEN[rule]
+        system, user, assistant, meta = brk(*_source(pick, seed_rows))
+        assert rule in _fired(checker.check(system, user, assistant, meta)), rule
+        if meta is not None:
+            for case in ("shared_origin", "shared_origin_decoy", "shared_origin_probe",
+                         "shared_origin_decoy_probe"):
+                fired = _fired(checker.check(system, user, assistant, {**meta, "case": case}))
+                assert rule in fired, (rule, case)
 
+
+# --- the healthy-origin read (multi) ----------------------------------------
 
 # The evidence rules that walk the gathered reads (`_Ctx.gathered`), which
 # leave out a healthy-origin read at index 0. The checker keeps no list of
@@ -601,27 +629,6 @@ def test_a_healthy_read_is_not_flagged_by_the_rules_that_exempt_it(seed_rows):
     fired = _fired(checker.check(system, user, assistant, bare))
     assert fired
     assert fired <= _SKIPS_THE_HEALTHY_READ
-
-
-def test_each_propagation_text_rule_still_fires_with_the_exemption_off(seed_rows):
-    """The second set holds only what propagation.py's own text fails today.
-
-    Spec 4 rewrites propagation.py and removes both sets. Until then, a rule
-    it fixes must leave the set: each rule here fires on at least one
-    shared-origin row once the row stops being exempt. Nothing outside the
-    two sets fires there, and the exempt rows skip exactly the two sets.
-    """
-    shared = [r for r in seed_rows if r["meta"]["case"] in checker.EXEMPT_CASES]
-    assert shared
-    fired: set[str] = set()
-    for row in shared:
-        system, user, assistant, meta = _parts(row)
-        exempt = checker.check(system, user, assistant, meta)
-        skipped = {rule for rule, n in exempt.inspected.items() if n == 0}
-        assert checker.EVIDENCE_RULES | checker.PROPAGATION_TEXT_RULES <= skipped
-        fired |= _fired(checker.check(system, user, assistant, {**meta, "case": "multi"}))
-    assert checker.PROPAGATION_TEXT_RULES <= fired
-    assert fired <= checker.EVIDENCE_RULES | checker.PROPAGATION_TEXT_RULES
 
 
 _READ_BOUNDARY = re.compile(r"\n\n(?=== .* ==\n)")
@@ -661,7 +668,7 @@ def test_a_healthy_origin_read_at_index_1_is_caught(seed_rows):
 
 def test_meta_none_skips_only_ans1s_meta_clause_and_ans2(seed_rows):
     row = next(r for r in seed_rows
-               if r["meta"]["case"] not in checker.EXEMPT_CASES
+               if not _family(r)
                and not r["meta"].get("origin_read_label") and _has_own_keywords(r))
     system, user, assistant, meta = _parts(row)
     with_meta = checker.check(system, user, assistant, meta)
@@ -765,8 +772,6 @@ TEST_COPIES = {
     "PULL_POD_UNREAD": (checker.PULL_POD_UNREAD, lambda: _literal("test_gather.py", "WRONG_POD")),
     "CONFIDENCE_BY_PREFIX (test_generate)": (checker.CONFIDENCE_BY_PREFIX,
                                              lambda: _literal("test_generate.py", "_RULE")),
-    "EXEMPT_CASES (test_generate)": (checker.EXEMPT_CASES,
-                                     lambda: frozenset(_literal("test_generate.py", "_HEADER_EXEMPT"))),
 }
 
 
@@ -827,3 +832,68 @@ def test_the_manifest_reports_the_checkers_counts():
     assert set(counts) == {ex.case for ex in everything}
     assert set(counts.values()) == {0}
     assert list(counts) == sorted(counts)
+
+
+# --- the shared-origin family (Spec 4b-1) ---------------------------------
+
+def _so_row(key="node-not-ready", seed=1):
+    return cases.shared_origin(stories.by_key()[key], random.Random(seed))
+
+
+def _rule_fails(ex, user, rule):
+    rep = checker.check(ex.system, user, ex.assistant, ex.meta)
+    return [v for v in rep.violations if v.rule == rule]
+
+
+def test_shared_origin_row_passes_every_rule():
+    for key in ("node-not-ready", "coredns-down", "networkpolicy-deny-all"):
+        ex = _so_row(key)
+        rep = checker.check(ex.system, ex.user, ex.assistant, ex.meta)
+        assert not rep.violations, (key, rep.violations)
+
+
+def test_no_exemption_names_remain():
+    for name in ("EXEMPT_CASES", "EVIDENCE_RULES", "PROPAGATION_TEXT_RULES"):
+        assert not hasattr(checker, name)
+    assert len(checker.RULES) == 50
+
+
+def test_health_system_status_may_hold_spaces():
+    for text in ("  system kube-system/backup Last run failed",
+                 "  system kube-system/metrics-server 0/0 Scaled Down",
+                 "  system kube-system/nightly BackoffLimitExceeded (3 of 3 failed)"):
+        m = checker._HEALTH_SYSTEM.match(text)
+        assert m, text
+    m = checker._HEALTH_SYSTEM.match("  system kube-system/coredns 0/2 CrashLoopBackOff")
+    assert m.group(2, 3, 4) == ("0", "2", "CrashLoopBackOff")
+
+
+def _swap_first_two_node_lines(user, node):
+    lines = user.splitlines()
+    idx = [i for i, ln in enumerate(lines) if ln.startswith(f"  node {node} ")]
+    assert len(idx) >= 2
+    lines[idx[0]], lines[idx[1]] = lines[idx[1]], lines[idx[0]]
+    return "\n".join(lines) + "\n"
+
+
+def test_b7_mutations():
+    st = stories.by_key()["node-not-ready"]
+    # The broken node gets a second line: PIDPressure prints before NotReady.
+    pid = replace(st, broken=replace(st.broken, conditions=(
+        health.Condition("PIDPressure", "True", "", ""), *st.broken.conditions)))
+    ex = cases.shared_origin(pid, random.Random(1))
+    node = ex.meta["scope_value"]
+    assert not _rule_fails(ex, ex.user, "B7")
+    # wrong order inside a node
+    assert _rule_fails(ex, _swap_first_two_node_lines(ex.user, node), "B7")
+    # a down line with no candidate
+    extra = ex.user.replace(f"  node {node} NotReady",
+                            f"  node worker-9 NotReady\n  node {node} NotReady", 1)
+    assert _rule_fails(ex, extra, "B7")
+    # a header total below the named nodes
+    low = re.sub(r"— (\d+)/(\d+) nodes Ready", "— 0/0 nodes Ready", ex.user, count=1)
+    assert _rule_fails(ex, low, "B7")
+    # a header with no lines
+    bare = "\n".join(ln for ln in ex.user.splitlines()
+                     if not ln.startswith(("  node ", "  system "))) + "\n"
+    assert _rule_fails(ex, bare, "B7")

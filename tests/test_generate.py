@@ -1,4 +1,5 @@
 import collections
+import hashlib
 import json
 import random
 import re
@@ -1099,10 +1100,6 @@ _CANDIDATE_HEAD = re.compile(r"^- (\S+) \(\w+\)(?: \[confidence: (\w+)\])?:$")
 _ATTRIBUTED = re.compile(r"^    considered (.+): attributed — ")
 # kubeagent's `ForRootCause` (internal/confidence/confidence.go:36-47 at v1.24.0).
 _RULE = (("node ", "high"), ("PVC ", "high"), ("registry ", "medium"))
-# The shared-origin builders still hand-pass their header. This branch leaves
-# them alone (spec: "Not touched here: the shared-origin builders").
-_HEADER_EXEMPT = {"shared_origin", "shared_origin_decoy", "shared_origin_probe",
-                  "shared_origin_decoy_probe"}
 
 
 def _headers(user: str) -> dict[str, tuple[str, list[str]]]:
@@ -1124,7 +1121,7 @@ def test_every_job2_header_follows_kubeagents_rule():
     candidate gives no header."""
     checked = collections.Counter()
     for ex in generate.generate(seed=17, size=8000) + generate.test_set():
-        if ex.case in _HEADER_EXEMPT or "== BEGIN candidates ==" not in ex.user:
+        if "== BEGIN candidates ==" not in ex.user:
             continue
         headers = _headers(ex.user)
         for workload, wm in ex.meta["workloads"].items():
@@ -1137,3 +1134,15 @@ def test_every_job2_header_follows_kubeagents_rule():
             assert header == want, (ex.case, ex.group, workload)
             checked[ex.case] += 1
     assert {"multi", "multi_misattribution_probe", "wrong_attribution"} <= set(checked)
+
+
+# 2026-10-03 (Spec 4b-1): measured on main @ ff6527e. The rewrite moves
+# only the 20 shared-origin exam rows; the other 229 must not move.
+OTHER_FAMILIES_SHA256 = "09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a"
+
+
+def test_the_other_families_exam_rows_did_not_move():
+    other = [e for e in generate.test_set() if not e.case.startswith("shared_origin")]
+    assert len(other) == 229
+    blob = json.dumps([generate.to_row(e) for e in other], sort_keys=True, ensure_ascii=False)
+    assert hashlib.sha256(blob.encode("utf-8")).hexdigest() == OTHER_FAMILIES_SHA256

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from kubeagent_verdict.dataset.propagation import Propagation
+    from kubeagent_verdict.dataset.stories import Story
 
 
 @dataclass(frozen=True)
@@ -97,6 +97,10 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # likelier answer on the very prompts that name a cause. At 4% each thin
 # entry has 40 thin rows per shape, and clear rows outnumber them in every
 # cell (test_clear_rows_outnumber_thin_rows_for_every_thin_entry_and_shape).
+# 2026-10-03 (Spec 4b-1): the shared-origin halves keep 15% each, but their
+# rows now come from `stories` through kubeagent's real pipeline. The twins
+# no longer differ in an origin read: they are the broken and the healthy
+# world of one story, and they differ in at least one printed line.
 CASE_MIX = (("attributed", 6), ("none_of_these", 4), ("own_cause", 13),
             ("multi", 13), ("shared_origin", 15), ("shared_origin_decoy", 15),
             ("truncated", 5), ("injection", 10), ("empty_candidates", 5),
@@ -108,11 +112,11 @@ CASE_MIX = (("attributed", 6), ("none_of_these", 4), ("own_cause", 13),
 # shares ANY constituent — a disproportionate bite out of the training set for
 # a case the single-workload slices already cover.
 # `shared_origin` is excluded for a second reason on top of `multi`'s: its
-# examples come from `propagation.trainable_scenarios()`, and `held_out_case_set`
-# mints its rows from the TRAINING pool. Listing it here would put trainable
-# origins into the test set -- the leak the split exists to prevent, arriving by
-# the other door. The eval's shared-origin rows come from `probe_sets` and draw
-# only from `all_scenarios()`.
+# examples come from `stories.trainable()`, and `held_out_case_set` mints its
+# rows from the TRAINING pool. Listing it here would put trainable origins into
+# the test set -- the leak the split exists to prevent, arriving by the other
+# door. The eval's shared-origin rows come from `probe_sets` and draw only from
+# `stories.exam()`.
 HELD_OUT_CASES = ("none_of_these", "own_cause", "truncated", "injection",
                   "empty_candidates", "wrong_attribution")
 
@@ -131,7 +135,7 @@ def _draw(entry, rng: random.Random):
 
 
 def generate(seed: int, size: int) -> list[Example]:
-    from kubeagent_verdict.dataset import cases, catalog, propagation
+    from kubeagent_verdict.dataset import cases, catalog, propagation, stories
 
     rng = random.Random(seed)
     entries = catalog.trainable()
@@ -243,8 +247,12 @@ def generate(seed: int, size: int) -> list[Example]:
     # twin instead of the confirmed one (spec section 5); the label comes
     # out "none" either way, which is what lets a plain `shared_origin` row
     # and an unverified one share one case name and one budget.
-    plain = tuple(p for p in train_scen if p.origin_object is None)
-    ruled = tuple(p for p in train_scen if p.origin_object is not None)
+    # 2026-10-03 (Spec 4b-1): the pools are `stories.trainable()`, 35 plain
+    # stories then 6 ruled ones (`cls == "R"`), about 27 pairs per plain story
+    # and 40 per ruled story at size 8000.
+    pool = stories.trainable()
+    plain = tuple(st for st in pool if st.cls == "P")
+    ruled = tuple(st for st in pool if st.cls == "R")
     for i in range(counts["shared_origin"]):
         if i % 5 == 4:
             j = i // 5
@@ -253,23 +261,21 @@ def generate(seed: int, size: int) -> list[Example]:
             # Vary the width the way `probe_sets` does: a row that always
             # renders every victim teaches the count, not the reasoning.
             victims = 2 + (t // 3) % (len(p.victims) - 1)
-            unverified = p.origin_object.kind == "node" and t % 3 == 2
+            unverified = p.origin_kind == "node" and t % 3 == 2
         else:
             k = i - (i + 1) // 5
             p = plain[k % len(plain)]
             victims = 2 + (k // len(plain)) % (len(p.victims) - 1)
             unverified = False
         # ONE salt, drawn once and spent twice. Two `random.Random` objects
-        # built from the same seed replay the same stream, so the twins draw
-        # the same names and render the same inventory, the same candidate
-        # menus with the same tags in the same order, and the same read labels
-        # in the same order. Only the read CONTENTS differ, and the answer
-        # flips with them -- which is the whole point: the pair is a minimal
-        # contrast in the curriculum, the same instrument the exam uses.
+        # built from the same seed replay the same stream, so the twins make
+        # the same draws (`shared_origin.draw` draws everything before it
+        # branches on the world). Only the world differs -- broken or healthy --
+        # and with it at least one printed line and the answer: the pair is a
+        # minimal contrast in the curriculum, the same instrument the exam uses.
         #
-        # `unverified` never applies to the decoy twin: the healthy read it
-        # draws already refutes every victim outright, so there is no second,
-        # "could not check" world for it to render (Task 8's docstring).
+        # `unverified` never applies to the decoy twin: the healthy world has
+        # no origin candidate, so there is no "could not check" world for it.
         #
         # This loop emits both halves, so it runs `counts["shared_origin"]`
         # times and not once per row. `counts["shared_origin_decoy"]` is spent
@@ -278,8 +284,7 @@ def generate(seed: int, size: int) -> list[Example]:
         salt = rng.getrandbits(64)
         out.append(cases.shared_origin(p, random.Random(salt), victims=victims,
                                        unverified=unverified))
-        out.append(cases.shared_origin_decoy(
-            p, random.Random(salt), victims=victims))
+        out.append(cases.shared_origin_decoy(p, random.Random(salt), victims=victims))
     for i in range(counts["truncated"]):
         e = rotate_job1(i)
         out.append(cases.truncated(e, _draw(e, rng), rng))
@@ -511,10 +516,11 @@ def probe_sets() -> list[Example]:
     # assert independence in exactly the shape `--investigate` sends it, and
     # nothing here could measure that until now.
     #
-    # These rows come from `dataset.propagation`, not from the catalog, so they
-    # share no group namespace with any training row: every group is prefixed
-    # `propagation:`, `drop_held_out` drops nothing, and no training example is
-    # lost to the slice.
+    # These rows come from `dataset.stories` (`dataset.propagation` until
+    # 2026-10-03), not from the catalog, so they share no group namespace with
+    # any training row: every group is still prefixed `propagation:`,
+    # `drop_held_out` drops nothing, and no training example is lost to the
+    # slice.
     out.extend(shared_origin_probes())
 
     # APPENDED once more, same comparability rule, and the counter-example the
@@ -526,26 +532,28 @@ def probe_sets() -> list[Example]:
     # answer, drawn from the same salts so each is a minimal contrast with its
     # twin. Groups are `propagation:` too, so `drop_held_out` still drops
     # nothing and the training set does not move.
+    # 2026-10-03 (Spec 4b-1): no family row carries an origin read label any
+    # more. Each twin pair is the broken and the healthy world of one story.
     out.extend(shared_origin_decoy_probes())
     return out
 
 
 def shared_origin_probes() -> list[Example]:
-    """EVAL-ONLY: one row per propagation scenario, plus narrower subsets.
+    """EVAL-ONLY: one row per exam story, plus narrower subsets.
 
     Full-width rows come first and subset rows after, so dropping the subsets
     later would leave the first six at their original indices. A subset exists
-    only where a scenario has a victim to spare: it renders the same origin at
+    only where a story has a victim to spare: it renders the same origin at
     two workloads instead of three or four, which is what tells a two-workload
     failure apart from a genuinely wide one when the scoreboard is read by
     victim count.
     """
-    from kubeagent_verdict.dataset import cases, propagation
+    from kubeagent_verdict.dataset import cases, stories
 
     out: list[Example] = []
-    for p in propagation.all_scenarios():
+    for p in stories.exam():
         out.append(cases.shared_origin_probe(p, _entry_rng("shared-origin", p.key)))
-    for p in propagation.all_scenarios():
+    for p in stories.exam():
         if len(p.victims) < 3:
             continue
         out.append(cases.shared_origin_probe(
@@ -554,21 +562,21 @@ def shared_origin_probes() -> list[Example]:
 
 
 def shared_origin_decoy_probes() -> list[Example]:
-    """EVAL-ONLY: `shared_origin_probes` with the origin reading healthy.
+    """EVAL-ONLY: `shared_origin_probes` in each story's healthy world.
 
-    Same scenarios, same order, same widths — and the SAME two rng salts, which
+    Same stories, same order, same widths — and the SAME two rng salts, which
     is what makes each row a minimal contrast with its twin rather than a
-    second question about the same cluster. Identical names give identical
-    inventories, identical candidate menus and identical read labels in
-    identical order; only the read contents differ, and with them the answer.
+    second question about the same cluster. Identical salts give identical
+    draws; only the world differs (healthy instead of broken), and with it at
+    least one printed line and the answer.
     """
-    from kubeagent_verdict.dataset import cases, propagation
+    from kubeagent_verdict.dataset import cases, stories
 
     out: list[Example] = []
-    for p in propagation.all_scenarios():
+    for p in stories.exam():
         out.append(cases.shared_origin_decoy_probe(
             p, _entry_rng("shared-origin", p.key)))
-    for p in propagation.all_scenarios():
+    for p in stories.exam():
         if len(p.victims) < 3:
             continue
         out.append(cases.shared_origin_decoy_probe(
@@ -576,15 +584,16 @@ def shared_origin_decoy_probes() -> list[Example]:
     return out
 
 
-def _shared_origin_twin_pairs(origins: Sequence[Propagation], pairs_per_origin: int,
-                              salt: str, width_of: Callable[[Propagation, int], int | None],
+def _shared_origin_twin_pairs(origins: Sequence[Story], pairs_per_origin: int,
+                              salt: str, width_of: Callable[[Story, int], int | None],
                               error_prefix: str) -> list[Example]:
-    """Build twin pairs (a probe row and its decoy) over a list of origins.
+    """Build twin pairs (a probe row and its decoy) over a list of stories.
 
-    Both halves of a pair use the same salted rng, so they draw identical
-    names and differ only in what the origin read says. `width_of(p, i)`
-    picks the victim count for pair `i` of origin `p`; returning `None`
-    means the full victim set. A repeated expected-workload key would merge
+    Both halves of a pair use the same salted rng, so they draw the same
+    values and differ only in the world (broken or healthy). `width_of(p, i)`
+    picks the victim count for pair `i` of story `p`; returning `None`
+    means the full victim set. A pair is keyed on its group, which names
+    the victims and is the same in both worlds. A repeated group would merge
     two pairs in the paired scoring, so it raises instead.
     """
     from kubeagent_verdict.dataset import cases
@@ -598,7 +607,8 @@ def _shared_origin_twin_pairs(origins: Sequence[Propagation], pairs_per_origin: 
                 p, _entry_rng(salt, p.key, str(i)), victims=width)
             decoy = cases.shared_origin_decoy_probe(
                 p, _entry_rng(salt, p.key, str(i)), victims=width)
-            key = "|".join(sorted(probe.meta["expected"]))
+            assert probe.group == decoy.group, (probe.group, decoy.group)
+            key = probe.group
             if key in seen:
                 raise ValueError(
                     f"{error_prefix} pair key collision: {seen[key]} and "
@@ -623,16 +633,16 @@ def shared_origin_wide_probes(pairs_per_origin: int = 5) -> list[Example]:
     It goes to its own file, never into `test_set()`, and its numbers gate
     no release. Fresh salts keep every pair distinct from the frozen exam's
     pairs; the SAME salt on both halves keeps each pair a minimal contrast
-    (same names, same menus, same read labels -- only the read contents and
-    the answer differ). Widths alternate between the full victim set and a
-    two-victim subset where the scenario has a victim to spare. A repeated
-    pair key would silently merge two pairs in the paired scoring, so a
-    collision raises instead of shrinking the set.
+    (same draws -- only the world, at least one printed line and the answer
+    differ). Widths alternate between the full victim set and a two-victim
+    subset where the story has a victim to spare. A repeated group would
+    silently merge two pairs in the paired scoring, so a collision raises
+    instead of shrinking the set.
     """
-    from kubeagent_verdict.dataset import propagation
+    from kubeagent_verdict.dataset import stories
 
     return _shared_origin_twin_pairs(
-        propagation.all_scenarios(), pairs_per_origin, "shared-origin-wide",
+        stories.exam(), pairs_per_origin, "shared-origin-wide",
         lambda p, i: 2 if i % 2 == 1 and len(p.victims) >= 3 else None,
         "wide-probe")
 
@@ -641,23 +651,24 @@ def shared_origin_cousin_probes(pairs_per_origin: int = 1) -> list[Example]:
     """EVAL-ONLY, DIAGNOSTIC-ONLY: one fresh twin pair per TRAINABLE origin.
 
     The wide probe asks the six held-out origins five times each. This one
-    asks the other question: on the scenarios the model studied, does it
-    read the origin at all? One pair per trainable scenario, at full width,
-    so every decoy half carries three or four verdicts, which is the shape
-    the 0907 model broke its JSON on.
+    asks the other question: on the stories the model studied, does it
+    read the origin at all? One pair per trainable story, at full width
+    (every victim the story has). Every trainable story has three or more
+    victims (Ruling 50), so every decoy half carries three or more verdicts,
+    the shape the 0907 model broke its JSON on.
 
     It is in-distribution on purpose. A model that scores well here and
     fails the exam has a coverage gap; one that fails here has a recipe
     problem. It goes to its own file, never into `test_set()`, and its
     numbers gate no release. Fresh salts keep every pair distinct from the
     training rows' draws; the SAME salt on both halves keeps each pair a
-    minimal contrast. A repeated pair key would silently merge two pairs in
+    minimal contrast. A repeated group would silently merge two pairs in
     the paired scoring, so a collision raises instead of shrinking the set.
     """
-    from kubeagent_verdict.dataset import propagation
+    from kubeagent_verdict.dataset import stories
 
     return _shared_origin_twin_pairs(
-        propagation.trainable_scenarios(), pairs_per_origin,
+        stories.trainable(), pairs_per_origin,
         "shared-origin-cousin", lambda p, i: None, "cousin-probe")
 
 

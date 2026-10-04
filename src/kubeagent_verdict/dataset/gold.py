@@ -159,6 +159,7 @@ def check_keys(keys: tuple[str, ...], *, anchors: list[str], own: list[str]) -> 
             continue
         if any(k in ln.lower() for ln in own):
             raise ValueError(f"key {k!r} sits only in excluded lines")
+        raise ValueError(f"key {k!r} sits in no own line")
 
 
 def label_for(rule_lines: tuple[str, ...], *, linked: int, cls: str, world: str) -> str:

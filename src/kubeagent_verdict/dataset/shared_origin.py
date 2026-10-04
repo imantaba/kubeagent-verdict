@@ -75,14 +75,19 @@ def draw(story: stories.Story, rng: random.Random, *, width: int) -> Draw:
         scope = ""
     victims: list[Names] = []
     seen: set[tuple[str, str]] = set()
+    # One claim is one object with one state: two victims of a claim story
+    # must not draw the same claim name in one namespace (cases.multi_clash).
+    claims = bool(story.broken.pvc_reason or story.healthy.pvc_reason)
+    seen_pvc: set[tuple[str, str]] = set()
     for _ in story.victims[:width]:
         while True:
             n = _draw_in(rng, scope if story.scope_field == "ns" else None)
             if story.scope_field == "node":
                 n = replace(n, node=scope)
-            if (n.ns, n.name) not in seen:
+            if (n.ns, n.name) not in seen and not (claims and (n.ns, n.pvc) in seen_pvc):
                 break
         seen.add((n.ns, n.name))
+        seen_pvc.add((n.ns, n.pvc))
         victims.append(n)
     row = story.broken.origin_row or story.healthy.origin_row
     origin = None
@@ -110,6 +115,18 @@ def _sub(text: str, n: Names | None, d: Draw) -> str:
         "image": n.image if n else "", "nodes": str(len(d.nodes))})
 
 
+def _scheduler_text(text: str, nodes: int) -> str:
+    """The scheduler's message always ends with its preemption clause
+    (diagnose/pending.go:17-22), so a story may leave it off and this adds
+    it. The original text stays a prefix, so an anchor still finds its line."""
+    if "nodes are available:" not in text or " preemption: 0/" in text:
+        return text
+    if not text.endswith("."):
+        text += "."
+    return (f"{text} preemption: 0/{nodes} nodes are available: {nodes} "
+            "Preemption is not helpful for scheduling.")
+
+
 def _kind(t) -> str:
     return t.kind if isinstance(t, stories.OriginRow) else t.workload_kind
 
@@ -118,13 +135,15 @@ def _container(t, n: Names) -> str:
     return n.init_container if t.status.startswith("Init:") else n.container
 
 
-def _log_body(value: str) -> str:
+def _log_body(value: str, *, ns: str = "", pod: str = "", container: str = "") -> str:
+    """The body of a previous-log read. The two fixed bodies name the pod and
+    the container (investigate/reader.go:473-487), so they are filled in."""
     if not value:
         raise ValueError("a crash-family log is empty: it would print a bare log-cause label")
     if value == stories.NO_PREVIOUS:
-        return LOG_NO_PREVIOUS
+        return LOG_NO_PREVIOUS.format(ns=ns, pod=pod, container=container)
     if value == stories.NO_CLASSIFIABLE:
-        return LOG_NO_CLASSIFIABLE
+        return LOG_NO_CLASSIFIABLE.format(ns=ns, pod=pod, container=container)
     return LOG_CAUSE_PREFIX + value
 
 
@@ -148,7 +167,8 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
         s = rem.suggest_for(t.issue, ns=n.ns, pod=n.pod, container=_container(t, n),
                             kind=_kind(t), workload=n.name)
         return c.Finding(issue=t.issue, reason=t.reason,
-                         evidence=_sub(_pick(t, "evidence", healthy), n, d),
+                         evidence=_scheduler_text(_sub(_pick(t, "evidence", healthy), n, d),
+                                                  len(d.nodes)),
                          next_step=s.next_step, command=s.command)
 
     def bare(t, n: Names) -> c.Workload:
@@ -185,19 +205,27 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
         tuple(svcs), tuple(svc_pods), down)
     policies = tuple(replace(p, namespace=_sub(p.namespace, None, d)) for p in w.policies)
 
+    # A claim is a candidate for every workload in its namespace: kubeagent's
+    # rootcause walks every broken claim there and rules out one the workload's
+    # pods do not mount (AnnotatePVC, rootcause.go:177-222). So each victim
+    # also carries its namespace-mates' claims, unmounted (cases._foreign_objects).
+    own_pvc = {i: objects.Object(
+        kind="pvc", name=n.pvc, scan_reason=w.pvc_reason, placement="mounted",
+        fresh=objects.Fresh(phase=w.pvc_phase, storage_class=w.pvc_class), intent="cause")
+        for i, (role, _, n, _) in enumerate(entries) if w.pvc_reason and role == "victim"}
+
     gws, objs = [], []
-    for role, _, n, t in entries:
+    for ei, (role, _, n, t) in enumerate(entries):
         ob = []
         for dn in down:
             o = objects.Object(kind="node", name=dn.name, scan_reason=dn.reason,
                                placement="on" if n.node == dn.name else "off",
                                fresh=objects.NODE_NOT_READY, intent="cause")
             ob.append(objects.unverify(o, "read_failed") if unverified else o)
-        if w.pvc_reason and role == "victim":
-            ob.append(objects.Object(
-                kind="pvc", name=n.pvc, scan_reason=w.pvc_reason, placement="mounted",
-                fresh=objects.Fresh(phase=w.pvc_phase, storage_class=w.pvc_class),
-                intent="cause"))
+        if ei in own_pvc:
+            ob.append(own_pvc[ei])
+            ob += [replace(o, placement="unmounted") for j, o in own_pvc.items()
+                   if j != ei and entries[j][2].ns == n.ns]
         if getattr(t, "pulls", False):
             # The literal is never declared: gather reads it back from the
             # pulling pod's events (gather._registry_fresh), so a healthy twin
@@ -210,12 +238,14 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
         log = _pick(t, "log", healthy)
         reads_log = t.issue in gather.CRASH_FAMILY
         f = gather.GatherFinding(issue=t.issue, pod=f"{n.ns}/{n.pod}", container=container,
-                                 log_read=_log_body(log) if reads_log else None,
+                                 log_read=(_log_body(log, ns=n.ns, pod=n.pod, container=container)
+                                           if reads_log else None),
                                  image=n.image if getattr(t, "pulls", False) else "")
         refused = role == "origin" and bool(origin_events_failed)
         # gather refuses a workload with both events and events_failed set.
         events = () if refused else tuple(
-            (r, _sub(m, n, d), k) for r, m, k in _pick(t, "events", healthy))
+            (r, _scheduler_text(_sub(m, n, d), len(d.nodes)), k)
+            for r, m, k in _pick(t, "events", healthy))
         gws.append(gather.GatherWorkload(
             namespace=n.ns, name=n.name, pod=n.pod, issue=t.issue, objects=tuple(ob),
             events=events, findings=(f,),

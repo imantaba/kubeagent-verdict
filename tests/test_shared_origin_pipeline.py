@@ -230,3 +230,31 @@ def test_unresponsive_node_carries_a_lease_older_than_the_threshold():
     st = stories.by_key()["node-kubelet-unresponsive"]
     assert st.broken.lease == "renewed" and st.broken.lease_age_ms == 95_000
     assert st.broken.lease_age_ms > health.THRESHOLD_MS
+
+
+def _family_rows():
+    from kubeagent_verdict.dataset import cases
+    for st in stories.by_key().values():
+        for w in range(2, len(st.victims) + 1):
+            for f in (cases.shared_origin_probe, cases.shared_origin_decoy_probe):
+                yield st.key, w, f(st, random.Random(3), victims=w)
+
+
+@pytest.mark.parametrize("rule", ["ANS-2", "TXT-IS9", "TXT-IS11"])
+def test_every_story_row_passes_the_text_rules(rule):
+    from kubeagent_verdict.dataset import checker
+    bad = []
+    for key, w, ex in _family_rows():
+        for v in checker.check(ex.system, ex.user, ex.assistant, ex.meta).violations:
+            if v.rule == rule:
+                bad.append((key, w, v.quote[:90]))
+    assert not bad, sorted(set(bad))[:8]
+
+
+def test_scheduler_text_gains_the_preemption_clause_once():
+    clause = " preemption: 0/5 nodes are available: 5 Preemption is not helpful for scheduling."
+    got = so._scheduler_text("0/5 nodes are available: 5 Insufficient cpu", 5)
+    assert got == "0/5 nodes are available: 5 Insufficient cpu." + clause
+    assert got.endswith(clause) and got.count("preemption: 0/") == 1
+    assert so._scheduler_text(got, 5) == got
+    assert so._scheduler_text("Readiness probe failed", 5) == "Readiness probe failed"
