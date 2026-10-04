@@ -135,6 +135,34 @@ class Story:
     shown_remedy: str
 
 
+# The 13 propagation scenarios Spec 4b-1 retires from training (Ruling 15):
+# the twelve whose origin kubeagent's rules cannot see, and runtime-class-removed.
+DROPPED = (
+    "cluster-autoscaler-at-capacity", "internal-ca-expired", "kube-proxy-degraded",
+    "namespace-migration-lock-held", "namespace-shared-pvc-full", "node-clock-skew",
+    "node-conntrack-full", "node-frequent-kubelet-restart", "node-kernel-deadlock",
+    "shared-base-image-tag-moved", "shared-gateway-refusing", "sidecar-injector-broken",
+    "runtime-class-removed",
+)
+
+_PULL = 'Failed to pull image "{image}": '
+_IMAGE_SIDE = "rpc error: code = NotFound desc = manifest unknown"
+
+
+def _pull(literal: str) -> tuple[tuple[str, str, int], ...]:
+    """A pulling victim's events in the world that holds `literal` (the
+    story's World.pull_literal). `shared_origin.build` never reads the
+    literal from the World: the rules read it back from these events."""
+    return (("Failed", _PULL + literal, 3),
+            ("BackOff", 'Back-off pulling image "{image}"', 8))
+
+
+_PULL_HEALTHY = _pull(_IMAGE_SIDE)
+_REGISTRY_MIRROR_UNREACHABLE = "dial tcp: lookup registry.example.com: i/o timeout"
+_REGISTRY_RATE_LIMITED = "429 Too Many Requests: toomanyrequests: rate limit exceeded"
+_REGISTRY_UNREACHABLE = "dial tcp 10.0.0.9:443: connect: connection refused"
+_UNBOUND = "pod has unbound immediate PersistentVolumeClaims"
+
 _NOT_READY = health.Condition("Ready", "False", "KubeletNotReady", "container runtime is down")
 
 _STORIES: tuple[Story, ...] = (
@@ -280,6 +308,263 @@ _STORIES: tuple[Story, ...] = (
                     "their traffic",
         shown_remedy="Allow the needed traffic in {scope} or remove default-deny; the "
                      "flagged workloads need no change.",
+    ),
+    Story(
+        key="node-kubelet-halted", cls="R", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded",
+                issue="ContainerStartError",
+                reason="the container image was resolved but the container could not be started",
+                evidence=("RunContainerError: failed to create containerd task: failed to "
+                          "create shim task: context deadline exceeded"),
+                events=(("Failed", ("Error: RunContainerError: failed to create containerd "
+                           "task: failed to create shim task: context deadline exceeded"), 3),),
+                log=NO_PREVIOUS, on_origin=True,
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="StatefulSet", status="ContainerCreating",
+                issue="VolumeMountError", reason="volume could not be mounted",
+                evidence=("MountVolume.SetUp failed: rpc error: code = DeadlineExceeded "
+                          "desc = context deadline exceeded"),
+                events=(("FailedMount", ("MountVolume.SetUp failed for volume \"pvc-{pvc}\": "
+                           "rpc error: code = DeadlineExceeded desc = context deadline "
+                           "exceeded"), 4),),
+                on_origin=True, none_phrase="its volume cannot be mounted"),
+            VictimText(
+                workload_kind="DaemonSet", status="CrashLoopBackOff",
+                issue="CrashLoopBackOff", reason="container keeps restarting",
+                evidence="back-off restarting failed container",
+                events=(("BackOff", "Back-off restarting failed container in pod {pod}", 7),),
+                log="cannot reach a dependency — connection refused", on_origin=True,
+                none_phrase="its container keeps crashing"),
+        ),
+        broken=World(conditions=(_NOT_READY,)),
+        healthy=World(),
+        shown_origin="node {node} is NotReady",
+        shown_cause="node {node} reports Ready False: container runtime is down",
+        shown_remedy="Recover or drain {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="node-kubelet-unresponsive", cls="R", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting on this node",
+                evidence="Back-off restarting failed container {name}",
+                events=(("BackOff", "Back-off restarting failed container in pod {pod}", 6),),
+                on_origin=True, none_phrase="its container keeps restarting"),
+            VictimText(
+                workload_kind="StatefulSet", status="ContainerCreating",
+                issue="VolumeAttachError",
+                reason="volume could not be attached to this pod's node",
+                evidence=("AttachVolume.Attach failed: rpc error: code = Unavailable desc = "
+                          "the node is not answering attach requests"),
+                events=(("FailedAttachVolume", ("AttachVolume.Attach failed for volume "
+                           "\"pvc-{pvc}\": rpc error: code = Unavailable desc = the node is "
+                           "not answering attach requests"), 4),),
+                evidence_healthy="volume pvc-{pvc} cannot attach",
+                events_healthy=(("FailedAttachVolume", ('Multi-Attach error for volume '
+                           '"pvc-{pvc}" Volume is already exclusively attached to one node '
+                           "and can't be attached to another"), 4),),
+                on_origin=True, none_phrase="its volume cannot attach"),
+            VictimText(
+                workload_kind="DaemonSet", status="Degraded", issue="ProbeFailure",
+                reason="container's readiness probe fails from this node",
+                evidence="Readiness probe failed: dial tcp: i/o timeout",
+                events=(("Unhealthy", "Readiness probe failed: dial tcp: i/o timeout", 5),),
+                on_origin=True, none_phrase="its readiness probe fails"),
+        ),
+        broken=World(conditions=(_NOT_READY,), lease="renewed", lease_age_ms=95_000),
+        healthy=World(),
+        shown_origin="node {node} is NotReady",
+        shown_cause="node {node} reports Ready False: container runtime is down",
+        shown_remedy="Recover or drain {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="pvc-provisioner-not-responding", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="pvc",
+        victims=(
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims", 4),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims", 6),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims", 3),),
+                none_phrase="its pod cannot be scheduled"),
+        ),
+        broken=World(pvc_reason="ProvisionerNotResponding", pvc_phase="Pending", pvc_class="standard"),
+        healthy=World(),
+        shown_origin="storage class standard cannot provision",
+        shown_cause="the provisioner for storage class standard is not responding",
+        shown_remedy="Fix the provisioner for standard; the flagged workloads need no change.",
+    ),
+    Story(
+        key="pvc-storageclass-missing", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="pvc",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.", 5),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.", 4),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for scheduling.", 7),),
+                none_phrase="its pod cannot be scheduled"),
+        ),
+        broken=World(pvc_reason="MissingStorageClass", pvc_phase="Pending", pvc_class="fast-ssd"),
+        healthy=World(),
+        shown_origin="storage class fast-ssd cannot provision",
+        shown_cause="the storage class fast-ssd does not exist",
+        shown_remedy="Recreate the storage class fast-ssd; the flagged workloads need no change.",
+    ),
+    Story(
+        key="registry-mirror-unreachable", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="registry",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}"',
+                events=_pull(_REGISTRY_MIRROR_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="DaemonSet", status="ErrImagePull", issue="ErrImagePull",
+                reason="container cannot pull its image",
+                evidence='failed to resolve reference for {image}',
+                events=_pull(_REGISTRY_MIRROR_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="Job", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}" for the job pod',
+                events=_pull(_REGISTRY_MIRROR_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its job image cannot be pulled"),
+        ),
+        broken=World(pull_literal=_REGISTRY_MIRROR_UNREACHABLE),
+        healthy=World(),
+        shown_origin="registry registry.example.com is unreachable",
+        shown_cause="pulls from registry.example.com fail with: dial tcp: lookup registry.example.com: i/o timeout",
+        shown_remedy="Restore access to registry.example.com; the flagged workloads need no change.",
+    ),
+    Story(
+        key="registry-rate-limited", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="registry",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}"',
+                events=_pull(_REGISTRY_RATE_LIMITED),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="DaemonSet", status="ErrImagePull", issue="ErrImagePull",
+                reason="container cannot pull its image",
+                evidence='failed to resolve reference for {image}',
+                events=_pull(_REGISTRY_RATE_LIMITED),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="Job", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}" for the job pod',
+                events=_pull(_REGISTRY_RATE_LIMITED),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its job image cannot be pulled"),
+        ),
+        broken=World(pull_literal=_REGISTRY_RATE_LIMITED),
+        healthy=World(),
+        shown_origin="registry registry.example.com rate limits pulls",
+        shown_cause="pulls from registry.example.com fail with: 429 Too Many Requests: toomanyrequests: rate limit exceeded",
+        shown_remedy="Restore access to registry.example.com; the flagged workloads need no change.",
+    ),
+    Story(
+        key="storage-provisioner-down", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="pvc",
+        victims=(
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.", 5),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.", 3),),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason=_UNBOUND,
+                evidence="0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} pod has unbound immediate PersistentVolumeClaims.", 6),),
+                none_phrase="its pod cannot be scheduled"),
+        ),
+        broken=World(pvc_reason="ProvisionerNotResponding", pvc_phase="Pending", pvc_class="standard"),
+        healthy=World(),
+        shown_origin="storage class standard cannot provision",
+        shown_cause="the provisioner for storage class standard is not responding",
+        shown_remedy="Fix the provisioner for standard; the flagged workloads need no change.",
+    ),
+    Story(
+        key="registry-unreachable", cls="R", blast_radius="namespace", scope_field="ns",
+        origin_kind="registry",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}"',
+                events=_pull(_REGISTRY_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="DaemonSet", status="ErrImagePull", issue="ErrImagePull",
+                reason="container cannot pull its image",
+                evidence='failed to resolve reference for {image}',
+                events=_pull(_REGISTRY_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its image cannot be pulled"),
+            VictimText(
+                workload_kind="Job", status="ImagePullBackOff", issue="ImagePullBackOff",
+                reason="container cannot pull its image",
+                evidence='Back-off pulling image "{image}" for the job pod',
+                events=_pull(_REGISTRY_UNREACHABLE),
+                events_healthy=_PULL_HEALTHY,
+                pulls=True, none_phrase="its job image cannot be pulled"),
+        ),
+        broken=World(pull_literal=_REGISTRY_UNREACHABLE),
+        healthy=World(),
+        shown_origin="registry registry.example.com is unreachable",
+        shown_cause="pulls from registry.example.com fail with: dial tcp 10.0.0.9:443: connect: connection refused",
+        shown_remedy="Restore access to registry.example.com; the flagged workloads need no change.",
     ),
 )
 

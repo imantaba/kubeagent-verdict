@@ -106,7 +106,8 @@ def _sub(text: str, n: Names | None, d: Draw) -> str:
     return text.format_map({
         "scope": d.scope_value, "node": n.node if n else d.scope_value,
         "ns": n.ns if n else d.scope_value, "name": n.name if n else "",
-        "pod": n.pod if n else "", "pvc": n.pvc if n else ""})
+        "pod": n.pod if n else "", "pvc": n.pvc if n else "",
+        "image": n.image if n else "", "nodes": str(len(d.nodes))})
 
 
 def _kind(t) -> str:
@@ -192,6 +193,18 @@ def build(story: stories.Story, d: Draw, *, world: str, unverified: bool = False
                                placement="on" if n.node == dn.name else "off",
                                fresh=objects.NODE_NOT_READY, intent="cause")
             ob.append(objects.unverify(o, "read_failed") if unverified else o)
+        if w.pvc_reason and role == "victim":
+            ob.append(objects.Object(
+                kind="pvc", name=n.pvc, scan_reason=w.pvc_reason, placement="mounted",
+                fresh=objects.Fresh(phase=w.pvc_phase, storage_class=w.pvc_class),
+                intent="cause"))
+        if getattr(t, "pulls", False):
+            # The literal is never declared: gather reads it back from the
+            # pulling pod's events (gather._registry_fresh), so a healthy twin
+            # whose events hold an image-side literal refutes this candidate.
+            ob.append(objects.Object(
+                kind="registry", name=gather._registry_host(n.image), scan_reason="{count}",
+                placement="", fresh=objects.Fresh(), intent="cause"))
         objs.append(tuple(ob))
         container = _container(t, n)
         log = _pick(t, "log", healthy)

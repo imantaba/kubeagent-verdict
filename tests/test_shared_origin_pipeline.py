@@ -4,8 +4,8 @@ import random
 import pytest
 
 from kubeagent_verdict import contract as c
+from kubeagent_verdict.dataset import health, rules, stories
 from kubeagent_verdict.dataset import names as names_mod
-from kubeagent_verdict.dataset import rules, stories
 from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.checker import LOG_CAUSE_PREFIX, LOG_CAUSES
 
@@ -126,3 +126,107 @@ def test_draw_survives_five_named_nodes():
 def test_log_body_refuses_an_empty_log():
     with pytest.raises(ValueError, match="empty"):
         so._log_body("")
+
+
+def test_pvc_candidate_only_when_the_claim_is_flagged():
+    b, h = _twins("storage-provisioner-down")
+    assert any(cd.obj.kind == "pvc" for r in b.rows for cd in r.trace)
+    assert not any(cd.obj.kind == "pvc" for r in h.rows for cd in r.trace)
+
+
+def test_pvc_victims_group_by_storage_class():
+    b, _ = _twins("pvc-storageclass-missing")
+    assert rules.shared(tuple(r.result for r in b.rows))
+    assert "fast-ssd" in b.user
+
+
+def test_registry_candidate_reads_the_pull_literal():
+    b, _ = _twins("registry-unreachable")
+    assert "connection refused" in b.user
+    assert all(r.result.decided for r in b.rows if r.role == "victim")
+
+
+REGISTRY_STORIES = ("registry-mirror-unreachable", "registry-rate-limited",
+                    "registry-unreachable")
+
+
+@pytest.mark.parametrize("key", REGISTRY_STORIES)
+def test_registry_literal_is_in_every_broken_pull_event(key):
+    st = stories.by_key()[key]
+    b, h = _twins(key)
+    pulling = [v for v in st.victims if v.pulls]
+    assert len(pulling) == len(st.victims)
+    for r in b.rows:
+        # The printed events read carries the full pull message for this image.
+        # An address is redacted in the printed read, so the exam story's
+        # literal (it names one) is matched by its tail.
+        shown = st.broken.pull_literal if key not in stories.EXAM_KEYS else \
+            st.broken.pull_literal.rsplit(": ", 1)[-1]
+        assert f'Failed to pull image "{r.names.image}": ' in b.user
+        assert shown in b.user
+    assert st.broken.pull_literal not in h.user
+    for r in h.rows:
+        assert f'Failed to pull image "{r.names.image}": ' in h.user
+
+
+@pytest.mark.parametrize("key", REGISTRY_STORIES)
+def test_healthy_twin_has_a_refuted_registry_candidate(key):
+    # [C]: every pulling victim gets a registry object in both worlds. In the
+    # healthy world the pull events hold an image-side literal, so the
+    # registry candidate is present but refuted, never confirmed.
+    b, h = _twins(key)
+    for built in (b, h):
+        for r in built.rows:
+            regs = [cd for cd in r.trace if cd.obj.kind == "registry"]
+            assert len(regs) == 1, (key, built.world_name, r.key)
+    for r in h.rows:
+        paired = [cd for cd in r.candidates if cd.cause.startswith("registry ")]
+        assert len(paired) == 1
+        assert paired[0].fresh_read_outcome == "refuted", (key, r.key, paired[0])
+        assert not r.result.decided
+    for r in b.rows:
+        paired = [cd for cd in r.candidates if cd.cause.startswith("registry ")]
+        assert paired[0].fresh_read_outcome == "confirmed"
+
+
+@pytest.mark.parametrize("key", REGISTRY_STORIES)
+def test_registry_count_is_filled_in_every_world(key):
+    # [D]: the count is the number of pulling workloads in the row, and the
+    # "{count}" template never reaches a trace or the prompt.
+    st = stories.by_key()[key]
+    n = len(st.victims)
+    for built in _twins(key):
+        assert "{count}" not in built.user
+        for r in built.rows:
+            for cd in r.trace:
+                assert "{count}" not in cd.cause
+                assert "{count}" not in cd.obj.scan_reason
+            for cd in r.candidates:
+                assert "{count}" not in cd.cause
+    b, _ = _twins(key)
+    assert f"({n} workloads failing to pull)" in b.user
+    for r in b.rows:
+        assert r.result.cause.endswith(f"({n} workloads failing to pull)")
+
+
+def test_registry_count_follows_the_width():
+    b, _ = _twins("registry-rate-limited", width=2)
+    assert "(2 workloads failing to pull)" in b.user
+    assert "(3 workloads failing to pull)" not in b.user
+
+
+@pytest.mark.parametrize("key", ["node-kubelet-halted", "node-kubelet-unresponsive"])
+def test_node_r_stories_describe_the_down_node(key):
+    b, h = _twins(key)
+    assert all(r.result.decided for r in b.rows)
+    assert f"describe node /{b.draw.scope_value}" in b.user
+    assert "NotReady" in b.user and "NotReady" not in h.user
+
+
+def test_unresponsive_node_carries_a_lease_older_than_the_threshold():
+    # health.LEASES has no "stale": a lease is "renewed" and its age is what
+    # goes stale (health._stale). The brief's lease="stale" is lease="renewed"
+    # with a 95 s age, past the scan's 40 s threshold.
+    st = stories.by_key()["node-kubelet-unresponsive"]
+    assert st.broken.lease == "renewed" and st.broken.lease_age_ms == 95_000
+    assert st.broken.lease_age_ms > health.THRESHOLD_MS
