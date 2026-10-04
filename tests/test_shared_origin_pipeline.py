@@ -258,3 +258,42 @@ def test_scheduler_text_gains_the_preemption_clause_once():
     assert got.endswith(clause) and got.count("preemption: 0/") == 1
     assert so._scheduler_text(got, 5) == got
     assert so._scheduler_text("Readiness probe failed", 5) == "Readiness probe failed"
+
+
+@pytest.mark.parametrize("value", [stories.NO_PREVIOUS, stories.NO_CLASSIFIABLE])
+def test_fixed_log_bodies_name_their_pod_and_container(value):
+    # E9: the two fixed bodies carry {ns}/{pod}/{container} in kubeagent's
+    # text (investigate/reader.go:473-487); none may reach a prompt unfilled.
+    body = so._log_body(value, ns="shop", pod="gateway-7f9c", container="app")
+    assert "{" not in body and "}" not in body
+    assert "shop/gateway-7f9c" in body and "app" in body
+
+
+_PVC_STORIES = ["pvc-provisioner-not-responding", "pvc-storageclass-missing",
+                "storage-provisioner-down"]
+
+
+@pytest.mark.parametrize("key", _PVC_STORIES)
+def test_claim_victims_carry_each_others_claims_and_never_share_one(key):
+    # B8: every claim a namespace names is a candidate in every block of that
+    # namespace. Draw: two victims never take one claim name in one namespace.
+    st = stories.by_key()[key]
+    mates = 0
+    for width in range(2, len(st.victims) + 1):
+        for seed in range(60):
+            d = so.draw(st, random.Random(seed), width=width)
+            claims = [(n.ns, n.pvc) for n in d.victims]
+            assert len(set(claims)) == len(claims), (key, width, seed)
+            for world in ("broken", "healthy"):
+                b = so.build(st, d, world=world)
+                w = st.broken if world == "broken" else st.healthy
+                if not w.pvc_reason:
+                    continue
+                for row in b.rows:
+                    if row.role != "victim":
+                        continue
+                    have = {cd.obj.name for cd in row.trace if cd.obj.kind == "pvc"}
+                    want = {n.pvc for n in d.victims if n.ns == row.names.ns}
+                    assert want <= have, (key, world, width, seed, row.key)
+                    mates += len(want) - 1
+    assert mates, "no draw put two claim victims in one namespace: the test checks nothing"

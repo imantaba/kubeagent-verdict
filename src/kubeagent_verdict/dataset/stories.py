@@ -2745,7 +2745,7 @@ _STORIES: tuple[Story, ...] = (
                 evidence="wait-for-api gave up after 120s", events=_backoff(5),
                 broken=Answer(anchor="wait-for-api gave up after 120s",
                               cause="its init container gave up waiting for the API after 120s",
-                              keys=("gave", "after"),
+                              keys=("wait", "gave"),
                               rationale="its init evidence says the API wait gave up"),
                 evidence_healthy="wait-for-api gave up after 120s: its proxy variable points at a host that was decommissioned",
                 healthy=Answer(anchor="its proxy variable points at a host that was decommissioned",
