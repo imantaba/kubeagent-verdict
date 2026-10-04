@@ -164,6 +164,14 @@ _REGISTRY_UNREACHABLE = "dial tcp 10.0.0.9:443: connect: connection refused"
 _UNBOUND = "pod has unbound immediate PersistentVolumeClaims"
 
 _NOT_READY = health.Condition("Ready", "False", "KubeletNotReady", "container runtime is down")
+_NO_SIGNATURE = "last output before exit (no signature in the last 25 lines)"
+_CSE = "the container image was resolved but the container could not be started"
+_OOM = "container was killed by the kernel out-of-memory handler"
+
+
+def _backoff(n: int) -> tuple[tuple[str, str, int], ...]:
+    """The kubelet's own restart back-off event, `n` times."""
+    return (("BackOff", "Back-off restarting failed container in pod {pod}", n),)
 
 _STORIES: tuple[Story, ...] = (
     Story(
@@ -565,6 +573,1277 @@ _STORIES: tuple[Story, ...] = (
         shown_origin="registry registry.example.com is unreachable",
         shown_cause="pulls from registry.example.com fail with: dial tcp 10.0.0.9:443: connect: connection refused",
         shown_remedy="Restore access to registry.example.com; the flagged workloads need no change.",
+    ),
+    Story(
+        key="node-pid-pressure", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="RunContainerError: unable to start container process: resource temporarily unavailable",
+                events=(("Failed", ("Error: failed to create containerd task: unable to start "
+                           "container process: resource temporarily unavailable"), 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="resource temporarily unavailable",
+                              cause="its container cannot start because a new process is "
+                                    "unavailable on the node",
+                              keys=("process", "unavailable"), confidence="medium",
+                              rationale="its start event shows a process that cannot be created, "
+                                        "on a node that reports PID pressure", link=True),
+                evidence_healthy="RunContainerError: pids limit of the pod cgroup reached",
+                events_healthy=(("Failed", ("Error: failed to create containerd task: pids limit "
+                                 "of the pod cgroup reached by its sidecar containers"), 3),),
+                healthy=Answer(anchor="pids limit of the pod cgroup reached by its sidecar containers",
+                               cause="its container cannot start because the pod's pids limit is "
+                                     "reached by its sidecar containers",
+                               keys=("pids", "sidecar"),
+                               rationale="its start event names the pod's own pids limit"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="DaemonSet", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="last state terminated with exit code 1",
+                events=_backoff(8), none_phrase="its container keeps restarting"),
+            VictimText(
+                workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="last state terminated with exit code 1",
+                events=_backoff(6), log=_NO_SIGNATURE,
+                none_phrase="its container keeps crashing"),
+        ),
+        broken=World(conditions=(health.READY, health.Condition(
+            "PIDPressure", "True", "KubeletHasInsufficientPID", "")),),
+        healthy=World(),
+        shown_origin="node {node} is under PID pressure",
+        shown_cause="node {node} reports PIDPressure, and a pod there cannot create a new process",
+        shown_remedy="Relieve the PID pressure on {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="node-runtime-restarting", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="last state terminated with exit code 137",
+                events=_backoff(7), none_phrase="its container keeps restarting"),
+            VictimText(
+                workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe failed 10 times in the last five minutes",
+                events=(("Unhealthy", ("Readiness probe failed: exec probe error: runtime did not "
+                           "respond within the exec timeout"), 10),),
+                broken=Answer(anchor="runtime did not respond within the exec timeout",
+                              cause="its readiness probe fails because the container runtime "
+                                    "did not respond within the exec timeout",
+                              keys=("runtime", "respond"),
+                              rationale="its probe event says the runtime did not respond",
+                              link=True),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: exec probe error: command "
+                                 "exited 1 while the local cache was still warming"), 10),),
+                healthy=Answer(anchor="command exited 1 while the local cache was still warming",
+                               cause="its readiness probe exits 1 while its local cache is "
+                                     "still warming",
+                               keys=("cache", "warming"),
+                               rationale="its probe event names a cache that is still warming"),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="Job", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="RunContainerError: failed to create containerd task: context deadline exceeded",
+                events=(("Failed", ("Error: failed to create containerd task: context deadline "
+                           "exceeded while starting the container"), 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="context deadline exceeded while starting the container",
+                              cause="its container fails to start because creating its "
+                                    "containerd task exceeded the deadline",
+                              keys=("containerd", "deadline"), confidence="medium",
+                              rationale="its start event shows the containerd task timing out",
+                              link=True),
+                evidence_healthy="RunContainerError: postStart hook did not return before the start deadline",
+                events_healthy=(("FailedPostStartHook", ("PostStartHook failed: its poststart call "
+                                 "to a remote host never returned before the start deadline"), 3),),
+                healthy=Answer(anchor="its poststart call to a remote host never returned",
+                               cause="its container fails to start because its own postStart "
+                                     "hook waits on a remote call that never returns",
+                               keys=("poststart", "remote"),
+                               rationale="its start event names its own postStart hook"),
+                none_phrase="its container fails to start"),
+        ),
+        broken=World(),
+        healthy=World(),
+        shown_origin="the container runtime on node {node} is not answering",
+        shown_cause="the container runtime on node {node} did not respond in time, so "
+                    "containers there fail to start or to pass an exec probe",
+        shown_remedy="Stabilize the container runtime on {node}; the flagged workloads need "
+                     "no change.",
+    ),
+    Story(
+        key="node-memory-pressure", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="OOMKilled", issue="OOMKilled",
+                reason=_OOM,
+                evidence="last state terminated with reason OOMKilled, exit code 137",
+                events=(("SystemOOM", "System OOM encountered, victim process killed", 2),),
+                log=_NO_SIGNATURE,
+                broken=Answer(anchor="system oom encountered",
+                              cause="its container was killed in a system out-of-memory "
+                                    "event on the node",
+                              keys=("system", "killed"), confidence="medium",
+                              rationale="its event shows a system-wide OOM on a node that "
+                                        "reports memory pressure", link=True),
+                events_healthy=(("OOMKilling", ("Memory cgroup out of memory: killed process in "
+                                 "container at its own limit"), 2),),
+                healthy=Answer(anchor="at its own limit",
+                               cause="its container was killed at its own memory limit",
+                               keys=("memory", "limit"),
+                               rationale="its event says the container hit its own limit"),
+                none_phrase="its container is killed for memory"),
+            VictimText(
+                workload_kind="StatefulSet", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", ("Readiness probe failed: Get readiness endpoint: context "
+                           "deadline exceeded after 2s"), 6),),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="DaemonSet", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="last state terminated with exit code 137",
+                events=_backoff(9), none_phrase="its container keeps restarting"),
+        ),
+        broken=World(conditions=(health.READY, health.Condition(
+            "MemoryPressure", "True", "KubeletHasInsufficientMemory", "")),),
+        healthy=World(),
+        shown_origin="node {node} is under memory pressure",
+        shown_cause="node {node} reports MemoryPressure, and a container there was killed in a "
+                    "system out-of-memory event",
+        shown_remedy="Relieve the memory pressure on {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="node-network-unavailable", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="failed to create pod sandbox: network plugin returned error: no route to the pod network",
+                events=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: network plugin "
+                           "returned error: no route to the pod network"), 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="no route to the pod network",
+                              cause="its pod sandbox cannot be created because the node has "
+                                    "no route to the pod network",
+                              keys=("route", "network"),
+                              rationale="its sandbox event says there is no route to the pod network",
+                              link=True),
+                evidence_healthy="failed to create pod sandbox: the pod spec sets hostNetwork but the policy forbids it",
+                events_healthy=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: the pod "
+                                 "spec sets hostNetwork true and the namespace policy rejects it"), 3),),
+                healthy=Answer(anchor="sets hostnetwork true and the namespace policy rejects it",
+                               cause="its pod sandbox is rejected because the pod spec sets "
+                                     "hostNetwork and the namespace policy forbids it",
+                               keys=("hostnetwork", "policy"),
+                               rationale="its sandbox event names the hostNetwork setting"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="1 node(s) had untolerated taint node.kubernetes.io/network-unavailable",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
+                           "untolerated taint node.kubernetes.io/network-unavailable, and the "
+                           "other nodes have insufficient memory"), 4),),
+                broken=Answer(anchor="untolerated taint node.kubernetes.io/network-unavailable",
+                              cause="its pod is kept off one node by an untolerated "
+                                    "network-unavailable taint",
+                              keys=("taint", "network"),
+                              rationale="its scheduling event names the network-unavailable taint",
+                              link=True),
+                evidence_healthy="1 node(s) had untolerated taint dedicated=gpu",
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
+                                 "untolerated taint dedicated=gpu, and the other nodes have "
+                                 "insufficient memory"), 4),),
+                healthy=Answer(anchor="the other nodes have insufficient memory",
+                               cause="its pod cannot be scheduled because the other nodes have "
+                                     "insufficient memory",
+                               keys=("insufficient", "memory"),
+                               rationale="its scheduling event says the other nodes lack memory"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", "Readiness probe failed: dial tcp: connect: network is unreachable", 5),),
+                broken=Answer(anchor="connect: network is unreachable",
+                              cause="its readiness probe fails because the network is "
+                                    "unreachable from the node",
+                              keys=("probe", "unreachable"), confidence="medium",
+                              rationale="its probe event says the network is unreachable",
+                              link=True),
+                events_healthy=(("Unhealthy", "Readiness probe failed: dial tcp: connect: connection refused", 5),),
+                healthy=Answer(anchor="connect: connection refused",
+                               cause="its readiness probe gets a refused connection when it dials",
+                               keys=("refused", "connection"),
+                               rationale="its probe event shows a refused connection"),
+                none_phrase="its readiness probe fails"),
+        ),
+        broken=World(),
+        healthy=World(),
+        shown_origin="node {node} has no route to the pod network",
+        shown_cause="node {node} has no route to the pod network, so pods there cannot get a "
+                    "sandbox and probes see the network as unreachable",
+        shown_remedy="Restore the pod-network route on {node}; the flagged workloads need no "
+                     "change.",
+    ),
+    Story(
+        key="node-readonly-filesystem", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="open /var/run/app.pid: input/output error",
+                events=_backoff(8), log=_NO_SIGNATURE,
+                broken=Answer(anchor="open /var/run/app.pid: input/output error",
+                              cause="its container fails because writing its pid file returns "
+                                    "an input/output error",
+                              keys=("input", "output"), confidence="medium",
+                              rationale="its crash evidence shows an input/output error on a write",
+                              link=True),
+                evidence_healthy="open /var/run/app.pid: operation not permitted",
+                healthy=Answer(anchor="open /var/run/app.pid: operation not permitted",
+                               cause="its container fails because the operation on its pid file "
+                                     "is not permitted",
+                               keys=("operation", "permitted"),
+                               rationale="its crash evidence shows a refused file operation"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="Job", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="RunContainerError: failed to create containerd task: mkdir /run/containerd: input/output error",
+                events=(("Failed", ("Error: failed to create containerd task: input/output "
+                           "error"), 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="containerd task: input/output error",
+                              cause="its container cannot start because creating its task "
+                                    "returns an input/output error",
+                              keys=("task", "output"), confidence="medium",
+                              rationale="its start event shows an input/output error",
+                              link=True),
+                evidence_healthy="RunContainerError: failed to create containerd task: image layer digest mismatch",
+                events_healthy=(("Failed", ("Error: failed to create containerd task: failed to "
+                                 "unpack image layer: digest mismatch"), 3),),
+                healthy=Answer(anchor="layer: digest mismatch",
+                               cause="its container cannot start because an image layer fails "
+                                     "to unpack on a digest mismatch",
+                               keys=("layer", "digest"),
+                               rationale="its start event names a layer digest mismatch"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="StatefulSet", status="ContainerCreating", issue="VolumeMountError",
+                reason="volume could not be mounted",
+                evidence="MountVolume.SetUp failed for volume pvc-{pvc}: input/output error",
+                events=(("FailedMount", ("MountVolume.SetUp failed for volume \"pvc-{pvc}\": mkdir "
+                           "on the node's kubelet directory: input/output error"), 4),),
+                broken=Answer(anchor="kubelet directory: input/output error",
+                              cause="its volume cannot mount because the kubelet directory on "
+                                    "the node returns an input/output error",
+                              keys=("kubelet", "directory"),
+                              rationale="its mount event shows an input/output error on the node",
+                              link=True),
+                evidence_healthy="MountVolume.SetUp failed for volume pvc-{pvc}: unknown filesystem type",
+                events_healthy=(("FailedMount", ("MountVolume.SetUp failed for volume \"pvc-{pvc}\": "
+                                 "mount failed: unknown filesystem type 'xfs'"), 4),),
+                healthy=Answer(anchor="unknown filesystem type 'xfs'",
+                               cause="its volume cannot mount because the node has an unknown "
+                                     "filesystem type xfs",
+                               keys=("filesystem", "unknown"),
+                               rationale="its mount event names an unknown filesystem type"),
+                none_phrase="its volume cannot be mounted"),
+        ),
+        broken=World(),
+        healthy=World(),
+        shown_origin="the root filesystem on node {node} is read-only",
+        shown_cause="the root filesystem on node {node} fails every write with an "
+                    "input/output error, so containers there cannot write to disk",
+        shown_remedy="Repair the disk behind {node} and remount it writable; the flagged "
+                     "workloads need no change.",
+    ),
+    Story(
+        key="node-cordoned-draining", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="0/{nodes} nodes are available: 1 node(s) were unschedulable",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) were "
+                           "unschedulable, 2 node(s) had volume node affinity conflict"), 4),),
+                broken=Answer(anchor="1 node(s) were unschedulable",
+                              cause="its pod cannot be scheduled because one node is "
+                                    "unschedulable and the other nodes conflict with its volume",
+                              keys=("unschedulable", "conflict"), confidence="medium",
+                              rationale="its scheduling event says a node is unschedulable",
+                              link=True),
+                evidence_healthy="0/{nodes} nodes are available: 3 node(s) had volume node affinity conflict",
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 3 node(s) had "
+                                 "volume node affinity conflict"), 4),),
+                healthy=Answer(anchor="3 node(s) had volume node affinity conflict",
+                               cause="its pod cannot be scheduled because its volume is "
+                                     "pinned to a zone the nodes are not in",
+                               keys=("volume", "zone"),
+                               rationale="its scheduling event names a volume node affinity "
+                                         "conflict on every node"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="pod evicted by drain; replacement started on another node and was evicted again",
+                events=(("Evicted", "The pod was evicted by drain and its replacement was evicted again", 5),),
+                broken=Answer(anchor="evicted by drain",
+                              cause="its pods keep being evicted by a node drain",
+                              keys=("evicted", "drain"), confidence="medium",
+                              rationale="its evidence says each replacement was evicted by a drain",
+                              link=True),
+                evidence_healthy="pod evicted; its PodDisruptionBudget allows zero disruptions so each eviction is retried",
+                events_healthy=(("Evicted", ("The pod was evicted again because its PodDisruptionBudget "
+                                  "allows zero disruptions"), 5),),
+                healthy=Answer(anchor="its poddisruptionbudget allows zero disruptions",
+                               cause="its pod is retried forever because its own "
+                                     "PodDisruptionBudget allows zero disruptions",
+                               keys=("budget", "disruptions"),
+                               rationale="its event names its own disruption budget"),
+                none_phrase="its container keeps restarting"),
+            VictimText(
+                workload_kind="Job", status="Init:CrashLoopBackOff", issue="Init:CrashLoopBackOff",
+                reason="init container keeps restarting",
+                evidence="wait-for-node: this pod's node affinity target is not schedulable",
+                events=_backoff(6),
+                broken=Answer(anchor="node affinity target is not schedulable",
+                              cause="its init container waits for a node target that is not "
+                                    "schedulable",
+                              keys=("init", "schedulable"), confidence="medium",
+                              rationale="its init evidence names a node target that is not "
+                                        "schedulable"),
+                evidence_healthy="wait-for-node: waiting for a node label that the last pool rollout renamed",
+                healthy=Answer(anchor="a node label that the last pool rollout renamed",
+                               cause="its init container waits for a node label that a "
+                                     "pool rollout renamed",
+                               keys=("label", "renamed"),
+                               rationale="its init evidence names a renamed node label"),
+                none_phrase="its init container keeps crashing"),
+        ),
+        broken=World(unschedulable=True),
+        healthy=World(),
+        shown_origin="node {node} is cordoned and draining",
+        shown_cause="node {node} is cordoned and draining, so its pods are evicted and nothing "
+                    "new lands there",
+        shown_remedy="Uncordon {node} once the drain is done; the flagged workloads need no change.",
+    ),
+    Story(
+        key="node-corrupt-overlay", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="RunContainerError: failed to create containerd task: failed to mount rootfs: input/output error",
+                events=(("Failed", ("Error: failed to create containerd task: failed to mount "
+                           "rootfs: input/output error"), 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="failed to mount rootfs: input/output error",
+                              cause="its container cannot start because mounting its rootfs "
+                                    "returns an input/output error",
+                              keys=("rootfs", "output"), confidence="medium",
+                              rationale="its start event shows an input/output error on the rootfs",
+                              link=True),
+                evidence_healthy="RunContainerError: failed to create containerd task: failed to unpack image layer: unexpected EOF",
+                events_healthy=(("Failed", ("Error: failed to create containerd task: failed to "
+                                 "unpack image layer: unexpected EOF in its last layer"), 3),),
+                healthy=Answer(anchor="unexpected eof in its last layer",
+                               cause="its container cannot start because its image's last "
+                                     "layer is truncated",
+                               keys=("layer", "truncated"),
+                               rationale="its start event shows an unexpected end of file in "
+                                         "its last layer"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="exec: unable to load shared library: input/output error",
+                events=_backoff(7), log=_NO_SIGNATURE,
+                broken=Answer(anchor="unable to load shared library: input/output error",
+                              cause="its container crashes because a shared library cannot be "
+                                    "read, with an input/output error",
+                              keys=("library", "output"), confidence="medium",
+                              rationale="its crash evidence shows an input/output error "
+                                        "while loading a library", link=True),
+                evidence_healthy="exec: unable to load shared library libssl.so.3: no such file",
+                healthy=Answer(anchor="shared library libssl.so.3: no such file",
+                               cause="its container crashes because the libssl library is "
+                                     "missing from its image",
+                               keys=("libssl", "missing"),
+                               rationale="its crash evidence names a library that is missing"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="Job", status="Init:CrashLoopBackOff", issue="Init:CrashLoopBackOff",
+                reason="init container keeps restarting",
+                evidence="init: read /etc/app/schema.sql: input/output error",
+                events=_backoff(5),
+                broken=Answer(anchor="read /etc/app/schema.sql: input/output error",
+                              cause="its init container fails to read a bundled file, with an "
+                                    "input/output error",
+                              keys=("bundled", "output"), confidence="medium",
+                              rationale="its init evidence shows an input/output error on a read",
+                              link=True),
+                evidence_healthy="init: parse /etc/app/schema.sql: file is empty, the image ships a placeholder",
+                healthy=Answer(anchor="file is empty, the image ships a placeholder",
+                               cause="its init container parses a seed file that its image "
+                                     "ships as an empty placeholder",
+                               keys=("seed", "placeholder"),
+                               rationale="its init evidence says the file is an empty placeholder"),
+                none_phrase="its init container keeps crashing"),
+        ),
+        broken=World(conditions=(health.READY, health.Condition(
+            "CorruptDockerOverlay2", "True", "CorruptDockerOverlay2", "")),),
+        healthy=World(),
+        shown_origin="the container layer store on node {node} is corrupt",
+        shown_cause="the overlay2 layer store on node {node} is corrupt, so containers there "
+                    "cannot read cached image layers",
+        shown_remedy="Clear the layer store on {node} or replace the node; the flagged "
+                     "workloads need no change.",
+    ),
+    Story(
+        key="node-disk-pressure", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="node",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="1 node(s) had untolerated taint node.kubernetes.io/disk-pressure",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
+                           "untolerated taint node.kubernetes.io/disk-pressure, 2 Insufficient cpu."), 4),),
+                broken=Answer(anchor="untolerated taint node.kubernetes.io/disk-pressure",
+                              cause="its pod is kept off one node by an untolerated "
+                                    "disk-pressure taint",
+                              keys=("disk", "pressure"),
+                              rationale="its scheduling event names the disk-pressure taint",
+                              link=True),
+                evidence_healthy="1 node(s) had untolerated taint dedicated=gpu",
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
+                                 "untolerated taint dedicated=gpu, 2 Insufficient cpu."), 4),),
+                healthy=Answer(anchor="untolerated taint dedicated=gpu",
+                               cause="its pod is missing a toleration for the dedicated gpu taint",
+                               keys=("dedicated", "taint"),
+                               rationale="its scheduling event names the dedicated=gpu taint"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="failed to create containerd task: no space left on device",
+                events=(("Failed", "Error: failed to create containerd task: no space left on device", 3),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="failed to create containerd task: no space left on device",
+                              cause="its container cannot start because there is no space "
+                                    "left on the device",
+                              keys=("space", "device"), confidence="medium",
+                              rationale="its start event says the device has no space left"),
+                events_healthy=(("Failed", ("Error: failed to create containerd task: no space left "
+                                 "on device. Ephemeral storage: pod limit 1Gi, currently used 1Gi"), 3),),
+                healthy=Answer(anchor="ephemeral storage: pod limit 1gi, currently used 1gi",
+                               cause="its container fills its own 1Gi ephemeral storage limit",
+                               keys=("ephemeral", "limit"),
+                               rationale="its event shows the pod used its whole storage limit"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="DaemonSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="last state terminated with exit code 137; cannot write checkpoint: no space left on device",
+                events=_backoff(8), log=_NO_SIGNATURE,
+                broken=Answer(anchor="cannot write checkpoint: no space left on device",
+                              cause="its agent dies while writing its checkpoint, with no "
+                                    "space left on the device",
+                              keys=("checkpoint", "space"), confidence="medium",
+                              rationale="its crash evidence shows a failed checkpoint write"),
+                evidence_healthy="last state terminated with exit code 137; cannot write checkpoint: volume smaller than the retention setting",
+                healthy=Answer(anchor="volume smaller than the retention setting",
+                               cause="its checkpoint volume is smaller than its retention setting",
+                               keys=("retention", "volume"),
+                               rationale="its crash evidence names its own retention setting"),
+                none_phrase="its container keeps crashing"),
+        ),
+        broken=World(conditions=(health.READY, health.Condition(
+            "DiskPressure", "True", "KubeletHasDiskPressure", "kubelet has disk pressure")),),
+        healthy=World(),
+        shown_origin="node {node} is under disk pressure",
+        shown_cause="node {node} reports DiskPressure, so it refuses new pods and evicts "
+                    "running ones",
+        shown_remedy="Free disk space on {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="cluster-maintenance-taint", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="other",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="0/{nodes} nodes are available for this pod",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) had "
+                           "untolerated taint maintenance=true"), 5),),
+                broken=Answer(anchor="untolerated taint maintenance=true",
+                              cause="its pod is kept off every node by an untolerated "
+                                    "maintenance taint",
+                              keys=("maintenance", "taint"),
+                              rationale="its scheduling event names the maintenance taint "
+                                        "on every node", link=True),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) "
+                                 "didn't match Pod's node affinity/selector"), 5),),
+                healthy=Answer(anchor="didn't match pod's node affinity/selector",
+                               cause="its pod asks for an instance type that no node carries",
+                               keys=("instance", "carries"),
+                               rationale="its scheduling event says no node matches its affinity"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="0/{nodes} nodes are available for this pod",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) had "
+                           "untolerated taint maintenance=true"), 5),),
+                broken=Answer(anchor="untolerated taint maintenance=true",
+                              cause="its pod is kept off every node by an untolerated "
+                                    "maintenance taint",
+                              keys=("maintenance", "taint"),
+                              rationale="its scheduling event names the maintenance taint "
+                                        "on every node", link=True),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) "
+                                 "didn't match pod anti-affinity rules"), 5),),
+                healthy=Answer(anchor="didn't match pod anti-affinity rules",
+                               cause="its pod anti-affinity leaves no node for another replica",
+                               keys=("anti", "replica"),
+                               rationale="its scheduling event names pod anti-affinity"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="0/{nodes} nodes are available for this pod",
+                events=(("FailedScheduling", "0/{nodes} nodes are available: no node fits this pod", 5),),
+                none_phrase="its pod cannot be scheduled"),
+        ),
+        broken=World(),
+        healthy=World(),
+        shown_origin="every node carries the maintenance taint",
+        shown_cause="every node carries a maintenance taint that no workload tolerates, so no "
+                    "new pod can be scheduled anywhere",
+        shown_remedy="Remove the maintenance taint when the work is done; the flagged workloads "
+                     "need no change.",
+    ),
+    Story(
+        key="cni-ip-pool-exhausted", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="other",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="failed to create pod sandbox",
+                events=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: plugin type cni "
+                           "failed (add): no available IP addresses in the pool"), 4),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="no available ip addresses in the pool",
+                              cause="its pod sandbox cannot be created because the CNI has no "
+                                    "available addresses in the pool",
+                              keys=("addresses", "pool"),
+                              rationale="its sandbox event says the address pool has nothing free",
+                              link=True),
+                events_healthy=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: plugin "
+                                 "type cni failed (add): requested static IP address already "
+                                 "allocated"), 4),),
+                healthy=Answer(anchor="requested static ip address already allocated",
+                               cause="its pod asks for a static address that is already "
+                                     "allocated to another pod",
+                               keys=("static", "allocated"),
+                               rationale="its sandbox event names a static address request"),
+                none_phrase="its container fails to start"),
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="0/{nodes} nodes accepted the pod",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} Insufficient "
+                           "pod-network addresses."), 4),),
+                broken=Answer(anchor="insufficient pod-network addresses",
+                              cause="its pod cannot be scheduled because the nodes have "
+                                    "insufficient pod-network addresses",
+                              keys=("insufficient", "network"),
+                              rationale="its scheduling event names missing network addresses",
+                              link=True),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) "
+                                 "had no free secondary network interface slot for this pod."), 4),),
+                healthy=Answer(anchor="no free secondary network interface slot",
+                               cause="its pod asks for a secondary interface that no node has "
+                                     "a free slot for",
+                               keys=("secondary", "interface"),
+                               rationale="its scheduling event names a secondary interface slot"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="Failed to create pod sandbox: IPAM returned no address for this pod",
+                events=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: plugin type cni "
+                           "failed: IPAM returned no address for this pod"), 4),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="ipam returned no address for this pod",
+                              cause="its sandbox fails because IPAM returned no address for the pod",
+                              keys=("ipam", "address"),
+                              rationale="its sandbox event says IPAM had no address to give",
+                              link=True),
+                evidence_healthy="Failed to create pod sandbox: its address annotation names a range IPAM no longer lists",
+                events_healthy=(("FailedCreatePodSandBox", ("Failed to create pod sandbox: plugin "
+                                 "type cni failed: pod annotation pins an address from a range "
+                                 "the config no longer lists"), 4),),
+                healthy=Answer(anchor="pod annotation pins an address from a range",
+                               cause="its pod annotation pins an address from a range that was "
+                                     "removed",
+                               keys=("annotation", "range"),
+                               rationale="its sandbox event names its own address annotation"),
+                none_phrase="its container fails to start"),
+        ),
+        broken=World(),
+        healthy=World(),
+        shown_origin="the CNI address pool is exhausted",
+        shown_cause="the CNI's shared address pool has no free addresses, so new pods cannot "
+                    "get a sandbox",
+        shown_remedy="Grow the CNI address pool; the flagged workloads need no change.",
+    ),
+    Story(
+        key="csi-node-driver-crashed", cls="P", blast_radius="node", scope_field="node",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="VolumeMountError",
+                reason="volume could not be mounted",
+                evidence="unmounted volumes=[data]",
+                events=(("FailedMount", ("Unable to attach or mount volumes: unmounted volumes=[data], "
+                           "timed out waiting for the condition"), 6),),
+                broken=Answer(anchor="timed out waiting for the condition",
+                              cause="its volume cannot mount because the mount timed out "
+                                    "waiting for the condition",
+                              keys=("mount", "timed"), confidence="medium",
+                              rationale="its mount event shows a timeout on the node",
+                              link=True),
+                events_healthy=(("FailedMount", ("Unable to attach or mount volumes: unmounted "
+                                 "volumes=[data]: its claim is stuck Terminating, the finalizer "
+                                 "never cleared"), 6),),
+                healthy=Answer(anchor="its claim is stuck terminating",
+                               cause="its claim is stuck Terminating because a finalizer "
+                                     "never cleared",
+                               keys=("terminating", "finalizer"),
+                               rationale="its mount event names its own stuck claim"),
+                none_phrase="its volume cannot be mounted"),
+            VictimText(
+                workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="open /data/lockfile: no such file or directory (volume not yet mounted when the container started)",
+                events=_backoff(8), log=_NO_SIGNATURE,
+                broken=Answer(anchor="volume not yet mounted when the container started",
+                              cause="its container exits reading a data path whose volume was "
+                                    "not yet mounted",
+                              keys=("volume", "mounted"), confidence="medium",
+                              rationale="its crash evidence says the volume was not mounted yet"),
+                evidence_healthy="open /data/lockfile: no such file or directory (the entrypoint never creates the lock directory)",
+                healthy=Answer(anchor="the entrypoint never creates the lock directory",
+                               cause="its entrypoint never creates the lock directory it reads",
+                               keys=("entrypoint", "directory"),
+                               rationale="its crash evidence names a directory nobody creates"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="Job", status="ContainerCreating", issue="VolumeAttachError",
+                reason="volume could not be attached to the pod's node",
+                evidence="AttachVolume.Attach failed for volume pvc-{pvc}: timed out waiting for the external attacher",
+                events=(("FailedAttachVolume", ("AttachVolume.Attach failed for volume \"pvc-{pvc}\": "
+                           "timed out waiting for the external attacher"), 4),),
+                broken=Answer(anchor="timed out waiting for the external attacher",
+                              cause="its volume cannot attach because the external attacher "
+                                    "timed out",
+                              keys=("attacher", "timed"), confidence="medium",
+                              rationale="its attach event shows the attacher timing out",
+                              link=True),
+                evidence_healthy="AttachVolume.Attach failed for volume pvc-{pvc}: volume handle not found on the storage backend",
+                events_healthy=(("FailedAttachVolume", ("AttachVolume.Attach failed for volume "
+                                 "\"pvc-{pvc}\": volume handle not found on the storage backend"), 4),),
+                healthy=Answer(anchor="volume handle not found on the storage backend",
+                               cause="its volume handle was deleted from the storage backend",
+                               keys=("handle", "backend"),
+                               rationale="its attach event says the backend has no such handle"),
+                none_phrase="its volume cannot attach"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="kube-system", name="csi-node-driver", kind="DaemonSet",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container csi-node-driver exited with code 1", container="csi-node-driver",
+            ready=0, desired=1,
+            events=(("BackOff", "Back-off restarting failed container csi-node-driver in pod {pod}", 4),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="the CSI node driver on node {node} is crashing",
+        shown_cause="the CSI node driver pod on node {node} keeps crashing, so volumes cannot "
+                    "mount or attach there",
+        shown_remedy="Recover the CSI node driver on {node}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="namespace-egress-proxy-down", cls="P", blast_radius="namespace", scope_field="ns",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe failed 10 times in the last five minutes",
+                events=(("Unhealthy", ("Readiness probe failed: outbound check blocked waiting on "
+                           "the egress proxy"), 10),),
+                broken=Answer(anchor="outbound check blocked waiting on the egress proxy",
+                              cause="its readiness probe fails because its outbound check is "
+                                    "blocked waiting on the egress proxy",
+                              keys=("outbound", "proxy"),
+                              rationale="its probe event names the egress proxy", link=True),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: outbound check exceeded its "
+                                 "own 900ms timeout budget"), 10),),
+                healthy=Answer(anchor="outbound check exceeded its own 900ms timeout budget",
+                               cause="its readiness probe gives up on its own short timeout budget",
+                               keys=("budget", "short"),
+                               rationale="its probe event names its own timeout budget"),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="dial tcp: i/o timeout while establishing an outbound connection",
+                events=_backoff(7), log=_NO_SIGNATURE,
+                broken=Answer(anchor="i/o timeout while establishing an outbound connection",
+                              cause="its container exits after a timeout while it opens an "
+                                    "outbound connection",
+                              keys=("timeout", "opens"), confidence="medium",
+                              rationale="its crash evidence shows an outbound connect timing out"),
+                evidence_healthy="dial tcp: connect timeout of 200ms, set below a normal round trip",
+                healthy=Answer(anchor="connect timeout of 200ms, set below a normal round trip",
+                               cause="its connect timeout is set below a normal round trip",
+                               keys=("connect", "round"),
+                               rationale="its crash evidence names its own 200ms setting"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="Job", status="Init:CrashLoopBackOff", issue="Init:CrashLoopBackOff",
+                reason="init container keeps restarting",
+                evidence="last state terminated with exit code 1; seed download through the proxy failed",
+                events=_backoff(5),
+                broken=Answer(anchor="seed download through the proxy failed",
+                              cause="its init container fails to download its seed data "
+                                    "through the proxy",
+                              keys=("download", "proxy"), confidence="medium",
+                              rationale="its init evidence says the proxy download failed"),
+                evidence_healthy="last state terminated with exit code 1; seed download from a decommissioned host no longer resolves",
+                healthy=Answer(anchor="seed download from a decommissioned host no longer resolves",
+                               cause="its init container downloads from a decommissioned host "
+                                     "that no longer resolves",
+                               keys=("decommissioned", "resolves"),
+                               rationale="its init evidence names a host that no longer resolves"),
+                none_phrase="its init container keeps crashing"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="egress-system", name="egress-proxy", kind="Deployment",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container egress-proxy exited with code 1", container="egress-proxy",
+            ready=0, desired=3,
+            events=(("BackOff", "Back-off restarting failed container egress-proxy in pod {pod}", 9),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="the egress proxy serving {scope} is down",
+        shown_cause="the egress proxy serving {scope} has no ready replicas, so outbound "
+                    "calls from {scope} hang",
+        shown_remedy="Restore the egress proxy for {scope}; the flagged workloads need no change.",
+    ),
+    Story(
+        key="pod-identity-webhook-down", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="no credential source found: identity token file is absent",
+                events=_backoff(7), log=_NO_SIGNATURE,
+                broken=Answer(anchor="no credential source found: identity token file is absent",
+                              cause="its container crashes because no credential source is "
+                                    "found and its identity token file is absent",
+                              keys=("credential", "absent"), confidence="medium",
+                              rationale="its crash evidence shows an absent identity token file",
+                              link=True),
+                evidence_healthy="no credential source found: its pod template carries the identity injection opt-out annotation",
+                healthy=Answer(anchor="its pod template carries the identity injection opt-out annotation",
+                               cause="its pod template opts out of identity injection with an "
+                                     "annotation",
+                               keys=("injection", "annotation"),
+                               rationale="its crash evidence names an opt-out annotation"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+                issue="Init:CrashLoopBackOff", reason="init container keeps restarting",
+                evidence="config fetch refused: request carried no identity token",
+                events=_backoff(6),
+                broken=Answer(anchor="request carried no identity token",
+                              cause="its init config fetch is refused because the request "
+                                    "carried no identity token",
+                              keys=("refused", "identity"), confidence="medium",
+                              rationale="its init evidence says the request had no token"),
+                evidence_healthy="config fetch refused: the init image predates token-file support",
+                healthy=Answer(anchor="the init image predates token-file support",
+                               cause="its init image predates token-file support",
+                               keys=("predates", "support"),
+                               rationale="its init evidence names an old init image"),
+                none_phrase="its init container keeps crashing"),
+            VictimText(
+                workload_kind="DaemonSet", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", ("Readiness probe failed: HTTP probe failed with statuscode: "
+                           "503, body: token signing unavailable"), 6),),
+                broken=Answer(anchor="body: token signing unavailable",
+                              cause="its readiness probe gets a 503 because token signing is "
+                                    "unavailable",
+                              keys=("signing", "unavailable"), confidence="medium",
+                              rationale="its probe event says token signing is unavailable"),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: HTTP probe failed with "
+                                 "statuscode: 503, body: signing key rotated, handler still loads "
+                                 "the previous key"), 6),),
+                healthy=Answer(anchor="signing key rotated, handler still loads the previous key",
+                               cause="its handler still loads the previous key after the signing key rotated",
+                               keys=("rotated", "previous"),
+                               rationale="its probe event names a key rotation"),
+                none_phrase="its readiness probe fails"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="kube-system", name="pod-identity-webhook", kind="Deployment",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container pod-identity-webhook exited with code 1",
+            container="pod-identity-webhook", ready=0, desired=2,
+            events=(("BackOff", "Back-off restarting failed container pod-identity-webhook in pod {pod}", 7),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="the pod identity webhook is down",
+        shown_cause="the pod identity webhook has no ready replica, so pods are admitted "
+                    "without their identity token volume",
+        shown_remedy="Restore the pod identity webhook; the flagged workloads need no change.",
+    ),
+    Story(
+        key="external-secrets-operator-down", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="CreateContainerConfigError",
+                issue="CreateContainerConfigError",
+                reason="container could not build its environment",
+                evidence="secret \"{name}-credentials\" not found",
+                events=(("Failed", "Error: secret \"{name}-credentials\" not found", 5),),
+                broken=Answer(anchor="secret \"{name}-credentials\" not found",
+                              cause="its container cannot start because a Secret it references "
+                                    "is not found",
+                              keys=("secret", "found"), confidence="medium",
+                              rationale="its event says a referenced Secret does not exist",
+                              link=True),
+                evidence_healthy="secret \"{name}-credentails\" not found; the Secret one letter off exists",
+                events_healthy=(("Failed", ("Error: secret \"{name}-credentails\" not found, a "
+                                 "Secret one letter off exists in the namespace"), 5),),
+                healthy=Answer(anchor="a secret one letter off exists in the namespace",
+                               cause="its pod spec misspells the Secret name by one letter",
+                               keys=("misspells", "letter"),
+                               rationale="its event says a similar Secret name exists"),
+                none_phrase="its container cannot build its environment"),
+            VictimText(
+                workload_kind="Job", status="Init:CreateContainerConfigError",
+                issue="Init:CreateContainerConfigError",
+                reason="init container could not build its environment",
+                evidence="couldn't find key DB_PASSWORD in Secret {ns}/{name}-db",
+                events=(("Failed", "Error: couldn't find key DB_PASSWORD in Secret {ns}/{name}-db", 5),),
+                broken=Answer(anchor="couldn't find key db_password in secret",
+                              cause="its init container asks for a Secret key that is missing",
+                              keys=("secret", "missing"), confidence="medium",
+                              rationale="its event names a Secret key that cannot be found"),
+                events_healthy=(("Failed", ("Error: couldn't find key DB_PASSWORD in Secret "
+                                 "{ns}/{name}-db, the chart now writes DATABASE_PASSWORD"), 5),),
+                healthy=Answer(anchor="the chart now writes database_password",
+                               cause="its chart renamed the key to DATABASE_PASSWORD",
+                               keys=("chart", "renamed"),
+                               rationale="its event names the renamed key"),
+                none_phrase="its init container cannot build its environment"),
+            VictimText(
+                workload_kind="StatefulSet", status="Degraded", issue="ContainerStartError",
+                reason=_CSE,
+                evidence="MountVolume.SetUp failed for volume tls: secret \"{name}-tls\" not found",
+                events=(("FailedMount", ("MountVolume.SetUp failed for volume \"tls\": secret "
+                           "\"{name}-tls\" not found"), 4),),
+                log=NO_PREVIOUS,
+                broken=Answer(anchor="secret \"{name}-tls\" not found",
+                              cause="its volume cannot mount because the Secret behind it is "
+                                    "not found",
+                              keys=("volume", "secret"), confidence="medium",
+                              rationale="its mount event says the Secret behind the volume is gone"),
+                evidence_healthy="MountVolume.SetUp failed for volume tls: secret \"{name}-tls\" not found",
+                events_healthy=(("FailedMount", ("MountVolume.SetUp failed for volume \"tls\": secret "
+                                 "\"{name}-tls\" not found, removed by a cleanup job that matched "
+                                 "its label"), 4),),
+                healthy=Answer(anchor="removed by a cleanup job that matched its label",
+                               cause="its TLS Secret was removed by a cleanup job",
+                               keys=("cleanup", "removed"),
+                               rationale="its mount event names a cleanup job"),
+                none_phrase="its container fails to start"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="kube-system", name="external-secrets", kind="Deployment",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container external-secrets exited with code 1",
+            container="external-secrets", ready=0, desired=1,
+            events=(("BackOff", "Back-off restarting failed container external-secrets in pod {pod}", 7),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="the external-secrets operator is down",
+        shown_cause="the external-secrets operator is down, so the Secrets it syncs are no "
+                    "longer created and pods that mount them cannot start",
+        shown_remedy="Restore the external-secrets operator; the flagged workloads need no change.",
+    ),
+    Story(
+        key="network-operator-down", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", ("Readiness probe failed: dependency check to a peer on "
+                           "another node timed out"), 6),),
+                broken=Answer(anchor="dependency check to a peer on another node timed out",
+                              cause="its readiness probe fails because a peer on another node "
+                                    "times out",
+                              keys=("peer", "another"), confidence="medium",
+                              rationale="its probe event shows a cross-node peer timing out",
+                              link=True),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: dependency check dials a "
+                                 "peer hostname that no Service publishes any more"), 6),),
+                healthy=Answer(anchor="a peer hostname that no service publishes any more",
+                               cause="its check dials a hostname that no Service publishes",
+                               keys=("hostname", "publishes"),
+                               rationale="its probe event names a hostname nobody publishes"),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="cluster join failed: peer on another node unreachable after 30s",
+                events=_backoff(7), log=_NO_SIGNATURE,
+                broken=Answer(anchor="peer on another node unreachable after 30s",
+                              cause="its cluster join fails because a peer on another node is "
+                                    "unreachable",
+                              keys=("join", "unreachable"), confidence="medium",
+                              rationale="its crash evidence shows a peer on another node "
+                                        "unreachable", link=True),
+                evidence_healthy="cluster join failed: member ordinal 3 no longer exists, the peer list is stale",
+                healthy=Answer(anchor="member ordinal 3 no longer exists",
+                               cause="its stale peer list still names a member ordinal that no "
+                                     "longer exists",
+                               keys=("ordinal", "stale"),
+                               rationale="its crash evidence names a missing member"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="Job", status="Init:CrashLoopBackOff", issue="Init:CrashLoopBackOff",
+                reason="init container keeps restarting",
+                evidence="wait-for-db: dial tcp: i/o timeout reaching a pod on another node",
+                events=_backoff(5),
+                broken=Answer(anchor="i/o timeout reaching a pod on another node",
+                              cause="its init wait for the database times out",
+                              keys=("database", "times"), confidence="medium",
+                              rationale="its init evidence shows a timeout reaching a pod"),
+                evidence_healthy="wait-for-db: reads a stale address file instead of the Service name",
+                healthy=Answer(anchor="reads a stale address file instead of the service name",
+                               cause="its init step reads a stale address file",
+                               keys=("stale", "address"),
+                               rationale="its init evidence names a stale address file"),
+                none_phrase="its init container keeps crashing"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="kube-system", name="network-operator", kind="Deployment",
+            status="OOMKilled", issue="OOMKilled", reason=_OOM,
+            evidence="last state terminated with reason OOMKilled, exit code 137",
+            container="network-operator", ready=0, desired=1,
+            events=(("OOMKilling", ("Memory cgroup out of memory: killed process in container "
+                       "network-operator at its memory limit"), 5),),
+            log=_NO_SIGNATURE,
+            answer=Answer(anchor="last state terminated with reason oomkilled, exit code 137",
+                          cause="the network operator was killed at its memory limit",
+                          keys=("memory", "limit"),
+                          rationale="its last state shows it was OOMKilled"))),
+        healthy=World(),
+        shown_origin="the network operator is OOM-killed",
+        shown_cause="the network operator keeps being OOM-killed, so the pod overlay network "
+                    "is no longer reconciled",
+        shown_remedy="Raise the network operator's memory limit; the flagged workloads need no change.",
+    ),
+    Story(
+        key="cert-manager-down", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", "Readiness probe failed: tls: certificate has expired", 8),),
+                broken=Answer(anchor="tls: certificate has expired",
+                              cause="its readiness probe fails because a TLS certificate has expired",
+                              keys=("expired", "certificate"),
+                              rationale="its probe event says a certificate has expired",
+                              link=True),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: x509: certificate signed by "
+                                 "unknown authority, the probe's CA bundle predates the trust store "
+                                 "rotation"), 8),),
+                healthy=Answer(anchor="the probe's ca bundle predates the trust store rotation",
+                               cause="its probe pins a CA bundle that predates the trust store "
+                                     "rotation",
+                               keys=("bundle", "trust"),
+                               rationale="its probe event names an old CA bundle"),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="StatefulSet", status="CrashLoopBackOff", issue="CrashLoopBackOff",
+                reason="container keeps restarting",
+                evidence="tls: failed to load server certificate: certificate has expired",
+                events=_backoff(8), log=_NO_SIGNATURE,
+                broken=Answer(anchor="failed to load server certificate: certificate has expired",
+                              cause="its container crashes because its server certificate has "
+                                    "expired",
+                              keys=("expired", "server"),
+                              rationale="its crash evidence says the server certificate expired",
+                              link=True),
+                evidence_healthy="tls: failed to load server certificate: self-signed, one-year validity, never enrolled for renewal",
+                healthy=Answer(anchor="self-signed, one-year validity, never enrolled for renewal",
+                               cause="its self-signed certificate was never enrolled for renewal",
+                               keys=("signed", "enrolled"),
+                               rationale="its crash evidence names a hand-made certificate"),
+                none_phrase="its container keeps crashing"),
+            VictimText(
+                workload_kind="DaemonSet", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="metrics push failed: x509: certificate has expired or is not yet valid",
+                events=_backoff(6),
+                broken=Answer(anchor="x509: certificate has expired or is not yet valid",
+                              cause="its metrics push fails because a certificate has expired",
+                              keys=("metrics", "expired"), confidence="medium",
+                              rationale="its evidence shows an x509 expiry on the push",
+                              link=True),
+                evidence_healthy="metrics push failed: x509: chain ends at a private CA intermediate that lapsed",
+                healthy=Answer(anchor="chain ends at a private ca intermediate that lapsed",
+                               cause="its certificate chain ends at a private intermediate that "
+                                     "lapsed",
+                               keys=("private", "intermediate"),
+                               rationale="its evidence names a lapsed private intermediate"),
+                none_phrase="its container keeps restarting"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="cert-manager", name="cert-manager", kind="Deployment",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container cert-manager exited with code 1", container="cert-manager",
+            ready=0, desired=1,
+            events=(("BackOff", "Back-off restarting failed container cert-manager in pod {pod}", 11),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="cert-manager is down",
+        shown_cause="cert-manager is down, so certificates near expiry are not renewed and the "
+                    "workloads serving them fail their TLS checks once they lapse",
+        shown_remedy="Restore cert-manager and let it renew the lapsed Certificates; the "
+                     "flagged workloads need no change.",
+    ),
+    Story(
+        key="metrics-server-down", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Running", issue="ProbeFailure",
+                reason="Unhealthy", evidence="readiness probe on the container is failing",
+                events=(("Unhealthy", "Readiness probe failed: HTTP probe failed with statuscode: 503", 6),),
+                events_healthy=(("Unhealthy", ("Readiness probe failed: HTTP probe failed with "
+                                 "statuscode: 503 (overloaded, queue depth 4000)"), 6),),
+                healthy=Answer(anchor="overloaded, queue depth 4000",
+                               cause="its request queue is overloaded at a depth of 4000",
+                               keys=("overloaded", "queue"),
+                               rationale="its probe event shows a full request queue"),
+                none_phrase="its readiness probe fails"),
+            VictimText(
+                workload_kind="StatefulSet", status="OOMKilled", issue="OOMKilled",
+                reason=_OOM,
+                evidence="container exceeded its memory limit under load that would have been spread across more replicas",
+                events=_backoff(6), log="ran out of memory in-process",
+                broken=Answer(anchor="load that would have been spread across more replicas",
+                              cause="its container exceeded its memory limit under load that "
+                                    "more replicas would share",
+                              keys=("memory", "replicas"), confidence="medium",
+                              rationale="its evidence says more replicas would have shared the load",
+                              link=True),
+                evidence_healthy="container exceeded its memory limit: its in-memory index doubles on every compaction",
+                healthy=Answer(anchor="its in-memory index doubles on every compaction",
+                               cause="its in-memory index doubles on every compaction",
+                               keys=("index", "compaction"),
+                               rationale="its evidence names its own growing index"),
+                none_phrase="its container is killed for memory"),
+            VictimText(
+                workload_kind="DaemonSet", status="Degraded", issue="RestartLoop",
+                reason="container keeps restarting",
+                evidence="scrape target overloaded: collector restarted after 30s of backpressure",
+                events=_backoff(6),
+                evidence_healthy="collector restarted: its scrape interval is one second so its buffer fills",
+                healthy=Answer(anchor="its scrape interval is one second so its buffer fills",
+                               cause="its scrape interval is one second so its buffer fills",
+                               keys=("interval", "buffer"),
+                               rationale="its evidence names its own scrape interval"),
+                none_phrase="its container keeps restarting"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="kube-system", name="metrics-server", kind="Deployment",
+            status="CrashLoopBackOff", issue="CrashLoopBackOff", reason="Error",
+            evidence="container metrics-server exited with code 1", container="metrics-server",
+            ready=0, desired=1,
+            events=(("BackOff", "Back-off restarting failed container metrics-server in pod {pod}", 8),),
+            log=_NO_SIGNATURE, answer=None)),
+        healthy=World(),
+        shown_origin="metrics-server is down",
+        shown_cause="metrics-server is down, so every autoscaler is frozen at its last size "
+                    "and overloaded pods are not scaled out",
+        shown_remedy="Restore metrics-server and let the autoscalers resume; the flagged "
+                     "workloads need no change.",
+    ),
+    Story(
+        key="csi-controller-oomkilled", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                           "immediate PersistentVolumeClaims"), 5),),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                                 "immediate PersistentVolumeClaims, its claim names a class one "
+                                 "letter off from any class"), 5),),
+                healthy=Answer(anchor="its claim names a class one letter off from any class",
+                               cause="its claim names a storage class one letter off",
+                               keys=("class", "letter"),
+                               rationale="its event names a misspelled class"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                           "immediate PersistentVolumeClaims"), 5),),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                                 "immediate PersistentVolumeClaims, its template asks for 10 TiB "
+                                 "above the per-volume cap"), 5),),
+                healthy=Answer(anchor="its template asks for 10 tib above the per-volume cap",
+                               cause="its volume template asks for more than the per-volume cap",
+                               keys=("template", "volume"),
+                               rationale="its event says the template asks for 10 TiB"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Job", status="ContainerCreating", issue="VolumeMountError",
+                reason="volume could not be mounted",
+                evidence="MountVolume.MountDevice failed for volume pvc-{pvc}: the controller has not published the volume",
+                events=(("FailedMount", ("MountVolume.MountDevice failed for volume \"pvc-{pvc}\": "
+                           "the controller has not published the volume"), 4),),
+                broken=Answer(anchor="the controller has not published the volume",
+                              cause="its volume cannot mount because the controller has not "
+                                    "published it",
+                              keys=("controller", "published"), confidence="medium",
+                              rationale="its mount event says the controller never published "
+                                        "the volume"),
+                evidence_healthy="MountVolume.MountDevice failed for volume pvc-{pvc}: two volumeMounts name the same claim",
+                events_healthy=(("FailedMount", ("MountVolume.MountDevice failed for volume "
+                                 "\"pvc-{pvc}\": two volumeMounts name the same claim with "
+                                 "conflicting options"), 4),),
+                healthy=Answer(anchor="two volumemounts name the same claim",
+                               cause="its pod mounts the same claim twice with conflicting options",
+                               keys=("twice", "conflicting"),
+                               rationale="its mount event names a doubled mount"),
+                none_phrase="its volume cannot be mounted"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="storage-system", name="block-ssd-csi-controller", kind="Deployment",
+            status="OOMKilled", issue="OOMKilled", reason=_OOM,
+            evidence="last state terminated with reason OOMKilled, exit code 137",
+            container="block-ssd-csi-controller", ready=0, desired=2,
+            events=(("OOMKilling", ("Memory cgroup out of memory: killed process in container "
+                       "block-ssd-csi-controller at its memory limit"), 6),),
+            log=_NO_SIGNATURE,
+            answer=Answer(anchor="last state terminated with reason oomkilled, exit code 137",
+                          cause="the block-ssd CSI controller was killed at its memory limit",
+                          keys=("memory", "limit"),
+                          rationale="its last state shows it was OOMKilled"))),
+        healthy=World(),
+        shown_origin="the block-ssd CSI controller is OOM-killed",
+        shown_cause="the block-ssd CSI controller is OOM-killed on every start, so no claim on "
+                    "that class gets a volume",
+        shown_remedy="Raise the block-ssd CSI controller's memory limit; the flagged workloads "
+                     "need no change.",
+    ),
+    Story(
+        key="csi-controller-unschedulable", cls="P", blast_radius="cluster", scope_field="",
+        origin_kind="workload",
+        victims=(
+            VictimText(
+                workload_kind="Deployment", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                           "immediate PersistentVolumeClaims"), 5),),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                                 "immediate PersistentVolumeClaims, its volumeName points at a "
+                                 "volume held by another claim"), 5),),
+                healthy=Answer(anchor="its volumename points at a volume held by another claim",
+                               cause="its claim pins a volume that another claim already holds",
+                               keys=("pins", "holds"),
+                               rationale="its event names a volume held by another claim"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="Job", status="Pending", issue="Unschedulable",
+                reason="no node has room for the pod",
+                evidence="pod has unbound immediate PersistentVolumeClaims",
+                events=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                           "immediate PersistentVolumeClaims"), 5),),
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: pod has unbound "
+                                 "immediate PersistentVolumeClaims, its claim asks for "
+                                 "ReadWriteMany but the class offers ReadWriteOnce"), 5),),
+                healthy=Answer(anchor="its claim asks for readwritemany but the class offers readwriteonce",
+                               cause="its claim asks for an access mode the class cannot offer",
+                               keys=("access", "offer"),
+                               rationale="its event names an access mode the class lacks"),
+                none_phrase="its pod cannot be scheduled"),
+            VictimText(
+                workload_kind="StatefulSet", status="Init:CrashLoopBackOff",
+                issue="Init:CrashLoopBackOff", reason="init container keeps restarting",
+                evidence="init step waited 120s for its data volume and gave up",
+                events=_backoff(6),
+                broken=Answer(anchor="waited 120s for its data volume and gave up",
+                              cause="its init step gave up after waiting for its data volume",
+                              keys=("waiting", "volume"), confidence="medium",
+                              rationale="its init evidence says the data volume never showed up"),
+                evidence_healthy="init step polls a volume path that its last chart release renamed",
+                healthy=Answer(anchor="a volume path that its last chart release renamed",
+                               cause="its init step polls a path that the chart renamed",
+                               keys=("polls", "renamed"),
+                               rationale="its init evidence names a renamed path"),
+                none_phrase="its init container keeps crashing"),
+        ),
+        broken=World(origin_row=OriginRow(
+            namespace="storage-system", name="archive-hdd-csi-controller", kind="Deployment",
+            status="Pending", issue="Unschedulable", reason="no node has room for the pod",
+            evidence="0/{nodes} nodes are available: {nodes} node(s) didn't match Pod's node affinity/selector.",
+            container="archive-hdd-csi-controller", ready=0, desired=1,
+            events=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) didn't "
+                       "match Pod's node affinity/selector."), 8),),
+            answer=Answer(anchor="didn't match pod's node affinity/selector",
+                          cause="the archive-hdd CSI controller cannot be scheduled because no "
+                                "node can match its node selector",
+                          keys=("match", "selector"),
+                          rationale="its scheduling event says no node matches its selector"))),
+        healthy=World(),
+        shown_origin="the archive-hdd CSI controller cannot be scheduled",
+        shown_cause="the archive-hdd CSI controller cannot be scheduled because its node "
+                    "selector matches no node, so claims on that class are never provisioned",
+        shown_remedy="Label a node for the archive-hdd controller; the flagged workloads need "
+                     "no change.",
     ),
 )
 

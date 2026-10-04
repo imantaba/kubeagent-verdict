@@ -197,3 +197,10 @@ def test_every_answer_key_is_lowercase():
             n += 1
             assert all(k == k.lower() for k in a.keys), (st.key, a.keys)
     assert n
+
+
+def test_named_edits():
+    by = s.by_key()
+    assert any(cd.type == "PIDPressure" and cd.status == "True"
+               for cd in by["node-pid-pressure"].broken.conditions)
+    assert by["networkpolicy-deny-all"].healthy.policies == ()
