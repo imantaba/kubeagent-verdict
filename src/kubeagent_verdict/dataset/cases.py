@@ -441,6 +441,8 @@ def _entry_gold(e: CatalogEntry, n: Names, own: Sequence[str],
     own = list(own)
     anchors = gold.drop_excluded(own, excluded)
     anchor = gold._norm_cause(_fmt(a.anchor, n))
+    if not anchor.strip():
+        raise ValueError(f"{e.key}: the anchor is empty after formatting")
     if any(anchor in ln for ln in anchors):
         gold.check_keys(a.keys, anchors=anchors, own=own)
         return gold.RowGold("named", _fmt(a.cause, n), a.confidence, a.keys,
