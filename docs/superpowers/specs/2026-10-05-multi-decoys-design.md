@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-05
 **Branch:** `spec4b3-multi-decoys` (cut off `main` @ `5b46542`)
-**Status:** draft, for review
+**Status:** approved; amended 2026-10-05 while planning (IS-22 header half only; 4b-1 answers with 4+ workloads move; node count 172)
 
 ## What this is
 
@@ -103,7 +103,7 @@ so T is 3 and the texts agree. A `multi` row can name more nodes: each
 other workload's node shows up as a ruled-out candidate. Then T is 4 or 5,
 and the prompt says both "3/4 nodes Ready" and "0/3 nodes are available".
 
-Measured: 172 train rows and 14 val rows disagree. Every one is `multi`.
+Measured: 172 rows disagree (159 train, 13 val). Every one is `multi`.
 Every other case agrees, including the shared-origin family, whose stories
 already write `0/{nodes}` and fill it with the row's count.
 
@@ -197,11 +197,17 @@ The rule:
   (4b-1's fallback, word for word.)
 - **One line per workload**, in row order: `key: cause.`, or
   `key: its own lines do not show why.` for a `none_of_these` row.
-- **At most 4 lines** (`c.MAX_SUMMARY_LINES`). With 4 workloads, the 3rd
-  and 4th share the last line, joined by one space.
+- **At most 4 lines** (`c.MAX_SUMMARY_LINES`). With 4 or more workloads,
+  the 3rd and every later one share the last line, joined by one space.
 
 4b-1's `_summary` keeps its `shared` branch as it is and calls the helper
-for the rest, so the 4b-1 family's summaries stay byte for byte the same.
+for the rest. Its summaries stay byte for byte the same, with one
+exception. Today its non-shared branch names only the first 3 rows. The
+helper names every row, so a non-shared 4b-1 row with 4 or 5 workloads
+gains its missing names. That is 77 train and val rows (amended
+2026-10-05, found while planning). No exam row moves: every 4b-1 exam row
+with 4 or more workloads is `shared`, and the `shared` branch does not
+change.
 
 Scoring, checked on the real scorer: for label `none`, both openings score
 job 3 = 1.0 (neither claims a shared cause). For label `separate`, only
@@ -257,16 +263,17 @@ the scheduler numbers change. (A digit for a digit: no read grows or
 shrinks, so no cap moves.) The builder asserts that the second T equals
 the first.
 
-**The checker.** One new rule, IS-22, on every row:
-
-- When the prompt prints a cluster-health header with T nodes, every
-  `0/N nodes are available` in the prompt has N = T.
-- In every scheduler message, the numbers that open its reasons add up to
-  N. A reason with no number (`pod has unbound immediate
-  PersistentVolumeClaims`) is skipped.
+**The checker.** One new rule, IS-22, on every row: when the prompt prints
+a cluster-health header with T nodes, every `0/N nodes are available` in
+the prompt has N = T.
 
 Today's checker would not catch the mismatch. This rule makes it a build
 failure from now on.
+
+(Amended 2026-10-05, found while planning. The draft had a second half:
+the numbers that open a scheduler message's reasons add up to N. That
+half fails on 4b-1's own stories, exam rows included, so adding it now
+would break the exam. It is left for the exam rebuild.)
 
 ### 6. The container-name clash
 
@@ -278,8 +285,9 @@ No code. PIN.md and the 4b-1 spec record it as closed, with the count
 | What | Rows | Why |
 |---|---|---|
 | `multi` prompts that had the healthy-origin read | 244 (213 train, 31 val) | the read goes; the gather gets 8 reads |
-| `multi` prompts with a node mismatch | 186 (172 train, 14 val) | scheduler numbers match the header |
+| `multi` prompts with a node mismatch | 172 (159 train, 13 val) | scheduler numbers match the header |
 | `multi` answers | most of 738 | new summary; some rows also move with the prompt |
+| 4b-1 non-shared answers with 4-5 workloads | 77 (train and val) | the summary names every workload |
 | `multi` meta | 738 | new decoy lists; `origin_*` keys gone |
 | non-`multi` rows | 0 | nothing they use changes |
 | exam (`test.jsonl`) | 0 expected | `multi` has no exam rows; the probe stays byte-identical |
@@ -312,7 +320,8 @@ TDD, as always: each test is written first and seen to fail.
 7. **Probe bytes.** The 20 `multi_misattribution_probe` rows are byte for
    byte the ones in `out/dataset-1004-4b2/test.jsonl`.
 8. **4b-1 bytes.** Every shared-origin family row's answer is byte for
-   byte the one in `out/dataset-1004-4b2`.
+   byte the one in `out/dataset-1004-4b2`, except a non-shared row with 4
+   or more workloads. Those rows differ only by naming every workload.
 9. **Empty anchor.** `stories.Answer(anchor="", …)` and `anchor="  "`
    raise. `_entry_gold` raises on an anchor that formats to empty.
 10. **Node fill.** `_fmt` with default `Names` gives the old text exactly.
@@ -321,17 +330,23 @@ TDD, as always: each test is written first and seen to fail.
 11. **`node_total`.** It returns what `cluster_health` printed before, on
     every row with a header in `out/dataset-1004-4b2`.
 12. **IS-22.** It fails a row with "3/4 nodes Ready" and "0/3 nodes are
-    available". It fails "0/4 … 1 node(s) were unschedulable, 2 node(s)
-    had untolerated taint(s)" (sum 3, not 4). It passes a row with no
-    header. On a full new build it finds 0 violations.
+    available". It passes a row with no header. On a full new build it
+    finds 0 violations.
 13. **Non-`multi` prompts.** Every non-`multi` user message is byte for
     byte the one in `out/dataset-1004-4b2`.
 14. **Old tests.** The tests that pinned the healthy-origin read
     (`test_checker.py:628-672`, `test_generate.py:1075-1088`,
     `test_cases.py:1115-1118`, `test_shared_origin_training.py:541`,
-    `:597`, `:694-698`, `test_ruled_scenarios.py:190`) are deleted or
-    rewritten to the new rule. Tests that check other families never carry
-    `origin_read_label` stay as they are.
+    `:694-698`, `:705`, and all of `tests/test_multi_collision.py`) are
+    deleted or rewritten to the new rule. Tests that check other families
+    never carry `origin_read_label` stay as they are, and so does
+    `test_ruled_scenarios.py:190`, which checks the propagation pool, not
+    `multi`.
+    The two share tests in `test_shared_origin_training.py` (`:597` and
+    the kept-pile test after it) measured the share of `multi` negatives.
+    With the healthy-origin read gone, both shares are exactly 0.5, below
+    their old floors (0.55 and 0.52). They are rewritten to assert 0.5,
+    with a dated note. These floors are test bands, not the bars.
 
 ## The build and the re-pin
 
@@ -387,10 +402,10 @@ Parts 2-5 each move `multi` rows, so tests that compare against
 - No workload, in any case, has its own gold in its own decoy list.
 - Every `multi` and probe summary names every workload, fits 4 lines, and
   scores job 3 = 1.0 for its label.
-- Every "0/N nodes are available" agrees with the header and with its own
-  reasons.
+- Every "0/N nodes are available" agrees with the header.
 - Non-`multi` prompts, the probe rows and the 4b-1 family's answers are
-  byte-identical to `out/dataset-1004-4b2`.
+  byte-identical to `out/dataset-1004-4b2` (4b-1's non-shared answers
+  with 4 or more workloads excepted, see part 3).
 - PIN.md, the model card, design.md and the 4b-1 spec say what changed.
 
 ## Out of scope
@@ -401,6 +416,8 @@ Parts 2-5 each move `multi` rows, so tests that compare against
 - The 4+-letter kit-key guard (the 3-letter keys are "key", "tag" and
   "pod"). It goes to 4b-4 with the other grader leftovers.
 - Widening the decoy gate to job 1. That is a grader change, for 4b-4.
+- IS-22's sum half (a scheduler message's reasons add up to N). It fails
+  on 4b-1 stories, exam rows included, so it waits for the exam rebuild.
 - The exam rebuild and re-pin, the 0920 live run, and the retrain. They
   come after 4b-4.
 - Training, a live model run, and anything under `dist/`.
