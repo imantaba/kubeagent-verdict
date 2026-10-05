@@ -4,7 +4,9 @@ The build here is the out/dataset-MMDD pipeline: generate(17, 8000), split,
 drop held-out. Tests that compare with the last build read
 out/dataset-1004-4b2 and skip when it is not on this machine.
 """
+import inspect
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -191,3 +193,22 @@ def test_no_workload_lists_its_own_gold_as_a_decoy(build):
             assert gold._norm_cause(gold_cause) not in {gold._norm_cause(d) for d in listed}, (
                 e.case, e.group, key)
     assert with_list > 1000
+
+
+# --- test 1: no healthy-origin read -----------------------------------------
+
+def _labels(user: str) -> list[str]:
+    section = user.split("== BEGIN evidence ==\n")[1].split("\n== END evidence ==")[0]
+    return re.findall(r"^== (.+) ==$", section, re.MULTILINE)
+
+
+def test_multi_has_no_healthy_origin_read(build):
+    assert "healthy_origin" not in inspect.signature(cases.multi).parameters
+    seen = 0
+    for e in _all(build):
+        if e.case != "multi":
+            continue
+        seen += 1
+        assert "origin_read_label" not in e.meta and "origin_healthy" not in e.meta, e.group
+        assert _labels(e.user)[0].startswith("events "), e.group
+    assert seen == 738

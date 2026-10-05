@@ -18,11 +18,6 @@ What the checker reads from `meta`, and nothing else:
 
 - `meta["case"]`: nothing. Every case, shared-origin included, is checked by
   all 50 rules.
-- `meta["origin_read_label"]`: the healthy-origin read at index 0 is left
-  out of the gathered reads (`_Ctx.gathered`) and so out of the per-workload
-  read groups. The rules that walk those, E2-order, E4 and E6-E10 among
-  them, never see it. It still counts toward E1, and E3, E5, the F rules
-  and the TXT rules still read it.
 - the keys of `meta["workloads"]`: ANS-1's workload set.
 - each workload's `own_cause_keywords`: ANS-2.
 
@@ -458,14 +453,13 @@ class _Ctx:
     assistant: str
     meta: dict | None
     p: _Prompt
-    healthy: _Read | None = None
     groups: list[list[_Read]] = field(default_factory=list)   # group k is entry k's reads
     orphans: list[_Read] = field(default_factory=list)        # gathered reads before any events read
 
     @property
     def gathered(self) -> list[_Read]:
-        """Every read but the healthy-origin read."""
-        return [r for r in self.p.reads if r is not self.healthy]
+        """Every read."""
+        return list(self.p.reads)
 
     def block(self, key: str) -> _Block | None:
         return next((b for b in self.p.blocks if b.key == key), None)
@@ -482,9 +476,6 @@ class _Ctx:
 
 def _context(system: str, user: str, assistant: str, meta: dict | None) -> _Ctx:
     x = _Ctx(system, user, assistant, meta, _parse(user))
-    reads = x.p.reads
-    if meta is not None and reads and reads[0].label == meta.get("origin_read_label"):
-        x.healthy = reads[0]
     for r in x.gathered:
         if _EVENTS_LABEL.match(r.label):
             x.groups.append([r])

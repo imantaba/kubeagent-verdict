@@ -135,7 +135,7 @@ def _draw(entry, rng: random.Random):
 
 
 def generate(seed: int, size: int) -> list[Example]:
-    from kubeagent_verdict.dataset import cases, catalog, propagation, stories
+    from kubeagent_verdict.dataset import cases, catalog, stories
 
     rng = random.Random(seed)
     entries = catalog.trainable()
@@ -153,8 +153,6 @@ def generate(seed: int, size: int) -> list[Example]:
     def rotate_job1(i: int):
         return job1[i % len(job1)]
 
-    train_scen = propagation.trainable_scenarios()
-
     for i in range(counts["attributed"]):
         e = rotate_job1(i)
         out.append(cases.attributed(e, _draw(e, rng), rng))
@@ -170,7 +168,9 @@ def generate(seed: int, size: int) -> list[Example]:
         out.append(cases.own_cause_case(e, _draw(e, rng)))
     # The last counted `multi` slot is the worker-containerd-stop self-pair,
     # below, so this loop builds one row fewer.
-    for i in range(counts["multi"] - 1):
+    # Each row draws 2-4 catalog pairs. A clash raises, and the caller draws
+    # again.
+    for _ in range(counts["multi"] - 1):
         k = rng.randint(2, 4)
         pairs = []
         picked = rng.sample(entries, k=min(k, len(entries)))
@@ -181,37 +181,7 @@ def generate(seed: int, size: int) -> list[Example]:
             while cases.multi_clash([*(pn for _pe, pn in pairs), n]):
                 n = _draw(e, rng)
             pairs.append((e, n))
-        # Every third `multi` row carries a healthy origin read, rotating over
-        # the trainable pool so every label that heads a `shared_origin` row
-        # also heads an independent one. This was the ONLY counter-example
-        # until the `shared_origin_decoy` pairing below, and on its own it
-        # closed the weaker shortcut while leaving a better one open: its
-        # victims are `rng.sample(entries)`, arbitrary catalog entries whose
-        # symptoms have nothing to do with the read, where a `shared_origin`
-        # row's victims are the scenario's own and cohere with it. So the two
-        # classes differed in the VICTIMS as well as in the read, and symptom
-        # coherence separated them without reading the origin at all. The
-        # pairing closes that; these rows stay because a healthy read over
-        # arbitrary victims is a different counter-example, not a worse copy
-        # of the same one.
-        #
-        # They also have no positive twin, so they are the whole of the
-        # residual lean: the paired core is exactly even (1200/1200 at the
-        # build size, re-measured 2026-09-19 after Task 9's mix move to 15%
-        # on both shared-origin halves -- was 960/960) and the kept pile
-        # reads ~0.543 toward the INDEPENDENT answer (was ~0.55; still
-        # tests/test_shared_origin_training.py's own re-measurement, not
-        # re-derived here). That is the opposite
-        # direction from the ~62/38 toward SHARED this comment used to
-        # record, and it is un-confounded now, which is the part that
-        # mattered. `drop_held_out` still takes about a third of these (a
-        # `multi` group is a `+`-join of two to four catalog entries and dies
-        # if any one collides with an exam group) but takes pairs whole,
-        # since both halves of a pair share one group. Both splits are
-        # asserted, separately, in tests/test_shared_origin_training.py --
-        # neither stands in for the other.
-        healthy = train_scen[(i // 3) % len(train_scen)] if i % 3 == 0 else None
-        out.append(cases.multi(pairs, rng, healthy_origin=healthy))
+        out.append(cases.multi(pairs, rng))
     # The last counted `multi` slot, training-only: worker-containerd-stop
     # paired with itself at two different (ns, node) draws. Both stay
     # confirmed (its node object is intent="cause", so _multi_objects never
@@ -229,7 +199,7 @@ def generate(seed: int, size: int) -> list[Example]:
                 break
         out.append(cases.multi(
             [(worker_containerd_stop, names_a), (worker_containerd_stop, names_b)],
-            rng, healthy_origin=None))
+            rng))
     # 2026-09-19 (spec section 6): one pair in five now comes from the six
     # ruled stories instead of the 48 plain ones, so the rules pass gets a
     # shared origin it can confirm itself and training finally carries

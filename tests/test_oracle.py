@@ -184,7 +184,9 @@ def test_oracle_job1_is_perfect_on_train():
     # 3074. Rate unchanged.
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was 3074.
-    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3151}
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read, so the gather
+    # gets 8 reads, and which workloads the rules decide moves; was 3151. Rate unchanged.
+    assert board["jobs"]["job1"] == {"rate": 1.0, "n": 3145}
 
 
 def test_oracle_job1_is_perfect_on_val():
@@ -215,7 +217,8 @@ def test_oracle_job2_gate_is_perfect_on_train():
     # reason as job 1; the split moved. 2999 -> 3017. Rate unchanged.
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was 3017.
-    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 8041}
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was 8041. Rate unchanged.
+    assert _job2_gate(_train_and_val()[0]) == {"rate": 1.0, "n": 8047}
 
 
 def test_oracle_job2_gate_is_perfect_on_val():
@@ -278,7 +281,8 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
     # lines; was 2766.
     # 2026-10-04 (Spec 4b-2): the one gated coredns multi row in train loses its named job-2
     # workload; was 6580.
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 6579}
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was 6579. Rate still 1.0.
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 6584}
 
 
 def test_oracle_job3_is_perfect_on_train():
@@ -459,7 +463,8 @@ def test_oracle_multi_job1_matches_the_spec_measurement():
     # (1188.0, 1188); (109.0, 109) -> (140.0, 140).
     # 2026-09-26 (faithful prompts): see the docstring. (1188.0, 1188) ->
     # (1207.0, 1207); (140.0, 140) -> (163.0, 163).
-    assert multi_job1(_train_results()) == (1207.0, 1207)
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was (1207.0, 1207).
+    assert multi_job1(_train_results()) == (1201.0, 1201)
     assert multi_job1(_val_results()) == (163.0, 163)
 
 

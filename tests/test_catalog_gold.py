@@ -276,7 +276,10 @@ def test_no_prompt_byte_moves_from_dataset_1004(build_1004, split):
            if line.strip()]
     new = [generate.to_row(e) for e in build_1004[split]]
     assert len(new) == len(old)
+    # 2026-10-05 (Spec 4b-3): multi prompts move (no healthy-origin read, node counts); tests/test_multi_decoys.py pins every other prompt against out/dataset-1004-4b2.
     for i, (a, b) in enumerate(zip(new, old)):
+        if b["meta"]["case"] == "multi":
+            continue
         assert a["messages"][:2] == b["messages"][:2], (split, i)
 
 
@@ -430,12 +433,15 @@ def test_the_old_fields_are_gone():
 # The pool's gated rows: generate(17, 8000) index and workload. All four are
 # coredns `multi` rows whose read budget ran out before the coredns log read,
 # so no own line shows the configuration parse error (Plan ruling 3).
+# 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; two rows join (2488,
+# 2851), the other four stay. Was the four rows without them.
 GATED_POOL = {(2088, "web/scheduler"), (2177, "web/scheduler"), (2630, "media/worker"),
-              (2850, "edge/gateway")}
+              (2850, "edge/gateway"), (2488, "payments/gateway"),
+              (2851, "payments/ingest")}
 
 
-def test_the_gate_fires_on_exactly_the_four_coredns_multi_rows():
-    """Spec test 3, the real coredns multi shape."""
+def test_the_gate_fires_on_exactly_the_pool_gated_coredns_multi_rows():
+    """Spec test 3, the real coredns multi shape (six rows since Spec 4b-3, four before)."""
     pool, found = generate.generate(17, 8000), set()
     for i, ex in enumerate(pool):
         if ex.case.startswith("shared_origin"):

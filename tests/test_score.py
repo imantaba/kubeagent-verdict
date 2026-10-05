@@ -3392,7 +3392,8 @@ def test_the_gold_answer_passes_the_grader_guard_on_every_training_pool_job2_wor
     assert zeroed == []
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was 9426.
-    assert checked == 9618
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was 9618.
+    assert checked == 9627
 
 
 def _own_keyword_bot(rows: list[dict]):

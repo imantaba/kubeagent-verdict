@@ -611,65 +611,31 @@ def test_each_once_exempt_rule_still_fires_on_its_own_bad_row(seed_rows):
                 assert rule in fired, (rule, case)
 
 
-# --- the healthy-origin read (multi) ----------------------------------------
+# --- no read is exempt (Spec 4b-3) -------------------------------------------
 
-# The evidence rules that walk the gathered reads (`_Ctx.gathered`), which
-# leave out a healthy-origin read at index 0. The checker keeps no list of
-# them: until 2026-09-28 it had one, HEALTHY_READ_EXEMPT, that no code read.
-_SKIPS_THE_HEALTHY_READ = frozenset({"E2-order", "E4", "E6", "E7", "E8", "E9", "E10"})
-
-
-def test_a_healthy_read_is_not_flagged_by_the_rules_that_exempt_it(seed_rows):
-    """Recognised by its label at index 0, the read passes every rule. Drop
-    the label from meta and the same read is one of the gathered reads, and
-    the rules that walk those fail it: it is no workload's events read."""
-    system, user, assistant, meta = _parts(_healthy_row(seed_rows))
-    assert _where(checker.check(system, user, assistant, meta)) == []
-    bare = {k: v for k, v in meta.items() if k != "origin_read_label"}
-    fired = _fired(checker.check(system, user, assistant, bare))
-    assert fired
-    assert fired <= _SKIPS_THE_HEALTHY_READ
+# The evidence rules that walk the gathered reads. Until 2026-10-05 a
+# healthy-origin read at index 0 was left out of them; now every read is in.
+_GATHER_RULES = frozenset({"E2-order", "E4", "E6", "E7", "E8", "E9", "E10"})
 
 
-_READ_BOUNDARY = re.compile(r"\n\n(?=== .* ==\n)")
-
-
-def _healthy_row(seed_rows) -> dict:
-    for row in seed_rows:
-        label = row["meta"].get("origin_read_label")
-        evidence = row["messages"][1]["content"].split("== BEGIN evidence ==\n", 1)[1]
-        if row["meta"]["case"] == "multi" and label and evidence.startswith(f"== {label} ==\n"):
-            return row
-    raise AssertionError("no multi row with a healthy-origin read")
-
-
-def test_a_healthy_origin_read_at_index_0_passes(seed_rows):
-    assert _where(checker.check_row(_healthy_row(seed_rows))) == []
-
-
-def test_a_label_off_by_one_character_is_caught(seed_rows):
-    system, user, assistant, meta = _parts(_healthy_row(seed_rows))
-    label = meta["origin_read_label"]
-    meta = {**meta, "origin_read_label": label[:-1] + ("y" if label[-1] == "x" else "x")}
+def test_a_first_read_that_is_not_an_events_read_is_caught(seed_rows):
+    """A `multi` row whose read 0 is not an events read fails the checker,
+    even when its meta names that read as an origin read."""
+    row = next(r for r in seed_rows if r["meta"]["case"] == "multi"
+               and "origin_read_label" not in r["meta"])
+    system, user, assistant, meta = _parts(row)
+    label = "describe node /worker-9"
+    user = user.replace("== BEGIN evidence ==\n",
+                        f"== BEGIN evidence ==\n== {label} ==\nName: worker-9\n\n", 1)
+    meta = {**meta, "origin_read_label": label}
     fired = _fired(checker.check(system, user, assistant, meta))
-    assert fired & _SKIPS_THE_HEALTHY_READ
-
-
-def test_a_healthy_origin_read_at_index_1_is_caught(seed_rows):
-    system, user, assistant, meta = _parts(_healthy_row(seed_rows))
-    head, rest = user.split("== BEGIN evidence ==\n", 1)
-    evidence, tail = rest.split("\n== END evidence ==", 1)
-    reads = _READ_BOUNDARY.split(evidence)
-    reads[0], reads[1] = reads[1], reads[0]
-    user = head + "== BEGIN evidence ==\n" + "\n\n".join(reads) + "\n== END evidence ==" + tail
-    fired = _fired(checker.check(system, user, assistant, meta))
-    assert fired & _SKIPS_THE_HEALTHY_READ
+    assert fired & _GATHER_RULES, fired
 
 
 def test_meta_none_skips_only_ans1s_meta_clause_and_ans2(seed_rows):
     row = next(r for r in seed_rows
                if not _family(r)
-               and not r["meta"].get("origin_read_label") and _has_own_keywords(r))
+               and _has_own_keywords(r))
     system, user, assistant, meta = _parts(row)
     with_meta = checker.check(system, user, assistant, meta)
     without = checker.check(system, user, assistant, None)
