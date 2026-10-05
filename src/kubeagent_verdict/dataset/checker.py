@@ -1872,7 +1872,7 @@ def _txt_is14(x: _Ctx) -> tuple[int, _Finding]:
 _DETECTOR_AGE = re.compile(r", last exit -?\d+ \(.*\), (\S+) ago(?:\)| \(×\d+\)|$)")
 _ROLLOUT_AGE = re.compile(r"^    recent change: rolled out to revision \S+ (\S+) ago(?:, |$)")
 _HUMAN_AGE = re.compile(r"^(?:0|[1-9]\d*)[dhms]$")
-_LEASE_MIN_NS = 40 * 10**9   # clusterhealth.go:137-144: stale only past 40s
+_LEASE_MIN_NS = 40 * 10**9   # clusterhealth.go:137-144: stale only past 40s, at the default --node-heartbeat-threshold
 
 
 def _duration_ok(token: str) -> bool:
@@ -1891,8 +1891,8 @@ def _txt_is15(x: _Ctx) -> tuple[int, _Finding]:
     A finding's last exit and a lease's staleness are Go's
     time.Duration.String in whole seconds (diagnose/crashloop.go:55-56,
     diagnose/restartloop.go:42-47, clusterhealth/clusterhealth.go:144), and a
-    lease is stale only past 40s (clusterhealth.go:137-144). A
-    recent change's age is inventory.HumanAge: one number and one of d, h, m,
+    lease is stale only past 40s at the default --node-heartbeat-threshold
+    (clusterhealth.go:137-144). A recent change's age is inventory.HumanAge: one number and one of d, h, m,
     s (inventory/inventory.go:115-146, rollout/rollout.go:61). An age inside
     text the cluster wrote, such as an event message, keeps the cluster's
     own form and is not read.

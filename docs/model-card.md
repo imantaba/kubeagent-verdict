@@ -1312,4 +1312,6 @@ against these.
     is not always a short one. It is 532 of 1,080 = 49.3%. The risk is one
     these tests cannot see. A model that over-learns `none_of_these` will
     say it when the evidence is there. We will see that only after the
-    retrain.
+    retrain. (2026-10-05, exam rebuild: the count is now 1,463 of 11,192
+    = 13.07%. It moved from 1,461 to 1,463 over Specs 4b-2 and 4b-3; the
+    rebuild did not move it. The 13.1% share stands.)

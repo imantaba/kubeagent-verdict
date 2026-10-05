@@ -1215,11 +1215,15 @@ counts per split (6,439 train, 739 val, 249 exam) and the same case at
 each index. The design is in
 `docs/superpowers/specs/2026-10-05-exam-rebuild-design.md`.
 
-The nine items, in short. Each one changes the rows or the checks:
-service lines on a down node, must-not words on the shared-origin
-family and the registry-fault key, IS-22's sum half with the scheduler
-texts, the refused-read text, and the checker's extra checks. The
-grader (`score.py`) did not change. The bars did not move. The fixtures
+The nine items, in short. Eight of them change the rows or the checks:
+service lines on a down node (two forms: `matching pods on down node <n>
+(NotReady)` and `matching pods on down node <n> (no kubelet lease)`; 33 of
+the 215 changed service lines are the second form), must-not words on
+the shared-origin family and the registry-fault key, IS-22's sum half
+with the scheduler texts, the refused-read text, and the checker's extra
+checks. Item 8 is
+docs-only (a pinning test): it changes no row and no check. The grader
+(`score.py`) did not change. The bars did not move. The fixtures
 under `tests/fixtures/gather_go*/`, `rules_golden.json` and
 `contract/golden/` keep their bytes.
 
@@ -1243,8 +1247,11 @@ its gold bytes differ):
 | val | 739 | 167 | 121 |
 | exam | 249 | 42 | 32 |
 
-A new test, `tests/test_exam_rebuild_moves.py`, pins that no row or line
-count moved (6 tests).
+A new test, `tests/test_exam_rebuild_moves.py`, pins three things. No row
+or line count moved. Every changed prompt line is one of three kinds
+(refused-read, scheduler, service), and the old line keeps its kind: it
+is never swapped for a different kind. And the system message of every
+row is byte-identical (9 tests).
 
 IS-22 sum violations (the reasons in "0/N nodes are available" add up to
 N). Before is the new rule run on the old build. After is 0 everywhere:
@@ -1256,14 +1263,18 @@ N). Before is the new rule run on the old build. After is 0 everywhere:
 | exam | 4 | 0 |
 
 Job counts. The exam still has 197 job-2 workloads and 102 job-1
-workloads, and 40 job-3 rows. None moved. Cause counts on the exam:
-`(2, False)` 140 to 110 and `(2, True)` 57 to 87 (the 30 are workloads
-whose answer now carries a must-not word); `(1, False)` stays 102.
+workloads, and 40 job-3 rows. None moved. Cause counts on the exam are
+counted as `(job, has_must_not)`. `(2, False)` is job-2 workloads whose
+answer has no must-not word. `(2, True)` is job-2 workloads whose answer
+has one. `(2, False)` went 140 to 110 and `(2, True)` 57 to 87 (the 30
+are workloads whose answer now carries a must-not word); `(1, False)` stays 102.
 
 The full grader on train and val, with the gold bot
 (`score.evaluate(..., grade_job2=True)`): job 2 scores 1.0 on train
 (8,047 workloads) and on val (906). 0 golds hold their own must-not
-word: 0 of 6,584 on train, 0 of 766 on val.
+word. Two denominators. 6,584 train and 766 val are the named job-2
+golds. Of those, 4,310 train and 505 val carry a must-not word. The
+count is 0 of 4,310 and 0 of 505.
 
 Other gate numbers (unchanged by the rebuild): job 1 1.0 on all three
 splits, job 3 1.0 on all three, decoy rate 0.0 on 3,598 train, 422 val
@@ -1277,11 +1288,19 @@ NetworkPolicy is behind a failing readiness probe, so passing it is
 right. The pool (every answer key in the build): 208 keys and 162 pairs, was 178
 pairs on main. The key count did not move. The 16 lost pairs were traced
 and none is a bug:
-- about 13 lose because the answer text says "init container" or "init
-  image", which is now a must-not word on the story key;
-- the rest lose on other new must-not words: "containerd" and "deadline
-  exceeded" against the readiness-probe key, "liveness" against the
-  NetworkPolicy key, and the authentication words.
+- 11 lose to the must-not word "init container";
+- 1 loses to "liveness" (the NetworkPolicy key);
+- 2 lose to "containerd" (the coredns readiness key: the corefile
+  containerd gold, and the "creating its containerd task exceeded the
+  deadline" gold);
+- 1 loses to the authentication words from the registry-fault key (the
+  bad-tag key against "its init image pull is unauthorized...");
+- 1 loses because item 2 retired the key ("containerd", "task"). That is
+  a key change, not a must-not word.
+
+Measured again by hand on main `c23dab3` and on this branch, with the
+same measure as the pin test: 178 pairs before, 162 after, 16 lost, 0
+gained.
 
 No gold is wrong. A new test,
 `test_the_pool_weak_pair_count_does_not_grow`, pins (208, 162).
