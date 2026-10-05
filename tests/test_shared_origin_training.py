@@ -1005,7 +1005,12 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # against the old bytes is retired.
 # f3d05a3da5946e8bdcfd56db7538ba9bbae57fa05f5fd232167c56aa8086897a ->
 # d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b
-FROZEN_SLICE_SHA256 = "d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b"
+# 2026-10-04 (Spec 4b-2): the catalog gold rests on anchors in own lines.
+# Exam answers and meta move (reasons, causes, confidence, two entries'
+# keys); no prompt byte moves (tests/test_catalog_gold.py).
+# d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b ->
+# 660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3
+FROZEN_SLICE_SHA256 = "660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1153,7 +1158,13 @@ FROZEN_SLICE_SHA256 = "d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d2
 # 10 gold answers and 10 metas.
 # a53041702ffcd794e4077df2c8d7e2dbfd8800192e56ba6b324cbb8e242f06e2 ->
 # 0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d
-EVAL_SET_SHA256 = "0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d"
+# 2026-10-04 (Spec 4b-2): the catalog gold rests on anchors in own lines.
+# Exam answers and meta move (reasons, causes, confidence, two entries'
+# keys), which moved `FROZEN_SLICE_SHA256` above; no prompt byte moves
+# (tests/test_catalog_gold.py).
+# 0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d ->
+# 94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e
+EVAL_SET_SHA256 = "94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e"
 
 
 def _digest(rows) -> str:

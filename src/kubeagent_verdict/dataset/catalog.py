@@ -4,8 +4,9 @@ An entry is a template kit, not an example: the case builders in cases.py
 substitute synthetic names (names.py) into the {placeholder} fields and
 assemble full prompts through the contract renderers. A job-1 row's cause
 is never written here: the rules decide it from the entry's objects, in
-kubeagent's own words. The cause an entry does write is its own_cause, the
-answer when the rules leave the workload undecided. Reason phrasing echoes
+kubeagent's own words. The cause an entry does write is its answer kit's
+(`answer`), named when the rules leave the workload undecided and its own
+lines show the kit's anchor. Reason phrasing echoes
 kubeagent's own kubelet/API-server reason strings, not text copied from
 the known-issues snapshot. Literal braces inside a template must be
 doubled ({{ }}) because templates go through str.format.
@@ -16,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kubeagent_verdict.dataset.objects import Object
+from kubeagent_verdict.dataset.stories import Answer
 
 
 @dataclass(frozen=True)
@@ -53,10 +55,13 @@ class CatalogEntry:
     # healthy and Ready on its lease ending, and pvc-unbound-unschedulable
     # was never written with one.
     contradiction_events: tuple[tuple[str, str, int | str], ...] = ()
-    rationale: str = ""
-    direct: bool = True  # True: full evidence earns "high" confidence; False: "medium"
-    own_cause: str = ""  # the cause phrase when the winner is omitted from candidates
-    own_cause_keywords: tuple[str, ...] = ()
+    # The answer kit (Spec 4b-2), on trainable entries only. An undecided
+    # row names `answer.cause` only when the workload's own lines, minus
+    # every line naming a ruled-out or refuted cause, hold `answer.anchor`.
+    # Otherwise the row answers none_of_these, and its reason opens with
+    # `none_phrase`: "<none_phrase>; none of its own lines says why."
+    answer: Answer | None = None
+    none_phrase: str = ""
     # Words a right job-2 answer never holds. An answer that holds every
     # keyword and any one of these scores 0. Matched as lowercase
     # substrings, the same as the keywords.

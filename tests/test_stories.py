@@ -181,7 +181,7 @@ def test_trainable_stories_carry_no_banned_shape(st):
 def test_exam_origin_keys_match_no_catalog_entry():
     # D3 checks the catalog's own-cause keywords against the exam's origin
     # keys; this fails at authoring time rather than late.
-    own = {tuple(e.own_cause_keywords) for e in catalog.all_entries()}
+    own = {tuple(e.answer.keys) for e in catalog.all_entries() if e.answer}
     assert own
     for st in s.exam():
         for w in (st.broken, st.healthy):

@@ -92,6 +92,9 @@ proportions, and each kind teaches one specific skill:
 | `shared_origin` | 15% | Several broken workloads, all downstream of one thing. Name that thing on a workload only when that workload's own lines show it, and answer `none_of_these` when they do not. Call it one shared cause only when the rules confirm it, or when two or more workloads' own lines show the link |
 | `shared_origin_decoy` | 15% | The *same* story with the one thing shown **healthy**. Each workload's answer is its own cause when its lines show one, and `none_of_these` when they do not |
 
+Every named gold, in every family, rests on an anchor in the workload's
+own lines. If the anchor is not there, the gold is `none_of_these`.
+
 Those last two rows are new, and they are one row really: every
 `shared_origin` question is generated together with its `shared_origin_decoy`
 twin. They are the whole subject of Part 2.

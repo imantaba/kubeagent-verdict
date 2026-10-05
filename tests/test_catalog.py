@@ -165,9 +165,10 @@ def test_trainable_entries_are_complete():
     # come from `events`, so these are all a trainable entry needs.
     for e in catalog.trainable():
         assert e.issue and e.reason and e.evidence and e.recommendation, e.key
-        assert e.rationale, e.key
         assert e.events, e.key
-        assert e.own_cause and e.own_cause_keywords, e.key
+        # 2026-10-04 (Spec 4b-2): the kit and the none phrase replace the
+        # old rationale, own_cause and own_cause_keywords.
+        assert e.answer and e.none_phrase, e.key
 
 
 # The six fields no builder reads any more. The rules give a row its cause
@@ -217,29 +218,31 @@ def test_contradiction_events_have_the_events_shape():
                 assert isinstance(count, int) and count > 0, e.key
 
 
-def test_own_cause_keywords_are_satisfied_by_their_own_cause():
+def test_kit_keys_are_satisfied_by_their_own_cause():
     """The answer key must be able to score its own reference answer.
 
     `evals/score.py` grades the `own_cause` and `empty_candidates` slices with
-    `all(k in cause for k in own_cause_keywords)`. A keyword the entry's own
-    `own_cause` text does not contain makes that conjunction unsatisfiable: the
-    ground truth itself scores zero, and so does every model, however good. A
-    rate built from such a row measures the catalog, not the model.
+    `all(k in cause for k in keys)`. A key the kit's own cause text does not
+    contain makes that conjunction unsatisfiable: the ground truth itself
+    scores zero, and so does every model, however good. A rate built from
+    such a row measures the catalog, not the model.
+    2026-10-04 (Spec 4b-2): `stories.Answer` checks this at import too; this
+    keeps the grader's view.
     """
     broken = {}
     for e in catalog.trainable():
-        cause = e.own_cause.format(**SAMPLE).lower()
-        missing = [k for k in e.own_cause_keywords if k.lower() not in cause]
+        cause = e.answer.cause.format(**SAMPLE).lower()
+        missing = [k for k in e.answer.keys if k.lower() not in cause]
         if missing:
             broken[e.key] = (missing, cause)
     assert not broken, "keywords absent from their own expected cause: " + "; ".join(
         f"{k}: {m} not in {c!r}" for k, (m, c) in sorted(broken.items()))
 
 
-def test_own_cause_keywords_are_discriminating():
+def test_kit_keys_are_discriminating():
     """Two keywords minimum, so the check cannot pass on one common word."""
     for e in catalog.trainable():
-        assert len(e.own_cause_keywords) >= 2, e.key
+        assert len(e.answer.keys) >= 2, e.key
 
 
 def test_untrainable_entries_say_why():
@@ -261,7 +264,8 @@ def test_read_labels_match_kubeagent_shapes():
 
 def test_templates_resolve_with_sample_names():
     for e in catalog.trainable():
-        for tpl in (e.evidence, e.log_cause, e.recommendation, e.rationale, e.own_cause):
+        for tpl in (e.evidence, e.log_cause, e.recommendation, e.answer.anchor,
+                    e.answer.cause, e.answer.rationale):
             tpl.format(**SAMPLE)
         for reason, message, count in e.events + e.contradiction_events:
             reason.format(**SAMPLE)
@@ -352,10 +356,10 @@ def test_the_unbound_claim_entry():
     # The pod's own event: kubeagent reads events by the pod's name, and the
     # claim's ProvisioningFailed event names the claim, not the pod.
     assert e.events == (("FailedScheduling", message, 5),)
-    assert e.own_cause == ("a claim the pod mounts is still waiting for its volume to be "
-                           "provisioned")
-    assert e.own_cause_keywords == ("claim", "volume")
-    assert e.direct is True
+    assert e.answer.cause == ("a claim the pod mounts is still waiting for its volume to be "
+                              "provisioned")
+    assert e.answer.keys == ("claim", "volume")
+    assert e.answer.confidence == "high"
     assert e.contradiction_events == ()
     # The last entry of the catalog, so every other entry keeps its place.
     assert catalog.all_entries()[-1] is e

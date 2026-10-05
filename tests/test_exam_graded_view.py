@@ -229,7 +229,12 @@ def view(row):
 # no other row moves
 # efed51405ad4822633b1a29a541c6972f57c8e3aa34258d9b1aba5e9d8d9caa4 ->
 # b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5
-GRADED_VIEW_SHA256 = "b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5"
+# 2026-10-04 (Spec 4b-2): the catalog gold rests on anchors in own lines.
+# Exam answers and meta move (reasons, causes, confidence, two entries'
+# keys); no prompt byte moves (tests/test_catalog_gold.py).
+# b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5 ->
+# a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9
+GRADED_VIEW_SHA256 = "a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9"
 
 
 def _digest(views) -> str:

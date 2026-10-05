@@ -733,6 +733,7 @@ then the untuned baseline.
 
 **4b-2: gold that says more than its prompt, in the other families.**
 The same rule as §4: a gold says only what its prompt shows.
+Done 2026-10-04: see `docs/superpowers/specs/2026-10-04-catalog-gold-design.md`.
 
 **4b-3: `multi` rows and decoys.**
 - the container-name clash count, 96 of 738 `multi` rows;

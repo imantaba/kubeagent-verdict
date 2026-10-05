@@ -191,6 +191,17 @@ of each row the grader reads. They are pinned so a change to the
 generators cannot move the exam without someone saying why. This is where
 the why is recorded.
 
+- **2026-10-04 — Spec 4b-2, the catalog gold.** Four hashes moved, old to
+  new (details are in the last entry of this section):
+  - `FROZEN_SLICE_SHA256`: `d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b`
+    to `660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3`.
+  - `EVAL_SET_SHA256`: `0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d`
+    to `94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e`.
+  - `GRADED_VIEW_SHA256`: `b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5`
+    to `a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9`.
+  - `OTHER_FAMILIES_SHA256` (`tests/test_generate.py`): `09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a`
+    to `745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a`.
+
 - **2026-09-16 — the missing `decided by rules:` line.** Both hashes moved.
   Not one of the 263 prompts carried that line, though job 1 grades the
   model on echoing it. The renderer in `contract.py` was right; the
@@ -484,6 +495,8 @@ the why is recorded.
     (`"node"`, `"pod"`) still claim disk pressure, which no line of the
     workload's own block shows. 10 exam rows carry that gold, and 213
     train and 13 val rows.
+    Closed 2026-10-04 by Spec 4b-2: its answer now names the cordoned node
+    and the taints its own finding line prints.
   - `coredns-corefile-broken` lives in the drawn namespace, not
     `kube-system`; its restart count is pinned; and it is the one named
     exception to the thin-row test.
@@ -910,3 +923,89 @@ the why is recorded.
   The order after 4b-1: 4b-2, 4b-3 and 4b-4, then the exam rebuild and
   re-pin, then 0920 live, then the one retrain (about 32 hours on the
   training host), then the untuned baseline.
+
+- **2026-10-04 (Spec 4b-2) — the catalog gold.** The four hashes above
+  moved. The prompts did not: 0 rows in any split differ from
+  `out/dataset-1004` in the system or user message. Only the gold answers
+  (cause, reason, confidence, keys) moved. The exam is still 249 rows.
+
+  The rule. A catalog entry's answer is now a kit: an anchor, a cause,
+  keys, a reason and a confidence.
+  - An undecided workload names its entry's cause only when its own lines
+    hold the kit's anchor. Its own lines are all its lines, minus any line
+    that names a ruled-out or refuted cause.
+  - If the anchor is not there, the gold is `none_of_these`, confidence
+    low, no keys, and the reason is "<none phrase>; none of its own lines
+    says why."
+  - The rule runs wherever an entry's own cause is written: `own_cause`,
+    `wrong_attribution`, `misattribution_probe`, `empty_candidates`,
+    `multi_misattribution_probe` and `multi`.
+
+  The gate fires on 4 rows in the 8,000-row pool. All 4 are coredns `multi`
+  rows whose read budget ran out before the log read. 1 of the 4 lands in
+  train, 0 in val and 0 on the exam. So it fires on 1 train row and on 0
+  exam rows. It is there so a later case or budget change cannot quietly
+  bring overclaiming back.
+
+  Confidence. Rules-decided rows are now high. The probe-failure and
+  restart-loop named rows go to high. `networkpolicy-deny-all` stays
+  medium. Counted against `out/dataset-1004`, medium to high:
+  - rules-decided verdicts: 441 in train, 60 in val, 15 on the exam. They
+    sit in 416, 58 and 15 rows, because one row can hold more than one;
+  - named verdicts: 258 in train, 34 in val, 12 on the exam. Here each row
+    holds one, so these are also 258, 34 and 12 rows.
+
+  The 8 changed causes (the new text is in the kit in
+  `src/kubeagent_verdict/dataset/entries_*.py`):
+  - `node-cordon-diskfull`: "one node is unschedulable (cordoned) and the
+    others have taints the pod does not tolerate". It no longer claims
+    disk pressure.
+  - `networkpolicy-deny-all`: "a default-deny network policy blocks the
+    probe's traffic to the pod".
+  - `init-config-error`: "a Secret the init container references does not
+    exist".
+  - `init-imagepullbackoff`: "the init container's image cannot be pulled,
+    and the kubelet keeps backing off".
+  - `init-oomkilled`: "the init container is killed at its memory limit".
+  - `restart-loop`: "the container panics (a code bug) and keeps
+    restarting".
+  - `volume-attach-error`: "the volume is still attached to another node".
+  - `volume-mount-error`: "the pod's volume times out while mounting on its
+    node".
+
+  The 7 changed recommendations. Each now names no object the workload's
+  own lines do not print: `node-cordon-diskfull`, `init-imagepullbackoff`,
+  `init-oomkilled`, `restart-loop`, `volume-mount-error`,
+  `worker-containerd-stop` and `pvc-unbound-unschedulable`. The other 13
+  stay.
+
+  What moved, counted against `out/dataset-1004` (train / val / exam):
+  - Cause changed: 1,158 / 92 / 52 verdicts. Counted as rows: 1,118 /
+    89 / 47 rows.
+  - Reason changed: 2,766 / 298 / 151 verdicts. Counted as rows: 2,531 /
+    271 / 131 rows.
+  - Moved to `none_of_these`: 1 / 0 / 0 rows.
+  - Unshown facts, counted as verdicts (cause and reason both checked,
+    shared-origin rows left out): train 714 of 5,300 named verdicts before,
+    0 of 5,299 after; exam 32 of 241 before, 0 of 241 after. Counted as
+    rows, reason only: 553 / 52 / 26 rows before and 0 / 0 / 0 after.
+  - `none_of_these` share of all verdicts: train 1,462 of 11,192 = 13.06%
+    (the ceiling is 30%), val 140 of 1,293 = 10.83%, exam 22 of 299 =
+    7.36%.
+  - The checker: 0 violations of every kind in the manifest.
+  - Weak pairs: 9 to 3. The key count stays 34. The 3 left are two for the
+    default-deny network policy key. The golds it clashes with are the
+    liveness and readiness victim golds of the shared default-deny story,
+    not the catalog `probe-failure` entry. The third is one for
+    "deadline", "exceeded" against the containerd gold.
+    `node-cordon-diskfull`'s key is now "unschedulable", "taint".
+  - Exam job counts, before and after: job 1 102 workloads, job 2 197
+    workloads. They are the same.
+  - The init-keys hedge bot: its map now follows the new keys. Its job-2
+    rate stays 0.9391 on 197 workloads.
+
+  The build folder is `out/dataset-1004-4b2`: train 6,439, val 739, test
+  249 rows. It is not `out/dataset-1004` because that folder holds the 4b-1
+  build, and the 4b-1 numbers above were counted on it. Keeping both lets
+  the before and after counts be re-run. The prompt-stability test now
+  reads `out/dataset-1004-4b2/test.jsonl`.

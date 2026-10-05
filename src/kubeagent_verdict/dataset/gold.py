@@ -138,19 +138,29 @@ class Gold(NamedTuple):
     summary: str
 
 
-def excluded_causes(row: so.Row) -> list[str]:
-    """Causes the rules threw out for this row: every candidate ruled out
-    at attribution, plus every candidate refuted by its fresh read."""
-    ruled_out = [cand.cause for cand in row.candidates if cand.verdict == "ruled_out"]
-    refuted = [d.candidate for d in row.result.decisions if d.outcome == "refuted"]
+def excluded_from(candidates: Iterable, result: rules.Result) -> list[str]:
+    """Causes the rules threw out: every candidate ruled out at attribution,
+    plus every candidate refuted by its fresh read."""
+    ruled_out = [cand.cause for cand in candidates if cand.verdict == "ruled_out"]
+    refuted = [d.candidate for d in result.decisions if d.outcome == "refuted"]
     return ruled_out + refuted
 
 
-def anchor_lines(own: Iterable[str], row: so.Row) -> list[str]:
-    """A row's own lines minus every line that names a ruled-out or refuted
-    candidate's cause: a gold may not lean on a cause the rules threw out."""
-    dropped = [_norm_cause(x) for x in excluded_causes(row)]
+def excluded_causes(row: so.Row) -> list[str]:
+    """Causes the rules threw out for one built row."""
+    return excluded_from(row.candidates, row.result)
+
+
+def drop_excluded(own: Iterable[str], excluded: Iterable[str]) -> list[str]:
+    """`own` minus every line that names an excluded cause: a gold may not
+    lean on a cause the rules threw out."""
+    dropped = [_norm_cause(x) for x in excluded]
     return [ln for ln in own if not any(x and x in _norm_cause(ln) for x in dropped)]
+
+
+def anchor_lines(own: Iterable[str], row: so.Row) -> list[str]:
+    """The row's own lines minus every line that names an excluded cause."""
+    return drop_excluded(own, excluded_causes(row))
 
 
 def check_keys(keys: tuple[str, ...], *, anchors: list[str], own: list[str]) -> None:

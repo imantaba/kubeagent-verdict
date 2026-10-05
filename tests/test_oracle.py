@@ -268,12 +268,17 @@ def test_oracle_job2_keyword_only_matches_the_spec_measurement():
 
     2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real lines.
     2766 -> 6580. Every named job-2 workload of a rebuilt row is keyword-graded now, so the family
-    adds to this slice. Rate still 1.0."""
+    adds to this slice. Rate still 1.0.
+
+    2026-10-04 (Spec 4b-2): 6580 -> 6579. One gated coredns `multi` row in train loses its named
+    job-2 workload's keywords (the catalog gold moves it to none_of_these). Rate still 1.0."""
     # 2026-09-26 (faithful prompts): see the docstring. 2748 -> 2747.
     # 2026-09-26 (faithful prompts): see the docstring. 2747 -> 2766.
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was 2766.
-    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 6580}
+    # 2026-10-04 (Spec 4b-2): the one gated coredns multi row in train loses its named job-2
+    # workload; was 6580.
+    assert _job2_keyword_only(_train_and_val()[0]) == {"rate": 1.0, "n": 6579}
 
 
 def test_oracle_job3_is_perfect_on_train():
