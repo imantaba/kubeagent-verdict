@@ -345,7 +345,10 @@ def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -
 def _g3b(c: str, own_lines: Iterable[str]) -> bool:
     """Whether the cleaned cause `c` holds one of `own_lines`, whole or with
     its first 1 or 2 words cut. A cut is made only when at least 3 words are
-    left, so a 3-word line is matched whole only."""
+    left, so a 3-word line is matched whole only. A cut is never made past
+    a word that ends in `:`, a label (2026-10-05, Spec 4b-4): cutting
+    `log cause:` off a line leaves the label's words, and a right answer
+    may use them."""
     for line in own_lines:
         if not line:
             continue
@@ -354,6 +357,8 @@ def _g3b(c: str, own_lines: Iterable[str]) -> bool:
         words = line.split()
         for cut in (1, 2):
             if len(words) - cut < 3:
+                break
+            if any(w.endswith(":") for w in words[:cut]):
                 break
             if " ".join(words[cut:]) in c:
                 return True

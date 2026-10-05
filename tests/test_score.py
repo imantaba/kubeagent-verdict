@@ -505,9 +505,14 @@ def test_job2_guard_does_not_fire_on_part_of_a_line():
 def test_job2_guard_g3b_finds_a_line_with_its_first_one_or_two_words_cut():
     """G3b also zeroes a cause that holds an own line minus its first word,
     or minus its first 2 words. A 3-word cut is not made: the cause below
-    that holds the line minus its first 3 words passes."""
-    own = _normalized(_GUARD_API_INVENTORY)
-    words = score._norm_cause(_GUARD_API_INVENTORY[1]).split()
+    that holds the line minus its first 3 words passes.
+
+    2026-10-05 (Spec 4b-4): this test used the inventory line `issue:
+    OOMKilled — …`. Its first word is a label, and G3b no longer cuts past
+    a label, so the test uses the candidate line now. It has no `:` in its
+    first 2 words."""
+    own = _normalized(_GUARD_API_CANDIDATES)
+    words = score._norm_cause(_GUARD_API_CANDIDATES[1]).split()
     assert score._job2_guarded("memory limit: " + " ".join(words[1:]), (), own)
     assert score._job2_guarded("memory limit: " + " ".join(words[2:]), (), own)
     assert not score._job2_guarded("memory limit: " + " ".join(words[3:]), (), own)
@@ -524,6 +529,26 @@ def test_job2_guard_g3b_crops_no_line_below_3_words():
     assert score._job2_guarded("exit: memory limit", (), own)
     assert score._job2_guarded("see events for web/api-gw-5c6b-fghij", (), own)
     assert not score._job2_guarded("see for web/api-gw-5c6b-fghij", (), own)
+
+
+def test_job2_guard_g3b_never_cuts_past_a_label():
+    """Model-card limit 13, closed 2026-10-05 (Spec 4b-4). Cut `log cause:`
+    off `log cause: bad command or entrypoint` and what is left is the
+    label's words. A right answer that uses them in a row held that cut
+    line and scored 0. Now a cut that would remove a word ending in `:` is
+    not made. The whole line, or the line with only `log` cut, still
+    counts."""
+    own = _normalized(["    log cause: bad command or entrypoint"])
+    assert not score._job2_guarded(
+        "the container exits because of a bad command or entrypoint", (), own)
+    assert score._job2_guarded("cause: bad command or entrypoint", (), own)
+    assert score._job2_guarded("log cause: bad command or entrypoint", (), own)
+
+    # A `:` further in does not stop the cuts before it. Here it is on word
+    # 4, so the 1- and 2-word cuts are both made.
+    own = _normalized(["    considered node worker-1 (NotReady): attributed — pod api"])
+    assert score._job2_guarded("see node worker-1 (notready): attributed — pod api", (), own)
+    assert score._job2_guarded("see worker-1 (notready): attributed — pod api", (), own)
 
 
 def test_job2_guard_g2_skips_a_decoy_under_3_words():
@@ -3911,3 +3936,59 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
                      "misattribution_probe", "multi_misattribution_probe",
                      "shared_origin_probe", "shared_origin_decoy_probe"}
 
+
+
+
+# --------------------------------------------------- exam probes (Spec 4b-4)
+#
+# Each probe is the gold reply with one change, scored on the real exam.
+# The change is something a right answer may say, or something a wrong one
+# may say, so the score shows whether the grader tells them apart.
+
+_LOG_CAUSE = re.compile(r"log cause: (.+)$", re.MULTILINE)
+
+
+def _gold_bot_with(rows: list[dict], change):
+    """Answers each row with its gold reply, after `change(row, verdict)`
+    has edited each verdict dict in place. It reads nothing."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        reply = json.loads(row["messages"][2]["content"])
+        for verdict in reply["verdicts"]:
+            change(row, verdict)
+        return json.dumps(reply)
+
+    return chat_fn
+
+
+def _count_changed(rows: list[dict], change) -> int:
+    """How many gold verdicts `change` alters. A probe that alters none
+    proves nothing, so each probe pins this count too."""
+    n = 0
+    for row in rows:
+        for verdict in json.loads(row["messages"][2]["content"])["verdicts"]:
+            before = verdict["cause"]
+            change(row, verdict)
+            n += verdict["cause"] != before
+    return n
+
+
+def _add_log_cause_label(row: dict, verdict: dict) -> None:
+    labels = _LOG_CAUSE.findall(row["messages"][1]["content"])
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    if wm.get("job") == 2 and labels and verdict["cause"] != NONE_OF_THESE:
+        verdict["cause"] += " because of a " + labels[0].strip()
+
+
+def test_a_right_answer_in_a_log_cause_labels_words_scores_on_the_exam():
+    """Limit 13 on the exam. The probe adds " because of a <the prompt's
+    first log-cause label>" to each named job-2 cause: 50 answers change,
+    and every one is still right. Before 2026-10-05 (Spec 4b-4), G3b cut
+    `log cause:` off the line and zeroed 30 of them: 167 of 197 = 0.8477.
+    Now 197 of 197."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _add_log_cause_label) == 50
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _add_log_cause_label)))
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
