@@ -311,3 +311,45 @@ def test_every_multi_scheduler_count_is_the_headers(build):
             checked += 1
             assert m.group(1) == h.group(2), e.group
     assert checked > 0
+
+
+# --- the answer's node counts are the header's (fix round 1) -----------------
+
+def test_a_rebuilt_rows_answer_counts_the_headers_nodes():
+    rows = [e for e in generate.generate(17, 8000) if e.case == "multi"]
+    checked = 0
+    for e in rows:
+        h = _HEADER.search(e.user)
+        if not h or h.group(2) == "3" or "node-cordon-diskfull" not in e.group:
+            continue
+        total = int(h.group(2))
+        a = e.assistant
+        for m in re.finditer(r"(\d+) had taints", a):
+            checked += 1
+            assert int(m.group(1)) == total - 1, e.group
+        for pat in (r"0/(\d+) nodes", r"(\d+) Insufficient", r"(\d+) Preemption"):
+            for m in re.finditer(pat, a):
+                assert int(m.group(1)) == total, e.group
+    assert checked > 0
+
+
+# --- the rebuild guard -------------------------------------------------------
+
+def test_multi_refuses_a_node_count_that_moves_on_rebuild(monkeypatch):
+    real = render.node_total
+    seen = []
+
+    def moving(workloads, reads):
+        seen.append(1)
+        return real(workloads, reads) + len(seen)
+
+    monkeypatch.setattr(render, "node_total", moving)
+    rng = random.Random(3)
+    by = {x.key: x for x in catalog.all_entries()}
+    while True:
+        pairs = [(by["crashloop-pod"], names_mod.draw(rng)),
+                 (by["node-cordon-diskfull"], names_mod.draw(rng))]
+        if not cases.multi_clash([n for _e, n in pairs]):
+            break
+    with pytest.raises(RuntimeError, match="the node count moved from"):
+        cases.multi(pairs, random.Random(4))

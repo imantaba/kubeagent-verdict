@@ -1082,6 +1082,23 @@ def test_one_claim_name_in_two_namespaces_is_two_claims():
     assert len(json.loads(cases.multi(pairs, random.Random(3)).assistant)["verdicts"]) == 2
 
 
+def _header_total(user):
+    m = re.search(r"— \d+/(\d+) nodes Ready", user)
+    return int(m.group(1)) if m else 3
+
+
+def test_a_row_with_a_bigger_header_is_gathered_twice(monkeypatch):
+    """The other branch: a down node named by two workloads raises the total."""
+    calls = []
+    real = gather.gather
+    monkeypatch.setattr(gather, "gather", lambda w, **kw: (calls.append(1), real(w, **kw))[1])
+    ex = cases.multi(_crash_pairs() + [(_entry("node-cordon-diskfull"),
+                                        _names("shop", "gateway", "worker-4"))],
+                     random.Random(26))
+    assert _header_total(ex.user) != 3
+    assert len(calls) == 2
+
+
 def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch):
     """One gather reads for every workload of the row, with the whole budget
     of 8. Three crash-family workloads want 9 reads, so the row uses all 8.
@@ -1097,8 +1114,9 @@ def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch):
     monkeypatch.setattr(gather, "gather", spy)
     ex = cases.multi(_crash_pairs(), random.Random(26))
     labels = _evidence_labels(ex.user)
-    # A row whose header counts more than 3 nodes is built twice, with no new draw.
-    assert calls in ([(3, c.MAX_TOOL_CALLS)], [(3, c.MAX_TOOL_CALLS)] * 2)
+    # A row whose header counts more than 3 nodes is built twice, with no new
+    # draw; any other row is built once.
+    assert calls == [(3, c.MAX_TOOL_CALLS)] * (1 if _header_total(ex.user) == 3 else 2)
     assert len(labels) == c.MAX_TOOL_CALLS
     assert len(set(labels)) == len(labels)
     assert "origin_read_label" not in ex.meta
@@ -1119,6 +1137,8 @@ def test_a_starved_workload_whose_block_names_its_cause_answers_it():
     e = _entry("node-cordon-diskfull")
     n = _names("shop", "gateway", "worker-4")
     ex = _starved_row(e)
+    # 2026-10-05 (Spec 4b-3): the row's nodes are the header's.
+    n = dataclasses.replace(n, nodes=_header_total(ex.user))
     row = _verdict(ex, "shop/gateway")
     assert (row["cause"], row["confidence"]) == (cases._fmt(e.answer.cause, n),
                                                  e.answer.confidence)

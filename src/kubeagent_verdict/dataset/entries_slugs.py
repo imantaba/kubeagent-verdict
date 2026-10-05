@@ -111,7 +111,7 @@ ENTRIES = [
             cause="one node is unschedulable (cordoned) and the others have taints the pod does "
                   "not tolerate",
             keys=("unschedulable", "taint"),
-            rationale="The scheduler says 1 node was unschedulable and 2 had taints the pod does "
+            rationale="The scheduler says 1 node was unschedulable and {other_nodes} had taints the pod does "
                       "not tolerate, so no node can take it."),
         none_phrase="its pod cannot be scheduled",
         grounding=("Unschedulable",),

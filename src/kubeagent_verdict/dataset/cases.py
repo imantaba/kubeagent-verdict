@@ -1002,7 +1002,8 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]
 
 
-def _multi_build(pairs: list[tuple[CatalogEntry, Names]], combined_objects: list[tuple]):
+def _multi_build(pairs: list[tuple[CatalogEntry, Names]], combined_objects: list[tuple],
+                 ) -> tuple[gather.GatherResult, list[c.Workload]]:
     """The gather and the workloads for one `multi` row. Draws no randomness."""
     res = gather.gather([gather_workload(e, n, objects)
                          for (e, n), objects in zip(pairs, combined_objects)])

@@ -107,8 +107,9 @@ REASONS = {
     "deployment-bad-image-tag":
         'The pull of {image} fails with "not found", so the tag does not exist in the '
         "registry.",
+    # 2026-10-05 (Spec 4b-3): the taint count is the {other_nodes} template field (was 2).
     "node-cordon-diskfull":
-        "The scheduler says 1 node was unschedulable and 2 had taints the pod does not "
+        "The scheduler says 1 node was unschedulable and {other_nodes} had taints the pod does not "
         "tolerate, so no node can take it.",
     "networkpolicy-deny-all":
         "The readiness probe times out, and kubeagent names the default-deny network policy "
