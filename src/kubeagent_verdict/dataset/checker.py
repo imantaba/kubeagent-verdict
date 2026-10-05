@@ -17,12 +17,7 @@ the spec's "read index 0"), `answer`, `prompt` or `system`.
 What the checker reads from `meta`, and nothing else:
 
 - `meta["case"]`: nothing. Every case, shared-origin included, is checked by
-  all 50 rules.
-- `meta["origin_read_label"]`: the healthy-origin read at index 0 is left
-  out of the gathered reads (`_Ctx.gathered`) and so out of the per-workload
-  read groups. The rules that walk those, E2-order, E4 and E6-E10 among
-  them, never see it. It still counts toward E1, and E3, E5, the F rules
-  and the TXT rules still read it.
+  all 51 rules.
 - the keys of `meta["workloads"]`: ANS-1's workload set.
 - each workload's `own_cause_keywords`: ANS-2.
 
@@ -33,6 +28,8 @@ A few rules check the builder's own model where kubeagent's output depends
 on cluster state the prompt does not show. Each such rule says so. B7 is
 one: the health header's node total is a count the prompt cannot show, so B7
 only checks that it is at least the number of nodes the row names.
+TXT-IS22 is another: it checks that the scheduler's node count agrees with
+the header the builder drew.
 """
 from __future__ import annotations
 
@@ -458,14 +455,13 @@ class _Ctx:
     assistant: str
     meta: dict | None
     p: _Prompt
-    healthy: _Read | None = None
     groups: list[list[_Read]] = field(default_factory=list)   # group k is entry k's reads
     orphans: list[_Read] = field(default_factory=list)        # gathered reads before any events read
 
     @property
     def gathered(self) -> list[_Read]:
-        """Every read but the healthy-origin read."""
-        return [r for r in self.p.reads if r is not self.healthy]
+        """Every read."""
+        return list(self.p.reads)
 
     def block(self, key: str) -> _Block | None:
         return next((b for b in self.p.blocks if b.key == key), None)
@@ -482,9 +478,6 @@ class _Ctx:
 
 def _context(system: str, user: str, assistant: str, meta: dict | None) -> _Ctx:
     x = _Ctx(system, user, assistant, meta, _parse(user))
-    reads = x.p.reads
-    if meta is not None and reads and reads[0].label == meta.get("origin_read_label"):
-        x.healthy = reads[0]
     for r in x.gathered:
         if _EVENTS_LABEL.match(r.label):
             x.groups.append([r])
@@ -1894,6 +1887,39 @@ def _txt_is17(x: _Ctx) -> tuple[int, _Finding]:
     return n, out
 
 
+_SCHED_TOTAL = re.compile(r"\b0/(\d+) nodes are available")
+
+
+def _txt_is22(x: _Ctx) -> tuple[int, _Finding]:
+    """Every scheduler message counts the nodes the cluster-health header
+    counts. kubeagent's header T is the node list's length
+    (clusterhealth/clusterhealth.go:60-110), and the scheduler's `0/N nodes
+    are available` counts the same nodes. IS-22 was a `multi` row whose header
+    said 4 nodes and whose FailedScheduling event said 0/3. A row with no
+    header shows no total and is not checked. The builder's model, not a
+    kubeagent string: the rule checks that the row agrees with itself."""
+    if not x.p.health:
+        return 0, []
+    m = _HEALTH_HEADER.match(x.p.health[0].text)
+    if not m:
+        return 0, []
+    total = m.group(2)
+    out: _Finding = []
+    n = 0
+    for ln in x.p.inv:
+        for s in _SCHED_TOTAL.finditer(ln.text):
+            n += 1
+            if s.group(1) != total:
+                out.append((f"inventory line {ln.no}", ln.text))
+    for r in x.p.reads:
+        for text in _content_lines(r):
+            for s in _SCHED_TOTAL.finditer(text):
+                n += 1
+                if s.group(1) != total:
+                    out.append((r.where, text))
+    return n, out
+
+
 # The commands of remediation.For that put an object's name in a slot
 # (remediation/remediation.go:21-57): logsCmd :66-72, jobLogsCmd :79-81,
 # describeCmd :83-85, describeCronJobCmd :93-95 and objectEventsCmd :107-109.
@@ -2022,6 +2048,7 @@ _RULE_FUNCS: dict[str, _Rule] = {
     "F1": _f1, "F2": _f2, "F3": _f3,
     "TXT-IS8": _txt_is8, "TXT-IS9": _txt_is9, "TXT-IS11": _txt_is11,
     "TXT-IS14": _txt_is14, "TXT-IS15": _txt_is15, "TXT-IS17": _txt_is17,
+    "TXT-IS22": _txt_is22,
     "TXT-POD": _txt_pod,
     "ANS-1": _ans1, "ANS-2": _ans2,
 }

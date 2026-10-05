@@ -15,7 +15,6 @@ from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
 from kubeagent_verdict.dataset import gather, gold, render, rules, stories
 from kubeagent_verdict.dataset import names as names_mod
-from kubeagent_verdict.dataset import propagation as prop
 from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.catalog import CatalogEntry
 from kubeagent_verdict.dataset.generate import Example
@@ -49,7 +48,8 @@ SHARED_CLAIM_PHRASES = ("shared origin", "shared root cause", "common cause",
 def _fmt(tpl: str, n: Names) -> str:
     return tpl.format(ns=n.ns, name=n.name, pod=n.pod, container=n.container,
                       init_container=n.init_container, image=n.image, node=n.node,
-                      pvc=n.pvc, restarts=n.restarts)
+                      pvc=n.pvc, restarts=n.restarts, nodes=n.nodes,
+                      other_nodes=n.nodes - 1)
 
 
 _rule_rationale = render.rule_rationale
@@ -441,6 +441,8 @@ def _entry_gold(e: CatalogEntry, n: Names, own: Sequence[str],
     own = list(own)
     anchors = gold.drop_excluded(own, excluded)
     anchor = gold._norm_cause(_fmt(a.anchor, n))
+    if not anchor.strip():
+        raise ValueError(f"{e.key}: the anchor is empty after formatting")
     if any(anchor in ln for ln in anchors):
         gold.check_keys(a.keys, anchors=anchors, own=own)
         return gold.RowGold("named", _fmt(a.cause, n), a.confidence, a.keys,
@@ -781,9 +783,10 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         workloads_meta[key] = workload_meta(
             result, expected_cause=cause, own_cause_keywords=list(g.keys),
             own_cause_must_not=list(e.own_cause_must_not) if g.verdict == "named" else [])
-    lines = [f"{len(pairs)} workloads are failing for separate reasons."]
-    lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     label = rules.label(rules.shared(tuple(res.results)))
+    causes = ["" if r["cause"] == c.NONE_OF_THESE else r["cause"] for r in rows]
+    summary = gold.summary_lines(list(zip(keys, causes)),
+                                 separate=gold.separate_for(label, causes))
     extra_meta = prompt_meta(workloads_meta, label=label, decoy_by_workload=decoy_by_workload)
     meta = {"case": "multi_misattribution_probe",
             "expected": {r["workload"]: r["cause"] for r in rows},
@@ -794,7 +797,7 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
             "shared_claim_phrases": list(SHARED_CLAIM_PHRASES)}
     meta.update(extra_meta)
     return Example(case="multi_misattribution_probe", group=group, system=c.SYSTEM_PROMPT,
-                   user=user, assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+                   user=user, assistant=_answer(rows, summary),
                    meta=meta)
 
 
@@ -999,78 +1002,23 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]
 
 
-def _is_node_story(p: prop.Propagation) -> bool:
-    """A node story's healthy origin read names a node: its label or its
-    healthy-content template still carries the `{node}` placeholder."""
-    return "{node}" in p.origin_read[0] or "{node}" in p.healthy_origin_content
+def _multi_build(pairs: list[tuple[CatalogEntry, Names]], combined_objects: list[tuple],
+                 ) -> tuple[gather.GatherResult, list[c.Workload]]:
+    """The gather and the workloads for one `multi` row. Draws no randomness."""
+    res = gather.gather([gather_workload(e, n, objects)
+                         for (e, n), objects in zip(pairs, combined_objects)])
+    workloads = [_workload(e, n, candidates, render.header_for(candidates), result=result)
+                 for (e, n), candidates, result in zip(pairs, res.candidates, res.results)]
+    return res, workloads
 
 
-def _node_clashes(name: str, objects: tuple) -> bool:
-    """True when the row already carries a node object of this name whose
-    fresh read failed, or whose Ready condition is not True -- a healthy
-    origin read naming it would contradict that object. A node the rules
-    refuted or left on a stale lease still reads Ready True, so it does
-    not clash."""
-    return any(
-        obj.kind == "node" and obj.name == name
-        and (obj.fresh.how == "read_failed"
-             or (obj.fresh.how == "read" and obj.fresh.ready != "True"))
-        for obj in objects)
-
-
-def _multi_healthy_origin_node(h_node: str, all_objects: tuple) -> str | None:
-    """The node name a node-story healthy-origin read should use: `h_node`
-    itself when it does not clash, else the first node of `names.NODES`
-    free of a clash, else None when every node clashes (the read is
-    dropped). No RNG draw: a row without a clash never moves the stream."""
-    for candidate in (h_node, *names_mod.NODES):
-        if not _node_clashes(candidate, all_objects):
-            return candidate
-    return None
-
-
-def _resolve_multi_healthy_origin(
-        healthy_origin: prop.Propagation, h: Names, all_objects: tuple,
-) -> tuple[str, str] | None:
-    """The (label, content) for `multi`'s prepended healthy-origin read, or
-    None when section 2's collision rules say to drop it entirely.
-
-    Registry rule: the two ruled registry stories' read is a cluster-wide
-    events read; showing it next to a registry candidate's own account
-    would contradict that candidate, so the read is dropped outright.
-
-    Node rule: see `_multi_healthy_origin_node`.
-    """
-    if (healthy_origin.origin_object is not None
-            and healthy_origin.origin_object.kind == "registry"
-            and any(obj.kind == "registry" for obj in all_objects)):
-        return None
-    node_name = h.node
-    if _is_node_story(healthy_origin):
-        node_name = _multi_healthy_origin_node(h.node, all_objects)
-        if node_name is None:
-            return None
-    hh = h if node_name == h.node else dataclasses.replace(h, node=node_name)
-    return (_fmt(healthy_origin.origin_read[0], hh),
-           _fmt(healthy_origin.healthy_origin_content, hh))
-
-
-def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
-          healthy_origin: prop.Propagation | None = None) -> Example:
+def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:
     """Several workloads, each failing for its own reason.
 
     The row shows 2 to 4 flagged workloads in report order. Each one prints
     its own finding lines and its own candidates. One gather reads for the
     whole row, under the budget of 8 reads, and walks the workloads in
     report order, so a late workload can get no read at all.
-
-    `healthy_origin` is the negative half of the shared-origin curriculum.
-    When it is given, the row shows that story's origin read first, with
-    content that shows the component healthy, and "separate reasons" stays
-    the right answer. Only the read's content tells this row from a
-    `shared_origin` row. The read counts toward the budget, so the gather
-    then gets 7 reads. The collision rules can move it to another node or
-    drop it.
 
     The gold, per workload:
     - The rules decide it: their cause, at high confidence, and a rationale
@@ -1091,36 +1039,22 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     if clash:
         raise ValueError(f"multi needs {clash}")
     combined_objects = _multi_objects(pairs, rng)
-    healthy_read: tuple[str, str] | None = None
-    if healthy_origin is not None:
-        # Formatted against the first workload's names, as the positive case
-        # formats against its anchor. A cluster-scoped read names nothing
-        # workload-specific; a node- or namespace-scoped one names this row's.
-        # The collision rules (section 2) can rename the node or drop the
-        # read outright, so the read is resolved against every object the
-        # row will carry, not against `h` alone.
-        h = pairs[0][1]
-        all_objects = tuple(obj for objs in combined_objects for obj in objs)
-        healthy_read = _resolve_multi_healthy_origin(healthy_origin, h, all_objects)
-    res = gather.gather([gather_workload(e, n, objects)
-                         for (e, n), objects in zip(pairs, combined_objects)],
-                        budget=c.MAX_TOOL_CALLS - (healthy_read is not None))
-    workloads = []
+    res, workloads = _multi_build(pairs, combined_objects)
+    total = render.node_total(tuple(workloads), tuple(res.reads))
+    if total != 3:
+        # The scheduler counts every node the header counts (Spec 4b-3 5).
+        # The second build reuses the drawn objects and draws nothing, so
+        # only the scheduler numbers change.
+        pairs = [(e, dataclasses.replace(n, nodes=total)) for e, n in pairs]
+        res, workloads = _multi_build(pairs, combined_objects)
+        again = render.node_total(tuple(workloads), tuple(res.reads))
+        if again != total:
+            raise RuntimeError(f"multi: the node count moved from {total} to {again} on rebuild")
     decoy_by_workload: dict[str, list[str]] = {}
-    for (e, n), objects, candidates, result in zip(pairs, combined_objects,
-                                                    res.candidates, res.results):
-        workloads.append(_workload(e, n, candidates, render.header_for(candidates),
-                                   result=result))
-        trace = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
-        # decoy_by_workload holds the decoy's cause STRING, as the prompt
-        # prints it, never the raw kind/name identifier.
-        decoy_by_workload[f"{n.ns}/{n.name}"] = [
-            shown.cause for raw, shown in zip(trace, candidates) if raw.obj.intent == "decoy"]
+    for (_e, n), candidates, result in zip(pairs, res.candidates, res.results):
+        decoy_by_workload[f"{n.ns}/{n.name}"] = gold.excluded_from(candidates, result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
-    reads = res.reads
-    if healthy_read is not None:
-        reads = (c.EvidenceRead(label=healthy_read[0], content=healthy_read[1]), *reads)
-    user = _user_message(None, "", (), tuple(workloads), tuple(reads), key=group)
+    user = _user_message(None, "", (), tuple(workloads), tuple(res.reads), key=group)
     keys = [f"{n.ns}/{n.name}" for _e, n in pairs]
     own_lines = gold.own_lines(user, keys)
     rows = []
@@ -1155,13 +1089,11 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     label = rules.label(rules.shared(tuple(res.results)))
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
-    lines = [f"{len(pairs)} workloads are failing for separate reasons."]
-    lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
+    causes = ["" if r["cause"] == c.NONE_OF_THESE else r["cause"] for r in rows]
+    summary = gold.summary_lines(list(zip(keys, causes)),
+                                 separate=gold.separate_for(label, causes))
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,
-                   assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+                   assistant=_answer(rows, summary),
                    meta={"case": "multi",
                          "expected": {r["workload"]: r["cause"] for r in rows},
-                         **({} if healthy_read is None else {
-                             "origin_read_label": healthy_read[0],
-                             "origin_healthy": True}),
                          **extra_meta})

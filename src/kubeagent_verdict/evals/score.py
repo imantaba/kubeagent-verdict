@@ -212,9 +212,9 @@ def _is_job2_keyword_graded(meta_workload: dict,
 # a paste puts after rune 512, and capping first was measured to let the
 # paste bot through.
 #
-# Job 1 is not guarded. On `shared_origin_probe` rows `decoy_by_workload`
-# lists the job-1 workload's decided cause, and that IS the job-1 gold
-# answer, so G2 on job 1 would zero the right answer.
+# No case lists a workload's own gold as its decoy (pinned by
+# tests/test_multi_decoys.py since Spec 4b-3). Job 1 is still skipped:
+# widening the decoy gate to job 1 is a grader change, left for 4b-4.
 
 _SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
 _READ_LABEL = re.compile(r"^== (.+) ==$")
@@ -791,10 +791,10 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
         #
-        # Only job-2 workloads are tested (2026-09-29, Spec 4a). On a
-        # `shared_origin_probe` row `decoy_by_workload` lists a decided
-        # workload's own decided cause, which IS its job-1 gold, so the right
-        # answer read as naming a decoy. A row with no job-2 workload that
+        # Only job-2 workloads are tested (2026-09-29, Spec 4a). The 4a
+        # reason (a decided workload's own cause in its decoy list) stopped
+        # holding at 4b-1, and 4b-3 pins it false; testing job 1 is left for
+        # 4b-4. A row with no job-2 workload that
         # carries a decoy has nothing to test, and `named_decoy` is None.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
         # Per-workload keys first, in their own order, then any flagged

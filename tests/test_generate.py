@@ -1067,28 +1067,20 @@ def test_a_multi_row_shows_each_node_with_one_scan_reason(multi_rows):
 
 def test_a_multi_row_reads_each_object_once_within_the_budget(multi_rows):
     """kubeagent spends at most 8 reads on a scan and describes each object
-    once. The one read outside the gather is a multi row's healthy shared
-    read, first in the evidence."""
+    once. Every read is part of the gather."""
     for ex in multi_rows:
         labels = _evidence_labels(ex.user)
         assert len(labels) <= c.MAX_TOOL_CALLS, ex.group
-        gathered = labels[1:] if "origin_read_label" in ex.meta else labels
-        assert len(set(gathered)) == len(gathered), (ex.group, gathered)
+        assert len(set(labels)) == len(labels), (ex.group, labels)
 
 
-def test_a_multi_rows_origin_label_is_the_read_it_prints(multi_rows):
-    """A multi row's healthy shared read is printed first, and the meta
-    names it by the label the prompt prints, with no `{node}` or `{ns}`
-    left in it."""
-    with_origin = 0
+def test_a_multi_row_has_no_origin_read(multi_rows):
+    """2026-10-05 (Spec 4b-3): kubeagent's gather starts with a workload's
+    events read, so a multi row's first read is one, and its meta names no
+    origin read."""
     for ex in multi_rows:
-        if "origin_read_label" not in ex.meta:
-            continue
-        with_origin += 1
-        label = ex.meta["origin_read_label"]
-        assert "{" not in label, (ex.group, label)
-        assert _evidence_labels(ex.user)[0] == label, ex.group
-    assert with_origin > 0
+        assert "origin_read_label" not in ex.meta, ex.group
+        assert _evidence_labels(ex.user)[0].startswith("events "), ex.group
 
 
 def test_every_job2_multi_workload_can_be_answered_from_its_own_block(multi_rows):

@@ -28,6 +28,7 @@ class CatalogEntry:
     trains: bool
     # Everything below is a str.format template over the names.py fields:
     # {ns} {name} {pod} {container} {init_container} {image} {node} {pvc} {restarts}
+    # {nodes} (the cluster's node count) {other_nodes} (nodes minus 1)
     workload_kind: str = "Deployment"
     status: str = "Progressing"
     issue: str = ""

@@ -23,7 +23,7 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
 __all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
-           "draw_ending", "drop", "header_for", "prompt_meta", "refute",
+           "draw_ending", "drop", "header_for", "node_total", "prompt_meta", "refute",
            "rule_rationale", "unverify", "workload_meta"]
 
 MAX_PROMPT_BYTES = 64 * 1024
@@ -254,6 +254,29 @@ _not_ready_issue = health.not_ready_issue
 _flagged = health.flagged
 
 
+def _node_reasons(workloads: tuple[c.Workload, ...]) -> dict[str, set[str]]:
+    """Every node candidate's name and its reasons."""
+    reasons: dict[str, set[str]] = {}
+    for w in workloads:
+        for cand in w.candidates:
+            m = _NODE_CAUSE.match(cand.cause)
+            if m:
+                reasons.setdefault(m.group(1), set()).add(m.group(2))
+    return reasons
+
+
+def _named_nodes(reasons: dict[str, set[str]], reads: tuple[c.EvidenceRead, ...]) -> set[str]:
+    """The nodes the prompt names: node candidates and `describe node /<name>` reads."""
+    return set(reasons) | {r.label[len(_DESCRIBE_NODE):] for r in reads
+                           if r.label.startswith(_DESCRIBE_NODE)}
+
+
+def node_total(workloads: tuple[c.Workload, ...], reads: tuple[c.EvidenceRead, ...]) -> int:
+    """The cluster-health header's node count T = max(3, named nodes + 1)
+    (see `cluster_health`)."""
+    return max(_MIN_NODES, len(_named_nodes(_node_reasons(workloads), reads)) + 1)
+
+
 def cluster_health(workloads: tuple[c.Workload, ...],
                    reads: tuple[c.EvidenceRead, ...]) -> c.ClusterHealth | None:
     """The cluster-health verdict kubeagent would compute for this prompt.
@@ -289,14 +312,8 @@ def cluster_health(workloads: tuple[c.Workload, ...],
     It builds synthetic nodes from the candidates and hands them to
     `health.assess`, the port the CLUSTER capture pins.
     """
-    reasons: dict[str, set[str]] = {}
-    for w in workloads:
-        for cand in w.candidates:
-            m = _NODE_CAUSE.match(cand.cause)
-            if m:
-                reasons.setdefault(m.group(1), set()).add(m.group(2))
-    named = set(reasons) | {r.label[len(_DESCRIBE_NODE):] for r in reads
-                            if r.label.startswith(_DESCRIBE_NODE)}
+    reasons = _node_reasons(workloads)
+    named = _named_nodes(reasons, reads)
     nodes = []
     for name in sorted(named):
         rs = reasons.get(name, set())
@@ -311,7 +328,7 @@ def cluster_health(workloads: tuple[c.Workload, ...],
             nodes.append(health.Node(name, (health.READY,), lease="missing"))
         else:
             nodes.append(health.Node(name, (health.READY,)))
-    total = max(_MIN_NODES, len(named) + 1)
+    total = node_total(workloads, reads)
     # Healthy nodes the prompt never names. They print nothing; only the
     # count T sees them. The leading space keeps them off any real name.
     nodes += [health.Node(f" healthy-{i}", (health.READY,)) for i in range(total - len(nodes))]

@@ -138,7 +138,8 @@ def test_every_pool_workload_carries_its_entrys_must_not_list(pool_rows):
     assert story_keyed == 83
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was (13677, 1084).
-    assert (total, non_empty) == (13946, 1084)
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was (13946, 1084).
+    assert (total, non_empty) == (13946, 1085)
 
 
 def test_every_pool_gold_passes_its_own_key_with_must_not(pool_rows):
@@ -164,7 +165,8 @@ def test_every_pool_gold_passes_its_own_key_with_must_not(pool_rows):
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was 3694.
     # 2026-10-04 (Spec 4b-2): the 4 gated coredns multi rows lose their keys; was 7976.
-    assert checked == 7972
+    # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was 7972.
+    assert checked == 7979
 
 
 def test_only_exam_job2_workloads_carry_must_not_words(exam_rows):

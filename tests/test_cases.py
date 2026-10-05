@@ -1024,15 +1024,6 @@ def _starved_row(e):
                        random.Random(26))
 
 
-def _plain_story():
-    """A trainable story whose origin read names no node and no registry,
-    so the collision rules always keep it."""
-    from kubeagent_verdict.dataset import propagation as prop
-
-    return next(p for p in prop.trainable_scenarios()
-                if p.origin_object is None and not cases._is_node_story(p))
-
-
 @pytest.mark.parametrize("builder", [cases.multi, cases.multi_misattribution_probe])
 def test_a_multi_row_prints_its_workloads_in_report_order(builder):
     """kubeagent gives every flagged workload one priority and then sorts
@@ -1091,12 +1082,28 @@ def test_one_claim_name_in_two_namespaces_is_two_claims():
     assert len(json.loads(cases.multi(pairs, random.Random(3)).assistant)["verdicts"]) == 2
 
 
-@pytest.mark.parametrize("with_origin", [False, True])
-def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch, with_origin):
-    """One gather reads for every workload of the row. The healthy-origin
-    read, when there is one, comes first and spends one of the 8 reads, so
-    the gather gets 7. Three crash-family workloads want 9 reads, so both
-    rows use the whole budget."""
+def _header_total(user):
+    m = re.search(r"— \d+/(\d+) nodes Ready", user)
+    return int(m.group(1)) if m else 3
+
+
+def test_a_row_with_a_bigger_header_is_gathered_twice(monkeypatch):
+    """The other branch: a down node named by two workloads raises the total."""
+    calls = []
+    real = gather.gather
+    monkeypatch.setattr(gather, "gather", lambda w, **kw: (calls.append(1), real(w, **kw))[1])
+    ex = cases.multi(_crash_pairs() + [(_entry("node-cordon-diskfull"),
+                                        _names("shop", "gateway", "worker-4"))],
+                     random.Random(26))
+    assert _header_total(ex.user) != 3
+    assert len(calls) == 2
+
+
+def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch):
+    """One gather reads for every workload of the row, with the whole budget
+    of 8. Three crash-family workloads want 9 reads, so the row uses all 8.
+    2026-10-05 (Spec 4b-3): the healthy-origin read and its parametrize are
+    gone."""
     calls = []
     real = gather.gather
 
@@ -1105,17 +1112,14 @@ def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch, with_origin):
         return real(workloads, **kw)
 
     monkeypatch.setattr(gather, "gather", spy)
-    story = _plain_story() if with_origin else None
-    ex = cases.multi(_crash_pairs(), random.Random(26), healthy_origin=story)
+    ex = cases.multi(_crash_pairs(), random.Random(26))
     labels = _evidence_labels(ex.user)
-    assert calls == [(3, c.MAX_TOOL_CALLS - with_origin)]
+    # A row whose header counts more than 3 nodes is built twice, with no new
+    # draw; any other row is built once.
+    assert calls == [(3, c.MAX_TOOL_CALLS)] * (1 if _header_total(ex.user) == 3 else 2)
     assert len(labels) == c.MAX_TOOL_CALLS
     assert len(set(labels)) == len(labels)
-    if with_origin:
-        assert "{" not in ex.meta["origin_read_label"]
-        assert labels[0] == ex.meta["origin_read_label"]
-    else:
-        assert "origin_read_label" not in ex.meta
+    assert "origin_read_label" not in ex.meta
 
 
 def test_the_fourth_workload_of_a_full_row_gets_no_read():
@@ -1133,6 +1137,8 @@ def test_a_starved_workload_whose_block_names_its_cause_answers_it():
     e = _entry("node-cordon-diskfull")
     n = _names("shop", "gateway", "worker-4")
     ex = _starved_row(e)
+    # 2026-10-05 (Spec 4b-3): the row's nodes are the header's.
+    n = dataclasses.replace(n, nodes=_header_total(ex.user))
     row = _verdict(ex, "shop/gateway")
     assert (row["cause"], row["confidence"]) == (cases._fmt(e.answer.cause, n),
                                                  e.answer.confidence)

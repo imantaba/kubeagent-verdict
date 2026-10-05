@@ -47,6 +47,7 @@ class Names:
     node: str
     pvc: str
     restarts: int
+    nodes: int = 3
 
 
 def pod_name(rng: random.Random, name: str) -> str:

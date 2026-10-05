@@ -39,6 +39,8 @@ class Answer:
     link: bool = False
 
     def __post_init__(self) -> None:
+        if not self.anchor.strip():
+            raise ValueError(f"{self.cause!r}: the anchor is empty")
         if not 1 <= len(self.keys) <= 3:
             raise ValueError(f"{self.cause!r}: 1 to 3 keys, got {len(self.keys)}")
         for k in self.keys:

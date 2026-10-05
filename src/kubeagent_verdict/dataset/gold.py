@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import NamedTuple
 
+from kubeagent_verdict import contract as c
 from kubeagent_verdict.dataset import render, rules
 from kubeagent_verdict.dataset import shared_origin as so
 
@@ -216,11 +217,36 @@ def gold_for(built: so.Built) -> Gold:
     return Gold(rows, label, n, _summary(built, rows, label, n))
 
 
+def summary_lines(rows: Sequence[tuple[str, str]], *, separate: bool) -> str:
+    """A non-shared summary (Spec 4b-3 §3). An opening line, then one line
+    per workload in row order: `key: cause.`, or `key: its own lines do not
+    show why.` when the cause is "". At most c.MAX_SUMMARY_LINES lines: from
+    the 3rd workload on, the rest share the last line, joined by a space.
+    The caller decides `separate`; this only writes it."""
+    n = len(rows)
+    lines = [f"{n} workloads are failing for separate reasons." if separate else
+             f"{n} workloads are failing, and kubeagent's rules did not confirm one "
+             "cause on two or more of them."]
+    parts = [f"{k}: {cause}." if cause else f"{k}: its own lines do not show why."
+             for k, cause in rows]
+    keep = c.MAX_SUMMARY_LINES - 2
+    lines += parts[:keep] + ([" ".join(parts[keep:])] if parts[keep:] else [])
+    return "\n".join(lines)
+
+
+def separate_for(label: str, causes: Sequence[str]) -> bool:
+    """`multi`'s and the probe's rule: separate when the rules confirmed
+    different causes (label `separate`), or when every row names its own
+    cause ("" is none_of_these) and no two rows share one."""
+    return label == "separate" or (all(causes) and len(set(causes)) == len(causes))
+
+
 def _summary(built: so.Built, rows: dict[str, RowGold], label: str, n: int) -> str:
     """1 to 4 lines, joined with "\\n" (Ruling 33). "Failing for separate
     reasons" is said only in a healthy world where every row has its own,
     different cause, named or rule-decided; anywhere else it would claim more
-    than the rows show."""
+    than the rows show. Every workload is named; from the 3rd one on they share
+    the last line (Spec 4b-3)."""
     st, d = built.story, built.draw
     if label == "shared":
         return "\n".join((
@@ -230,11 +256,4 @@ def _summary(built: so.Built, rows: dict[str, RowGold], label: str, n: int) -> s
     separate = (built.world_name == "healthy"
                 and all(g.verdict != "none_of_these" for g in rows.values())
                 and len({g.cause for g in rows.values()}) == len(rows))
-    lines = [f"{n} workloads are failing for separate reasons." if separate else
-             f"{n} workloads are failing, and kubeagent's rules did not confirm one "
-             "cause on two or more of them."]
-    for r in built.rows[:3]:
-        g = rows[r.key]
-        lines.append(f"{r.key}: {g.cause}." if g.cause else
-                     f"{r.key}: its own lines do not show why.")
-    return "\n".join(lines)
+    return summary_lines([(r.key, rows[r.key].cause) for r in built.rows], separate=separate)

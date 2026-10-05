@@ -107,8 +107,9 @@ REASONS = {
     "deployment-bad-image-tag":
         'The pull of {image} fails with "not found", so the tag does not exist in the '
         "registry.",
+    # 2026-10-05 (Spec 4b-3): the taint count is the {other_nodes} template field (was 2).
     "node-cordon-diskfull":
-        "The scheduler says 1 node was unschedulable and 2 had taints the pod does not "
+        "The scheduler says 1 node was unschedulable and {other_nodes} had taints the pod does not "
         "tolerate, so no node can take it.",
     "networkpolicy-deny-all":
         "The readiness probe times out, and kubeagent names the default-deny network policy "
@@ -119,8 +120,9 @@ REASONS = {
     "worker-containerd-stop":
         'Starting the container fails with "failed to create containerd task: context '
         "deadline exceeded\", so containerd on the pod's node does not answer in time.",
+    # 2026-10-05 (Spec 4b-3): the node count is the {nodes} template field (was 3).
     "oversized-job-unschedulable":
-        "The scheduler rejects all 3 nodes for insufficient memory, so the pod's memory "
+        "The scheduler rejects all {nodes} nodes for insufficient memory, so the pod's memory "
         "request is larger than any node can give.",
     "crashloop-pod":
         "The container keeps exiting after it starts, and its previous log classifies as a "
@@ -276,7 +278,10 @@ def test_no_prompt_byte_moves_from_dataset_1004(build_1004, split):
            if line.strip()]
     new = [generate.to_row(e) for e in build_1004[split]]
     assert len(new) == len(old)
+    # 2026-10-05 (Spec 4b-3): multi prompts move (no healthy-origin read, node counts); tests/test_multi_decoys.py pins every other prompt against out/dataset-1004-4b2.
     for i, (a, b) in enumerate(zip(new, old)):
+        if b["meta"]["case"] == "multi":
+            continue
         assert a["messages"][:2] == b["messages"][:2], (split, i)
 
 
@@ -427,15 +432,20 @@ def test_the_old_fields_are_gone():
     assert not hasattr(cases, "_confidence")
 
 
-# The pool's gated rows: generate(17, 8000) index and workload. All four are
+# The pool's gated rows: generate(17, 8000) index and workload. All are
 # coredns `multi` rows whose read budget ran out before the coredns log read,
 # so no own line shows the configuration parse error (Plan ruling 3).
+# 2026-10-05 (Spec 4b-3): (2488, payments/gateway) and (2851, payments/ingest)
+# joined the other four. The old healthy-origin read used up a budget slot, so
+# a stale "unverified" node attribution survived. Now the 8th read refutes the
+# node, and the row gates to none_of_these.
 GATED_POOL = {(2088, "web/scheduler"), (2177, "web/scheduler"), (2630, "media/worker"),
-              (2850, "edge/gateway")}
+              (2850, "edge/gateway"), (2488, "payments/gateway"),
+              (2851, "payments/ingest")}
 
 
-def test_the_gate_fires_on_exactly_the_four_coredns_multi_rows():
-    """Spec test 3, the real coredns multi shape."""
+def test_the_gate_fires_on_exactly_the_pool_gated_coredns_multi_rows():
+    """Spec test 3, the real coredns multi shape (six rows since Spec 4b-3, four before)."""
     pool, found = generate.generate(17, 8000), set()
     for i, ex in enumerate(pool):
         if ex.case.startswith("shared_origin"):

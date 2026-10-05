@@ -1103,7 +1103,12 @@ against these.
    the exam; both forms: 0 in train, 0 in val, 0 in the exam. `multi` is not
    changed by 4b-1. Every `multi` row is byte for byte the one in
    `out/dataset-0929`, so what the text above says about `multi` rows still
-   holds. Spec 4b-3 owns `multi`.)
+   holds. On 2026-10-05 (Spec 4b-3) `multi` was rebuilt. It has no
+   healthy-origin read, so it shows only reads kubeagent's gather makes.
+   Its decoy lists are the causes the prompt rules out. Its summary says
+   "separate reasons" only when the rows show it, and names every
+   workload. A scheduler node count matches the header. The 355 `multi`
+   prompts that moved are counted in `contract/PIN.md`.
 9. **The rule rationale asserts read results the prompt never shows.**
    `_rule_rationale`'s sentence quotes `result.evidence`, the rules
    engine's own one-line summary of a fresh read (`ready condition is

@@ -238,13 +238,15 @@ MUST_INSPECT = frozenset({
 # moves between these two lists only with a dated comment saying why.
 # TXT-IS14 inspects nothing: no family row prints a restart-loop finding
 # whose evidence carries a restart count.
+# 2026-10-05 (Spec 4b-3): TXT-IS22 joins INSPECTS: family rows with a header print
+# a scheduler "0/N nodes are available" line.
 INSPECTS = frozenset({
     "A1", "A2", "A3", "A4", "A5", "A6", "ANS-1", "ANS-2", "B1", "B2", "B3",
     "B4", "B5", "B6", "B7", "B8", "C1", "C1-cause", "C1-conf", "C2-reason",
     "C2-vocab", "C3", "C4-dedup", "C4-order", "C5/D4", "D1", "D1-onefresh",
     "D2-vocab", "D3", "E-min", "E1", "E10", "E2-order", "E3", "E4", "E5",
     "E6", "E7", "E8", "E9", "F1", "F2", "F3", "TXT-IS11", "TXT-IS15",
-    "TXT-IS17", "TXT-IS8", "TXT-IS9", "TXT-POD",
+    "TXT-IS17", "TXT-IS22", "TXT-IS8", "TXT-IS9", "TXT-POD",
 })
 INSPECTS_NONE = frozenset({
     "TXT-IS14",
@@ -252,7 +254,7 @@ INSPECTS_NONE = frozenset({
 
 
 def test_no_rule_passes_by_looking_at_nothing(family):
-    """Spec Tests section 2: every one of the 50 rules is on exactly one
+    """Spec Tests section 2: every one of the 51 rules is on exactly one
     list, the "inspects" list is what the family really exercises, and the
     must-inspect rules are on it."""
     seen = Counter()

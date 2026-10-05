@@ -140,8 +140,9 @@ from kubeagent_verdict.dataset.objects import Fresh, Object
 # the field that makes a propagation graph useful rather than decorative.
 BLAST_RADII = ("cluster", "node", "namespace")
 
-# The memorised sentence this slice exists to measure. `cases.multi` writes it
-# on every multi-workload training row; here it is always the wrong answer.
+# The memorised sentence this slice exists to measure. Here it is always the
+# wrong answer. Today only this propagation family uses it: `cases.multi`
+# builds its own summary through `gold.summary_lines`.
 SEPARATE_REASONS = "failing for separate reasons"
 
 
@@ -258,11 +259,10 @@ class Propagation:
     # (broken content, healthy content) and entry 0 must equal
     # (origin_read[1], healthy_origin_content). Two call sites reach that pair
     # directly: `_render_shared_origin` takes it as the fallback when a
-    # scenario declares no variants, and `cases.multi`'s `healthy_origin`
-    # branch renders `healthy_origin_content` on its own, never going through
-    # the draw -- so the legacy wording is rendered whatever the variants say,
-    # and keeping it as entry 0 is what keeps those sites showing content the
-    # model has actually seen. Empty on the eval six: the exam is frozen and
+    # scenario declares no variants. The propagation family is now the only
+    # user of `healthy_origin_content`, since `cases.multi` no longer has a
+    # healthy-origin read. Keeping the legacy wording as entry 0 keeps that
+    # site showing content the model has actually seen. Empty on the eval six: the exam is frozen and
     # must consume the same RNG.
     origin_variants: tuple[tuple[str, str], ...] = ()
     # (broken token, healthy token). A word, not only a number -- the two

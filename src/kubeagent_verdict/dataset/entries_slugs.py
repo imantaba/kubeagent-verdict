@@ -96,14 +96,14 @@ ENTRIES = [
         status="Degraded",
         issue="Unschedulable",
         reason="No node can schedule this pod",
-        evidence="0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had "
-                 "untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is "
+        evidence="0/{nodes} nodes are available: 1 node(s) were unschedulable, {other_nodes} node(s) had "
+                 "untolerated taint(s). preemption: 0/{nodes} nodes are available: {nodes} Preemption is "
                  "not helpful for scheduling.",
         recommendation="uncordon the node, or check why the other nodes are tainted",
         events=(
             ("FailedScheduling",
-             ("0/3 nodes are available: 1 node(s) were unschedulable, 2 node(s) had untolerated "
-              "taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
+             ("0/{nodes} nodes are available: 1 node(s) were unschedulable, {other_nodes} node(s) had untolerated "
+              "taint(s). preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for "
               "scheduling."), 6),
         ),
         answer=Answer(
@@ -111,7 +111,7 @@ ENTRIES = [
             cause="one node is unschedulable (cordoned) and the others have taints the pod does "
                   "not tolerate",
             keys=("unschedulable", "taint"),
-            rationale="The scheduler says 1 node was unschedulable and 2 had taints the pod does "
+            rationale="The scheduler says 1 node was unschedulable and {other_nodes} had taints the pod does "
                       "not tolerate, so no node can take it."),
         none_phrase="its pod cannot be scheduled",
         grounding=("Unschedulable",),
@@ -279,20 +279,20 @@ ENTRIES = [
         status="Running",
         issue="Unschedulable",
         reason="No node can schedule this pod",
-        evidence="0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are "
-                 "available: 3 Preemption is not helpful for scheduling.",
+        evidence="0/{nodes} nodes are available: {nodes} Insufficient memory. preemption: 0/{nodes} nodes are "
+                 "available: {nodes} Preemption is not helpful for scheduling.",
         recommendation="lower the Job's memory request or add a node that can fit it",
         events=(
             ("FailedScheduling",
-             ("0/3 nodes are available: 3 Insufficient memory. preemption: 0/3 nodes are "
-              "available: 3 Preemption is not helpful for scheduling."), 5),
+             ("0/{nodes} nodes are available: {nodes} Insufficient memory. preemption: 0/{nodes} nodes are "
+              "available: {nodes} Preemption is not helpful for scheduling."), 5),
         ),
         own_cause_must_not=("cordon", "pressure"),
         answer=Answer(
             anchor="insufficient memory",
             cause="the pod's memory request is larger than any node can allocate",
             keys=("memory", "node"),
-            rationale="The scheduler rejects all 3 nodes for insufficient memory, so the pod's "
+            rationale="The scheduler rejects all {nodes} nodes for insufficient memory, so the pod's "
                       "memory request is larger than any node can give."),
         none_phrase="its pod cannot be scheduled",
         objects=(

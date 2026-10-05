@@ -5,8 +5,8 @@ from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, CatalogEntry
 from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
 from kubeagent_verdict.dataset.stories import Answer
 
-_UNBOUND_CLAIM = ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
-                  "preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
+_UNBOUND_CLAIM = ("0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. "
+                  "preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for "
                   "scheduling.")
 
 ENTRIES = [

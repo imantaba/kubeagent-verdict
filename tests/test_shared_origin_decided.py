@@ -185,13 +185,15 @@ def test_the_family_never_carries_the_label_separate(fam):
     assert {ex.meta["label"] for ex in fam} == {"shared", "none"}
 
 
-def test_a_summary_lists_at_most_three_rows(fam):
+def test_a_non_shared_summary_has_one_line_per_row_up_to_three(fam):
     for ex in fam:
         if ex.meta["label"] == "shared":
             continue
         n = len(ex.meta["expected"])
         assert len(_summary(ex).split("\n")) == 1 + min(3, n), ex.group
 
+    # 2026-10-05 (Spec 4b-3): the summary now names every row, the 3rd and 4th
+    # sharing the last line.
     # The loop above only reaches a fourth row if some example has one. Force
     # it: build every story in both worlds, and cap the ones with four rows.
     capped = 0
@@ -205,6 +207,7 @@ def test_a_summary_lists_at_most_three_rows(fam):
             lines = gold._summary(b, g.rows, "none", len(b.rows)).split("\n")
             assert len(lines) == 4, (st.key, world)
             assert [ln.split(":")[0] for ln in lines[1:]] == [r.key for r in b.rows[:3]]
+            assert all(f"{r.key}: " in lines[3] for r in b.rows[2:]), (st.key, world)
     assert capped > 0
 
 

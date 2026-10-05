@@ -22,6 +22,10 @@ So training gets its OWN origins and the six eval scenarios stay eval-only —
 the catalog's 19-trainable / 9-held-out split, applied to propagation. The
 eval set does not move, which is what keeps the 0830 scoreboard comparable.
 
+Until 2026-10-05 (Spec 4b-3) the next three paragraphs described live
+code. They are history now: `multi` has no healthy-origin read and no
+counterweight case.
+
 That closes the obvious shortcut. This module was written mostly for the
 second, which is not obvious: `multi` builds its reads per constituent
 (`_reads(e, n)[:2]`), so a cluster-scoped read at the head of the list used to
@@ -61,12 +65,10 @@ through kubeagent's own pipeline. Three things follow for this file.
    `test_no_family_row_meta_carries_a_dropped_key` checks that on the train
    pile, the exam, the wide probes and the cousin probes.
 
-`multi` was not rebuilt. It still draws from the 54 scenarios in
-`propagation.py`, which Spec 4b-1 does not change, and it is now the only
-case that carries `origin_read_label`. So the checks that only `multi` can
-answer stay in this file, in the block that holds `_template`. The family's
-side of the same shortcut is checked in `tests/test_shared_origin_floor.py`
-and `tests/test_shared_origin_pool.py`. Spec 4b-3 owns `multi`.
+2026-10-05 (Spec 4b-3): `multi` no longer shows a healthy-origin read.
+kubeagent's gather never makes that read, so no case carries
+`origin_read_label` now. The family's side of the shortcut is checked in
+`tests/test_shared_origin_floor.py` and `tests/test_shared_origin_pool.py`.
 """
 
 import dataclasses
@@ -78,7 +80,7 @@ from collections import Counter
 import pytest
 
 from kubeagent_verdict import contract, vocab
-from kubeagent_verdict.dataset import generate, propagation, stories
+from kubeagent_verdict.dataset import generate, gold, propagation, stories
 
 SIZE = 800
 SEED = 17
@@ -118,8 +120,7 @@ FAMILY_CASES = ("shared_origin", "shared_origin_decoy",
                 "shared_origin_probe", "shared_origin_decoy_probe")
 
 # 2026-10-04 (Spec 4b-1): the four meta keys the made-up menu and the invented
-# origin read needed. The family does not carry them. `multi` still carries
-# `origin_read_label`, and nothing below looks at `multi`.
+# origin read needed. The family does not carry them.
 _DROPPED_META_KEYS = ("origin_read_label", "distractor_cause",
                       "wrong_summary_phrase", "expected_confidence")
 
@@ -213,7 +214,7 @@ def family_piles(rows):
 # ------------------------------------------------- the held-out origin split
 
 def test_both_trainable_pools_exist():
-    """`stories` feeds the shared-origin family. `propagation` still feeds `multi`."""
+    """`stories` feeds the shared-origin family. The `propagation` pool is kept and still checked."""
     assert stories.trainable()
     assert propagation.trainable_scenarios()
 
@@ -222,9 +223,8 @@ def test_no_trainable_origin_is_an_eval_origin():
     """The whole point. A shared key would make the probe a memory test.
 
     2026-10-04 (Spec 4b-1): the family's two pools are `stories.exam()` and
-    `stories.trainable()`; `multi` still draws from the trainable
-    `propagation` scenarios. All three must stay clear of the six held-out
-    keys, and the six must still be the same six in both modules.
+    `stories.trainable()`; the trainable `propagation` pool is kept.
+    All three must stay clear of the six held-out keys, and the six must still be the same six in both modules.
     """
     held = {st.key for st in stories.exam()}
     assert held == {p.key for p in propagation.all_scenarios()}
@@ -504,73 +504,12 @@ def test_the_shared_origin_case_family_stays_the_minority_among_multi_workload_r
 
 # ------------------------------------------------- the structural-cue killer
 
-def _template(label: str) -> str:
-    """The trainable origin-read template a filled label was built from.
-
-    2026-09-26 (faithful prompts): a `multi` row's healthy read now names
-    the node or namespace it describes, so its meta label is filled, while
-    the shared-origin rows still carry the template. The label maps back
-    by pattern: `{node}` and `{ns}` each stand for one name with no space
-    or slash in it, and exactly one template may match.
-
-    2026-10-04 (Spec 4b-1): only `multi` rows carry a label now, so only
-    `multi` rows reach this function.
-    """
-    hits = set()
-    for p in propagation.trainable_scenarios():
-        template = p.origin_read[0]
-        pattern = re.escape(template)
-        for slot in (re.escape("{node}"), re.escape("{ns}")):
-            pattern = pattern.replace(slot, "[^ /]+")
-        if re.fullmatch(pattern, label):
-            hits.add(template)
-    assert len(hits) == 1, (label, sorted(hits))
-    return hits.pop()
-
-
-# 2026-10-04 (Spec 4b-1): a comment stood here that argued about the family's
-# origin read label under both answers. The family has no label now, so the
-# argument went with its tests,
-# `test_the_small_build_offers_no_negative_the_shared_half_lacks` and
-# `test_the_cull_never_leaves_an_origin_read_under_only_shared_answers`.
-# What is left is the half only `multi` can answer: does the build offer every
-# origin read as a negative at all? The old text is in git, at main @ ff6527e.
-
-def _multi_templates(rows):
-    """The origin read templates `multi` rows carry. The family carries none."""
-    return {_template(e.meta["origin_read_label"])
-            for e in _by_case(rows, "multi") if "origin_read_label" in e.meta}
-
-
-def test_the_multi_negatives_offer_every_origin_read_template(big_rows):
-    """The emitter's half, checked before the cull, where it is the emitter's.
-
-    Every trainable origin read template must be offered by a `multi` row,
-    under an independent answer. The negatives rotate over the pool one
-    `multi` row in three, so the rotation completes only when the build holds
-    at least three `multi` rows per scenario. `SIZE` stopped holding that at
-    thirty-one scenarios; `BIG` holds it many times over. Asserting it on the
-    kept pile instead would be asserting the cull's behaviour under the
-    emitter's name.
-
-    2026-10-04 (Spec 4b-1): this was `test_the_emitter_offers_every_origin_read_under_both_answers`,
-    which compared the shared half to the negatives. The family has no
-    origin read label now, so only the negatives side is left, and it is
-    compared to the pool itself: the set of templates the 54 `propagation`
-    scenarios declare.
-    """
-    pool = {p.origin_read[0] for p in propagation.trainable_scenarios()}
-    negatives = _multi_templates(big_rows)
-    assert negatives, "no multi row carries an origin read — the cue is alive"
-    assert negatives == pool, sorted(negatives ^ pool)
-
-
 def test_node_memory_pressure_spells_no_taint_the_way_kubectl_does():
     """kubectl prints `Taints:  <none>`. The record said `Taints:  none`.
 
     2026-10-04 (Spec 4b-1): moved here from the origin-variant group. Its
-    variant checks went with the variants. What stays is the healthy read
-    that `multi`'s negative rows render.
+    variant checks went with the variants. What stays is the
+    `propagation` pool's healthy read text.
     """
     p = {q.key: q for q in propagation.trainable_scenarios()}["node-memory-pressure"]
     assert "Taints:  <none>" in p.healthy_origin_content
@@ -590,16 +529,21 @@ def _independent_share(rows):
     `shared_origin_decoy` row on the other. `multi` is still counted by its
     label, because only its negatives carry the read. The counts did not
     move: 120 + 120 + 35 at this module's SIZE, which is 0.5636.
+
+    2026-10-05 (Spec 4b-3): `multi` carries no origin read now, so only the
+    family counts, and the share is exactly 0.5.
     """
     shared = len(_by_case(rows, "shared_origin"))
-    independent = (len(_by_case(rows, "shared_origin_decoy"))
-                   + len([e for e in _by_case(rows, "multi")
-                          if "origin_read_label" in e.meta]))
+    independent = len(_by_case(rows, "shared_origin_decoy"))
     return independent / (shared + independent)
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.568,
+    """History up to 2026-10-05 (Spec 4b-3), kept as written. Until then the
+    every-third `multi` negatives existed, and this text argued for keeping
+    them. They are gone; see the last paragraph for the live number.
+
+    What the EMITTER controls, and it is no longer a coin flip: 0.568,
     re-measured 2026-09-19 (Task 9: pool merge + mix move, spec section 6)
     at 0.5636.
 
@@ -622,12 +566,20 @@ def test_the_generator_emits_the_two_classes_near_evenly(rows):
     `shared_origin_decoy` twin from the same salt, so the paired half is
     still 120/120 at this module's SIZE, and `multi` was not touched, so its
     35 negatives are the same 35.
+
+    2026-10-05 (Spec 4b-3): the every-third `multi` negatives are gone, so
+    only the pair is left and the share is exactly 0.5 (it was 0.5636). The
+    old band was 0.55-0.75; it is a test band, not a bar.
     """
-    assert 0.55 <= _independent_share(rows) <= 0.75
+    assert _independent_share(rows) == 0.5
 
 
 def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
-    """What the MODEL reads, which is the number that decides what it learns.
+    """History up to 2026-10-05 (Spec 4b-3), kept as written. Until then the
+    `multi` negatives had no twin and the lean ran toward the independent
+    answer. They are gone; see the last paragraph for the live number.
+
+    What the MODEL reads, which is the number that decides what it learns.
 
     A 9:1 split is a prior, not a cue kill. This is the assertion the module
     docstring's argument actually depends on, and the one that was missing.
@@ -669,42 +621,24 @@ def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
     label now, so "origin read rows" means the family's two cases, counted
     by case, plus the `multi` rows that carry a label (see
     `_independent_share`).
+
+    2026-10-05 (Spec 4b-3): 0.5 exactly (it was 0.5385 at this size).
+    `drop_held_out` takes pairs whole, so the kept pile is the pair alone.
+    The old band was 0.52-0.70; it is a test band, not a bar.
     """
     share = _independent_share(kept)
-    assert 0.52 <= share <= 0.70, f"kept-pile independent share {share:.3f}"
-
-
-def test_a_negative_multi_row_shows_the_component_healthy(rows):
-    """Same label, opposite content — otherwise the label is still the answer.
-
-    Several scenarios share one read label: every node scenario in the
-    exam's layout heads `describe node {node}`. So the healthy first lines
-    are collected per label, and a row must show one of them. A dict of one
-    content per label kept only the last scenario registered and failed
-    every other scenario's negative row.
-    """
-    healthy = {}
-    for p in propagation.trainable_scenarios():
-        first = p.healthy_origin_content.split("\n")[0]
-        healthy.setdefault(p.origin_read[0], set()).add(first)
-    broken = {p.origin_read[1].split("\n")[0]
-              for p in propagation.trainable_scenarios()}
-    seen = 0
-    for e in _by_case(rows, "multi"):
-        if "origin_read_label" not in e.meta:
-            continue
-        seen += 1
-        assert e.meta["origin_healthy"] is True
-        first_lines = healthy[_template(e.meta["origin_read_label"])]
-        assert any(line in e.user for line in first_lines), e.meta
-        for b in broken:
-            assert b not in e.user
-    assert seen
+    assert share == 0.5, f"kept-pile independent share {share:.3f}"
 
 
 def test_a_negative_multi_row_still_says_separate_reasons(rows):
+    """2026-10-05 (Spec 4b-3): a `multi` row says "separate reasons" only when
+    its rows show it: the rules confirmed different causes, or every row names
+    its own different cause. Otherwise it says the rules confirmed no shared
+    cause (4b-1's fallback)."""
     for e in _by_case(rows, "multi"):
-        assert propagation.SEPARATE_REASONS in e.assistant
+        causes = ["" if v == contract.NONE_OF_THESE else v for v in e.meta["expected"].values()]
+        assert (propagation.SEPARATE_REASONS in e.assistant) == gold.separate_for(
+            e.meta["label"], causes), e.group
 
 
 def test_a_shared_origin_training_row_never_says_separate_reasons(rows):
