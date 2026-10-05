@@ -78,7 +78,7 @@ from collections import Counter
 import pytest
 
 from kubeagent_verdict import contract, vocab
-from kubeagent_verdict.dataset import generate, propagation, stories
+from kubeagent_verdict.dataset import generate, gold, propagation, stories
 
 SIZE = 800
 SEED = 17
@@ -703,8 +703,14 @@ def test_a_negative_multi_row_shows_the_component_healthy(rows):
 
 
 def test_a_negative_multi_row_still_says_separate_reasons(rows):
+    """2026-10-05 (Spec 4b-3): a `multi` row says "separate reasons" only when
+    its rows show it: the rules confirmed different causes, or every row names
+    its own different cause. Otherwise it says the rules confirmed no shared
+    cause (4b-1's fallback)."""
     for e in _by_case(rows, "multi"):
-        assert propagation.SEPARATE_REASONS in e.assistant
+        causes = ["" if v == contract.NONE_OF_THESE else v for v in e.meta["expected"].values()]
+        assert (propagation.SEPARATE_REASONS in e.assistant) == gold.separate_for(
+            e.meta["label"], causes), e.group
 
 
 def test_a_shared_origin_training_row_never_says_separate_reasons(rows):

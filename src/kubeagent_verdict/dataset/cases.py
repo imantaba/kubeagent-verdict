@@ -783,9 +783,10 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
         workloads_meta[key] = workload_meta(
             result, expected_cause=cause, own_cause_keywords=list(g.keys),
             own_cause_must_not=list(e.own_cause_must_not) if g.verdict == "named" else [])
-    lines = [f"{len(pairs)} workloads are failing for separate reasons."]
-    lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
     label = rules.label(rules.shared(tuple(res.results)))
+    causes = ["" if r["cause"] == c.NONE_OF_THESE else r["cause"] for r in rows]
+    summary = gold.summary_lines(list(zip(keys, causes)),
+                                 separate=gold.separate_for(label, causes))
     extra_meta = prompt_meta(workloads_meta, label=label, decoy_by_workload=decoy_by_workload)
     meta = {"case": "multi_misattribution_probe",
             "expected": {r["workload"]: r["cause"] for r in rows},
@@ -796,7 +797,7 @@ def multi_misattribution_probe(pairs: list[tuple[CatalogEntry, Names]],
             "shared_claim_phrases": list(SHARED_CLAIM_PHRASES)}
     meta.update(extra_meta)
     return Example(case="multi_misattribution_probe", group=group, system=c.SYSTEM_PROMPT,
-                   user=user, assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+                   user=user, assistant=_answer(rows, summary),
                    meta=meta)
 
 
@@ -1157,10 +1158,11 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
     label = rules.label(rules.shared(tuple(res.results)))
     extra_meta = render.prompt_meta(workloads_meta, label=label,
                                     decoy_by_workload=decoy_by_workload)
-    lines = [f"{len(pairs)} workloads are failing for separate reasons."]
-    lines += [f"{r['workload']}: {r['cause']}." for r in rows[:3]]
+    causes = ["" if r["cause"] == c.NONE_OF_THESE else r["cause"] for r in rows]
+    summary = gold.summary_lines(list(zip(keys, causes)),
+                                 separate=gold.separate_for(label, causes))
     return Example(case="multi", group=group, system=c.SYSTEM_PROMPT, user=user,
-                   assistant=_answer(rows, "\n".join(lines[:c.MAX_SUMMARY_LINES])),
+                   assistant=_answer(rows, summary),
                    meta={"case": "multi",
                          "expected": {r["workload"]: r["cause"] for r in rows},
                          **({} if healthy_read is None else {
