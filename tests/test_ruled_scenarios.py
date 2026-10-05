@@ -446,7 +446,8 @@ def test_unverified_node_twin_origin_read_says_read_failed_is_forbidden(key):
     b = _built(st, "broken", 2, salt=1, unverified=True)
     node = b.draw.scope_value
     assert node, key
-    assert f'read failed: nodes "{node}" is forbidden' in b.user
+    assert (f'read failed: nodes "{node}" is forbidden: User "system:serviceaccount:kubeagent:kubeagent" cannot get resource '
+            '"nodes" in API group "" at the cluster scope') in b.user
 
 
 @pytest.mark.parametrize("key,victims", NODE_ROWS, ids=NODE_IDS)

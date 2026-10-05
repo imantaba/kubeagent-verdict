@@ -100,12 +100,34 @@ def test_refute_gives_each_kind_its_healthy_ending():
     assert (r.fresh.literal, r.fresh.wrong_pod) == ("manifest unknown", False)
 
 
-def test_unverify_read_failed_carries_the_name_template():
-    assert o.unverify(node(), "read_failed").fresh == o.Fresh(
-        how="read_failed", message='nodes "{node}" is forbidden')
-    assert o.unverify(pvc(), "read_failed").fresh.message == \
-        'persistentvolumeclaims "{pvc}" is forbidden'
-    assert o.unverify(registry(), "read_failed").fresh.message == "events is forbidden"
+_SA = "system:serviceaccount:kubeagent:kubeagent"
+
+
+def test_read_failed_prints_the_api_servers_full_text():
+    """Exam rebuild, item 6: kubeagent prints `read failed: ` + redact.Error(err),
+    and redact.Error changes only URL errors, so the API server's text arrives
+    whole. The user is kubeagent's own service account."""
+    assert o.unverify(node(), "read_failed").fresh.message == (
+        f'nodes "{{node}}" is forbidden: User "{_SA}" cannot get resource "nodes" '
+        'in API group "" at the cluster scope')
+    assert o.unverify(pvc(), "read_failed", namespace="shop").fresh.message == (
+        f'persistentvolumeclaims "{{pvc}}" is forbidden: User "{_SA}" cannot get resource '
+        '"persistentvolumeclaims" in API group "" in the namespace "shop"')
+    assert o.unverify(registry(), "read_failed", namespace="shop").fresh.message == (
+        f'events is forbidden: User "{_SA}" cannot list resource "events" in API group "" '
+        'in the namespace "shop"')
+
+
+@pytest.mark.parametrize("obj", [pvc(), registry()])
+def test_a_namespaced_read_failed_needs_its_namespace(obj):
+    """Review Focus 4: never `in the namespace ""`."""
+    with pytest.raises(ValueError, match="namespace"):
+        o.unverify(obj, "read_failed")
+
+
+def test_the_origin_events_text_names_the_service_account():
+    from kubeagent_verdict.dataset import shared_origin as so
+    assert f'User "{_SA}"' in so.ORIGIN_EVENTS_FORBIDDEN
 
 
 def test_unverify_kind_specific_endings():

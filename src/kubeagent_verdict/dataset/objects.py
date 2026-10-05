@@ -149,13 +149,28 @@ def refute(obj: Object) -> Object:
                                       literal="manifest unknown", wrong_pod=False))
 
 
-def unverify(obj: Object, how: str) -> Object:
-    """An ending the rules cannot settle: the object stays decided but unverified."""
+# kubeagent's own identity: the deploy/rbac-*.yaml manifests create this account.
+SERVICE_ACCOUNT = "system:serviceaccount:kubeagent:kubeagent"
+
+
+def unverify(obj: Object, how: str, *, namespace: str = "") -> Object:
+    """An ending the rules cannot settle: the object stays decided but unverified.
+
+    A failed read prints the API server's whole refusal, as kubeagent does
+    (`read failed: ` + redact.Error(err), internal/investigate/gather.go).
+    A claim and an event list are namespaced, so they need `namespace`."""
     if how == "read_failed":
+        if obj.kind in ("pvc", "registry") and not namespace:
+            raise _err(obj, "a failed read needs its namespace")
+        user = f'User "{SERVICE_ACCOUNT}"'
         message = {
-            "node": f'nodes "{obj.name}" is forbidden',
-            "pvc": f'persistentvolumeclaims "{obj.name}" is forbidden',
-            "registry": "events is forbidden",
+            "node": (f'nodes "{obj.name}" is forbidden: {user} cannot get resource "nodes" '
+                     'in API group "" at the cluster scope'),
+            "pvc": (f'persistentvolumeclaims "{obj.name}" is forbidden: {user} cannot get '
+                    'resource "persistentvolumeclaims" in API group "" '
+                    f'in the namespace "{namespace}"'),
+            "registry": (f'events is forbidden: {user} cannot list resource "events" '
+                         f'in API group "" in the namespace "{namespace}"'),
         }[obj.kind]
         return replace(obj, fresh=Fresh(how="read_failed", message=message))
     if obj.kind == "node" and how == "lease":

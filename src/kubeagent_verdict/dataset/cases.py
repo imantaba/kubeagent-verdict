@@ -302,7 +302,7 @@ def _deciding_winner(e: CatalogEntry, n: Names, case: str, rng: random.Random):
     row's first rng draw."""
     obj = bind(_winner_object(e, case), dataclasses.asdict(n))
     try:
-        return deciding_ending(obj, rng)
+        return deciding_ending(obj, rng, namespace=n.ns)
     except ValueError as err:
         raise ValueError(f"{case}: the rules do not decide {e.key} ({err})") from err
 
@@ -636,7 +636,7 @@ def _contradiction_menu(n: Names, objects: tuple) -> tuple:
     """
     names = dataclasses.asdict(n)
     endings = {"node": "lease", "pvc": "read_failed", "registry": "auth"}
-    return tuple(unverify(bind(obj, names), endings[obj.kind]) for obj in objects)
+    return tuple(unverify(bind(obj, names), endings[obj.kind], namespace=n.ns) for obj in objects)
 
 
 def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
@@ -1009,7 +1009,7 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     for e, n in pairs:
         names_dict = dataclasses.asdict(n)
         own.append(tuple(
-            render.draw_ending(render.bind(obj, names_dict), rng)
+            render.draw_ending(render.bind(obj, names_dict), rng, namespace=n.ns)
             if obj.intent == "decoy" else render.bind(obj, names_dict)
             for obj in e.objects))
     return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]

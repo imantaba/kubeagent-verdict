@@ -18,7 +18,7 @@ from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset.checker import LOG_CAUSE_PREFIX, LOG_NO_CLASSIFIABLE, LOG_NO_PREVIOUS
 from kubeagent_verdict.dataset.names import Names
 
-ORIGIN_EVENTS_FORBIDDEN = ('events is forbidden: User "kubeagent" cannot list '
+ORIGIN_EVENTS_FORBIDDEN = (f'events is forbidden: User "{objects.SERVICE_ACCOUNT}" cannot list '
                            'resource "events" in API group "" in the namespace "kube-system"')
 
 

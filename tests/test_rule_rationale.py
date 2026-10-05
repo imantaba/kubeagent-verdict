@@ -68,7 +68,7 @@ PVC_BRANCHES = [
     ("pvc-confirmed-lost",
      o.Object(kind="pvc", name="data-0", scan_reason="ProvisionerNotResponding",
               placement="mounted", fresh=o.Fresh(how="read", phase="Lost"), intent="cause")),
-    ("pvc-unverified-read-failed", o.unverify(_PVC, "read_failed")),
+    ("pvc-unverified-read-failed", o.unverify(_PVC, "read_failed", namespace="shop")),
     ("pvc-unverified-not-read",
      o.Object(kind="pvc", name="data-0", scan_reason="ProvisionerNotResponding",
               placement="mounted", fresh=o.Fresh(how="not_read"), intent="cause")),
@@ -81,7 +81,7 @@ REGISTRY_BRANCHES = [
     ("registry-confirmed-connection",
      o.Object(kind="registry", name="registry.example.com", scan_reason="2",
               placement="", fresh=o.Fresh(how="read", literal="dial tcp"), intent="cause")),
-    ("registry-unverified-read-failed", o.unverify(_REGISTRY, "read_failed")),
+    ("registry-unverified-read-failed", o.unverify(_REGISTRY, "read_failed", namespace="shop")),
     ("registry-unverified-not-read",
      o.Object(kind="registry", name="registry.example.com", scan_reason="2",
               placement="", fresh=o.Fresh(how="not_read"), intent="cause")),
@@ -132,7 +132,7 @@ UNVERIFY_CASES = [
                          ids=[c[0] for c in UNVERIFY_CASES])
 def test_every_valid_unverify_message_holds_no_denial_or_overclaim_phrase(
         case_id, base, how, issue):
-    ended = o.unverify(base, how)
+    ended = o.unverify(base, how, namespace="shop")
     result = _decide(ended, issue=issue)
     assert result.decided and result.outcome == "unverified", case_id
     kind = ended.kind

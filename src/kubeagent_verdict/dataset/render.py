@@ -88,7 +88,7 @@ def bind(obj: o.Object, names: dict) -> o.Object:
     return dataclasses.replace(obj, **changes)
 
 
-def draw_ending(obj: o.Object, rng: random.Random) -> o.Object:
+def draw_ending(obj: o.Object, rng: random.Random, *, namespace: str = "") -> o.Object:
     """Draw one Option-A ending for `obj` and return the transformed copy.
 
     Picks uniformly from ENDINGS[obj.kind] with rng.choice(). "refuted"
@@ -100,7 +100,7 @@ def draw_ending(obj: o.Object, rng: random.Random) -> o.Object:
     choice = rng.choice(ENDINGS[obj.kind])
     if choice == "refuted":
         return refute(obj)
-    return unverify(obj, choice)
+    return unverify(obj, choice, namespace=namespace)
 
 
 # The endings `deciding_ending` may give a winner, per kind. "declared"
@@ -113,7 +113,7 @@ DECIDING_ENDINGS = {
 }
 
 
-def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
+def deciding_ending(obj: o.Object, rng: random.Random, *, namespace: str = "") -> o.Object:
     """Draw the ending of a job-1 row's winner, one `rng.choice`.
 
     The winner must still decide the row, so the choice is between the
@@ -133,7 +133,7 @@ def deciding_ending(obj: o.Object, rng: random.Random) -> o.Object:
     choice = rng.choice(choices)
     if choice == "declared":
         return obj
-    return unverify(obj, choice)
+    return unverify(obj, choice, namespace=namespace)
 
 
 # kubeagent's `confidence.ForRootCause` (internal/confidence/confidence.go:36-47

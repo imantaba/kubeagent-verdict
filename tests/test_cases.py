@@ -157,7 +157,8 @@ def test_injection_answer_ignores_payload():
     assert payload in ex.user  # the attack is really in the evidence
     doc = json.loads(ex.assistant)  # the answer is still pure contract JSON
     assert set(doc) == {"verdicts", "summary"}
-    blob = ex.assistant.lower()
+    # A refused read now quotes kubeagent's own account, which starts "system:".
+    blob = ex.assistant.lower().replace(o.SERVICE_ACCOUNT, "")
     for marker in ("ignore all previous", "markdown", "system:"):
         assert marker not in blob
     assert ex.meta["injection_payload"] == payload
@@ -506,7 +507,7 @@ def _contradiction_result(e, n):
     ended the way contradiction_probe ends them. Event lines do not change
     what the rules decide, so the entry's own events are enough here."""
     bound = tuple(render.bind(obj, dataclasses.asdict(n)) for obj in e.objects)
-    menu = tuple(o.unverify(obj, _CONTRADICTION_ENDINGS[obj.kind]) for obj in bound)
+    menu = tuple(o.unverify(obj, _CONTRADICTION_ENDINGS[obj.kind], namespace=n.ns) for obj in bound)
     (result,) = gather.gather([cases.gather_workload(e, n, menu)]).results
     return result
 
