@@ -191,6 +191,11 @@ of each row the grader reads. They are pinned so a change to the
 generators cannot move the exam without someone saying why. This is where
 the why is recorded.
 
+- **2026-10-05 — Spec 4b-3, `multi` rows and decoys.** No exam hash moved.
+  `test.jsonl` is byte for byte the 4b-2 one. From this date `multi` shows
+  only reads kubeagent's own gather makes, and the checker has no
+  exemption for a hand-made read (the `origin_read_label` path is gone).
+  Details are in the last entry of this section.
 - **2026-10-04 — Spec 4b-2, the catalog gold.** Four hashes moved, old to
   new (details are in the last entry of this section):
   - `FROZEN_SLICE_SHA256`: `d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b`
@@ -653,7 +658,10 @@ the why is recorded.
     character (say, a full-width letter) can slip a copy past it.
   - D4: `multi`'s decoy list is keyed on each object's intent, not on
     what the prompt shows, so it can hold a decided workload's own gold.
-    No grader reads it today.
+    No grader reads it today. (2026-10-05, Spec 4b-3: done. Every `multi`
+    decoy list is `gold.excluded_from(...)`, and
+    `tests/test_multi_decoys.py` checks that no workload in any case lists
+    its own gold. Widening the decoy gate to job 1 is left for 4b-4.)
   - A node's state at scan time: a cordon and a pressure condition.
     (2026-10-04, Spec 4b-1: closed. A node read now prints `unschedulable=`
     and every condition. The cluster lines carry a node's pressure,
@@ -765,6 +773,10 @@ the why is recorded.
   - B6: a refused read's message is shorter than the API server's real
     text.
   - D4: `multi`'s decoy list is keyed on each object's intent.
+    (2026-10-05, Spec 4b-3: done. Every `multi` decoy list is
+    `gold.excluded_from(...)`, and `tests/test_multi_decoys.py` checks that
+    no workload in any case lists its own gold. Widening the decoy gate to
+    job 1 is left for 4b-4.)
   - A node's state at scan time: a cordon and a pressure condition.
     (2026-10-04, Spec 4b-1: closed. See the note under the same item in the
     2026-09-26 entry.)
@@ -899,10 +911,17 @@ the why is recorded.
   Left for 4b-2, 4b-3 and 4b-4:
   - 4b-2: gold that says more than its prompt, in the other families. The
     gold rule above, applied to them.
-  - 4b-3: `multi` rows and decoys.
-    - the container-name clash, 96 of 738 `multi` rows;
-    - `multi`'s `healthy_origin` and its `origin_read_label` path;
-    - D4.
+  - 4b-3: `multi` rows and decoys. Done 2026-10-05, see the 2026-10-05
+    entry below.
+    - the container-name clash, 96 of 738 `multi` rows: closed, no change.
+      kubeagent's gather does the same
+      (`internal/investigate/gather.go:146`). See §6 of
+      `docs/superpowers/specs/2026-10-05-multi-decoys-design.md`;
+    - `multi`'s `healthy_origin` and its `origin_read_label` path: removed;
+    - D4: done.
+    Still open for 4b-4: the guard for 4+-letter kit keys, widening the
+    decoy gate to job 1, and the sum half of IS-22. That half fails on
+    4b-1 stories, exam rows included, so it waits for the exam rebuild.
   - 4b-4: grader leftovers.
     - model-card limits 13 and 14;
     - hyphen and underscore folding in the cleaning step;
@@ -1009,3 +1028,77 @@ the why is recorded.
   build, and the 4b-1 numbers above were counted on it. Keeping both lets
   the before and after counts be re-run. The prompt-stability test now
   reads `out/dataset-1004-4b2/test.jsonl`.
+
+### 2026-10-05 — Spec 4b-3: multi rows and decoys
+
+No exam hash moved. `test.jsonl` is byte for byte the one in
+`out/dataset-1004-4b2`, so `FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256` and
+`GRADED_VIEW_SHA256` stay as they were. The design is in
+`docs/superpowers/specs/2026-10-05-multi-decoys-design.md`.
+
+The build folder is `out/dataset-1005` (`--seed 17 --size 8000`): train
+6,439, val 739, test 249 rows. The exam has no `multi` rows, which is why
+it did not move.
+
+What changed in `multi`:
+- No healthy-origin read. `multi` shows only reads kubeagent's gather
+  makes. The checker has no exemption for a hand-made read.
+- A decoy list is `gold.excluded_from(...)`: the causes the prompt rules
+  out, never a workload's own gold.
+- The summary says "separate reasons" only when the rows show it, and it
+  names every workload.
+- A scheduler node count agrees with the cluster header. The node-cordon
+  answer sentence had a hard-coded node count too ("2 had taints"). It is
+  now `{other_nodes}`, so a rebuilt `multi` row's answer agrees with its
+  prompt.
+
+What moved, against `out/dataset-1004-4b2` (train / val / exam):
+- `multi` prompts: 315 / 40 / 0 rows moved, 355 in all.
+- `multi` answers: 279 / 27 / 0 rows moved, 306 in all. 200 / 18 / 0 rows
+  moved in both. So 218 rows moved in both.
+- 652 train and 86 val `multi` rows in all (738). Rows that are not
+  `multi`: 0 prompts moved in any split.
+- 77 shared-origin rows from 4b-1 (66 train, 11 val, 0 exam) have an answer
+  that moved. They are the rows with 4 or more workloads. The summary now
+  names every workload, where it used to name only some.
+
+Measured, before and after:
+- Node count mismatches (a scheduler line whose node count differs from the
+  header): 172 `multi` rows before (159 train, 13 val), 0 after.
+- Own-gold decoys (D4): 0 after, over 11,192 train, 1,293 val and 299 exam
+  workloads checked. The counts show the 0 is not an empty pass.
+- `none_of_these` verdicts in `multi` rows: train 1 of 1,924 before, 2 of
+  1,924 after. Val 0 of 246 both times. That is 2 of 2,170 train and val
+  verdicts, far under the 30% ceiling.
+- `multi` row labels: train 639 `none`, 13 `separate`, the same before and
+  after. Val 86 `none`, the same.
+- The checker has 51 rules and 0 violations of every kind (16 case keys).
+  The new one is IS-22 (a scheduler node count matches the header). It
+  inspected 2,266 counts: 2,026 train, 160 val, 80 exam. Only its first
+  half is built. Its sum half fails on 4b-1 stories, so it waits for the
+  exam rebuild.
+
+Re-pins. None in Task 6. Task 4 removed the healthy-origin read and made
+these hand re-pins, each dated 2026-10-05 (Spec 4b-3) in a comment. The
+guarded rates stayed 1.0 and no exam pin moved.
+- `GATED_POOL` in `test_catalog_gold`: 4 rows to 6. It added (2488,
+  payments/gateway) and (2851, payments/ingest). Why: the old healthy read
+  used up a budget slot, so a stale "unverified" node answer survived. Now
+  the 8th read refutes the node and the row gates to `none_of_these`.
+- `test_oracle`: job 1 n 3151 to 3145; job 2 gate n 8041 to 8047;
+  keyword-only n 6579 to 6584; multi job 1 (1207, 1207) to (1201, 1201).
+- `test_answer_keys`: (13946, 1084) to (13946, 1085); checked 7972 to 7979.
+- `test_score`: checked 9618 to 9627.
+
+Test changes:
+- The two share tests in `test_shared_origin_training` now assert `== 0.5`.
+- `test_catalog_gold`'s dataset-1004 byte test skips `multi` rows.
+- `tests/test_multi_collision.py` is deleted, with the healthy-origin read.
+- `test_shared_origin_pool`'s `INSPECTS` list gained TXT-IS22.
+- New: `tests/test_multi_decoys.py`.
+
+Container-name clash: closed, no change. 96 of 738 `multi` rows have it,
+and kubeagent does the same (`internal/investigate/gather.go:146`). See §6
+of the spec.
+
+Full suite: 1,940 passed. Ruff: clean.

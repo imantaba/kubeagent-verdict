@@ -418,8 +418,11 @@ story: the report order, the gather, the rules over every candidate, and the
 render. There are 47 stories, each in two worlds, one broken and one
 healthy. 41 are trainable, where the old pool had 54, and 6 are exam-only.
 The paragraphs above describe the earlier design, and they stay as history.
-`multi` still draws from `propagation.trainable_scenarios()`; Spec 4b-3 owns
-it. The counts and the hashes are in `contract/PIN.md`.
+`multi` still draws from `propagation.trainable_scenarios()`. Since Spec
+4b-3 (2026-10-05) it has no healthy-origin read, so it shows only reads
+kubeagent's gather makes. Its decoy lists are the causes the prompt rules
+out. Its summary says "separate reasons" only when the rows show it, and it
+names every workload. Scheduler node counts match the header. The counts and the hashes are in `contract/PIN.md`.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1

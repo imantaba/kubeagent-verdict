@@ -736,6 +736,7 @@ The same rule as §4: a gold says only what its prompt shows.
 Done 2026-10-04: see `docs/superpowers/specs/2026-10-04-catalog-gold-design.md`.
 
 **4b-3: `multi` rows and decoys.**
+Done 2026-10-05: see `docs/superpowers/specs/2026-10-05-multi-decoys-design.md`.
 - the container-name clash count, 96 of 738 `multi` rows;
 - `multi`'s `healthy_origin` and its `origin_read_label` path;
 - D4.
