@@ -1231,8 +1231,8 @@ against these.
     `log cause:` is protected. Every other label is cut as before. On the
     exam, 50 job-2 workloads have a `log cause:` line in the prompt, and
     32 have one in their own block. A probe that adds each workload's own
-    label words to its right answer scored 165 of 197 before and 197 of
-    197 now. The label-strip bot and the three cut-paste bots score 0 of
+    label words to its right answer scored 165 of 197 with G3b's old
+    rule and 197 of 197 now. The label-strip bot and the three cut-paste bots score 0 of
     197.)
 14. **A must-not word is a plain substring, and it cannot see "not".**
     (Added 2026-09-29, after Spec 4a's final review.) Must-not words match

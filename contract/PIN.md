@@ -1123,7 +1123,7 @@ job-2 workloads). A "probe" is the gold reply with one change.
 3. G3b never cuts the `log cause:` label off a line (model-card limit
    13). Every other label is cut as before. A probe that adds each
    workload's own `log cause:` label words to its right answer changes 32
-   answers: job 2 165 of 197 before, 197 of 197 after. The final review
+   answers: job 2 165 of 197 with G3b's old rule, 197 of 197 after. The final review
    found that the first rule, which kept any word ending in `:`, was too
    wide. Two label-strip bots read nothing and paste their own labelled
    lines with the label cut off. One pastes every such line, the other
