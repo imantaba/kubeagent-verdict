@@ -1097,7 +1097,8 @@ def test_a_multi_row_runs_one_gather_under_one_budget(monkeypatch):
     monkeypatch.setattr(gather, "gather", spy)
     ex = cases.multi(_crash_pairs(), random.Random(26))
     labels = _evidence_labels(ex.user)
-    assert calls == [(3, c.MAX_TOOL_CALLS)]
+    # A row whose header counts more than 3 nodes is built twice, with no new draw.
+    assert calls in ([(3, c.MAX_TOOL_CALLS)], [(3, c.MAX_TOOL_CALLS)] * 2)
     assert len(labels) == c.MAX_TOOL_CALLS
     assert len(set(labels)) == len(labels)
     assert "origin_read_label" not in ex.meta

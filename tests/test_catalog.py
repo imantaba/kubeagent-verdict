@@ -8,8 +8,10 @@ DATA = Path(__file__).resolve().parent.parent / "data" / "corpus"
 SAMPLE = {
     "ns": "shop", "name": "api", "pod": "api-7f9c4d5b6-x2x9k", "container": "app",
     "init_container": "init-config", "image": "registry.example.com/shop/api:v1.2.3",
-    "node": "worker-2", "pvc": "data-0", "restarts": 14,
+    "node": "worker-2", "pvc": "data-0", "restarts": 14, "nodes": 3,
 }
+# 2026-10-05 (Spec 4b-3): the fill also gives {other_nodes}, nodes minus 1.
+FILL = {**SAMPLE, "other_nodes": 2}
 
 
 def test_catalog_entry_objects_field_defaults_to_empty():
@@ -211,9 +213,9 @@ def test_contradiction_events_have_the_events_shape():
     or a template that formats to one."""
     for e in catalog.all_entries():
         for reason, message, count in e.contradiction_events:
-            assert reason.format(**SAMPLE) and message.format(**SAMPLE), e.key
+            assert reason.format(**FILL) and message.format(**FILL), e.key
             if isinstance(count, str):
-                assert int(count.format(**SAMPLE)) > 0, e.key
+                assert int(count.format(**FILL)) > 0, e.key
             else:
                 assert isinstance(count, int) and count > 0, e.key
 
@@ -231,7 +233,7 @@ def test_kit_keys_are_satisfied_by_their_own_cause():
     """
     broken = {}
     for e in catalog.trainable():
-        cause = e.answer.cause.format(**SAMPLE).lower()
+        cause = e.answer.cause.format(**FILL).lower()
         missing = [k for k in e.answer.keys if k.lower() not in cause]
         if missing:
             broken[e.key] = (missing, cause)
@@ -266,12 +268,12 @@ def test_templates_resolve_with_sample_names():
     for e in catalog.trainable():
         for tpl in (e.evidence, e.log_cause, e.recommendation, e.answer.anchor,
                     e.answer.cause, e.answer.rationale):
-            tpl.format(**SAMPLE)
+            tpl.format(**FILL)
         for reason, message, count in e.events + e.contradiction_events:
-            reason.format(**SAMPLE)
-            message.format(**SAMPLE)
+            reason.format(**FILL)
+            message.format(**FILL)
             if isinstance(count, str):
-                count.format(**SAMPLE)
+                count.format(**FILL)
 
 
 def test_grounding_substrings_appear_in_corpus():
@@ -298,7 +300,7 @@ def test_restart_loop_evidence_quotes_the_container():
     """kubeagent prints `container %q, %d restarts, …`
     (internal/diagnose/restartloop.go:47 at v1.24.0)."""
     e = next(e for e in catalog.all_entries() if e.key == "restart-loop")
-    assert e.evidence.format(**SAMPLE).startswith('container "app", 14 restarts, ')
+    assert e.evidence.format(**FILL).startswith('container "app", 14 restarts, ')
 
 
 # The 17 trainable entries the rules decide in a single-workload row, in
@@ -346,8 +348,9 @@ def test_the_cordoned_node_is_ruled_out():
 
 def test_the_unbound_claim_entry():
     e = next(e for e in catalog.all_entries() if e.key == "pvc-unbound-unschedulable")
-    message = ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims. "
-               "preemption: 0/3 nodes are available: 3 Preemption is not helpful for "
+    # 2026-10-05 (Spec 4b-3): the node count is the {nodes} template field (was 3).
+    message = ("0/{nodes} nodes are available: pod has unbound immediate PersistentVolumeClaims. "
+               "preemption: 0/{nodes} nodes are available: {nodes} Preemption is not helpful for "
                "scheduling.")
     assert (e.covered_slugs, e.covered_kinds, e.trains) == ((), (), True)
     assert (e.workload_kind, e.status) == ("Deployment", "Degraded")
@@ -382,4 +385,4 @@ def test_no_entry_names_a_pad_pvc():
 
     for e in catalog.all_entries():
         for obj in e.objects:
-            assert obj.name.format(**SAMPLE) not in names.PAD_PVCS, e.key
+            assert obj.name.format(**FILL) not in names.PAD_PVCS, e.key

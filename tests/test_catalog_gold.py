@@ -119,8 +119,9 @@ REASONS = {
     "worker-containerd-stop":
         'Starting the container fails with "failed to create containerd task: context '
         "deadline exceeded\", so containerd on the pod's node does not answer in time.",
+    # 2026-10-05 (Spec 4b-3): the node count is the {nodes} template field (was 3).
     "oversized-job-unschedulable":
-        "The scheduler rejects all 3 nodes for insufficient memory, so the pod's memory "
+        "The scheduler rejects all {nodes} nodes for insufficient memory, so the pod's memory "
         "request is larger than any node can give.",
     "crashloop-pod":
         "The container keeps exiting after it starts, and its previous log classifies as a "

@@ -273,6 +273,8 @@ BROKEN = {
     "TXT-IS14": (_has(_RESTART_LOOP), _regex(_RESTART_LOOP, r"\g<1>2\g<2>")),
     "TXT-IS15": (_has(_DETECTOR_AGE), _regex(_DETECTOR_AGE, r"\g<1>90s\g<3>")),
     "TXT-IS17": (None, _replace("logs <pod> -c coredns --previous", "logs <pod> --previous")),
+    "TXT-IS22": (None, _replace("(0/4 nodes are available: pod has unbound",
+                                "(0/3 nodes are available: pod has unbound")),
     "TXT-POD": (None, _replace("kubectl -n web describe pod <pod>",
                                "kubectl -n web describe pod frontend-5b8d7f6c9-q2w3e")),
     # the answer
@@ -286,7 +288,8 @@ def test_every_rule_has_a_broken_copy():
     # 2026-09-26 (faithful prompts): TXT-POD checks the pod slot of a fix command 48 -> 49
     # 2026-09-28 (final review): B8 checks each block lists the row's down nodes and its
     # namespace's broken PVCs 49 -> 50
-    assert len(checker.RULES) == len(set(checker.RULES)) == 50
+    # 2026-10-05 (Spec 4b-3): TXT-IS22 checks every scheduler node count against the header 50 -> 51
+    assert len(checker.RULES) == len(set(checker.RULES)) == 51
 
 
 # `_source` and two other pickers keep skipping the shared-origin family so
@@ -821,7 +824,7 @@ def test_shared_origin_row_passes_every_rule():
 def test_no_exemption_names_remain():
     for name in ("EXEMPT_CASES", "EVIDENCE_RULES", "PROPAGATION_TEXT_RULES"):
         assert not hasattr(checker, name)
-    assert len(checker.RULES) == 50
+    assert len(checker.RULES) == 51
 
 
 def test_health_system_status_may_hold_spaces():

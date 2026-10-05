@@ -4,15 +4,26 @@ The build here is the out/dataset-MMDD pipeline: generate(17, 8000), split,
 drop held-out. Tests that compare with the last build read
 out/dataset-1004-4b2 and skip when it is not on this machine.
 """
+import dataclasses
 import inspect
 import json
+import random
 import re
 from pathlib import Path
 
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import cases, gather, generate, gold
+from kubeagent_verdict.dataset import (
+    cases,
+    catalog,
+    checker,
+    gather,
+    generate,
+    gold,
+    render,
+)
+from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.evals import score
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,3 +223,91 @@ def test_multi_has_no_healthy_origin_read(build):
         assert "origin_read_label" not in e.meta and "origin_healthy" not in e.meta, e.group
         assert _labels(e.user)[0].startswith("events "), e.group
     assert seen == 738
+
+
+# --- test 10: the node fill --------------------------------------------------
+
+_SCHED_ENTRIES = ("pvc-unbound-unschedulable", "node-cordon-diskfull", "oversized-job-unschedulable")
+
+
+def _sched_texts(e) -> list[str]:
+    return [e.evidence] + [ev[1] for ev in e.events]
+
+
+def test_the_default_fill_gives_the_old_text():
+    n = names_mod.draw(random.Random(5))
+    assert n.nodes == 3
+    by = {x.key: x for x in catalog.all_entries()}
+    texts = [cases._fmt(t, n) for k in _SCHED_ENTRIES for t in _sched_texts(by[k])]
+    joined = "\n".join(texts)
+    assert "{" not in joined
+    assert "0/3 nodes are available" in joined
+    assert "3 Preemption is not helpful" in joined
+    assert "3 Insufficient memory" in joined
+    assert "1 node(s) were unschedulable, 2 node(s) had untolerated taint(s)" in joined
+
+
+def test_five_nodes_fill_five():
+    n = dataclasses.replace(names_mod.draw(random.Random(5)), nodes=5)
+    by = {x.key: x for x in catalog.all_entries()}
+    joined = "\n".join(cases._fmt(t, n) for k in _SCHED_ENTRIES for t in _sched_texts(by[k]))
+    assert "0/3" not in joined
+    assert "0/5 nodes are available" in joined
+    assert "5 Preemption is not helpful" in joined
+    assert "5 Insufficient memory" in joined
+    assert "1 node(s) were unschedulable, 4 node(s) had untolerated taint(s)" in joined
+
+
+# --- test 11: node_total is the header's T -----------------------------------
+
+def test_node_total_is_the_headers_count(monkeypatch):
+    real = render.cluster_health
+    checked = 0
+
+    def spy(workloads, reads):
+        nonlocal checked
+        block = real(workloads, reads)
+        if block is not None:
+            assert block.nodes_total == render.node_total(workloads, reads)
+            checked += 1
+        return block
+
+    monkeypatch.setattr(render, "cluster_health", spy)
+    generate.generate(17, 800)
+    assert checked > 0
+
+
+# --- test 12: IS-22 ----------------------------------------------------------
+
+def test_is22_finds_nothing_on_the_build(build):
+    inspected = 0
+    for e in _all(build):
+        rep = checker.check(e.system, e.user, e.assistant, e.meta)
+        assert not [v for v in rep.violations if v.rule == "TXT-IS22"], (e.case, e.group)
+        inspected += rep.inspected["TXT-IS22"]
+    assert inspected > 0
+
+
+def test_is22_passes_a_row_with_no_header():
+    user = "Workload problems (P2):\n- a/b (Deployment): 0/1 ready\n  0/3 nodes are available"
+    assert checker._txt_is22(checker._context("", user, "", None)) == (0, [])
+
+
+# --- test 12b: every multi scheduler count is the header's -------------------
+
+_HEADER = re.compile(r"— (\d+)/(\d+) nodes Ready\.")
+_SCHED = re.compile(r"\b0/(\d+) nodes are available")
+
+
+def test_every_multi_scheduler_count_is_the_headers(build):
+    checked = 0
+    for e in _all(build):
+        if e.case != "multi":
+            continue
+        h = _HEADER.search(e.user)
+        if not h:
+            continue
+        for m in _SCHED.finditer(e.user):
+            checked += 1
+            assert m.group(1) == h.group(2), e.group
+    assert checked > 0

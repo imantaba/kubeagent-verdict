@@ -48,7 +48,8 @@ SHARED_CLAIM_PHRASES = ("shared origin", "shared root cause", "common cause",
 def _fmt(tpl: str, n: Names) -> str:
     return tpl.format(ns=n.ns, name=n.name, pod=n.pod, container=n.container,
                       init_container=n.init_container, image=n.image, node=n.node,
-                      pvc=n.pvc, restarts=n.restarts)
+                      pvc=n.pvc, restarts=n.restarts, nodes=n.nodes,
+                      other_nodes=n.nodes - 1)
 
 
 _rule_rationale = render.rule_rationale
@@ -1001,6 +1002,15 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]
 
 
+def _multi_build(pairs: list[tuple[CatalogEntry, Names]], combined_objects: list[tuple]):
+    """The gather and the workloads for one `multi` row. Draws no randomness."""
+    res = gather.gather([gather_workload(e, n, objects)
+                         for (e, n), objects in zip(pairs, combined_objects)])
+    workloads = [_workload(e, n, candidates, render.header_for(candidates), result=result)
+                 for (e, n), candidates, result in zip(pairs, res.candidates, res.results)]
+    return res, workloads
+
+
 def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Example:
     """Several workloads, each failing for its own reason.
 
@@ -1028,13 +1038,19 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random) -> Exampl
     if clash:
         raise ValueError(f"multi needs {clash}")
     combined_objects = _multi_objects(pairs, rng)
-    res = gather.gather([gather_workload(e, n, objects)
-                         for (e, n), objects in zip(pairs, combined_objects)])
-    workloads = []
+    res, workloads = _multi_build(pairs, combined_objects)
+    total = render.node_total(tuple(workloads), tuple(res.reads))
+    if total != 3:
+        # The scheduler counts every node the header counts (Spec 4b-3 5).
+        # The second build reuses the drawn objects and draws nothing, so
+        # only the scheduler numbers change.
+        pairs = [(e, dataclasses.replace(n, nodes=total)) for e, n in pairs]
+        res, workloads = _multi_build(pairs, combined_objects)
+        again = render.node_total(tuple(workloads), tuple(res.reads))
+        if again != total:
+            raise RuntimeError(f"multi: the node count moved from {total} to {again} on rebuild")
     decoy_by_workload: dict[str, list[str]] = {}
-    for (e, n), candidates, result in zip(pairs, res.candidates, res.results):
-        workloads.append(_workload(e, n, candidates, render.header_for(candidates),
-                                   result=result))
+    for (_e, n), candidates, result in zip(pairs, res.candidates, res.results):
         decoy_by_workload[f"{n.ns}/{n.name}"] = gold.excluded_from(candidates, result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     user = _user_message(None, "", (), tuple(workloads), tuple(res.reads), key=group)
