@@ -1120,12 +1120,23 @@ job-2 workloads). A "probe" is the gold reply with one change.
 2. The decoy compare cleans both sides with `_norm_cause`. A probe that
    names each first decoy in capitals plus a period: `decoy_rate`
    {0.0, 121} before, {1.0, 174} after.
-3. G3b never cuts past a word that ends in `:` (model-card limit 13). A
-   probe that adds a `log cause:` label's words to 50 right answers: job 2
-   167 of 197 before, 197 of 197 after.
-4. A must-not word with a negator in the 24 characters before it does not
-   count (model-card limit 14). A probe that rules out the must-not word
-   in 51 right answers: job 2 146 of 197 before, 197 of 197 after.
+3. G3b never cuts the `log cause:` label off a line (model-card limit
+   13). Every other label is cut as before. A probe that adds each
+   workload's own `log cause:` label words to its right answer changes 32
+   answers: job 2 165 of 197 before, 197 of 197 after. The final review
+   found that the first rule, which kept any word ending in `:`, was too
+   wide. Two label-strip bots read nothing and paste their own labelled
+   lines with the label cut off. One pastes every such line, the other
+   only its `issue:` line. Job 2: 0.0 with G3b's old rule, 0.8173 and
+   0.6548 with the first rule, 0.0 now.
+4. A must-not word with a negator just before it does not count
+   (model-card limit 14). "Just before" means within 24 characters, in
+   the last 3 words, and in the same clause: no `,` `;` `:` `.` `(` `)`
+   or " - " in between. A probe that rules out the must-not word in 51
+   right answers: job 2 146 of 197 before, 197 of 197 after. A probe of
+   51 wrong answers whose "not" belongs to another word, such as "node is
+   not ready due to memory pressure": job 2 146 of 197 before, 197 of 197
+   with job 3's plain 24-character window, 146 of 197 now.
 5. The cleaning step folds U+2010 to U+2015 to `-` and `_` to a space,
    after NFKC, in both twins. A new test keeps the twins equal.
 6. A key or must-not word of 3 letters or fewer must start a word
@@ -1140,8 +1151,13 @@ cut-paste bots score job 2 0.0 of 197. The bars did not move.
 Still open in the grader: a negator more than 24 characters back, as in
 "no node is cordoned or under memory pressure", still scores 0. And the
 negation check does not see a curly apostrophe: "isn’t" (U+2019) is not
-read as "n't", so a must-not word right after it still counts. Both are
-written down in model-card limit 14. No code changed for them.
+read as "n't", so a must-not word right after it still counts. A right
+answer whose negator sits more than 3 words back, or across a comma, still
+scores 0. And a key of 3 letters or fewer no longer hits inside a
+camelCase word: `key` misses "configMapKeyRef" and "secretKeyRef", and
+`tag` misses "imageTag". The exam prompts print only "key", so no pinned
+number moved. All four are written down in model-card limit 14. No code
+changed for them.
 
 Hand re-pins, each dated 2026-10-05 (Spec 4b-4) in a comment:
 - `test_the_gold_reply_names_no_decoy_on_any_exam_row`: `decoy_rate` n
@@ -1157,7 +1173,11 @@ Test changes:
   uses a candidate line now. Its old line starts with the label `issue:`.
 - New in `tests/test_score.py`: the fold test (both twins), the twin
   test, the G3b label test, the negator test, the short-word test, the
-  cleaned-compare test, and four exam probes.
+  cleaned-compare test, and seven exam probes.
+- After the final review, the G3b label test was renamed from
+  `test_job2_guard_g3b_never_cuts_past_a_label` to
+  `test_job2_guard_g3b_never_cuts_the_log_cause_label`. Three exam probes
+  were added: the two label-strip bots and the wrong-answer negator bot.
 
 Left for the exam rebuild. These were on 4b-4's list, but each changes
 exam rows, so they move with the rebuild and its one re-pin:
@@ -1177,4 +1197,4 @@ exam rows, so they move with the rebuild and its one re-pin:
 - B4's fourth arm, the shared-cause cap. It needs a new Go capture.
 - image-pull-secret-expired graded as unverified.
 
-Full suite: 1,951 passed. Ruff: clean.
+Full suite: 1,954 passed. Ruff: clean.

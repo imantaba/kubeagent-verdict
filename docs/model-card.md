@@ -1223,12 +1223,17 @@ against these.
     pinned number moved. The code does what the spec says. It still means
     job 2 can mark a model wrong for using kubeagent's own words. Spec 4b
     owns it. One idea: never cut past a word that ends in `:`.
-    (2026-10-05, Spec 4b-4: closed. G3b never cuts past a word that ends
-    in `:`. The whole line, or the line with words before the label cut,
-    still counts. On the exam, 50 job-2 workloads carry a `log cause:`
-    line. A probe that adds the label's words to each right answer scored
-    167 of 197 before and 197 of 197 now. The three cut-paste bots still
-    score 0 of 197.)
+    (2026-10-05, Spec 4b-4: closed. G3b never cuts the `log cause:` label
+    off a line. The whole line, or the line with only `log` cut, still
+    counts. A first version skipped the cut for any word ending in `:`.
+    That let a bot that reads nothing paste its own labelled lines with
+    the labels cut off and score 0.8173 of 197, over the 0.7 bar. So only
+    `log cause:` is protected. Every other label is cut as before. On the
+    exam, 50 job-2 workloads have a `log cause:` line in the prompt, and
+    32 have one in their own block. A probe that adds each workload's own
+    label words to its right answer scored 165 of 197 before and 197 of
+    197 now. The label-strip bot and the three cut-paste bots score 0 of
+    197.)
 14. **A must-not word is a plain substring, and it cannot see "not".**
     (Added 2026-09-29, after Spec 4a's final review.) Must-not words match
     anywhere in the cleaned answer, the same way keywords do. So `tag`
@@ -1242,20 +1247,31 @@ against these.
     so no pinned number moved. The spec chose substring matching on
     purpose, and kept bare `init` off the list because `initial` would
     trip it. Spec 4b owns the rest.
-    (2026-10-05, Spec 4b-4: mostly closed. A must-not word with "not",
-    "no", "n't" or another negator in the 24 characters before it no
-    longer counts. A probe that adds ", not an init container" or "; the
-    node is not cordoned" to each right answer scored 146 of 197 before
-    and 197 of 197 now. A key or must-not word of 3 letters or fewer must
-    start a word, so `tag` no longer hits "stage", "outage" or
-    "percentage". A probe that writes "stage" for `tag` scored 197 of 197
-    before (6 wrong answers passed) and 191 of 197 now. Longer words stay
-    substrings on purpose: `cordon` must hit "cordoned", and `pressure`
-    must hit "MemoryPressure", 0920's wrong answer on exam row 197. Still
-    open: a negator more than 24 characters back, as in "no node is
-    cordoned or under memory pressure". That answer still scores 0. Also
-    open: a curly apostrophe. "isn’t" (U+2019) is not read as "n't", so a
-    must-not word right after it still counts.)
+    (2026-10-05, Spec 4b-4: mostly closed. A must-not word no longer
+    counts when "not", "no", "n't" or another negator sits just before it.
+    "Just before" means three things: within 24 characters, in the last 3
+    words, and in the same clause, with no `,` `;` `:` `.` `(` `)` or
+    " - " in between. A probe that adds ", not an init container" or ";
+    the node is not cordoned" to each right answer scored 146 of 197
+    before and 197 of 197 now. The clause and 3-word limits came from the
+    final review. With job 3's plain 24-character window, wrong answers
+    such as "node is not ready due to memory pressure" passed: the "not"
+    belongs to "ready". A probe of such wrong answers scored 197 of 197
+    with that window, and 146 of 197 now, the same as before 4b-4. A key
+    or must-not word of 3 letters or fewer must start a word, so `tag` no
+    longer hits "stage", "outage" or "percentage". A probe that writes
+    "stage" for `tag` scored 197 of 197 before (6 wrong answers passed)
+    and 191 of 197 now. The cost: `key` no longer hits "configMapKeyRef"
+    or "secretKeyRef", and `tag` misses "imageTag". The exam prompts print
+    only "key", so no pinned number moved. Longer words stay substrings
+    on purpose: `cordon` must hit "cordoned", and `pressure` must hit
+    "MemoryPressure", 0920's wrong answer on exam row 197. Still open: a
+    negator more than 24 characters back, as in "no node is cordoned or
+    under memory pressure". That answer still scores 0. Also open: a
+    right answer whose negator sits more than 3 words back, or across a
+    comma, still scores 0. Also open: a curly apostrophe. "isn’t" (U+2019)
+    is not read as "n't", so a must-not word right after it still
+    counts.)
 15. **`none_of_these` is 13.1% of the train answers.** (Added 2026-10-04,
     Spec 4b-1.) A victim's gold names a cause only when its anchor is in
     that victim's own lines. Where it is not, the gold is `none_of_these`.

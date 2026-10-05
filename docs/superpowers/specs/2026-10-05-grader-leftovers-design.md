@@ -304,3 +304,22 @@ rebuild and its one re-pin:
   its live run comes after the rebuild.
 - Training, and anything under `dist/`.
 - Moving a bar.
+
+## Amended 2026-10-05 after the final review
+
+G3b now keeps only the `log cause:` label. The rule above kept any word
+that ends in `:`. Job-2 own blocks are full of labelled lines, such as
+`issue:`, `failed:` and `backoff:`. So a bot that reads nothing could
+paste its own lines with the label cut off. It scored job 2 0.8173 of
+197, over the 0.7 bar. Now only the 2-word cut of `log cause:` is
+skipped, and every other cut is made as before. Cost if wrong: a right
+answer written in another label's words scores 0, as it did before 4b-4.
+
+Job 2's negation window now stops at the clause. It starts as job 3's 24
+characters, is cut at the last `,` `;` `:` `.` `(` `)` or " - ", and
+keeps only its last 3 words. With the plain window, a wrong answer such as
+"node is not ready due to memory pressure" passed, because the "not"
+belongs to "ready". A probe of such answers scored 197 of 197; now it
+scores 146 of 197, as before 4b-4. Cost if wrong: a right answer whose
+negator sits more than 3 words back, or across a comma, scores 0, as it
+did before 4b-4.
