@@ -23,8 +23,8 @@ from kubeagent_verdict.dataset.objects import drop, refute, unverify
 # re-exported name appends it here, so ruff's F401 (unused import) never
 # has a window where an already-imported name looks unused.
 __all__ = ["bind", "check_prompt_size", "cluster_health", "deciding_ending",
-           "draw_ending", "drop", "header_for", "node_total", "prompt_meta", "refute",
-           "rule_rationale", "unverify", "workload_meta"]
+           "down_nodes", "draw_ending", "drop", "header_for", "node_total", "prompt_meta",
+           "refute", "rule_rationale", "unverify", "workload_meta"]
 
 MAX_PROMPT_BYTES = 64 * 1024
 
@@ -277,6 +277,32 @@ def node_total(workloads: tuple[c.Workload, ...], reads: tuple[c.EvidenceRead, .
     return max(_MIN_NODES, len(_named_nodes(_node_reasons(workloads), reads)) + 1)
 
 
+def _assess(workloads: tuple[c.Workload, ...], reads: tuple[c.EvidenceRead, ...]
+            ) -> tuple[c.ClusterHealth | None, tuple[health.DownNode, ...]]:
+    """Run `health.assess` once: (the block, the down nodes)."""
+    reasons = _node_reasons(workloads)
+    named = _named_nodes(reasons, reads)
+    nodes = []
+    for name in sorted(named):
+        rs = reasons.get(name, set())
+        unknown = rs - {"NotReady", _NO_LEASE}
+        if unknown:
+            raise ValueError(f"node {name}: no cluster-health text for reason "
+                             f"{min(unknown)!r}")
+        if "NotReady" in rs:
+            nodes.append(health.Node(name, (health.Condition(
+                "Ready", "False", o.NOT_READY_REASON, o.NOT_READY_MESSAGE),)))
+        elif rs:
+            nodes.append(health.Node(name, (health.READY,), lease="missing"))
+        else:
+            nodes.append(health.Node(name, (health.READY,)))
+    total = node_total(workloads, reads)
+    # Healthy nodes the prompt never names. They print nothing; only the
+    # count T sees them. The leading space keeps them off any real name.
+    nodes += [health.Node(f" healthy-{i}", (health.READY,)) for i in range(total - len(nodes))]
+    return health.assess(nodes, workloads)
+
+
 def cluster_health(workloads: tuple[c.Workload, ...],
                    reads: tuple[c.EvidenceRead, ...]) -> c.ClusterHealth | None:
     """The cluster-health verdict kubeagent would compute for this prompt.
@@ -312,28 +338,14 @@ def cluster_health(workloads: tuple[c.Workload, ...],
     It builds synthetic nodes from the candidates and hands them to
     `health.assess`, the port the CLUSTER capture pins.
     """
-    reasons = _node_reasons(workloads)
-    named = _named_nodes(reasons, reads)
-    nodes = []
-    for name in sorted(named):
-        rs = reasons.get(name, set())
-        unknown = rs - {"NotReady", _NO_LEASE}
-        if unknown:
-            raise ValueError(f"node {name}: no cluster-health text for reason "
-                             f"{min(unknown)!r}")
-        if "NotReady" in rs:
-            nodes.append(health.Node(name, (health.Condition(
-                "Ready", "False", o.NOT_READY_REASON, o.NOT_READY_MESSAGE),)))
-        elif rs:
-            nodes.append(health.Node(name, (health.READY,), lease="missing"))
-        else:
-            nodes.append(health.Node(name, (health.READY,)))
-    total = node_total(workloads, reads)
-    # Healthy nodes the prompt never names. They print nothing; only the
-    # count T sees them. The leading space keeps them off any real name.
-    nodes += [health.Node(f" healthy-{i}", (health.READY,)) for i in range(total - len(nodes))]
-    block, _down = health.assess(nodes, workloads)
-    return block
+    return _assess(workloads, reads)[0]
+
+
+def down_nodes(workloads: tuple[c.Workload, ...],
+               reads: tuple[c.EvidenceRead, ...]) -> tuple[health.DownNode, ...]:
+    """The nodes `cluster_health` judges down, from the same `health.assess`
+    call: what svchealth's endpoint cause sees (AnnotateEndpointCause)."""
+    return _assess(workloads, reads)[1]
 
 
 _NOUN = {"node": "node", "pvc": "claim", "registry": "registry"}

@@ -69,7 +69,7 @@ class CatalogEntry:
     own_cause_must_not: tuple[str, ...] = ()
     grounding: tuple[str, ...] = ()  # substrings that must appear in this slug's corpus assertions
     network_policies: tuple[str, ...] = ()
-    service_issue: tuple[str, str] | None = None  # (type, detail template)
+    service_type: str | None = None   # a Service fronts the workload; svchealth prints its line
     notes: str = ""
     # The nodes, PVCs and registries this entry puts on the menu. Empty for
     # the 9 entries with no fault-side object (control-plane read failures,
