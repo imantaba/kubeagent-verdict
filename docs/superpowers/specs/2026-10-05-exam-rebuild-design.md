@@ -8,11 +8,12 @@
 
 Spec 4b-4 changed only the grader. It left a list in PIN.md, "Left for the
 exam rebuild": nine items that change exam rows, or belong with a build.
-This spec takes **eight of the nine**. Any change to exam rows moves all
-three hash pins (`FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256`,
-`GRADED_VIEW_SHA256`), so the eight land together with **one re-pin**.
+This spec takes **eight of the nine**, plus one item found while planning
+(item 9). Any change to exam rows moves all three hash pins
+(`FROZEN_SLICE_SHA256`, `EVAL_SET_SHA256`, `GRADED_VIEW_SHA256`), so the
+nine land together with **one re-pin**.
 
-The eight:
+The nine:
 
 1. **IS-22's sum half.** In "0/N nodes are available: ...", the counts add
    up to N.
@@ -29,6 +30,9 @@ The eight:
    Go output. They move no row.
 8. **image-pull-secret-expired graded as unverified.** It already is. A
    test pins it.
+9. **The probe-failure service line.** It is built by the `svchealth`
+   port, so it prints what kubeagent prints. Added 2026-10-05 while
+   planning; see item 9.
 
 **Left out:** B4's fourth arm, the shared-cause cap. It needs a new Go
 capture. It stays on the list.
@@ -221,9 +225,14 @@ input) move to the long text.
 These are checks that real output already passes. None moves a row. Each
 one tightens a rule that already exists, so the count stays at 51 rules.
 
-- **Service lines (`_b6`, `checker.py:918-925`).** The problem wording
-  must be one of the wordings kubeagent's `svchealth` prints. Lines must be
-  sorted by namespace, then name, then problem (`svchealth.go:33-75`).
+- **Service lines (`_b6`, `checker.py:918-925`).** Lines must be sorted
+  by namespace, then name, then problem (`svchealth.go:33-75`). The problem
+  is `NoExternalAddress` when the detail is "no external address", and
+  `NoEndpoints` otherwise. The checker does **not** check the wording: the
+  contract golden (`contract/golden/user_message.txt:47`) carries the old
+  line `shop/api (NoReadyEndpoints): service has 0 ready endpoints`, and
+  the golden keeps its bytes. The wording is pinned by a dataset test
+  instead (item 9).
 - **The network-policy gate (`_b4`, `:876-886`).** A workload's policy
   line may appear only when all its findings are ProbeFailure, or it has
   none (`netpolicy.go:28-42`).
@@ -260,6 +269,42 @@ story. A new test builds the story's rows and pins three facts:
 
 No generator change.
 
+### 9. The probe-failure service line
+
+**Found while planning.** Measuring item 7's checks on `out/dataset-1005`
+showed that the probe-failure catalog entry (`entries_kinds.py:39`) writes
+a service line kubeagent never prints:
+
+```
+  - <ns>/<name> (NoReadyEndpoints): service has 0 ready endpoints
+```
+
+kubeagent's `svchealth` puts the Service **type** in the brackets
+(`ClusterIP`, `NodePort`, `LoadBalancer`), and its NoEndpoints detail
+starts "no ready endpoints". 215 rows carry this line in that build, 8 of
+them in the exam.
+
+**Fix.** The line is built by the port, not by a template:
+
+- The catalog field `service_issue: tuple[str, str] | None` becomes
+  `service_type: str | None`. The probe-failure entry sets `"ClusterIP"`.
+- `cases._service_issues` builds one Service with selector `app=<name>`,
+  one EndpointSlice with 2 not-ready addresses, and 2 not-ready pods on the
+  workload's node (the workload is always 0/2 ready). It runs
+  `health.service_issues` and then `health.annotate_endpoint_cause`, with
+  the row's down nodes.
+- The down nodes come from the same `health.assess` call that builds the
+  cluster-health block. `render.down_nodes(workloads, reads)` returns them.
+- So the line is either `no ready endpoints — 2 matching pods, 0 ready`,
+  or `no ready endpoints — matching pods on down node <node> (NotReady)`
+  when the row names the pod's node as down.
+
+**The wording test.** A dataset test reads every service line in the
+build and checks that it is one svchealth can print: the type is one of
+ClusterIP, NodePort or LoadBalancer, and the detail is one of svchealth's
+forms. The contract golden and the Go fixtures are not built rows, so they
+keep the old line.
+
 ## The build and the re-pin
 
 **The build.** `kv-dataset --seed 17 --size 8000 --out
@@ -271,8 +316,9 @@ out/dataset-1005-exam`.
 - the gold reply scores 1.0 on job 1, job 2 and job 3;
 - the gold reply names a decoy on 0 rows (`decoy_rate`);
 - the `none_of_these` share is under 30% in train;
-- against `out/dataset-1005`, every changed prompt line is either a
-  refused-read line (item 6) or a scheduler line (item 1).
+- against `out/dataset-1005`, every changed prompt line is a
+  refused-read line (item 6), a scheduler line (item 1) or a service line
+  (item 9).
 
 **One re-pin, in the last code task.** Earlier tasks may leave only a named
 list of hash and count pins red. Their reports list each red pin with its
@@ -296,8 +342,9 @@ value. No test is run with `-update`.
   (`test_catalog_gold.py:270-285`) and `out/dataset-1004-4b2`
   (`test_multi_decoys.py`) can no longer hold, since items 1 and 6 change
   prompts. They become one "what moved" test against `out/dataset-1005`:
-  every changed prompt line is a refused-read line or a scheduler line. It
-  skips when the folder is not on the machine, as they do today.
+  every changed prompt line is a refused-read line, a scheduler line or a
+  service line. It skips when the folder is not on the machine, as they do
+  today.
 
 ## Numbers to record
 
@@ -339,21 +386,23 @@ Each is measured before (on main) and after (on the branch):
 
 1. The checker checks (item 7). They move no row, so they go first. The
    tests are green after this task.
-2. The must-not field and the key changes (items 2, 3, 4 and 5). Only meta
+2. The probe-failure service line (item 9), with its wording test. Hash
+   pins may go red.
+3. The must-not field and the key changes (items 2, 3, 4 and 5). Only meta
    moves. Hash and key-count pins may go red.
-3. IS-22's sum half and the scheduler texts (item 1). The new rule is
+4. IS-22's sum half and the scheduler texts (item 1). The new rule is
    written first. It must fail on the old texts and pass on the new ones.
-4. B6 (item 6).
-5. The expired-secret test (item 8). It should pass at once. Its purpose is
+5. B6 (item 6).
+6. The expired-secret test (item 8). It should pass at once. Its purpose is
    to pin the current behavior. A pin test that passes at once is accepted
    here, and the report says so.
-6. Build, gates, the "what moved" test, the folder pointers and the one
+7. Build, gates, the "what moved" test, the folder pointers and the one
    re-pin.
-7. Docs.
+8. Docs.
 
 ## Done when
 
-- The eight items are in, as above.
+- The nine items are in, as above.
 - The build passes every gate.
 - The full suite is green, with 0 skipped on this machine. Ruff prints
   "All checks passed!".
