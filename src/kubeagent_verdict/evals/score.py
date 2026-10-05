@@ -213,8 +213,8 @@ def _is_job2_keyword_graded(meta_workload: dict,
 # paste bot through.
 #
 # No case lists a workload's own gold as its decoy (pinned by
-# tests/test_multi_decoys.py since Spec 4b-3). Job 1 is still skipped:
-# widening the decoy gate to job 1 is a grader change, left for 4b-4.
+# tests/test_multi_decoys.py since Spec 4b-3). So the decoy gate tests
+# job-1 workloads too (2026-10-05, Spec 4b-4).
 
 _SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
 _READ_LABEL = re.compile(r"^== (.+) ==$")
@@ -345,7 +345,12 @@ def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -
 def _g3b(c: str, own_lines: Iterable[str]) -> bool:
     """Whether the cleaned cause `c` holds one of `own_lines`, whole or with
     its first 1 or 2 words cut. A cut is made only when at least 3 words are
-    left, so a 3-word line is matched whole only."""
+    left, so a 3-word line is matched whole only. The 2-word cut is not
+    made when the line starts with the `log cause:` label (2026-10-05, Spec
+    4b-4): cutting it off leaves the label's words, and a right answer may
+    use them. Only that label is kept (2026-10-05, Spec 4b-4, final
+    review): a skip for every label lets a bot paste its own labelled lines
+    with the label cut off."""
     for line in own_lines:
         if not line:
             continue
@@ -354,6 +359,8 @@ def _g3b(c: str, own_lines: Iterable[str]) -> bool:
         words = line.split()
         for cut in (1, 2):
             if len(words) - cut < 3:
+                break
+            if cut == 2 and words[:2] == ["log", "cause:"]:
                 break
             if " ".join(words[cut:]) in c:
                 return True
@@ -364,10 +371,44 @@ def _keywords_match(cause: str, keywords: Iterable[str],
                     must_not: Iterable[str] = ()) -> bool:
     """The keyword rule, written once for `job2` and `cause_acc`: the cause,
     cleaned by `_norm_cause`, holds every keyword and no must-not word. Both
-    lists are lowercased and matched as substrings."""
+    lists are lowercased and found by `_word_hits`: a word of
+    `SHORT_WORD_MAX` letters or fewer must start a word, a longer one may
+    sit anywhere. A must-not word with a negator just before it does not
+    count, so a right answer may rule one out (2026-10-05, Spec 4b-4)."""
     c = _norm_cause(cause)
-    return (all(str(k).lower() in c for k in keywords)
-            and not any(str(m).lower() in c for m in must_not))
+    return (all(_word_hits(c, str(k).lower(), negatable=False) for k in keywords)
+            and not any(_word_hits(c, str(m).lower(), negatable=True) for m in must_not))
+
+
+# A key or must-not word this short must start a word. As a substring,
+# `tag` hits "stage" and "outage" (2026-10-05, Spec 4b-4).
+SHORT_WORD_MAX = 3
+# Job 2's negation window starts after the last clause mark (2026-10-05, Spec 4b-4, final review).
+_CLAUSE_MARK = re.compile(r"[,;:.()]| - ")
+# Job 2 seeks a negator in only the last 3 words (2026-10-05, Spec 4b-4, final review).
+NEGATION_WORDS = 3
+
+
+def _word_hits(text: str, word: str, *, negatable: bool) -> bool:
+    """Whether `word` is found in the cleaned `text`. A word of
+    `SHORT_WORD_MAX` letters or fewer counts only where it starts a word (no
+    \\w just before it); it may run on, so `tag` hits "tags". A longer word
+    counts anywhere, so `pressure` hits "memorypressure". When `negatable`,
+    a hit with a `NEGATORS` word or "n't" just before it does not count.
+    The window is job 3's `NEGATION_WINDOW` characters, cut at the last
+    `_CLAUSE_MARK`, and only its last `NEGATION_WORDS` words (2026-10-05,
+    Spec 4b-4, final review). In job 2 a negator that belongs to another
+    word, as in "not ready due to memory pressure", would let a wrong
+    answer pass."""
+    start = r"(?<!\w)" if len(word) <= SHORT_WORD_MAX else ""
+    for m in re.finditer(start + re.escape(word), text):
+        if negatable:
+            window = text[max(0, m.start() - NEGATION_WINDOW):m.start()]
+            window = " ".join(_CLAUSE_MARK.split(window)[-1].split()[-NEGATION_WORDS:])
+            if NEGATORS.search(window) or "n't" in window:
+                continue
+        return True
+    return False
 
 
 def job2(meta_workload: dict, reply_row: dict | None,
@@ -377,7 +418,7 @@ def job2(meta_workload: dict, reply_row: dict | None,
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
     story's own cause -- the reply's cause, cleaned by `_norm_cause`, holds
     every one of `own_cause_keywords` and none of `own_cause_must_not`, both
-    matched as lowercase substrings -- or, on a `none_of_these` workload,
+    found by `_keywords_match` -- or, on a `none_of_these` workload,
     when the reply's cause is exactly that. 0.0 otherwise, including a
     missing row or reply.
 
@@ -597,12 +638,18 @@ def _suggestion_strings(prompt: str) -> set[str]:
     return out
 
 
+# U+2010 to U+2015 (hyphen, non-breaking hyphen, figure dash, en dash, em
+# dash, horizontal bar) fold to "-", and "_" to a space (2026-10-05, Spec 4b-4).
+_FOLD = str.maketrans({**{chr(c): "-" for c in range(0x2010, 0x2016)}, "_": " "})
+
+
 def _norm_cause(s: str) -> str:
     """One cleaning step for every cause the grader reads: NFKC first, so a
-    full-width letter, space or period folds to its plain form, then
-    lowercase, strip, trailing periods off, and runs of whitespace
-    squeezed to one space."""
-    return " ".join(unicodedata.normalize("NFKC", str(s)).lower().strip().rstrip(".").split())
+    full-width letter, space or period folds to its plain form, then odd
+    hyphens to "-" and "_" to a space (`_FOLD`), then lowercase, strip,
+    trailing periods off, and runs of whitespace squeezed to one space."""
+    folded = unicodedata.normalize("NFKC", str(s)).translate(_FOLD)
+    return " ".join(folded.lower().strip().rstrip(".").split())
 
 
 # Job 2 grades most of its workloads by keyword containment rather than exact
@@ -648,6 +695,9 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
     and not `any`. Anything looser would report an exposure the grader would
     not accept. The grader also applies NFKC (`_norm_cause`) and exposure does
     not; NFKC changes 0 of the exam's prompt texts, so the counts are the same.
+    Since 2026-10-05 (Spec 4b-4) the grader also folds dashes and `_`, and a
+    key of 3 letters or fewer must start a word. Exposure does neither. On
+    the exam the two counts still agree: 175 = 175.
 
     A workload that is not keyword-graded is absent from both counts, never a
     zero in the denominator -- the same contract `_rate` states.
@@ -791,11 +841,12 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
         #
-        # Only job-2 workloads are tested (2026-09-29, Spec 4a). The 4a
-        # reason (a decided workload's own cause in its decoy list) stopped
-        # holding at 4b-1, and 4b-3 pins it false; testing job 1 is left for
-        # 4b-4. A row with no job-2 workload that
-        # carries a decoy has nothing to test, and `named_decoy` is None.
+        # Job-1 and job-2 workloads are both tested (2026-10-05, Spec 4b-4).
+        # Spec 4a tested job 2 only: a decided workload's own cause could sit
+        # in its decoy list. 4b-3 pins that no case does that. Both sides are
+        # cleaned by `_norm_cause` before the exact compare, so a decoy copied
+        # with capitals or a trailing period counts. A row with no workload
+        # that carries a decoy has nothing to test, and `named_decoy` is None.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
         # Per-workload keys first, in their own order, then any flagged
         # workload `decoy_by_workload` never mentioned -- sorted, so the scan
@@ -803,14 +854,13 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
         decoy_hits: list[bool] = []
         for workload in [*per_workload_decoys, *extra_workloads]:
-            if ((meta.get("workloads") or {}).get(workload) or {}).get("job") != 2:
-                continue
             decoys = _workload_decoys(meta, workload)
             if not decoys:
                 continue
             got = by_workload.get(workload)
             if got is not None:
-                decoy_hits.append(str(got.get("cause", "")) in decoys)
+                decoy_hits.append(_norm_cause(got.get("cause", ""))
+                                  in {_norm_cause(d) for d in decoys})
         named_decoy = any(decoy_hits) if decoy_hits else None
 
         # Word count alone picks the winner in 15 of the 19 trainable catalog

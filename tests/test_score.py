@@ -7,6 +7,7 @@ import pytest
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.dataset import cases, catalog, generate
+from kubeagent_verdict.dataset import gold as dataset_gold
 from kubeagent_verdict.evals import score
 
 ROW = {
@@ -504,9 +505,14 @@ def test_job2_guard_does_not_fire_on_part_of_a_line():
 def test_job2_guard_g3b_finds_a_line_with_its_first_one_or_two_words_cut():
     """G3b also zeroes a cause that holds an own line minus its first word,
     or minus its first 2 words. A 3-word cut is not made: the cause below
-    that holds the line minus its first 3 words passes."""
-    own = _normalized(_GUARD_API_INVENTORY)
-    words = score._norm_cause(_GUARD_API_INVENTORY[1]).split()
+    that holds the line minus its first 3 words passes.
+
+    2026-10-05 (Spec 4b-4): this test used the inventory line `issue:
+    OOMKilled — …`. Its first word is a label, and G3b no longer cuts past
+    a label, so the test uses the candidate line now. It has no `:` in its
+    first 2 words."""
+    own = _normalized(_GUARD_API_CANDIDATES)
+    words = score._norm_cause(_GUARD_API_CANDIDATES[1]).split()
     assert score._job2_guarded("memory limit: " + " ".join(words[1:]), (), own)
     assert score._job2_guarded("memory limit: " + " ".join(words[2:]), (), own)
     assert not score._job2_guarded("memory limit: " + " ".join(words[3:]), (), own)
@@ -523,6 +529,35 @@ def test_job2_guard_g3b_crops_no_line_below_3_words():
     assert score._job2_guarded("exit: memory limit", (), own)
     assert score._job2_guarded("see events for web/api-gw-5c6b-fghij", (), own)
     assert not score._job2_guarded("see for web/api-gw-5c6b-fghij", (), own)
+
+
+def test_job2_guard_g3b_never_cuts_the_log_cause_label():
+    """Model-card limit 13, closed 2026-10-05 (Spec 4b-4). Cut `log cause:`
+    off `log cause: bad command or entrypoint` and what is left is the
+    label's words. A right answer that uses them in a row held that cut
+    line and scored 0. Now the 2-word cut is not made when the line's first
+    two words are `log cause:`. The whole line, or the line with only `log`
+    cut, still counts.
+
+    Every other label is cut as before (2026-10-05, Spec 4b-4, final
+    review). A skip for any word ending in `:` let a bot paste its own
+    labelled lines with the label cut off."""
+    own = _normalized(["    log cause: bad command or entrypoint"])
+    assert not score._job2_guarded(
+        "the container exits because of a bad command or entrypoint", (), own)
+    assert score._job2_guarded("cause: bad command or entrypoint", (), own)
+    assert score._job2_guarded("log cause: bad command or entrypoint", (), own)
+
+    # A `:` further in does not stop the cuts before it. Here it is on word
+    # 4, so the 1- and 2-word cuts are both made.
+    own = _normalized(["    considered node worker-1 (NotReady): attributed — pod api"])
+    assert score._job2_guarded("see node worker-1 (notready): attributed — pod api", (), own)
+    assert score._job2_guarded("see worker-1 (notready): attributed — pod api", (), own)
+
+    # Any other label is cut. `issue:` comes off, and the rest still
+    # guards a pasted answer.
+    own = _normalized(["    issue: unschedulable - no node can schedule this pod"])
+    assert score._job2_guarded("unschedulable - no node can schedule this pod", (), own)
 
 
 def test_job2_guard_g2_skips_a_decoy_under_3_words():
@@ -570,13 +605,21 @@ def test_job2_guards_a_none_of_these_workload_too():
     2026-09-29 (Spec 4a): this test used a made-up decoy, `none_of_these`.
     That decoy is 1 word, and G2 now skips a decoy under 3 words, so the
     reply passes it. G3b matches a whole own line of any length, so a
-    made-up own line shows the order instead."""
+    made-up own line shows the order instead.
+
+    2026-10-05 (Spec 4b-4): the cleaning step folds `_` to a space. Own
+    lines are cleaned text, so the made-up own line is the cleaned form
+    now. And the made-up decoy cleans to `none of these`, 3 words, so G2
+    tests it again and zeroes the reply. No exam decoy has a `_`: the gold
+    reply and every bot pin are unchanged."""
     wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
     reply = {"cause": score.NONE_OF_THESE, "confidence": "medium", "rationale": "r"}
     assert score.job2(wm, reply, []) == 1.0
-    assert score.job2(wm, reply, [], own_lines={score.NONE_OF_THESE}) == 0.0
-    # 2026-09-29 (Spec 4a): G2 skips a 1-word decoy 0.0 -> 1.0
-    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 1.0
+    # 2026-10-05 (Spec 4b-4): own lines are cleaned text; was {score.NONE_OF_THESE}
+    assert score.job2(wm, reply, [],
+                      own_lines={score._norm_cause(score.NONE_OF_THESE)}) == 0.0
+    # 2026-10-05 (Spec 4b-4): the decoy cleans to 3 words, so G2 tests it; was 1.0
+    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 0.0
 
 
 def test_job2_missing_reply_still_scores_zero_with_the_guard_on():
@@ -600,6 +643,30 @@ def test_norm_cause_folds_full_width_letters_first():
     """NFKC runs before the lowercase, so full-width letters, a full-width
     space and a full-width period fold to their plain forms."""
     assert score._norm_cause("ＭＥＭＯＲＹ　Ｌｉｍｉｔ．") == "memory limit"
+
+
+@pytest.mark.parametrize("twin", [score, dataset_gold], ids=["score", "gold"])
+def test_norm_cause_folds_unicode_hyphens_and_underscores(twin):
+    """2026-10-05 (Spec 4b-4). NFKC keeps U+2010 to U+2015 as they are, and
+    `_` is not a space. So "init‐container" and `init_container` used to
+    slip past all three init-container must-not spellings. The cleaning
+    step now folds those dashes to `-` and `_` to a space, after NFKC,
+    because NFKC can make some of them (a full-width `＿` becomes `_`)."""
+    for dash in map(chr, range(0x2010, 0x2016)):
+        assert twin._norm_cause(f"Init{dash}Container") == "init-container", hex(ord(dash))
+    assert twin._norm_cause("init_container") == "init container"
+    assert twin._norm_cause("ＩＮＩＴ＿ＣＯＮＴＡＩＮＥＲ") == "init container"
+
+
+def test_the_two_cleaning_steps_agree():
+    """`gold._norm_cause` is a copy of `score._norm_cause`, so the dataset
+    package never imports the grader. Nothing kept the two equal before
+    2026-10-05 (Spec 4b-4). This test does: same input, same output."""
+    samples = ["Init‑Container", "  Node Worker-2 under MEMORY pressure. ",
+               "none_of_these", "ＩＮＩＴ＿ＣＯＮＴＡＩＮＥＲ", "a—b", "", "x.",
+               "tab\there", "ＭＥＭＯＲＹ　Ｌｉｍｉｔ．"]
+    for s in samples:
+        assert score._norm_cause(s) == dataset_gold._norm_cause(s), repr(s)
 
 
 def test_job2_guard_g2_finds_a_decoy_written_in_full_width_letters():
@@ -628,8 +695,68 @@ def test_keywords_match_needs_every_keyword_and_no_must_not_word():
     assert not score._keywords_match("the memory is low", ["memory", "limit"])
     assert not score._keywords_match("the init container's memory limit is too small",
                                      ["memory", "limit"], ["init container"])
-    # A must-not word is a substring rule, like a keyword. "initial" does
-    # not hold "init container".
+
+
+def test_a_must_not_word_after_a_negator_does_not_count():
+    """Model-card limit 14, closed in part 2026-10-05 (Spec 4b-4). A right
+    answer may name a must-not word to rule it out. A hit with a `NEGATORS`
+    word or "n't" just before it does not count. The window starts as job
+    3's 24 characters, is cut at the last clause mark, and keeps only its
+    last 3 words (2026-10-05, Spec 4b-4, final review). So a negator that
+    belongs to another word does not count. A hit with no negator still
+    zeroes the answer."""
+    keys, must_not = ["memory", "limit"], ["init container", "cordon", "pressure"]
+
+    def ok(cause):
+        return score._keywords_match(cause, keys, must_not)
+
+    assert ok("the main container, not an init container, is killed at its memory limit")
+    assert ok("killed at its memory limit; it isn't the init container")
+    assert ok("killed at its memory limit; the node is not cordoned")
+    assert not ok("killed at its memory limit in the init container")
+    assert not ok("the node is cordoned and short of memory limit")
+    # "another" holds "not", but `NEGATORS` matches whole words only.
+    assert not ok("another init container is killed at its memory limit")
+    # Still open, and pinned so: "no" is more than 24 characters before
+    # `pressure`, so the hit counts and a right answer scores 0.
+    assert not ok("memory limit; no node is cordoned or under memory pressure")
+    # Wrong answers. The negator belongs to another word, or sits in
+    # another clause, so the must-not word still counts.
+    assert not ok("memory limit: node is not ready due to memory pressure")
+    assert not ok("memory limit: node isn't ready: MemoryPressure")
+    assert not ok("memory limit: no node fits: memory pressure on the node")
+    assert not ok("memory limit: the app is not at fault; the init container is the problem")
+    # A negated hit followed by an un-negated one still counts.
+    assert not ok("killed at its memory limit, not an init container; the init container is killed")
+
+
+def test_a_short_word_starts_a_word_and_a_long_one_is_a_substring():
+    """2026-10-05 (Spec 4b-4). A key or must-not word of `SHORT_WORD_MAX`
+    letters or fewer must start a word: nothing in \\w just before it. It
+    may run on, so `tag` still hits "tags". A longer word is a substring,
+    as before: `pull` hits "pulling", `cordon` hits "cordoned", and
+    `pressure` hits "MemoryPressure", which is 0920's wrong answer on exam
+    row 197 and must stay 0."""
+    assert score.SHORT_WORD_MAX == 3
+    # Keys.
+    assert not score._keywords_match("bad image stage", ["image", "tag"])
+    assert score._keywords_match("bad image tags", ["image", "tag"])
+    assert score._keywords_match("bad image tag", ["image", "tag"])
+    assert score._keywords_match("tag: v2 is missing from the image", ["image", "tag"])
+    assert score._keywords_match("the image (tag) is wrong", ["image", "tag"])
+    assert score._keywords_match("bad image_tag", ["image", "tag"])
+    assert score._keywords_match("image pulling fails", ["pull"])
+    # Must-not words.
+    for cause in ("an outage", "a percentage", "a stage"):
+        assert score._keywords_match(cause, [], ["tag"]), cause
+    assert not score._keywords_match("wrong tag", [], ["tag"])
+    assert not score._keywords_match("MemoryPressure on the node", [], ["pressure"])
+    assert score._keywords_match("no MemoryPressure on the node", [], ["pressure"])
+    # A must-not word with a "-" still hits an odd hyphen: the fold
+    # (Task 1) makes it "-", and the word is escaped before the search.
+    assert not score._keywords_match("init\u2010container killed", [], ["init-container"])
+    # A must-not word longer than 3 letters is a substring rule, like a
+    # key (2026-10-05, Spec 4b-4). "initial" does not hold "init container".
     assert score._keywords_match("the initial memory limit is too small",
                                  ["memory", "limit"], ["init container"])
 
@@ -887,6 +1014,17 @@ def test_decoy_rate_is_zero_when_the_model_reads_the_evidence():
     board = score.scoreboard(_decoy_row("memory limit too low for the workload"))
     assert board["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
     assert board["overall"]["cause_accuracy"]["rate"] == 1.0
+
+
+def test_decoy_rate_cleans_both_sides_before_it_compares():
+    """2026-10-05 (Spec 4b-4). The decoy compare used the raw answer, so a
+    decoy copied with capitals or a trailing period did not count as
+    naming it. Both sides are cleaned by `_norm_cause` now. It is still an
+    exact match: a hedge that holds the decoy is G2's job, not this one."""
+    board = score.scoreboard(_decoy_row("Node Worker-2 under MEMORY pressure."))
+    assert board["overall"]["decoy_rate"] == {"rate": 1.0, "n": 1}
+    board = score.scoreboard(_decoy_row("memory limit too low, or node worker-2 under memory pressure"))
+    assert board["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
 
 
 def test_markdown_carries_the_denominator():
@@ -1351,7 +1489,11 @@ def test_decoy_by_workload_is_none_when_that_workload_is_never_answered():
     2026-09-29 (Spec 4a): shop/api is job 2 here. `decoy_rate` now counts
     job-2 workloads only, so a job-1 shop/api would read None for that
     reason alone and this test would stop testing the unanswered path. The
-    last assert shows shop/api is measured: naming its decoy is caught."""
+    last assert shows shop/api is measured: naming its decoy is caught.
+
+    2026-10-05 (Spec 4b-4): `decoy_rate` counts job-1 workloads too now,
+    so the "would read None" above no longer holds. A job-1 shop/api would
+    be tested too. The workload stays job 2 here."""
     row = {"messages": [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": "user shop/api and shop/web"},
@@ -1471,29 +1613,32 @@ def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
     assert results[0]["named_decoy"] is None
 
 
-def test_decoy_gate_is_none_when_the_only_decoy_sits_on_a_job1_workload():
-    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+def test_decoy_gate_tests_a_job1_workload_too():
+    """2026-10-05 (Spec 4b-4): job-1 workloads count in `decoy_rate` again.
 
-    On a `shared_origin_probe` row, `decoy_by_workload` lists a decided
-    workload's own decided cause. That cause IS the job-1 gold, so the right
-    answer named its own "decoy" and read as a hit. A row whose only
-    decoy-bearing workload is job 1 has nothing to test: `named_decoy` is
-    None and the row stays out of `decoy_rate`. Before: True, and
-    `decoy_rate` {1.0, 1}."""
-    wm = _node_workload(cause="node worker-1 (no kubelet lease)",
-                        evidence="Ready condition is True, but the kubelet lease was not re-read",
-                        outcome="unverified")
-    gold = _one_verdict("shop/api", wm["decided_cause"], "the kubelet lease was not re-read")
+    This test was `..._is_none_when_the_only_decoy_sits_on_a_job1_workload`
+    and pinned `named_decoy` None there. Spec 4a skipped job 1 because a
+    decided workload's own cause could be listed as its decoy, so the right
+    answer named its own "decoy". Since Spec 4b-3 no case does that
+    (`tests/test_multi_decoys.py`). So a job-1 workload's decoy is tested:
+    the right answer reads False, the decoy reads True."""
+    wm = _node_workload(cause="node worker-1 (disk pressure)")
+    gold = _one_verdict("shop/api", wm["decided_cause"])
     row = {"messages": [{"role": "system", "content": "sys"},
                         {"role": "user", "content": "user shop/api"},
                         {"role": "assistant", "content": gold}],
-           "meta": {"case": "shared_origin_probe", "label": "none",
-                    "decoy_by_workload": {"shop/api": [wm["decided_cause"]]},
+           "meta": {"case": "contradiction_probe", "label": "none",
+                    "decoy_by_workload": {"shop/api": ["node worker-2 (NotReady)"]},
                     "workloads": {"shop/api": wm}}}
 
-    results = score.evaluate([row], lambda _messages: gold)
-    assert results[0]["named_decoy"] is None
-    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": None, "n": 0}
+    right = score.evaluate([row], lambda _messages: gold)
+    assert right[0]["named_decoy"] is False
+    assert score.scoreboard(right)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
+
+    wrong = score.evaluate([row], lambda _messages: _one_verdict("shop/api",
+                                                                 "node worker-2 (NotReady)"))
+    assert wrong[0]["named_decoy"] is True
+    assert score.scoreboard(wrong)["overall"]["decoy_rate"] == {"rate": 1.0, "n": 1}
 
 
 def test_the_gold_reply_names_no_decoy_on_any_exam_row():
@@ -1507,12 +1652,17 @@ def test_the_gold_reply_names_no_decoy_on_any_exam_row():
     answer names it. {0.0526, 190} -> {0.0, 128}.
 
     2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam now
-    has 121 job-2 workloads that carry a decoy, was 128. The gold reply still names none of them."""
+    has 121 job-2 workloads that carry a decoy, was 128. The gold reply still names none of them.
+
+    2026-10-05 (Spec 4b-4): job-1 workloads are tested too. 174 exam rows
+    carry a decoy on a job-1 or job-2 workload, was 121. The gold reply
+    still names none of them."""
     rows = _corpus_rows()
     replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
     results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
     # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 128.
-    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 121}
+    # 2026-10-05 (Spec 4b-4): job-1 workloads are tested too; was 121.
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 174}
 
 
 # --------------------------------------------------- evaluate(): job1/job2/job3
@@ -3878,3 +4028,206 @@ def test_rewriting_the_job2_answer_keys_retires_four_numbers_and_spares_the_rest
                      "misattribution_probe", "multi_misattribution_probe",
                      "shared_origin_probe", "shared_origin_decoy_probe"}
 
+
+# --------------------------------------------------- exam probes (Spec 4b-4)
+#
+# Each probe is the gold reply with one change, scored on the real exam.
+# The change is something a right answer may say, or something a wrong one
+# may say, so the score shows whether the grader tells them apart.
+
+def _gold_bot_with(rows: list[dict], change):
+    """Answers each row with its gold reply, after `change(row, verdict)`
+    has edited each verdict dict in place. It reads nothing."""
+    by_prompt = {r["messages"][1]["content"]: r for r in rows}
+
+    def chat_fn(messages: list[dict]) -> str:
+        row = by_prompt[messages[1]["content"]]
+        reply = json.loads(row["messages"][2]["content"])
+        for verdict in reply["verdicts"]:
+            change(row, verdict)
+        return json.dumps(reply)
+
+    return chat_fn
+
+
+def _count_changed(rows: list[dict], change) -> int:
+    """How many gold verdicts `change` alters. A probe that alters none
+    proves nothing, so each probe pins this count too."""
+    n = 0
+    for row in rows:
+        for verdict in json.loads(row["messages"][2]["content"])["verdicts"]:
+            before = verdict["cause"]
+            change(row, verdict)
+            n += verdict["cause"] != before
+    return n
+
+
+def _add_log_cause_label(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    if wm.get("job") != 2 or verdict["cause"] == NONE_OF_THESE:
+        return
+    own = score._own_blocks(row["messages"][1]["content"], row["meta"]["workloads"])
+    for line in sorted(own[verdict["workload"]]):
+        if line.startswith("log cause:"):
+            verdict["cause"] += " because of a " + line[len("log cause:"):].strip()
+            return
+
+
+def test_a_right_answer_in_a_log_cause_labels_words_scores_on_the_exam():
+    """Limit 13 on the exam. The probe adds " because of a <the workload's
+    own log-cause label>" to each named job-2 cause that has one: 32
+    answers change, and every one is still right. Before 2026-10-05 (Spec
+    4b-4), G3b cut `log cause:` off the line and zeroed every one: 165 of
+    197 = 0.8376. Now 197 of 197."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _add_log_cause_label) == 32
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _add_log_cause_label)))
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
+
+
+def _rule_out_the_must_not_word(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    must_not = wm.get("own_cause_must_not") or []
+    if "init container" in must_not:
+        verdict["cause"] += ", not an init container"
+    if "cordon" in must_not:
+        verdict["cause"] += "; the node is not cordoned"
+
+
+def test_a_right_answer_that_rules_out_a_must_not_word_scores_on_the_exam():
+    """Limit 14 on the exam. The probe adds ", not an init container" or
+    "; the node is not cordoned" to the gold cause of each workload with
+    that must-not word: 51 answers change, and every one is still right.
+    Before 2026-10-05 (Spec 4b-4) all 51 scored 0: 146 of 197 = 0.7411.
+    Now 197 of 197."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _rule_out_the_must_not_word) == 51
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _rule_out_the_must_not_word)))
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
+
+
+def _swap_tag_for_stage(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    keys = wm.get("own_cause_keywords") or []
+    if "tag" in keys:
+        verdict["cause"] = " ".join(k for k in keys if k != "tag") + " stage"
+
+
+def test_a_wrong_answer_that_says_stage_for_tag_fails_on_the_exam():
+    """The 3-letter kit keys on the exam. The probe answers each workload
+    keyed on `tag` with its other keys plus "stage": 6 answers change, and
+    every one is wrong. Before 2026-10-05 (Spec 4b-4), `tag` sat inside
+    "stage" and all 6 passed: 197 of 197. Now 191 of 197 = 0.9695."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _swap_tag_for_stage) == 6
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _swap_tag_for_stage)))
+    assert board["jobs"]["job2"] == {"rate": 0.9695, "n": 197}
+
+
+def _name_the_first_decoy_in_capitals(row: dict, verdict: dict) -> None:
+    decoys = score._workload_decoys(row["meta"], verdict["workload"])
+    if decoys:
+        verdict["cause"] = decoys[0].upper() + "."
+
+
+def test_a_decoy_named_in_capitals_counts_on_the_exam():
+    """Every workload with a decoy answers with its first decoy, in
+    capitals, plus a period: 200 answers on 174 rows. Before 2026-10-05
+    (Spec 4b-4), the raw compare missed every one and only job-2 workloads
+    were tested: {0.0, 121}. Now both sides are cleaned and job 1 counts:
+    {1.0, 174}."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _name_the_first_decoy_in_capitals) == 200
+    board = score.scoreboard(score.evaluate(
+        rows, _gold_bot_with(rows, _name_the_first_decoy_in_capitals)))
+    assert board["overall"]["decoy_rate"] == {"rate": 1.0, "n": 174}
+
+
+def _strip_label(line: str) -> str | None:
+    words = line.split()
+    for i, w in enumerate(words[:2]):
+        if w.endswith(":"):
+            return " ".join(words[i + 1:]) if len(words) - (i + 1) >= 3 else None
+    return None
+
+
+def _paste_own_lines_without_labels(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    if wm.get("job") != 2:
+        return
+    own = score._own_blocks(row["messages"][1]["content"], row["meta"]["workloads"])
+    parts = [p for p in (_strip_label(l) for l in sorted(own[verdict["workload"]])) if p]
+    if parts:
+        verdict["cause"] = "; ".join(parts)
+
+
+def test_a_bot_that_pastes_its_own_lines_without_labels_fails_on_the_exam():
+    """A bot that reads nothing. For each job-2 workload it answers with
+    every own labelled line, the label cut off, joined with "; ": 197
+    answers change. G3b's rule from before 2026-10-05 (Spec 4b-4) cut every
+    label, and this scored 0.0. The first 4b-4 rule skipped the cut for any
+    word ending in `:`, and it scored 0.8173. Now only `log cause:` is
+    kept, and it scores 0.0 again."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _paste_own_lines_without_labels) == 197
+    board = score.scoreboard(score.evaluate(
+        rows, _gold_bot_with(rows, _paste_own_lines_without_labels)))
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
+
+
+def _paste_own_issue_line_without_label(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    if wm.get("job") != 2:
+        return
+    own = score._own_blocks(row["messages"][1]["content"], row["meta"]["workloads"])
+    for line in sorted(own[verdict["workload"]]):
+        if line.split()[:1] == ["issue:"]:
+            part = _strip_label(line)
+            if part:
+                verdict["cause"] = part
+            return
+
+
+def test_a_bot_that_pastes_its_own_issue_line_without_the_label_fails_on_the_exam():
+    """A bot that reads nothing. For each job-2 workload it answers with its
+    first own `issue:` line, in sorted order, with `issue:` cut off: 197
+    answers change. With G3b's rule from before 2026-10-05 (Spec 4b-4) this
+    scored 0.0. The first 4b-4 rule kept every label and it scored 0.6548.
+    Now only `log cause:` is kept, and it scores 0.0 again."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _paste_own_issue_line_without_label) == 197
+    board = score.scoreboard(score.evaluate(
+        rows, _gold_bot_with(rows, _paste_own_issue_line_without_label)))
+    assert board["jobs"]["job2"] == {"rate": 0.0, "n": 197}
+
+
+_WRONG_BUT_NEGATED = {
+    "pressure": "node is not ready due to memory pressure",
+    "init container": "the app is not at fault; the init container is the problem",
+}
+
+
+def _negate_the_wrong_word(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    must_not = wm.get("own_cause_must_not") or []
+    keys = wm.get("own_cause_keywords") or []
+    if wm.get("job") != 2:
+        return
+    if "pressure" in must_not:
+        verdict["cause"] = " ".join(keys) + ": " + _WRONG_BUT_NEGATED["pressure"]
+    elif "init container" in must_not:
+        verdict["cause"] = " ".join(keys) + ": " + _WRONG_BUT_NEGATED["init container"]
+
+
+def test_a_wrong_answer_with_a_stray_negator_fails_on_the_exam():
+    """Limit 14's other side. For each job-2 workload with the must-not word
+    `pressure` or `init container`, the probe answers with its keys plus a
+    wrong cause that names that word, with a "not" that belongs to another
+    word: 51 answers change, and each one is wrong. Before 2026-10-05 (Spec
+    4b-4) they scored 146 of 197. With job 3's plain 24-character window
+    they scored 197 of 197. Now the window stops at the clause and keeps 3
+    words: 146 of 197 = 0.7411."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _negate_the_wrong_word) == 51
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _negate_the_wrong_word)))
+    assert board["jobs"]["job2"] == {"rate": 0.7411, "n": 197}
