@@ -205,7 +205,7 @@ def _row_gold(row: so.Row, own: list[str], built: so.Built) -> RowGold:
             cause = so._sub(answer.cause, row.names, built.draw)
             init = t.status.startswith("Init:") or t.issue.startswith("Init:")
             must_not = answer.must_not + (() if init else catalog.INIT_CONTAINER)
-            hit = [w for w in must_not if w in cause.lower()]
+            hit = [w for w in must_not if w in _norm_cause(cause)]
             if hit:
                 raise ValueError(f"{row.key}: gold {cause!r} holds its own must-not word {hit[0]!r}")
             return RowGold("named", cause, answer.confidence, answer.keys, answer.rationale,

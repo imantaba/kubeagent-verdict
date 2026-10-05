@@ -428,9 +428,33 @@ def test_a_story_gold_holding_its_own_must_not_word_fails_the_build():
     assert raised > 0
 
 
+@pytest.mark.parametrize("spelling", ["init_container", "init\u2011container", "INIT  CONTAINER"])
+def test_a_must_not_word_in_another_spelling_fails_the_build(spelling):
+    """The grader folds "_" to a space and odd hyphens to "-" before it looks
+    for a must-not word. The build check folds the same way, so a gold cannot
+    slip past the build with "init_container" and then be marked wrong."""
+    def poison(a):
+        return None if a is None else dataclasses.replace(a, cause=f"{a.cause} ({spelling})")
+
+    st = stories.by_key()["coredns-down"]
+    victims = tuple(v if v.status.startswith("Init:") or v.issue.startswith("Init:")
+                    else dataclasses.replace(v, broken=poison(v.broken), healthy=poison(v.healthy))
+                    for v in st.victims)
+    st = dataclasses.replace(st, victims=victims)
+    raised = 0
+    for seed in range(10):
+        try:
+            cases.shared_origin(st, random.Random(seed))
+        except ValueError as err:
+            assert "must-not" in str(err), err
+            raised += 1
+    assert raised > 0
+
+
 # 2026-10-05 (exam rebuild): measured on this build; was (208, 178) on main
 # (re-measured on main c23dab3: also (208, 178)). The key count did not move;
-# 16 pairs went away (not traced to one task; the must-not words of Task 3 are the likely cause).
+# 16 pairs went away: 11 init container, 1 liveness, 2 containerd, 1 auth, 1 retired key
+# (see contract/PIN.md, exam rebuild).
 POOL_KEYS, POOL_PAIRS = 208, 162
 
 
