@@ -37,6 +37,7 @@ from kubeagent_verdict.dataset import (
     rules,
     stories,
 )
+from kubeagent_verdict.dataset import shared_origin as so
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = Path(__file__).resolve().parent
@@ -982,3 +983,38 @@ def test_ans2_does_not_count_a_ruled_out_candidate_line(exam_rows):
                 assert "ANS-2" in _fired(checker.check(system, user, assistant, m))
                 return
     pytest.fail("no exam row has a ruled-out candidate whose cause is unique in the prompt")
+
+
+# ------------------------------------------------ exam rebuild, item 1
+
+@pytest.mark.parametrize("text, ok", [
+    ("0/3 nodes are available: 1 node(s) had untolerated taint {x: y}, 2 Insufficient cpu.", True),
+    ("0/4 nodes are available: 1 node(s) had untolerated taint {x: y}, 2 Insufficient cpu.", False),
+    ("0/3 nodes are available: 1 node(s) were unschedulable, 2 Insufficient memory. (x4)", True),
+    ("(0/3 nodes are available: 3 Insufficient cpu.)", True),
+    ("0/5 nodes are available: 1 node(s) were unschedulable, 2 node(s) had volume…", True),
+    ("0/3 nodes are available for this pod", True),
+    ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims.", True),
+    (("0/3 nodes are available: 1 node(s) were unschedulable, pod has unbound immediate "
+      "PersistentVolumeClaims."), False),
+    (("0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: "
+      "3 No preemption victims found for incoming pod."), True),
+    (("0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: "
+      "2 No preemption victims found for incoming pod."), False),
+])
+def test_sched_sum_ok(text, ok):
+    assert checker._sched_sum_ok(text) is ok
+
+
+def test_every_story_scheduler_line_sums_to_its_node_count():
+    """The whole story set, both worlds, seeds 0-5: every scheduler line adds
+    up to its node count."""
+    bad = []
+    for st in stories.by_key().values():
+        for world in ("broken", "healthy"):
+            for seed in range(6):
+                d = so.draw(st, random.Random(seed), width=len(st.victims))
+                b = so.build(st, d, world=world)
+                bad += [(st.key, world, seed, ln) for ln in b.user.split("\n")
+                        if "nodes are available" in ln and not checker._sched_sum_ok(ln)]
+    assert bad == []

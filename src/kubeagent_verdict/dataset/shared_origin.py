@@ -113,6 +113,7 @@ def _sub(text: str, n: Names | None, d: Draw) -> str:
         "ns": n.ns if n else d.scope_value, "name": n.name if n else "",
         "pod": n.pod if n else "", "pvc": n.pvc if n else "",
         "image": n.image if n else "", "nodes": str(len(d.nodes)),
+        "other_nodes": str(len(d.nodes) - 1),
         "init_container": n.init_container if n else ""})
 
 

@@ -1945,33 +1945,58 @@ def _txt_is17(x: _Ctx) -> tuple[int, _Finding]:
 _SCHED_TOTAL = re.compile(r"\b0/(\d+) nodes are available")
 
 
+_SCHED_PART = re.compile(r"\b0/(\d+) nodes are available: (.*)$")
+_SCHED_COUNT = re.compile(r"^(\d+) ")
+_SCHED_TIMES = re.compile(r"\s*\(x\d+\)$")
+
+
+def _sched_sum_ok(text: str) -> bool:
+    """IS-22's sum half: in "0/N nodes are available: <reasons>", the reason
+    counts add up to N. Each " preemption: " part is checked alone. A part
+    whose clauses carry no count (the PVC PreFilter message) is skipped, a
+    part cut with "…" is skipped, and a part with some counts and not others
+    fails. Real Kubernetes can give one node two reasons and over-count; the
+    builder never writes that, so the sum must equal N."""
+    for part in text.split(" preemption: "):
+        m = _SCHED_PART.search(part)
+        if not m:
+            continue
+        reasons = _SCHED_TIMES.sub("", m.group(2)).rstrip()
+        if reasons.endswith("…"):
+            continue
+        clauses = [c.strip() for c in reasons.rstrip(").").split(",")]
+        counts = [_SCHED_COUNT.match(c) for c in clauses]
+        if not any(counts):
+            continue
+        if not all(counts) or sum(int(c.group(1)) for c in counts) != int(m.group(1)):
+            return False
+    return True
+
+
 def _txt_is22(x: _Ctx) -> tuple[int, _Finding]:
     """Every scheduler message counts the nodes the cluster-health header
-    counts. kubeagent's header T is the node list's length
-    (clusterhealth/clusterhealth.go:60-110), and the scheduler's `0/N nodes
-    are available` counts the same nodes. IS-22 was a `multi` row whose header
-    said 4 nodes and whose FailedScheduling event said 0/3. A row with no
-    header shows no total and is not checked. The builder's model, not a
-    kubeagent string: the rule checks that the row agrees with itself."""
-    if not x.p.health:
-        return 0, []
-    m = _HEALTH_HEADER.match(x.p.health[0].text)
-    if not m:
-        return 0, []
-    total = m.group(2)
+    counts, and its reasons add up to that count. kubeagent's header T is the
+    node list's length (clusterhealth/clusterhealth.go:60-110), and the
+    scheduler's `0/N nodes are available` counts the same nodes. IS-22 was a
+    `multi` row whose header said 4 nodes and whose FailedScheduling event said
+    0/3. The sum half runs on every row, header or not. The total half needs
+    the header: a row with no header shows no total. The builder's model, not
+    a kubeagent string: the rule checks that the row agrees with itself."""
+    m = _HEALTH_HEADER.match(x.p.health[0].text) if x.p.health else None
+    total = m.group(2) if m else None
     out: _Finding = []
     n = 0
-    for ln in x.p.inv:
-        for s in _SCHED_TOTAL.finditer(ln.text):
-            n += 1
-            if s.group(1) != total:
-                out.append((f"inventory line {ln.no}", ln.text))
+    lines = [(f"inventory line {ln.no}", ln.text) for ln in x.p.inv]
     for r in x.p.reads:
-        for text in _content_lines(r):
-            for s in _SCHED_TOTAL.finditer(text):
-                n += 1
-                if s.group(1) != total:
-                    out.append((r.where, text))
+        lines.extend((r.where, text) for text in _content_lines(r))
+    for where, text in lines:
+        if "nodes are available" not in text:
+            continue
+        n += 1
+        if not _sched_sum_ok(text) or (
+                total is not None
+                and any(s.group(1) != total for s in _SCHED_TOTAL.finditer(text))):
+            out.append((where, text))
     return n, out
 
 
