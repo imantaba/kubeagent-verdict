@@ -74,13 +74,15 @@ kubeagent's gather never makes that read, so no case carries
 import dataclasses
 import hashlib
 import json
+import random
 import re
 from collections import Counter
 
 import pytest
 
 from kubeagent_verdict import contract, vocab
-from kubeagent_verdict.dataset import generate, gold, propagation, stories
+from kubeagent_verdict.dataset import cases, checker, generate, gold, propagation, stories
+from kubeagent_verdict.evals import score
 
 SIZE = 800
 SEED = 17
@@ -1452,3 +1454,26 @@ def test_one_training_only_separate_prompt_exists_at_the_frozen_seed():
     # assert actually needs.
     causes = {meta["decided_cause"] for meta in workloads.values()}
     assert len(causes) == len(workloads), "every workload must have its own cause"
+
+
+def test_image_pull_secret_expired_pull_victims_are_unverified():
+    """Exam rebuild, item 8. Every victim with a registry candidate is job 1,
+    outcome unverified; its gold is the decided cause, and its rationale
+    claims no more than that. The exam has no row from this story, so this
+    pins the training rows only."""
+    st = stories.by_key()["image-pull-secret-expired"]
+    seen = 0
+    for seed in range(20):
+        ex = cases.shared_origin(st, random.Random(seed))
+        x = checker._context(ex.system, ex.user, ex.assistant, ex.meta)
+        golds = {v["workload"]: v for v in json.loads(ex.assistant)["verdicts"]}
+        for name, wm in ex.meta["workloads"].items():
+            b = x.block(name)
+            if b is None or not any("registry" in cd.cause for cd in b.cands):
+                continue
+            seen += 1
+            assert (wm["job"], wm["decided_outcome"]) == (1, "unverified"), name
+            assert golds[name]["cause"] == wm["decided_cause"], name
+            assert not score._word_bounded_signal(golds[name]["rationale"],
+                                                  score.OVERCLAIM_WORDS), name
+    assert seen > 0
