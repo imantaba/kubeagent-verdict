@@ -686,8 +686,57 @@ def test_keywords_match_needs_every_keyword_and_no_must_not_word():
     assert not score._keywords_match("the memory is low", ["memory", "limit"])
     assert not score._keywords_match("the init container's memory limit is too small",
                                      ["memory", "limit"], ["init container"])
-    # A must-not word is a substring rule, like a keyword. "initial" does
-    # not hold "init container".
+
+
+def test_a_must_not_word_after_a_negator_does_not_count():
+    """Model-card limit 14, closed in part 2026-10-05 (Spec 4b-4). A right
+    answer may name a must-not word to rule it out. A hit with a `NEGATORS`
+    word or "n't" in the 24 characters before it does not count, the same
+    window job 3 uses. A hit with no negator still zeroes the answer."""
+    keys, must_not = ["memory", "limit"], ["init container", "cordon", "pressure"]
+
+    def ok(cause):
+        return score._keywords_match(cause, keys, must_not)
+
+    assert ok("the main container, not an init container, is killed at its memory limit")
+    assert ok("killed at its memory limit; it isn't the init container")
+    assert ok("killed at its memory limit; the node is not cordoned")
+    assert not ok("killed at its memory limit in the init container")
+    assert not ok("the node is cordoned and short of memory limit")
+    # "another" holds "not", but `NEGATORS` matches whole words only.
+    assert not ok("another init container is killed at its memory limit")
+    # Still open, and pinned so: "no" is more than 24 characters before
+    # `pressure`, so the hit counts and a right answer scores 0.
+    assert not ok("memory limit; no node is cordoned or under memory pressure")
+
+
+def test_a_short_word_starts_a_word_and_a_long_one_is_a_substring():
+    """2026-10-05 (Spec 4b-4). A key or must-not word of `SHORT_WORD_MAX`
+    letters or fewer must start a word: nothing in \\w just before it. It
+    may run on, so `tag` still hits "tags". A longer word is a substring,
+    as before: `pull` hits "pulling", `cordon` hits "cordoned", and
+    `pressure` hits "MemoryPressure", which is 0920's wrong answer on exam
+    row 197 and must stay 0."""
+    assert score.SHORT_WORD_MAX == 3
+    # Keys.
+    assert not score._keywords_match("bad image stage", ["image", "tag"])
+    assert score._keywords_match("bad image tags", ["image", "tag"])
+    assert score._keywords_match("bad image tag", ["image", "tag"])
+    assert score._keywords_match("tag: v2 is missing from the image", ["image", "tag"])
+    assert score._keywords_match("the image (tag) is wrong", ["image", "tag"])
+    assert score._keywords_match("bad image_tag", ["image", "tag"])
+    assert score._keywords_match("image pulling fails", ["pull"])
+    # Must-not words.
+    for cause in ("an outage", "a percentage", "a stage"):
+        assert score._keywords_match(cause, [], ["tag"]), cause
+    assert not score._keywords_match("wrong tag", [], ["tag"])
+    assert not score._keywords_match("MemoryPressure on the node", [], ["pressure"])
+    assert score._keywords_match("no MemoryPressure on the node", [], ["pressure"])
+    # A must-not word with a "-" still hits an odd hyphen: the fold
+    # (Task 1) makes it "-", and the word is escaped before the search.
+    assert not score._keywords_match("init\u2010container killed", [], ["init-container"])
+    # A must-not word longer than 3 letters is a substring rule, like a
+    # key (2026-10-05, Spec 4b-4). "initial" does not hold "init container".
     assert score._keywords_match("the initial memory limit is too small",
                                  ["memory", "limit"], ["init container"])
 
@@ -3992,3 +4041,42 @@ def test_a_right_answer_in_a_log_cause_labels_words_scores_on_the_exam():
     assert _count_changed(rows, _add_log_cause_label) == 50
     board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _add_log_cause_label)))
     assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
+
+
+def _rule_out_the_must_not_word(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    must_not = wm.get("own_cause_must_not") or []
+    if "init container" in must_not:
+        verdict["cause"] += ", not an init container"
+    if "cordon" in must_not:
+        verdict["cause"] += "; the node is not cordoned"
+
+
+def test_a_right_answer_that_rules_out_a_must_not_word_scores_on_the_exam():
+    """Limit 14 on the exam. The probe adds ", not an init container" or
+    "; the node is not cordoned" to the gold cause of each workload with
+    that must-not word: 51 answers change, and every one is still right.
+    Before 2026-10-05 (Spec 4b-4) all 51 scored 0: 146 of 197 = 0.7411.
+    Now 197 of 197."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _rule_out_the_must_not_word) == 51
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _rule_out_the_must_not_word)))
+    assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
+
+
+def _swap_tag_for_stage(row: dict, verdict: dict) -> None:
+    wm = row["meta"]["workloads"].get(verdict["workload"]) or {}
+    keys = wm.get("own_cause_keywords") or []
+    if "tag" in keys:
+        verdict["cause"] = " ".join(k for k in keys if k != "tag") + " stage"
+
+
+def test_a_wrong_answer_that_says_stage_for_tag_fails_on_the_exam():
+    """The 3-letter kit keys on the exam. The probe answers each workload
+    keyed on `tag` with its other keys plus "stage": 6 answers change, and
+    every one is wrong. Before 2026-10-05 (Spec 4b-4), `tag` sat inside
+    "stage" and all 6 passed: 197 of 197. Now 191 of 197 = 0.9695."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _swap_tag_for_stage) == 6
+    board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _swap_tag_for_stage)))
+    assert board["jobs"]["job2"] == {"rate": 0.9695, "n": 197}

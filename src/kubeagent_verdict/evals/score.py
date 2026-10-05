@@ -369,10 +369,36 @@ def _keywords_match(cause: str, keywords: Iterable[str],
                     must_not: Iterable[str] = ()) -> bool:
     """The keyword rule, written once for `job2` and `cause_acc`: the cause,
     cleaned by `_norm_cause`, holds every keyword and no must-not word. Both
-    lists are lowercased and matched as substrings."""
+    lists are lowercased and found by `_word_hits`: a word of
+    `SHORT_WORD_MAX` letters or fewer must start a word, a longer one may
+    sit anywhere. A must-not word with a negator just before it does not
+    count, so a right answer may rule one out (2026-10-05, Spec 4b-4)."""
     c = _norm_cause(cause)
-    return (all(str(k).lower() in c for k in keywords)
-            and not any(str(m).lower() in c for m in must_not))
+    return (all(_word_hits(c, str(k).lower(), negatable=False) for k in keywords)
+            and not any(_word_hits(c, str(m).lower(), negatable=True) for m in must_not))
+
+
+# A key or must-not word this short must start a word. As a substring,
+# `tag` hits "stage" and "outage" (2026-10-05, Spec 4b-4).
+SHORT_WORD_MAX = 3
+
+
+def _word_hits(text: str, word: str, *, negatable: bool) -> bool:
+    """Whether `word` is found in the cleaned `text`. A word of
+    `SHORT_WORD_MAX` letters or fewer counts only where it starts a word (no
+    \\w just before it); it may run on, so `tag` hits "tags". A longer word
+    counts anywhere, so `pressure` hits "memorypressure". When `negatable`,
+    a hit with a `NEGATORS` word or "n't" in the `NEGATION_WINDOW`
+    characters before it does not count, the same rule as
+    `_word_bounded_signal`."""
+    start = r"(?<!\w)" if len(word) <= SHORT_WORD_MAX else ""
+    for m in re.finditer(start + re.escape(word), text):
+        if negatable:
+            window = text[max(0, m.start() - NEGATION_WINDOW):m.start()]
+            if NEGATORS.search(window) or "n't" in window:
+                continue
+        return True
+    return False
 
 
 def job2(meta_workload: dict, reply_row: dict | None,
@@ -382,7 +408,7 @@ def job2(meta_workload: dict, reply_row: dict | None,
     """Score one undecided ("job 2") workload. 1.0 when the reply names the
     story's own cause -- the reply's cause, cleaned by `_norm_cause`, holds
     every one of `own_cause_keywords` and none of `own_cause_must_not`, both
-    matched as lowercase substrings -- or, on a `none_of_these` workload,
+    found by `_keywords_match` -- or, on a `none_of_these` workload,
     when the reply's cause is exactly that. 0.0 otherwise, including a
     missing row or reply.
 
