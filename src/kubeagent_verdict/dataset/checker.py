@@ -210,6 +210,16 @@ _HEALTH_NODE = re.compile(
     r"^  node (\S+) (MemoryPressure|DiskPressure|PIDPressure|SchedulingDisabled|no kubelet lease"
     r"|kubelet not heartbeating \(lease \S+ stale\)|NotReady(?:: .+)?"
     r"|expected but absent from the cluster)$")
+# Copied from gold.py (the checker imports only the standard library);
+# tests/test_checker.py COPIES pins the copy.
+_FOLD = str.maketrans({**{chr(c): "-" for c in range(0x2010, 0x2016)}, "_": " "})
+
+
+def _norm_cause(s: str) -> str:
+    folded = unicodedata.normalize("NFKC", str(s)).translate(_FOLD)
+    return " ".join(folded.lower().strip().rstrip(".").split())
+
+
 _HEALTH_SYSTEM = re.compile(r"^  system kube-system/(\S+) (?:(\d+)/(\d+) )?(.+)$")
 _CPU_LINE = re.compile(r"^  CPU: allocatable \S+ cores, requests \S+ \(\d+%\), limits \S+ \(\d+%\)"
                        r"(, usage \S+ \(\d+%\))?$")
@@ -875,14 +885,23 @@ def _b3(x: _Ctx) -> tuple[int, _Finding]:
 
 def _b4(x: _Ctx) -> tuple[int, _Finding]:
     """`network policy:` and `recent change:` come after the findings, once
-    each, in that order (explain/explain.go:207-218)."""
+    each, in that order (explain/explain.go:207-218). A policy line is printed
+    only for a workload whose findings are all ProbeFailure
+    (netpolicy.go:28-42)."""
     out = []
     for e in x.p.entries:
         seq = [_sub_kind(ln.text) for ln in e.subs]
         tail = [k for k in seq if k in "NC"]
         last_finding = max((i for i, k in enumerate(seq) if k in "ILRFM"), default=-1)
         first_extra = min((i for i, k in enumerate(seq) if k in "NC"), default=len(seq))
-        if first_extra < last_finding or tail not in ([], ["N"], ["C"], ["N", "C"]):
+        bad = first_extra < last_finding or tail not in ([], ["N"], ["C"], ["N", "C"])
+        if not bad and "N" in seq and "M" not in seq:
+            # netpolicy.go:28-42: a policy line is built only for a workload
+            # whose findings are all ProbeFailure.
+            kinds = [ln.text[len(_ISSUE_PREFIX):].split(" ", 1)[0]
+                     for ln in e.subs if ln.text.startswith(_ISSUE_PREFIX)]
+            bad = any(k != "ProbeFailure" for k in kinds)
+        if bad:
             out.append((f"inventory line {e.line.no}", e.line.text))
     return len(x.p.entries), out
 
@@ -917,11 +936,24 @@ def _b5(x: _Ctx) -> tuple[int, _Finding]:
 
 def _b6(x: _Ctx) -> tuple[int, _Finding]:
     """At most 10 service issues, each `  - ns/name (Type): detail`
-    (investigate/local.go:48-53, explain/explain.go:221-224)."""
+    (investigate/local.go:48-53, explain/explain.go:221-224), sorted by
+    namespace, name, then problem (NoEndpoints before NoExternalAddress), with
+    no key twice (svchealth.go:33-75)."""
     out = [(f"inventory line {ln.no}", ln.text) for ln in x.p.services if not _SERVICE_LINE.match(ln.text)]
     if len(x.p.services) > MAX_SERVICE_ISSUES:
         ln = x.p.services[MAX_SERVICE_ISSUES]
         out.append((f"inventory line {ln.no}", ln.text))
+    keys = []
+    for ln in x.p.services:
+        m = _SERVICE_LINE.match(ln.text)
+        if m is None:
+            continue
+        ns, name, _typ, detail = m.groups()
+        keys.append(((ns, name, "NoExternalAddress" if detail == "no external address"
+                      else "NoEndpoints"), ln))
+    for (prev, _), (key, ln) in pairwise(keys):
+        if key <= prev:
+            out.append((f"user line {ln.no}", ln.text))
     return len(x.p.services), out
 
 
@@ -999,6 +1031,19 @@ def _b7(x: _Ctx) -> tuple[int, _Finding]:
           else got_sys == want_sys)
     if not ok:
         out.append((where, f"system lines {got_sys} expected {want_sys}"))
+    elif len(x.p.entries) >= MAX_GATHER_WORKLOADS:
+        # Past the gather cap a flagged kube-system workload is not an entry
+        # but still gets a health line. The checker cannot see it, so each
+        # extra line must be well formed, new, and not an entry already shown
+        # (investigate/gather.go:24).
+        rendered = {e.name for e in system}
+        seen: set[str] = set()
+        for extra in got_sys[len(want_sys):]:
+            m = _HEALTH_SYSTEM.match(extra)
+            if m is None or m.group(1) in rendered or m.group(1) in seen:
+                out.append((where, f"extra system line: {extra}"))
+            else:
+                seen.add(m.group(1))
     return len(h), out
 
 
@@ -1711,7 +1756,8 @@ def _answer(x: _Ctx) -> dict | None:
 def _f3(x: _Ctx) -> tuple[int, _Finding]:
     """Every line of API text and every answer line is at most 512 runes
     (safetext/safetext.go:28, investigate/local.go:113; a NotReady message
-    at most 120 runes and its ellipsis, clusterhealth/clusterhealth.go:206)."""
+    at most 120 runes and its ellipsis, clusterhealth/clusterhealth.go:206,
+    also when the line carries a message and no reason)."""
     out = []
     n = 0
     for r in x.p.reads:
@@ -1730,6 +1776,8 @@ def _f3(x: _Ctx) -> tuple[int, _Finding]:
             text = m.group(2)[len("NotReady: "):]
             if " — " in text:
                 over = _runes_over(text.split(" — ", 1)[1], NOT_READY_MESSAGE_RUNES + 1)
+            elif not re.match(r"^[A-Z][A-Za-z0-9]*$", text):
+                over = _runes_over(text, NOT_READY_MESSAGE_RUNES + 1)   # clusterhealth.go:206
             else:
                 over = _runes_over(text)
             if over:
@@ -1824,6 +1872,7 @@ def _txt_is14(x: _Ctx) -> tuple[int, _Finding]:
 _DETECTOR_AGE = re.compile(r", last exit -?\d+ \(.*\), (\S+) ago(?:\)| \(×\d+\)|$)")
 _ROLLOUT_AGE = re.compile(r"^    recent change: rolled out to revision \S+ (\S+) ago(?:, |$)")
 _HUMAN_AGE = re.compile(r"^(?:0|[1-9]\d*)[dhms]$")
+_LEASE_MIN_NS = 40 * 10**9   # clusterhealth.go:137-144: stale only past 40s
 
 
 def _duration_ok(token: str) -> bool:
@@ -1831,12 +1880,18 @@ def _duration_ok(token: str) -> bool:
     return ns is not None and ns % 10**9 == 0 and _go_duration(ns) == token
 
 
+def _lease_ok(token: str) -> bool:
+    ns = _parse_duration(token)
+    return _duration_ok(token) and ns is not None and ns >= _LEASE_MIN_NS
+
+
 def _txt_is15(x: _Ctx) -> tuple[int, _Finding]:
     """Every age kubeagent prints is in the form it prints it.
 
     A finding's last exit and a lease's staleness are Go's
     time.Duration.String in whole seconds (diagnose/crashloop.go:55-56,
-    diagnose/restartloop.go:42-47, clusterhealth/clusterhealth.go:144). A
+    diagnose/restartloop.go:42-47, clusterhealth/clusterhealth.go:144), and a
+    lease is stale only past 40s (clusterhealth.go:137-144). A
     recent change's age is inventory.HumanAge: one number and one of d, h, m,
     s (inventory/inventory.go:115-146, rollout/rollout.go:61). An age inside
     text the cluster wrote, such as an event message, keeps the cluster's
@@ -1845,7 +1900,7 @@ def _txt_is15(x: _Ctx) -> tuple[int, _Finding]:
     out = []
     n = 0
     for ln in x.p.inv:
-        tokens = [(m.group(1), _duration_ok) for m in _LEASE_AGE.finditer(ln.text)]
+        tokens = [(m.group(1), _lease_ok) for m in _LEASE_AGE.finditer(ln.text)]
         if ln.text.startswith(_ISSUE_PREFIX):
             tokens += [(m.group(1), _duration_ok) for m in _DETECTOR_AGE.finditer(ln.text)]
         if m := _ROLLOUT_AGE.match(ln.text):
@@ -2008,8 +2063,9 @@ def _ans1(x: _Ctx) -> tuple[int, _Finding]:
 
 def _ans2(x: _Ctx) -> tuple[int, _Finding]:
     """Every own-cause keyword is in that workload's own block: its inventory
-    entry, its candidate block and its reads (the grader's containment rule,
-    evals/score.py:209-214)."""
+    entry, its candidate block and its reads, less every part that names a
+    ruled-out or refuted candidate (the grader's containment rule,
+    evals/score.py:209-214, and gold.drop_excluded)."""
     if x.meta is None:
         return 0, []
     out = []
@@ -2020,15 +2076,20 @@ def _ans2(x: _Ctx) -> tuple[int, _Finding]:
             continue
         n += 1
         parts = []
+        excluded: list[str] = []
         entry = next((e for e in x.p.entries if e.key == name), None)
         if entry is not None:
             parts += [entry.line.text] + [ln.text for ln in entry.subs]
         b = x.block(name)
         if b is not None:
             parts += [b.heading.text] + [it.line.text for it in b.items]
+            excluded = [_norm_cause(cd.cause) for cd in b.cands
+                        if cd.verdict == "ruled out"
+                        or any(f.outcome == "refuted" for f in cd.fresh)]
         for r in x.group_of(name) or []:
-            parts += [r.label, r.content]
-        text = "\n".join(parts).lower()
+            parts += [r.label] + r.content.split("\n")
+        kept = [p for p in parts if not any(e and e in _norm_cause(p) for e in excluded)]
+        text = "\n".join(kept).lower()
         missing = [k for k in keywords if str(k).lower() not in text]
         if missing:
             out.append((f"workload {name}", f"missing {missing}"))
