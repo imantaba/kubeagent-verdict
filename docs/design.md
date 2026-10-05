@@ -422,7 +422,8 @@ The paragraphs above describe the earlier design, and they stay as history.
 4b-3 (2026-10-05) it has no healthy-origin read, so it shows only reads
 kubeagent's gather makes. Its decoy lists are the causes the prompt rules
 out. Its summary says "separate reasons" only when the rows show it, and it
-names every workload. Scheduler node counts match the header. The counts and the hashes are in `contract/PIN.md`.
+names every workload. Scheduler node counts match the header. The counts
+and the hashes are in `contract/PIN.md`.
 
 The generator's `multi` case draws `rng.randint(2, 4)` workloads per
 example — it never reaches kubeagent's own gather cap. Verdict contract v1
@@ -533,7 +534,8 @@ truncated or thin → low), so calibration is trained, not guessed.
   Spec 3 closed it on 2026-09-26. Since then a `multi` block prints each
   workload's finding lines, and its reads come from one gather over the
   whole row: 8 reads, or 7 when a healthy-origin read takes the first
-  slot. Counted the same way in `out/dataset-0926/train.jsonl` (and in
+  slot. (Since 2026-10-05, Spec 4b-3, `multi` has no healthy-origin read,
+  so it is always 8.) Counted the same way in `out/dataset-0926/train.jsonl` (and in
   `out/dataset-0928/train.jsonl`, which replaced it on 2026-09-28, with
   the same counts), `multi`
   rows carry 717 job-2 workloads: 626 at `high` and 91 at `medium`, and

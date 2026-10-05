@@ -22,6 +22,10 @@ So training gets its OWN origins and the six eval scenarios stay eval-only —
 the catalog's 19-trainable / 9-held-out split, applied to propagation. The
 eval set does not move, which is what keeps the 0830 scoreboard comparable.
 
+Until 2026-10-05 (Spec 4b-3) the next three paragraphs described live
+code. They are history now: `multi` has no healthy-origin read and no
+counterweight case.
+
 That closes the obvious shortcut. This module was written mostly for the
 second, which is not obvious: `multi` builds its reads per constituent
 (`_reads(e, n)[:2]`), so a cluster-scoped read at the head of the list used to
@@ -535,7 +539,11 @@ def _independent_share(rows):
 
 
 def test_the_generator_emits_the_two_classes_near_evenly(rows):
-    """What the EMITTER controls, and it is no longer a coin flip: 0.568,
+    """History up to 2026-10-05 (Spec 4b-3), kept as written. Until then the
+    every-third `multi` negatives existed, and this text argued for keeping
+    them. They are gone; see the last paragraph for the live number.
+
+    What the EMITTER controls, and it is no longer a coin flip: 0.568,
     re-measured 2026-09-19 (Task 9: pool merge + mix move, spec section 6)
     at 0.5636.
 
@@ -567,7 +575,11 @@ def test_the_generator_emits_the_two_classes_near_evenly(rows):
 
 
 def test_the_trained_pile_is_not_one_sided_among_origin_read_rows(kept):
-    """What the MODEL reads, which is the number that decides what it learns.
+    """History up to 2026-10-05 (Spec 4b-3), kept as written. Until then the
+    `multi` negatives had no twin and the lean ran toward the independent
+    answer. They are gone; see the last paragraph for the live number.
+
+    What the MODEL reads, which is the number that decides what it learns.
 
     A 9:1 split is a prior, not a cue kill. This is the assertion the module
     docstring's argument actually depends on, and the one that was missing.

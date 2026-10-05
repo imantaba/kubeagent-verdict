@@ -53,7 +53,8 @@ def write_jsonl(path: Path, examples: list[Example]) -> None:
 # everywhere fails it on the decoy twin, trading one failure for its
 # mirror. The shared answer stays the minority among multi-workload rows:
 # every `shared_origin` row has a `shared_origin_decoy` twin that answers
-# "separate reasons", and `multi` answers the same. The cap test below pins
+# "separate reasons". A `multi` row says it only when its rows show it (see
+# `gold.summary_lines`). The cap test below pins
 # the `shared_origin` case family's share, about 38 of every 100. The share
 # of rows whose answer actually claims a shared origin is a different and
 # much smaller number, about 7 of every 100; no test caps it.

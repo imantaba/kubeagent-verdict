@@ -178,7 +178,7 @@ def test_a_multi_decoy_list_is_what_the_prompt_rules_out(monkeypatch):
         nonlocal checked
         ex = real_multi(*a, **kw)
         res = last["res"]
-        for key, cands, result in zip(ex.meta["expected"], res.candidates, res.results):
+        for key, cands, result in zip(ex.meta["expected"], res.candidates, res.results, strict=True):
             assert ex.meta["decoy_by_workload"][key] == gold.excluded_from(cands, result), key
             checked += 1
         return ex
@@ -199,6 +199,7 @@ def test_no_workload_lists_its_own_gold_as_a_decoy(build):
             gold_cause = w.get("expected_cause") or ""
             listed = decoys.get(key) or []
             with_list += bool(listed)
+            # none_of_these has no cause to find in a decoy list.
             if not gold_cause or gold_cause == c.NONE_OF_THESE:
                 continue
             assert gold._norm_cause(gold_cause) not in {gold._norm_cause(d) for d in listed}, (

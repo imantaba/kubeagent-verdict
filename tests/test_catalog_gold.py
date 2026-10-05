@@ -432,11 +432,13 @@ def test_the_old_fields_are_gone():
     assert not hasattr(cases, "_confidence")
 
 
-# The pool's gated rows: generate(17, 8000) index and workload. All four are
+# The pool's gated rows: generate(17, 8000) index and workload. All are
 # coredns `multi` rows whose read budget ran out before the coredns log read,
 # so no own line shows the configuration parse error (Plan ruling 3).
-# 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; two rows join (2488,
-# 2851), the other four stay. Was the four rows without them.
+# 2026-10-05 (Spec 4b-3): (2488, payments/gateway) and (2851, payments/ingest)
+# joined the other four. The old healthy-origin read used up a budget slot, so
+# a stale "unverified" node attribution survived. Now the 8th read refutes the
+# node, and the row gates to none_of_these.
 GATED_POOL = {(2088, "web/scheduler"), (2177, "web/scheduler"), (2630, "media/worker"),
               (2850, "edge/gateway"), (2488, "payments/gateway"),
               (2851, "payments/ingest")}

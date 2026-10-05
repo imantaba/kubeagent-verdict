@@ -1078,9 +1078,9 @@ Measured, before and after:
   half is built. Its sum half fails on 4b-1 stories, so it waits for the
   exam rebuild.
 
-Re-pins. None in Task 6. Task 4 removed the healthy-origin read and made
-these hand re-pins, each dated 2026-10-05 (Spec 4b-3) in a comment. The
-guarded rates stayed 1.0 and no exam pin moved.
+No re-pin was needed for the final build. Removing the healthy-origin read
+moved these pins. Each is a hand re-pin, dated 2026-10-05 (Spec 4b-3) in a
+comment. The guarded rates stayed 1.0 and no exam pin moved.
 - `GATED_POOL` in `test_catalog_gold`: 4 rows to 6. It added (2488,
   payments/gateway) and (2851, payments/ingest). Why: the old healthy read
   used up a budget slot, so a stale "unverified" node answer survived. Now

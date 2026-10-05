@@ -185,7 +185,7 @@ def test_the_family_never_carries_the_label_separate(fam):
     assert {ex.meta["label"] for ex in fam} == {"shared", "none"}
 
 
-def test_a_summary_lists_at_most_three_rows(fam):
+def test_a_non_shared_summary_has_one_line_per_row_up_to_three(fam):
     for ex in fam:
         if ex.meta["label"] == "shared":
             continue
