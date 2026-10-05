@@ -23,8 +23,8 @@ The six:
 2. **The decoy compare is cleaned.** `named_decoy` cleans both sides with
    `_norm_cause` before it compares.
 3. **G3b never cuts past a label** (model-card limit 13).
-4. **Must-not words start at a word and can see "not"** (model-card
-   limit 14).
+4. **Must-not words can see "not", and short ones start at a word**
+   (model-card limit 14).
 5. **The cleaning step folds hyphens and underscores.**
 6. **Kit keys of 3 letters start at a word.** This is the grader's answer
    to "the guard for 4+-letter kit keys".
@@ -84,17 +84,27 @@ The exam's must-not words: `init container`, `init-container`,
 `initcontainer` (42 workloads each), `cordon` and `pressure` (9 each),
 `tag` (6), `provision` (6).
 
-Whole-word matching at both ends was considered and turned down. `cordon`
-must still hit "cordoned" and `provision` must still hit "provisioned":
-those are the wrong answers the words exist to catch. So a must-not word
-must **start** at a word boundary, and may run on into a longer word.
+Whole-word matching was considered and turned down. `cordon` must still
+hit "cordoned" and `provision` must still hit "provisioned": those are the
+wrong answers the words exist to catch.
+
+Start-of-word matching for every must-not word was approved in chat, then
+turned down while planning. It lets 0920's wrong answer on exam row 197,
+"the pod's node has a MemoryPressure condition", pass: `pressure` sits
+inside "memorypressure", not at its start. `tests/test_answer_keys.py`
+pins that answer at 0.
+
+So a must-not word follows the same length rule as a key (§6): 3 letters
+or fewer must start at a word, longer is a substring as today. On the
+exam that changes only `tag`. Every number in this spec was measured with
+this rule.
 
 ### 5. The cleaning step leaves hyphens and underscores
 
 NFKC keeps a non-ASCII hyphen (U+2010 to U+2015) as it is, and `_` is not a
 space. So "init‐container" (U+2010) and `init_container` slip past all
-three init-container spellings. The cleaning step has a twin in `gold.py`,
-and a test keeps the two equal. Measured with both changed: 0 of 8,000 pool
+three init-container spellings. The cleaning step has a twin in `gold.py`.
+No test keeps the two equal today; 4b-4 adds one. Measured with both changed: 0 of 8,000 pool
 rows and 0 of 249 exam rows change by a byte.
 
 ### 6. Three kit keys are 3 letters
@@ -156,20 +166,21 @@ Measured: the three cut-paste bots still score 0 of 197.
 
 ### 4 and 6. One matcher for keys and must-not words
 
-A new helper, `_starts_word(text, word, *, negatable)`:
-- It finds `word` where it starts at a word boundary (`\b` + the escaped
-  word, no `\b` at the end).
+A new constant, `SHORT_WORD_MAX = 3`, and a new helper,
+`_word_hits(text, word, *, negatable)`:
+- A word of `SHORT_WORD_MAX` letters or fewer is found only where it starts
+  a word: no letter, digit or `_` just before it (`(?<!\w)` + the escaped
+  word, nothing at the end). A longer word is found anywhere, as today.
 - When `negatable` is true, a hit with a `NEGATORS` word or an "n't" in the
   24 characters before it does not count, the same as
   `_word_bounded_signal`.
 - It returns whether any hit counts.
 
 `_keywords_match` then reads:
-- A key of 3 letters or fewer: `_starts_word(c, key, negatable=False)`. A
-  key is never negatable: "not a tag" holding the key is not the grader's
-  concern, and G3b and must-not words cover wrong answers.
-- A longer key: a substring, as today.
-- A must-not word: `_starts_word(c, word, negatable=True)`.
+- A key: `_word_hits(c, key, negatable=False)`. A key is never negatable:
+  "not a tag" holding the key is not the grader's concern, and G3b and
+  must-not words cover wrong answers.
+- A must-not word: `_word_hits(c, word, negatable=True)`.
 
 `job2` and `cause_acc` both call `_keywords_match`, so both get the rule.
 The docstrings of `_keywords_match` and `job2` say how it works now.
@@ -199,10 +210,12 @@ New tests, in `tests/test_score.py` unless named:
 - **Must-not "not".** The answer "the main container, not an init
   container, is killed at its memory limit" passes. "killed in the init
   container" still fails. "the node is cordoned" still fails on `cordon`.
-- **Must-not start.** `tag` does not hit "stage" or "outage".
+- **Must-not start.** `tag` does not hit "stage" or "outage". `pressure`
+  still hits "MemoryPressure"; "no MemoryPressure" does not count.
 - **Short key start.** `tag` does not pass "stage"; it passes "tags".
 - **Cleaning.** `init_container` and "init‐container" (U+2010) fold to
-  the plain spelling, in both twins. The twin test still passes.
+  the plain spelling, in both twins. A new twin test gives both the
+  same strings and expects the same answers.
 - **Exam probes.** The three probe answers above, on `_corpus_rows()`,
   pinned at their after-numbers: label 197 of 197, "not" 197 of 197,
   "stage" 191 of 197. A fourth probe pins the capital-decoy bot's
