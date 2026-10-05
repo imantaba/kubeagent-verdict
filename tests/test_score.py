@@ -7,6 +7,7 @@ import pytest
 
 from kubeagent_verdict.contract import NONE_OF_THESE, TRUNCATION_MARKER
 from kubeagent_verdict.dataset import cases, catalog, generate
+from kubeagent_verdict.dataset import gold as dataset_gold
 from kubeagent_verdict.evals import score
 
 ROW = {
@@ -570,13 +571,21 @@ def test_job2_guards_a_none_of_these_workload_too():
     2026-09-29 (Spec 4a): this test used a made-up decoy, `none_of_these`.
     That decoy is 1 word, and G2 now skips a decoy under 3 words, so the
     reply passes it. G3b matches a whole own line of any length, so a
-    made-up own line shows the order instead."""
+    made-up own line shows the order instead.
+
+    2026-10-05 (Spec 4b-4): the cleaning step folds `_` to a space. Own
+    lines are cleaned text, so the made-up own line is the cleaned form
+    now. And the made-up decoy cleans to `none of these`, 3 words, so G2
+    tests it again and zeroes the reply. No exam decoy has a `_`: the gold
+    reply and every bot pin are unchanged."""
     wm = {"job": 2, "decided": False, "expected_cause": score.NONE_OF_THESE}
     reply = {"cause": score.NONE_OF_THESE, "confidence": "medium", "rationale": "r"}
     assert score.job2(wm, reply, []) == 1.0
-    assert score.job2(wm, reply, [], own_lines={score.NONE_OF_THESE}) == 0.0
-    # 2026-09-29 (Spec 4a): G2 skips a 1-word decoy 0.0 -> 1.0
-    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 1.0
+    # 2026-10-05 (Spec 4b-4): own lines are cleaned text; was {score.NONE_OF_THESE}
+    assert score.job2(wm, reply, [],
+                      own_lines={score._norm_cause(score.NONE_OF_THESE)}) == 0.0
+    # 2026-10-05 (Spec 4b-4): the decoy cleans to 3 words, so G2 tests it; was 1.0
+    assert score.job2(wm, reply, [], decoys=[score.NONE_OF_THESE]) == 0.0
 
 
 def test_job2_missing_reply_still_scores_zero_with_the_guard_on():
@@ -600,6 +609,30 @@ def test_norm_cause_folds_full_width_letters_first():
     """NFKC runs before the lowercase, so full-width letters, a full-width
     space and a full-width period fold to their plain forms."""
     assert score._norm_cause("ＭＥＭＯＲＹ　Ｌｉｍｉｔ．") == "memory limit"
+
+
+@pytest.mark.parametrize("twin", [score, dataset_gold], ids=["score", "gold"])
+def test_norm_cause_folds_unicode_hyphens_and_underscores(twin):
+    """2026-10-05 (Spec 4b-4). NFKC keeps U+2010 to U+2015 as they are, and
+    `_` is not a space. So "init‐container" and `init_container` used to
+    slip past all three init-container must-not spellings. The cleaning
+    step now folds those dashes to `-` and `_` to a space, after NFKC,
+    because NFKC can make some of them (a full-width `＿` becomes `_`)."""
+    for dash in map(chr, range(0x2010, 0x2016)):
+        assert twin._norm_cause(f"Init{dash}Container") == "init-container", hex(ord(dash))
+    assert twin._norm_cause("init_container") == "init container"
+    assert twin._norm_cause("ＩＮＩＴ＿ＣＯＮＴＡＩＮＥＲ") == "init container"
+
+
+def test_the_two_cleaning_steps_agree():
+    """`gold._norm_cause` is a copy of `score._norm_cause`, so the dataset
+    package never imports the grader. Nothing kept the two equal before
+    2026-10-05 (Spec 4b-4). This test does: same input, same output."""
+    samples = ["Init‑Container", "  Node Worker-2 under MEMORY pressure. ",
+               "none_of_these", "ＩＮＩＴ＿ＣＯＮＴＡＩＮＥＲ", "a—b", "", "x.",
+               "tab\there", "ＭＥＭＯＲＹ　Ｌｉｍｉｔ．"]
+    for s in samples:
+        assert score._norm_cause(s) == dataset_gold._norm_cause(s), repr(s)
 
 
 def test_job2_guard_g2_finds_a_decoy_written_in_full_width_letters():

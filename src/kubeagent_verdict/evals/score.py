@@ -597,12 +597,18 @@ def _suggestion_strings(prompt: str) -> set[str]:
     return out
 
 
+# U+2010 to U+2015 (hyphen, non-breaking hyphen, figure dash, en dash, em
+# dash, horizontal bar) fold to "-", and "_" to a space (2026-10-05, Spec 4b-4).
+_FOLD = str.maketrans({**{chr(c): "-" for c in range(0x2010, 0x2016)}, "_": " "})
+
+
 def _norm_cause(s: str) -> str:
     """One cleaning step for every cause the grader reads: NFKC first, so a
-    full-width letter, space or period folds to its plain form, then
-    lowercase, strip, trailing periods off, and runs of whitespace
-    squeezed to one space."""
-    return " ".join(unicodedata.normalize("NFKC", str(s)).lower().strip().rstrip(".").split())
+    full-width letter, space or period folds to its plain form, then odd
+    hyphens to "-" and "_" to a space (`_FOLD`), then lowercase, strip,
+    trailing periods off, and runs of whitespace squeezed to one space."""
+    folded = unicodedata.normalize("NFKC", str(s)).translate(_FOLD)
+    return " ".join(folded.lower().strip().rstrip(".").split())
 
 
 # Job 2 grades most of its workloads by keyword containment rather than exact
