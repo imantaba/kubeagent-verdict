@@ -8,7 +8,7 @@ from collections.abc import Iterable, Sequence
 from typing import NamedTuple
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import render, rules
+from kubeagent_verdict.dataset import catalog, render, rules
 from kubeagent_verdict.dataset import shared_origin as so
 
 # Verbatim port of the grader's own-lines reader (evals/score.py), kept here
@@ -136,6 +136,7 @@ class RowGold(NamedTuple):
     keys: tuple[str, ...]
     rationale: str
     linked: bool
+    must_not: tuple[str, ...] = ()
 
 
 class Gold(NamedTuple):
@@ -201,9 +202,14 @@ def _row_gold(row: so.Row, own: list[str], built: so.Built) -> RowGold:
         anchors = anchor_lines(own, row)
         if any(anchor in ln for ln in anchors):
             check_keys(answer.keys, anchors=anchors, own=own)
-            return RowGold("named", so._sub(answer.cause, row.names, built.draw),
-                           answer.confidence, answer.keys, answer.rationale,
-                           answer.link and built.world_name == "broken")
+            cause = so._sub(answer.cause, row.names, built.draw)
+            init = t.status.startswith("Init:") or t.issue.startswith("Init:")
+            must_not = answer.must_not + (() if init else catalog.INIT_CONTAINER)
+            hit = [w for w in must_not if w in cause.lower()]
+            if hit:
+                raise ValueError(f"{row.key}: gold {cause!r} holds its own must-not word {hit[0]!r}")
+            return RowGold("named", cause, answer.confidence, answer.keys, answer.rationale,
+                           answer.link and built.world_name == "broken", must_not)
     return RowGold("none_of_these", "", "low", (),
                    f"{t.none_phrase}; none of its own lines says why.", False)
 

@@ -92,6 +92,11 @@ class CatalogEntry:
 # "initial" and "initialize" would trip it.
 INIT_CONTAINER = ("init container", "init-container", "initcontainer")
 
+# Words that name a registry fault rather than a missing tag (exam rebuild,
+# item 4). G2 skips the bad-tag entry's 2-word decoy, so these do its job.
+REGISTRY_FAULT = ("unreachable", "refused", "timed out", "timeout", "unauthorized",
+                  "authentication", "rate limit", "dial tcp", "no such host")
+
 
 def all_entries() -> tuple[CatalogEntry, ...]:
     from kubeagent_verdict.dataset import entries_kinds, entries_slugs

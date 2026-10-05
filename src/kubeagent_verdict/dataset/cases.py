@@ -826,7 +826,7 @@ def _shared_origin_example(case: str, built: so.Built, **extra) -> Example:
                             "confidence": rg.confidence, "rationale": rg.rationale})
         metas[row.key] = render.workload_meta(row.result, expected_cause=cause,
                                               own_cause_keywords=list(rg.keys),
-                                              own_cause_must_not=[])
+                                              own_cause_must_not=list(rg.must_not))
         # `rules.decide` skips ruled-out candidates, so decisions and
         # candidates do not line up: ask gold which causes the rules threw out.
         decoys[row.key] = gold.excluded_causes(row)

@@ -37,6 +37,7 @@ class Answer:
     rationale: str
     confidence: str = "high"
     link: bool = False
+    must_not: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.anchor.strip():
@@ -54,6 +55,11 @@ class Answer:
             raise ValueError(f"{self.cause!r}: the rationale is empty")
         if self.confidence not in CONFIDENCES:
             raise ValueError(f"{self.cause!r}: confidence {self.confidence!r}")
+        for w in self.must_not:
+            if not w or w != w.lower() or w.strip() != w:
+                raise ValueError(f"{self.cause!r}: must-not word {w!r} is not lowercase and trimmed")
+            if w in self.cause.lower():
+                raise ValueError(f"{self.cause!r}: must-not word {w!r} is inside the cause")
 
 
 def validate_answer(a: Answer) -> None:
@@ -242,7 +248,8 @@ _STORIES: tuple[Story, ...] = (
                 healthy=Answer(anchor="context deadline exceeded after 1s",
                                cause="its readiness probe exceeded its deadline on a slow dependency",
                                keys=("deadline", "exceeded"), confidence="medium",
-                               rationale="its probe event shows a deadline exceeded"),
+                               rationale="its probe event shows a deadline exceeded",
+                               must_not=("containerd",)),
                 none_phrase="its readiness probe fails"),
             VictimText(
                 workload_kind="StatefulSet", status="Running",
@@ -1083,7 +1090,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="failed to create containerd task: no space left on device",
                               cause="its container cannot start because containerd failed "
                                     "to create its task, with no space left on the device",
-                              keys=("containerd", "task"), confidence="medium",
+                              keys=("space", "containerd"), confidence="medium",
                               rationale="its start event says the device has no space left"),
                 events_healthy=(("Failed", ("Error: failed to create containerd task: no space left "
                                  "on device. Ephemeral storage: pod limit 1Gi, currently used 1Gi"), 3),),

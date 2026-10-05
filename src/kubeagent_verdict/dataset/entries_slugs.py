@@ -1,6 +1,6 @@
 """Slug-keyed catalog entries — one per chaos fault slug (17 when complete)."""
 
-from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, CatalogEntry
+from kubeagent_verdict.dataset.catalog import INIT_CONTAINER, REGISTRY_FAULT, CatalogEntry
 from kubeagent_verdict.dataset.objects import NODE_NOT_READY, Fresh, Object
 from kubeagent_verdict.dataset.stories import Answer
 
@@ -56,7 +56,7 @@ ENTRIES = [
             ("Failed", "Error: ErrImagePull", 1),
             ("BackOff", 'Back-off pulling image "{image}"', 1),
         ),
-        own_cause_must_not=INIT_CONTAINER,
+        own_cause_must_not=INIT_CONTAINER + REGISTRY_FAULT,
         answer=Answer(
             anchor="\": not found",
             cause="the image tag does not exist in the registry",
@@ -153,6 +153,7 @@ ENTRIES = [
             rationale="The readiness probe times out, and kubeagent names the default-deny "
                       "network policy that selects its pods as a possible cause, so the policy "
                       "likely blocks the probe."),
+        own_cause_must_not=("liveness",),
         none_phrase="its readiness probe fails",
         network_policies=("default-deny",),
         objects=(
