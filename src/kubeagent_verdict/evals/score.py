@@ -213,8 +213,8 @@ def _is_job2_keyword_graded(meta_workload: dict,
 # paste bot through.
 #
 # No case lists a workload's own gold as its decoy (pinned by
-# tests/test_multi_decoys.py since Spec 4b-3). Job 1 is still skipped:
-# widening the decoy gate to job 1 is a grader change, left for 4b-4.
+# tests/test_multi_decoys.py since Spec 4b-3). So the decoy gate tests
+# job-1 workloads too (2026-10-05, Spec 4b-4).
 
 _SECTION_MARK = re.compile(r"^== (BEGIN|END) (\w+) ==$")
 _READ_LABEL = re.compile(r"^== (.+) ==$")
@@ -828,11 +828,12 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         # (not `False`) on a row with no decoy anywhere, so an unmeasured row
         # never averages into `decoy_rate` as a free pass.
         #
-        # Only job-2 workloads are tested (2026-09-29, Spec 4a). The 4a
-        # reason (a decided workload's own cause in its decoy list) stopped
-        # holding at 4b-1, and 4b-3 pins it false; testing job 1 is left for
-        # 4b-4. A row with no job-2 workload that
-        # carries a decoy has nothing to test, and `named_decoy` is None.
+        # Job-1 and job-2 workloads are both tested (2026-10-05, Spec 4b-4).
+        # Spec 4a tested job 2 only: a decided workload's own cause could sit
+        # in its decoy list. 4b-3 pins that no case does that. Both sides are
+        # cleaned by `_norm_cause` before the exact compare, so a decoy copied
+        # with capitals or a trailing period counts. A row with no workload
+        # that carries a decoy has nothing to test, and `named_decoy` is None.
         per_workload_decoys = meta.get("decoy_by_workload") or {}
         # Per-workload keys first, in their own order, then any flagged
         # workload `decoy_by_workload` never mentioned -- sorted, so the scan
@@ -840,14 +841,13 @@ def evaluate(rows: list[dict], chat_fn, *, grade_job2: bool = True) -> list[dict
         extra_workloads = sorted(w for w in flagged if w not in per_workload_decoys)
         decoy_hits: list[bool] = []
         for workload in [*per_workload_decoys, *extra_workloads]:
-            if ((meta.get("workloads") or {}).get(workload) or {}).get("job") != 2:
-                continue
             decoys = _workload_decoys(meta, workload)
             if not decoys:
                 continue
             got = by_workload.get(workload)
             if got is not None:
-                decoy_hits.append(str(got.get("cause", "")) in decoys)
+                decoy_hits.append(_norm_cause(got.get("cause", ""))
+                                  in {_norm_cause(d) for d in decoys})
         named_decoy = any(decoy_hits) if decoy_hits else None
 
         # Word count alone picks the winner in 15 of the 19 trainable catalog

@@ -996,6 +996,17 @@ def test_decoy_rate_is_zero_when_the_model_reads_the_evidence():
     assert board["overall"]["cause_accuracy"]["rate"] == 1.0
 
 
+def test_decoy_rate_cleans_both_sides_before_it_compares():
+    """2026-10-05 (Spec 4b-4). The decoy compare used the raw answer, so a
+    decoy copied with capitals or a trailing period did not count as
+    naming it. Both sides are cleaned by `_norm_cause` now. It is still an
+    exact match: a hedge that holds the decoy is G2's job, not this one."""
+    board = score.scoreboard(_decoy_row("Node Worker-2 under MEMORY pressure."))
+    assert board["overall"]["decoy_rate"] == {"rate": 1.0, "n": 1}
+    board = score.scoreboard(_decoy_row("memory limit too low, or node worker-2 under memory pressure"))
+    assert board["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
+
+
 def test_markdown_carries_the_denominator():
     board = score.scoreboard(_decoy_row("node worker-2 under memory pressure"))
     md = score.render_markdown(board)
@@ -1578,29 +1589,32 @@ def test_decoy_gate_is_none_when_no_workload_carries_a_decoy():
     assert results[0]["named_decoy"] is None
 
 
-def test_decoy_gate_is_none_when_the_only_decoy_sits_on_a_job1_workload():
-    """`decoy_rate` counts job-2 workloads only (2026-09-29, Spec 4a).
+def test_decoy_gate_tests_a_job1_workload_too():
+    """2026-10-05 (Spec 4b-4): job-1 workloads count in `decoy_rate` again.
 
-    On a `shared_origin_probe` row, `decoy_by_workload` lists a decided
-    workload's own decided cause. That cause IS the job-1 gold, so the right
-    answer named its own "decoy" and read as a hit. A row whose only
-    decoy-bearing workload is job 1 has nothing to test: `named_decoy` is
-    None and the row stays out of `decoy_rate`. Before: True, and
-    `decoy_rate` {1.0, 1}."""
-    wm = _node_workload(cause="node worker-1 (no kubelet lease)",
-                        evidence="Ready condition is True, but the kubelet lease was not re-read",
-                        outcome="unverified")
-    gold = _one_verdict("shop/api", wm["decided_cause"], "the kubelet lease was not re-read")
+    This test was `..._is_none_when_the_only_decoy_sits_on_a_job1_workload`
+    and pinned `named_decoy` None there. Spec 4a skipped job 1 because a
+    decided workload's own cause could be listed as its decoy, so the right
+    answer named its own "decoy". Since Spec 4b-3 no case does that
+    (`tests/test_multi_decoys.py`). So a job-1 workload's decoy is tested:
+    the right answer reads False, the decoy reads True."""
+    wm = _node_workload(cause="node worker-1 (disk pressure)")
+    gold = _one_verdict("shop/api", wm["decided_cause"])
     row = {"messages": [{"role": "system", "content": "sys"},
                         {"role": "user", "content": "user shop/api"},
                         {"role": "assistant", "content": gold}],
-           "meta": {"case": "shared_origin_probe", "label": "none",
-                    "decoy_by_workload": {"shop/api": [wm["decided_cause"]]},
+           "meta": {"case": "contradiction_probe", "label": "none",
+                    "decoy_by_workload": {"shop/api": ["node worker-2 (NotReady)"]},
                     "workloads": {"shop/api": wm}}}
 
-    results = score.evaluate([row], lambda _messages: gold)
-    assert results[0]["named_decoy"] is None
-    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": None, "n": 0}
+    right = score.evaluate([row], lambda _messages: gold)
+    assert right[0]["named_decoy"] is False
+    assert score.scoreboard(right)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 1}
+
+    wrong = score.evaluate([row], lambda _messages: _one_verdict("shop/api",
+                                                                 "node worker-2 (NotReady)"))
+    assert wrong[0]["named_decoy"] is True
+    assert score.scoreboard(wrong)["overall"]["decoy_rate"] == {"rate": 1.0, "n": 1}
 
 
 def test_the_gold_reply_names_no_decoy_on_any_exam_row():
@@ -1614,12 +1628,17 @@ def test_the_gold_reply_names_no_decoy_on_any_exam_row():
     answer names it. {0.0526, 190} -> {0.0, 128}.
 
     2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines. The exam now
-    has 121 job-2 workloads that carry a decoy, was 128. The gold reply still names none of them."""
+    has 121 job-2 workloads that carry a decoy, was 128. The gold reply still names none of them.
+
+    2026-10-05 (Spec 4b-4): job-1 workloads are tested too. 174 exam rows
+    carry a decoy on a job-1 or job-2 workload, was 121. The gold reply
+    still names none of them."""
     rows = _corpus_rows()
     replies = {r["messages"][1]["content"]: r["messages"][2]["content"] for r in rows}
     results = score.evaluate(rows, lambda messages: replies[messages[1]["content"]])
     # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was 128.
-    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 121}
+    # 2026-10-05 (Spec 4b-4): job-1 workloads are tested too; was 121.
+    assert score.scoreboard(results)["overall"]["decoy_rate"] == {"rate": 0.0, "n": 174}
 
 
 # --------------------------------------------------- evaluate(): job1/job2/job3
@@ -4080,3 +4099,22 @@ def test_a_wrong_answer_that_says_stage_for_tag_fails_on_the_exam():
     assert _count_changed(rows, _swap_tag_for_stage) == 6
     board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _swap_tag_for_stage)))
     assert board["jobs"]["job2"] == {"rate": 0.9695, "n": 197}
+
+
+def _name_the_first_decoy_in_capitals(row: dict, verdict: dict) -> None:
+    decoys = score._workload_decoys(row["meta"], verdict["workload"])
+    if decoys:
+        verdict["cause"] = decoys[0].upper() + "."
+
+
+def test_a_decoy_named_in_capitals_counts_on_the_exam():
+    """Every workload with a decoy answers with its first decoy, in
+    capitals, plus a period: 200 answers on 174 rows. Before 2026-10-05
+    (Spec 4b-4), the raw compare missed every one and only job-2 workloads
+    were tested: {0.0, 121}. Now both sides are cleaned and job 1 counts:
+    {1.0, 174}."""
+    rows = _corpus_rows()
+    assert _count_changed(rows, _name_the_first_decoy_in_capitals) == 200
+    board = score.scoreboard(score.evaluate(
+        rows, _gold_bot_with(rows, _name_the_first_decoy_in_capitals)))
+    assert board["overall"]["decoy_rate"] == {"rate": 1.0, "n": 174}
