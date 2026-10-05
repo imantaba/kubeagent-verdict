@@ -903,6 +903,11 @@ What moved, and why:
   text as a decoy. Those were the 8 of 190 rows. Counting job-2
   workloads only, 0920 names a decoy on 0 of 128 rows. The gold reply
   moves the same way: 10 of 190 rows before, 0 of 128 now.
+  (2026-10-05, Spec 4b-4: job-1 workloads count again. The reason for the
+  skip is gone: since Spec 4b-3 no case lists a workload's own cause as
+  its decoy, and a test pins it. On the exam 174 rows now carry a decoy,
+  was 121. The gold reply names a decoy on 0 of 174. 0920 has not been
+  run on this exam, so its number is not re-measured.)
 - **0920's 5 part-line copies still pass.** Each cuts 3 words off the
   front of a printed line, and G3b crops at most 2. See known limit 11.
 
@@ -1218,6 +1223,12 @@ against these.
     pinned number moved. The code does what the spec says. It still means
     job 2 can mark a model wrong for using kubeagent's own words. Spec 4b
     owns it. One idea: never cut past a word that ends in `:`.
+    (2026-10-05, Spec 4b-4: closed. G3b never cuts past a word that ends
+    in `:`. The whole line, or the line with words before the label cut,
+    still counts. On the exam, 50 job-2 workloads carry a `log cause:`
+    line. A probe that adds the label's words to each right answer scored
+    167 of 197 before and 197 of 197 now. The three cut-paste bots still
+    score 0 of 197.)
 14. **A must-not word is a plain substring, and it cannot see "not".**
     (Added 2026-09-29, after Spec 4a's final review.) Must-not words match
     anywhere in the cleaned answer, the same way keywords do. So `tag`
@@ -1231,6 +1242,20 @@ against these.
     so no pinned number moved. The spec chose substring matching on
     purpose, and kept bare `init` off the list because `initial` would
     trip it. Spec 4b owns the rest.
+    (2026-10-05, Spec 4b-4: mostly closed. A must-not word with "not",
+    "no", "n't" or another negator in the 24 characters before it no
+    longer counts. A probe that adds ", not an init container" or "; the
+    node is not cordoned" to each right answer scored 146 of 197 before
+    and 197 of 197 now. A key or must-not word of 3 letters or fewer must
+    start a word, so `tag` no longer hits "stage", "outage" or
+    "percentage". A probe that writes "stage" for `tag` scored 197 of 197
+    before (6 wrong answers passed) and 191 of 197 now. Longer words stay
+    substrings on purpose: `cordon` must hit "cordoned", and `pressure`
+    must hit "MemoryPressure", 0920's wrong answer on exam row 197. Still
+    open: a negator more than 24 characters back, as in "no node is
+    cordoned or under memory pressure". That answer still scores 0. Also
+    open: a curly apostrophe. "isn’t" (U+2019) is not read as "n't", so a
+    must-not word right after it still counts.)
 15. **`none_of_these` is 13.1% of the train answers.** (Added 2026-10-04,
     Spec 4b-1.) A victim's gold names a cause only when its anchor is in
     that victim's own lines. Where it is not, the gold is `none_of_these`.

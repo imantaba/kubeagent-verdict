@@ -922,6 +922,8 @@ the why is recorded.
     Still open for 4b-4: the guard for 4+-letter kit keys, widening the
     decoy gate to job 1, and the sum half of IS-22. That half fails on
     4b-1 stories, exam rows included, so it waits for the exam rebuild.
+    (2026-10-05: 4b-4 took only the grader items. The rest moved to the
+    exam rebuild. See the "2026-10-05 — Spec 4b-4" entry below.)
   - 4b-4: grader leftovers.
     - model-card limits 13 and 14;
     - hyphen and underscore folding in the cleaning step;
@@ -1102,3 +1104,77 @@ and kubeagent does the same (`internal/investigate/gather.go:146`). See §6
 of the spec.
 
 Full suite: 1,940 passed. Ruff: clean.
+
+### 2026-10-05 — Spec 4b-4: grader leftovers
+
+No pin moved. No exam, train or val byte changed. `FROZEN_SLICE_SHA256`,
+`EVAL_SET_SHA256` and `GRADED_VIEW_SHA256` stay as they were. Only the
+grader changed: `src/kubeagent_verdict/evals/score.py`, and the cleaning
+twin in `src/kubeagent_verdict/dataset/gold.py`. The design is in
+`docs/superpowers/specs/2026-10-05-grader-leftovers-design.md`.
+
+The six changes, with what each one moves on the exam (249 rows, 197
+job-2 workloads). A "probe" is the gold reply with one change.
+1. The decoy gate tests job 1. `decoy_rate` counts 174 rows, was 121.
+   The gold reply names a decoy on 0 of 174.
+2. The decoy compare cleans both sides with `_norm_cause`. A probe that
+   names each first decoy in capitals plus a period: `decoy_rate`
+   {0.0, 121} before, {1.0, 174} after.
+3. G3b never cuts past a word that ends in `:` (model-card limit 13). A
+   probe that adds a `log cause:` label's words to 50 right answers: job 2
+   167 of 197 before, 197 of 197 after.
+4. A must-not word with a negator in the 24 characters before it does not
+   count (model-card limit 14). A probe that rules out the must-not word
+   in 51 right answers: job 2 146 of 197 before, 197 of 197 after.
+5. The cleaning step folds U+2010 to U+2015 to `-` and `_` to a space,
+   after NFKC, in both twins. A new test keeps the twins equal.
+6. A key or must-not word of 3 letters or fewer must start a word
+   (`SHORT_WORD_MAX = 3`). This is the grader's answer to the 4+-letter
+   kit-key guard. A probe that writes "stage" for `tag` on 6 workloads:
+   job 2 197 of 197 before (6 wrong answers passed), 191 of 197 after.
+
+What did not move: the gold reply scores 1.0 on job 1 (102), job 2 (197)
+and job 3 (40). The hedge bot scores job 2 0.4162 of 197. The three
+cut-paste bots score job 2 0.0 of 197. The bars did not move.
+
+Still open in the grader: a negator more than 24 characters back, as in
+"no node is cordoned or under memory pressure", still scores 0. And the
+negation check does not see a curly apostrophe: "isn’t" (U+2019) is not
+read as "n't", so a must-not word right after it still counts. Both are
+written down in model-card limit 14. No code changed for them.
+
+Hand re-pins, each dated 2026-10-05 (Spec 4b-4) in a comment:
+- `test_the_gold_reply_names_no_decoy_on_any_exam_row`: `decoy_rate` n
+  121 to 174.
+- `test_job2_guards_a_none_of_these_workload_too`: the made-up own line
+  is the cleaned `none of these` now. The made-up decoy `none_of_these`
+  cleans to 3 words, so G2 tests it: 1.0 to 0.0. No exam decoy has a `_`.
+
+Test changes:
+- `test_decoy_gate_is_none_when_the_only_decoy_sits_on_a_job1_workload`
+  is now `test_decoy_gate_tests_a_job1_workload_too`.
+- `test_job2_guard_g3b_finds_a_line_with_its_first_one_or_two_words_cut`
+  uses a candidate line now. Its old line starts with the label `issue:`.
+- New in `tests/test_score.py`: the fold test (both twins), the twin
+  test, the G3b label test, the negator test, the short-word test, the
+  cleaned-compare test, and four exam probes.
+
+Left for the exam rebuild. These were on 4b-4's list, but each changes
+exam rows, so they move with the rebuild and its one re-pin:
+- IS-22's sum half: the reasons in "0/N nodes are available: ..." add up
+  to N. It fails on 4b-1 stories, exam rows included.
+- node-disk-pressure's ContainerStartError keys: ("containerd", "task")
+  to ("space", "containerd").
+- The weak pairs: 3 left (see the 4b-2 entry).
+- The G2 registry skip: the bad-image-tag key has no must-not word for a
+  registry fault.
+- Must-not words for the shared-origin family.
+- B6: a refused read's short "is forbidden" text.
+- The tighter checker checks: service-line wording and sort order, the
+  network-policy gate, a message-only NotReady line over 120 runes, lease
+  ages 0s to 39s, an extra system line at 10 rows, and ANS-2 counting
+  ruled-out lines. They move no row, but they belong with the build.
+- B4's fourth arm, the shared-cause cap. It needs a new Go capture.
+- image-pull-secret-expired graded as unverified.
+
+Full suite: 1,951 passed. Ruff: clean.
