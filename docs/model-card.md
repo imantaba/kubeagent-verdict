@@ -797,6 +797,10 @@ Seven limits on this reading, carried from the design that scored it:
 
 ### 0920 against the Spec 3 exam (2026-09-28)
 
+(2026-10-05, exam rebuild: this section scored the exam as it was before the
+2026-10-05 rebuild. Nothing was re-scored, so no number here compares with the
+rebuilt exam.)
+
 (2026-10-04, Spec 4b-1: this section scored the exam's shared-origin rows as
 they were before 2026-10-04. Spec 4b-1 rebuilt those 20 rows, and 20 of the
 20 user messages moved. The other 229 rows are byte for byte the same.
@@ -869,6 +873,10 @@ Spec 4, then 0920 live again, then the retrain.
 
 ### 0920 re-scored under the 4a grader (2026-09-29)
 
+(2026-10-05, exam rebuild: this section scored the exam as it was before the
+2026-10-05 rebuild. Nothing was re-scored, so no number here compares with the
+rebuilt exam.)
+
 (2026-10-04, Spec 4b-1: this section scored the exam's shared-origin rows as
 they were before 2026-10-04. Spec 4b-1 rebuilt those 20 rows, and 20 of the
 20 user messages moved. The other 229 rows are byte for byte the same.
@@ -908,6 +916,8 @@ What moved, and why:
   its decoy, and a test pins it. On the exam 174 rows now carry a decoy,
   was 121. The gold reply names a decoy on 0 of 174. 0920 has not been
   run on this exam, so its number is not re-measured.)
+  (2026-10-05, exam rebuild: n did not move. 174 exam rows still carry a
+  decoy, and the gold reply still names one on 0 of 174.)
 - **0920's 5 part-line copies still pass.** Each cuts 3 words off the
   front of a printed line, and G3b crops at most 2. See known limit 11.
 
@@ -1210,6 +1220,12 @@ against these.
     The cost: a hedge that names the cause and that decoy passes too. The
     hedge bot goes from 32 to 61 of 177 = 0.3446, still under the 0.7
     bar.)
+    (2026-10-05, exam rebuild: the other side is closed too. The bad-image-tag
+    key now has must-not words for a registry fault. An answer that says
+    "the image registry is unreachable" or "the registry returned
+    unauthorized" used to pass the key `("image", "registry")`. Now it
+    scores 0 on each of the exam's 30 bad-image-tag workloads. An answer
+    that rules the fault out still scores 1.0. A test pins both.)
 13. **G3b also zeroes a right answer written in a `log cause:` label's
     words.** (Added 2026-09-29, after Spec 4a's final review.) Some own
     blocks print a line like `log cause: bad command or entrypoint`. G3b
@@ -1272,6 +1288,16 @@ against these.
     comma, still scores 0. Also open: a curly apostrophe. "isn’t" (U+2019)
     is not read as "n't", so a must-not word right after it still
     counts.)
+    (2026-10-05, exam rebuild: the numbers moved. Story victims that are not
+    an init container now carry "init container" as a must-not word. The
+    right-answer probe changes 75 answers, was 51, and still scores 197 of
+    197. The wrong-answer probe changes 75, was 51, and scores 122 of 197 =
+    0.6193, was 146 of 197 = 0.7411. The 24 extra answers are 14
+    `shared_origin_probe` and 10 `shared_origin_decoy_probe` workloads, and
+    each is wrong, so the rate fell by exactly 24 of 197. On train and val,
+    0 gold answers hold their own must-not word: 0 of 6,584 and 0 of 766.
+    The weak pairs on the exam: 1, was 3. In the pool: 162, was 178. The 16
+    lost are benign: no gold is wrong.)
 15. **`none_of_these` is 13.1% of the train answers.** (Added 2026-10-04,
     Spec 4b-1.) A victim's gold names a cause only when its anchor is in
     that victim's own lines. Where it is not, the gold is `none_of_these`.
