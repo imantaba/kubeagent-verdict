@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from kubeagent_verdict import contract as c
-from kubeagent_verdict.dataset import generate, gold
+from kubeagent_verdict.dataset import cases, gather, generate, gold
 from kubeagent_verdict.evals import score
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,3 +147,47 @@ def test_no_non_multi_prompt_moves(build, split):
         if e.case == "multi":
             continue
         assert generate.to_row(e)["messages"][:2] == o["messages"][:2], (split, i)
+
+
+# --- test 3: a multi decoy list is what the prompt rules out -----------------
+
+def test_a_multi_decoy_list_is_what_the_prompt_rules_out(monkeypatch):
+    last = {}
+    real_gather, real_multi = gather.gather, cases.multi
+
+    def spy_gather(*a, **kw):
+        last["res"] = real_gather(*a, **kw)
+        return last["res"]
+
+    checked = 0
+
+    def spy_multi(*a, **kw):
+        nonlocal checked
+        ex = real_multi(*a, **kw)
+        res = last["res"]
+        for key, cands, result in zip(ex.meta["expected"], res.candidates, res.results):
+            assert ex.meta["decoy_by_workload"][key] == gold.excluded_from(cands, result), key
+            checked += 1
+        return ex
+
+    monkeypatch.setattr(gather, "gather", spy_gather)
+    monkeypatch.setattr(cases, "multi", spy_multi)
+    generate.generate(17, 800)
+    assert checked > 100
+
+
+# --- test 4: no workload lists its own gold as a decoy -----------------------
+
+def test_no_workload_lists_its_own_gold_as_a_decoy(build):
+    with_list = 0
+    for e in _all(build):
+        decoys = e.meta.get("decoy_by_workload") or {}
+        for key, w in (e.meta.get("workloads") or {}).items():
+            gold_cause = w.get("expected_cause") or ""
+            listed = decoys.get(key) or []
+            with_list += bool(listed)
+            if not gold_cause or gold_cause == c.NONE_OF_THESE:
+                continue
+            assert gold._norm_cause(gold_cause) not in {gold._norm_cause(d) for d in listed}, (
+                e.case, e.group, key)
+    assert with_list > 1000

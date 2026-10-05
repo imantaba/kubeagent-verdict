@@ -1110,15 +1110,10 @@ def multi(pairs: list[tuple[CatalogEntry, Names]], rng: random.Random,
                         budget=c.MAX_TOOL_CALLS - (healthy_read is not None))
     workloads = []
     decoy_by_workload: dict[str, list[str]] = {}
-    for (e, n), objects, candidates, result in zip(pairs, combined_objects,
-                                                    res.candidates, res.results):
+    for (e, n), candidates, result in zip(pairs, res.candidates, res.results):
         workloads.append(_workload(e, n, candidates, render.header_for(candidates),
                                    result=result))
-        trace = rules.attribute(objects, ns=n.ns, pod=n.pod, issue=e.issue)
-        # decoy_by_workload holds the decoy's cause STRING, as the prompt
-        # prints it, never the raw kind/name identifier.
-        decoy_by_workload[f"{n.ns}/{n.name}"] = [
-            shown.cause for raw, shown in zip(trace, candidates) if raw.obj.intent == "decoy"]
+        decoy_by_workload[f"{n.ns}/{n.name}"] = gold.excluded_from(candidates, result)
     group = "+".join(f"{e.key}:{n.ns}/{n.name}" for e, n in pairs)
     reads = res.reads
     if healthy_read is not None:
