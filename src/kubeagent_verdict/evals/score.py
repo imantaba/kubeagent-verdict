@@ -345,10 +345,12 @@ def _job2_guarded(cause: str, decoys: Iterable[str], own_lines: Iterable[str]) -
 def _g3b(c: str, own_lines: Iterable[str]) -> bool:
     """Whether the cleaned cause `c` holds one of `own_lines`, whole or with
     its first 1 or 2 words cut. A cut is made only when at least 3 words are
-    left, so a 3-word line is matched whole only. A cut is never made past
-    a word that ends in `:`, a label (2026-10-05, Spec 4b-4): cutting
-    `log cause:` off a line leaves the label's words, and a right answer
-    may use them."""
+    left, so a 3-word line is matched whole only. The 2-word cut is not
+    made when the line starts with the `log cause:` label (2026-10-05, Spec
+    4b-4): cutting it off leaves the label's words, and a right answer may
+    use them. Only that label is kept (2026-10-05, Spec 4b-4, final
+    review): a skip for every label lets a bot paste its own labelled lines
+    with the label cut off."""
     for line in own_lines:
         if not line:
             continue
@@ -358,7 +360,7 @@ def _g3b(c: str, own_lines: Iterable[str]) -> bool:
         for cut in (1, 2):
             if len(words) - cut < 3:
                 break
-            if any(w.endswith(":") for w in words[:cut]):
+            if cut == 2 and words[:2] == ["log", "cause:"]:
                 break
             if " ".join(words[cut:]) in c:
                 return True
@@ -381,6 +383,10 @@ def _keywords_match(cause: str, keywords: Iterable[str],
 # A key or must-not word this short must start a word. As a substring,
 # `tag` hits "stage" and "outage" (2026-10-05, Spec 4b-4).
 SHORT_WORD_MAX = 3
+# Job 2's negation window starts after the last clause mark (2026-10-05, Spec 4b-4, final review).
+_CLAUSE_MARK = re.compile(r"[,;:.()]| - ")
+# Job 2 seeks a negator in only the last 3 words (2026-10-05, Spec 4b-4, final review).
+NEGATION_WORDS = 3
 
 
 def _word_hits(text: str, word: str, *, negatable: bool) -> bool:
@@ -388,13 +394,17 @@ def _word_hits(text: str, word: str, *, negatable: bool) -> bool:
     `SHORT_WORD_MAX` letters or fewer counts only where it starts a word (no
     \\w just before it); it may run on, so `tag` hits "tags". A longer word
     counts anywhere, so `pressure` hits "memorypressure". When `negatable`,
-    a hit with a `NEGATORS` word or "n't" in the `NEGATION_WINDOW`
-    characters before it does not count, the same rule as
-    `_word_bounded_signal`."""
+    a hit with a `NEGATORS` word or "n't" just before it does not count.
+    The window is job 3's `NEGATION_WINDOW` characters, cut at the last
+    `_CLAUSE_MARK`, and only its last `NEGATION_WORDS` words (2026-10-05,
+    Spec 4b-4, final review). In job 2 a negator that belongs to another
+    word, as in "not ready due to memory pressure", would let a wrong
+    answer pass."""
     start = r"(?<!\w)" if len(word) <= SHORT_WORD_MAX else ""
     for m in re.finditer(start + re.escape(word), text):
         if negatable:
             window = text[max(0, m.start() - NEGATION_WINDOW):m.start()]
+            window = " ".join(_CLAUSE_MARK.split(window)[-1].split()[-NEGATION_WORDS:])
             if NEGATORS.search(window) or "n't" in window:
                 continue
         return True
@@ -685,6 +695,9 @@ def _keyword_exposure(meta: dict, prompt: str) -> tuple[int, int]:
     and not `any`. Anything looser would report an exposure the grader would
     not accept. The grader also applies NFKC (`_norm_cause`) and exposure does
     not; NFKC changes 0 of the exam's prompt texts, so the counts are the same.
+    Since 2026-10-05 (Spec 4b-4) the grader also folds dashes and `_`, and a
+    key of 3 letters or fewer must start a word. Exposure does neither. On
+    the exam the two counts still agree: 175 = 175.
 
     A workload that is not keyword-graded is absent from both counts, never a
     zero in the denominator -- the same contract `_rate` states.
