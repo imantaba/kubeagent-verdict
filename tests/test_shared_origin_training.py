@@ -946,7 +946,9 @@ def test_the_eval_set_is_two_hundred_and_forty_nine_rows():
 # keys); no prompt byte moves (tests/test_catalog_gold.py).
 # d7d609f9e63cb0d52c74a92f33242b8967dc46e4670924be0d15288d29ef941b ->
 # 660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3
-FROZEN_SLICE_SHA256 = "660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3"
+# 2026-10-05 (exam rebuild): was 660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3.
+# The rebuild moved exam prompts and golds; every banked scoreboard comparison restarts here.
+FROZEN_SLICE_SHA256 = "0b16a43329e8933f43f5438bc852910771f579834f0875ae37b150036d7d5370"
 
 # The whole exam, the frozen slice plus the ten `shared_origin_decoy_probe`
 # rows (263 until 2026-09-24, 252 since). First captured on `main` @
@@ -1100,7 +1102,9 @@ FROZEN_SLICE_SHA256 = "660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf
 # (tests/test_catalog_gold.py).
 # 0a9b308a210157c3147cdc8c5b39471cbb50522f27bd792e39fded423f525a0d ->
 # 94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e
-EVAL_SET_SHA256 = "94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e"
+# 2026-10-05 (exam rebuild): was 94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e.
+# The rebuild moved exam prompts and golds; decoy numbers from before it are not comparable.
+EVAL_SET_SHA256 = "70ccc5ae23033fdfd610cd48b849ca1d5d285d4edf5216e63a24c1301e46c0ee"
 
 
 def _digest(rows) -> str:

@@ -1151,7 +1151,10 @@ def test_every_job2_header_follows_kubeagents_rule():
 # entries' keys), not their prompts (Plan ruling 6; tests/test_catalog_gold.py).
 # 09de3501feceaab8ec014e7ccc5d187c3d88af50deef63dd030ef9cbaa87895a ->
 # 745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a
-OTHER_FAMILIES_SHA256 = "745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a"
+# 2026-10-05 (exam rebuild): was 745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a.
+# Prompt lines (scheduler, service, refused read) and must-not meta moved on these rows;
+# tests/test_exam_rebuild_moves.py checks that every changed prompt line is one of the three kinds.
+OTHER_FAMILIES_SHA256 = "a6c7ac5aae87571a24b43360784b1ee944eeee30c421cc3eea9b15d289863b58"
 
 
 def test_the_other_families_exam_rows_did_not_move():

@@ -67,7 +67,9 @@ from kubeagent_verdict.dataset import generate
 # anchors in own lines); its prompts did not -- tests/test_catalog_gold.py
 # proves no prompt byte moved against out/dataset-1004. Was
 # out/dataset-1004/test.jsonl.
-BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-1004-4b2" / "test.jsonl"
+# 2026-10-05 (exam rebuild): re-pointed, out/dataset-1004-4b2/test.jsonl ->
+# out/dataset-1005-exam/test.jsonl (the rebuilt exam's prompts and golds moved).
+BANK = Path(__file__).resolve().parents[1] / "out" / "dataset-1005-exam" / "test.jsonl"
 
 pytestmark = pytest.mark.skipif(
     not BANK.exists(), reason=f"banked exam not present at {BANK}")

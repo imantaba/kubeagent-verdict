@@ -182,7 +182,11 @@ def test_every_pool_workload_carries_its_entrys_must_not_list(pool_rows):
     # 2026-10-04 (Spec 4b-1): the shared-origin rows of the training pool were rebuilt on real
     # lines; was (13677, 1084).
     # 2026-10-05 (Spec 4b-3): multi rows lose the healthy-origin read; was (13946, 1084).
-    assert (total, non_empty) == (13946, 1085)
+    # 2026-10-05 (exam rebuild): was (13946, 1085). The +3978 non-empty lists are story
+    # victims and other workloads that now carry "init container" (Task 3): 1750 shared_origin
+    # and 2053 shared_origin_decoy rows, plus 175 in the own_cause, multi, empty_candidates and
+    # wrong_attribution cases.
+    assert (total, non_empty) == (13946, 5063)
 
 
 def test_every_pool_gold_passes_its_own_key_with_must_not(pool_rows):
@@ -228,7 +232,10 @@ def test_only_exam_job2_workloads_carry_must_not_words(exam_rows):
             counts[k] = counts.get(k, 0) + 1
     # 2026-10-04 (Spec 4b-1): the 20 shared-origin exam rows were rebuilt on real lines; was (1,
     # False) 120, (2, False) 120, (2, True) 57.
-    assert counts == {(1, False): 102, (2, False): 140, (2, True): 57}
+    # 2026-10-05 (exam rebuild): was (2, False) 140 and (2, True) 57. 30 job-2 workloads gain a
+    # must-not list (Task 3): 24 in the shared_origin_probe and shared_origin_decoy_probe rows,
+    # 6 in other cases.
+    assert counts == {(1, False): 102, (2, False): 110, (2, True): 87}
 
 
 # ------------------------------------------------------------ the exam
@@ -419,3 +426,25 @@ def test_a_story_gold_holding_its_own_must_not_word_fails_the_build():
             assert "must-not" in str(err), err
             raised += 1
     assert raised > 0
+
+
+# 2026-10-05 (exam rebuild): measured on this build; was (208, 178) on main
+# (re-measured on main c23dab3: also (208, 178)). The key count did not move;
+# 16 pairs went away (not traced to one task; the must-not words of Task 3 are the likely cause).
+POOL_KEYS, POOL_PAIRS = 208, 162
+
+
+def test_the_pool_weak_pair_count_does_not_grow(pool_rows, exam_rows):
+    """Spec item 5: most pool pairs are benign (the same cause in other
+    words, init vs main container, two NetworkPolicy names), so they are not
+    swept. This pins their number so it cannot grow unnoticed. 178 before
+    the rebuild (208 keys)."""
+    keys = set()
+    for row in pool_rows + exam_rows:
+        for wm in row["meta"]["workloads"].values():
+            kw = wm["own_cause_keywords"]
+            if wm["job"] == 2 and score._is_job2_keyword_graded(wm, kw):
+                keys.add((wm["expected_cause"], tuple(kw), tuple(wm["own_cause_must_not"])))
+    pairs = {(a, ka, b) for a, ka, ma in keys for b, _, _ in keys
+             if a != b and score._keywords_match(b, ka, ma)}
+    assert (len(keys), len(pairs)) == (POOL_KEYS, POOL_PAIRS)

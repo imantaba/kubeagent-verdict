@@ -234,7 +234,11 @@ def view(row):
 # keys); no prompt byte moves (tests/test_catalog_gold.py).
 # b6335d8386c815c77c2bda8b0f3dd4310969f88680a1a9b2cb41d375a54c08a5 ->
 # a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9
-GRADED_VIEW_SHA256 = "a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9"
+# 2026-10-05 (exam rebuild): the exam's prompts and golds moved (scheduler, service and
+# refused-read lines; story must-not words). Was
+# a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9. This one pin also
+# covers test_graded_view_notices_a_changed_flagged_workload (ruling R6).
+GRADED_VIEW_SHA256 = "a2e0011fefdf6a2e8dc7424618eda1603b1625f01354bab7a991095e2e8ccea1"
 
 
 def _digest(views) -> str:

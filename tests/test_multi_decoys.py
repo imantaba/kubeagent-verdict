@@ -1,8 +1,8 @@
 """Spec 4b-3: multi rows and decoys.
 
 The build here is the out/dataset-MMDD pipeline: generate(17, 8000), split,
-drop held-out. Tests that compare with the last build read
-out/dataset-1004-4b2 and skip when it is not on this machine.
+drop held-out. Tests that compare with an older build live in
+tests/test_exam_rebuild_moves.py (2026-10-05).
 """
 import dataclasses
 import inspect
@@ -27,9 +27,8 @@ from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.evals import score
 
 ROOT = Path(__file__).resolve().parents[1]
-OLD = ROOT / "out" / "dataset-1004-4b2"
 SPLITS = ("train", "val", "test")
-_needs_old = pytest.mark.skipif(not OLD.is_dir(), reason="out/dataset-1004-4b2 is not on this machine")
+# 2026-10-05 (exam rebuild): the _needs_old helper and _old() went with their tests.
 
 
 @pytest.fixture(scope="module")
@@ -39,12 +38,6 @@ def build() -> dict[str, list]:
     te = generate.test_set()
     return {"train": generate.drop_held_out(tr, te),
             "val": generate.drop_held_out(va, te), "test": te}
-
-
-def _old(split: str) -> list[dict]:
-    path = OLD / f"{split}.jsonl"
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
 
 
 def _all(build):
@@ -110,56 +103,8 @@ def test_every_multi_and_probe_summary_names_every_workload_and_scores(build):
     assert seen == 758  # 738 multi + 20 multi_misattribution_probe
 
 
-# --- test 7: the probe rows do not move --------------------------------------
-
-@_needs_old
-def test_the_probe_rows_are_the_old_ones(build):
-    new = [generate.to_row(e) for e in build["test"] if e.case == "multi_misattribution_probe"]
-    old = [r for r in _old("test") if r["meta"]["case"] == "multi_misattribution_probe"]
-    assert len(new) == len(old) == 20
-    assert new == old
-
-
-# --- test 8: 4b-1's answers move only to name every workload -----------------
-
-@_needs_old
-def test_only_wide_non_shared_family_answers_move(build):
-    moved = 0
-    for split in SPLITS:
-        old = _old(split)
-        assert len(build[split]) == len(old), split
-        for i, (e, o) in enumerate(zip(build[split], old)):
-            if not e.case.startswith("shared_origin"):
-                continue
-            na, oa = e.assistant, o["messages"][2]["content"]
-            if na == oa:
-                continue
-            moved += 1
-            nd, od = json.loads(na), json.loads(oa)
-            assert nd["verdicts"] == od["verdicts"], (split, i)
-            assert e.meta["label"] != "shared", (split, i)
-            assert len(nd["verdicts"]) >= 4, (split, i)
-            nl, ol = nd["summary"].split("\n"), od["summary"].split("\n")
-            assert len(nl) == len(ol) == 4, (split, i)
-            assert nl[:3] == ol[:3], (split, i)
-            assert nl[3].startswith(ol[3] + " "), (split, i)
-            for v in nd["verdicts"]:
-                assert f"{v['workload']}: " in nd["summary"], (split, i)
-    # Spec 4b-3 §3 (amended 2026-10-05): 77 train and val rows, no exam row.
-    assert moved == 77
-
-
-# --- test 13: non-multi prompts do not move ----------------------------------
-
-@_needs_old
-@pytest.mark.parametrize("split", SPLITS)
-def test_no_non_multi_prompt_moves(build, split):
-    old = _old(split)
-    assert len(build[split]) == len(old)
-    for i, (e, o) in enumerate(zip(build[split], old)):
-        if e.case == "multi":
-            continue
-        assert generate.to_row(e)["messages"][:2] == o["messages"][:2], (split, i)
+# 2026-10-05 (exam rebuild): replaced by tests/test_exam_rebuild_moves.py.
+# (was test 7, test 8 and test 13: the three tests that read out/dataset-1004-4b2.)
 
 
 # --- test 3: a multi decoy list is what the prompt rules out -----------------
