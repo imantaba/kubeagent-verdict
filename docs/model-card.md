@@ -918,6 +918,8 @@ What moved, and why:
   run on this exam, so its number is not re-measured.)
   (2026-10-05, exam rebuild: n did not move. 174 exam rows still carry a
   decoy, and the gold reply still names one on 0 of 174.)
+  (2026-10-06: 0920 live on the rebuilt exam names one on 0 of 174. See
+  "0920 on the rebuilt exam" below.)
 - **0920's 5 part-line copies still pass.** Each cuts 3 words off the
   front of a printed line, and G3b crops at most 2. See known limit 11.
 
@@ -953,6 +955,69 @@ them to 3 of the same 34 keys, because `node-cordon-diskfull`'s key is now
 **What this changes:** nothing in the plan. Job 2's 0.8023 is the
 baseline under the new grader. Next come Spec 4b, then 0920 live again,
 then the retrain.
+
+### 0920 on the rebuilt exam (2026-10-06)
+
+This is a diagnostic run. It gates nothing and ships nothing. It is 0920
+live again, on the exam after Spec 4b and the 2026-10-05 rebuild. Run:
+`out/eval/0920-exam1005`, served by a local `llama-server` from 0920's
+Q8_0 file (sha256 `f4327d90…`), the same file and server flags as the
+2026-09-28 run. Exam: `out/dataset-1005-exam/test.jsonl`, `test_sha256`
+`48f514a0ffa065f392701c897b4f83c3cb03cadada946963b6e43f330d56d284`, 249
+of 249 rows scored.
+
+| | 2026-09-28 exam | rebuilt exam | bar | |
+|---|---|---|---|---|
+| Job 1 | 0.95 (114 of 120) | 0.9902 (101 of 102) | ≥ 0.9 | met |
+| Job 2 | 0.8136 (144 of 177) | 0.5736 (113 of 197) | ≥ 0.7 | missed |
+| Job 3 | 0.875 (35 of 40) | 0.95 (38 of 40) | ≥ 0.9 | met |
+| Length gap | −0.3125 | −0.375 | ≤ 0.15 | met |
+| Decoy rate | 0.0421 (8 of 190 rows) | 0.0 (0 of 174 rows) | | |
+
+The two exams are not the same exam. Spec 4a, Spec 4b-1 to 4b-4 and the
+rebuild all came in between. So the left column is not a before-and-after
+of one change. 0920 is the same file, and the server runs at temperature
+0, so where a prompt did not move, 0920's reply did not move either.
+
+**Where Job 2 went down.** The 197 job-2 workloads split three ways, by
+which exam rows' prompts moved since 2026-09-28:
+
+| Rows | Job-2 workloads | Right |
+|---|---|---|
+| the 20 shared-origin rows (Spec 4b-1 rewrote all 20; 4 moved again in the rebuild) | 38 | 3 |
+| other rows whose prompt moved in the rebuild | 4 | 4 |
+| rows whose prompt has not moved | 155 | 106 (was 123 of the same 155) |
+
+- **The 155 unmoved workloads lost 17 answers, and 0920 wrote the same
+  replies.** Only the answer keys and golds moved under them. 6 are
+  `multi_misattribution_probe`, 4 are `node-cordon-diskfull` (0920 says
+  "the pod's node is cordoned and reporting disk pressure", and the key
+  is now `space`, `containerd`), 2 `own_cause`, 2 `empty_candidates`, 2
+  `misattribution_probe` and 1 `wrong_attribution`.
+- **The 38 shared-origin workloads score 3.** Spec 4b-1 turned these rows
+  into ones that ask for each workload's own cause. 0920 was trained
+  before that. It answers with a vague sentence ("the probe keeps
+  failing") where the gold names the cause ("its readiness probe exceeded
+  its deadline on a slow dependency"). Or it names a cause when the gold
+  is `none_of_these`. Without these 38, Job 2 would be 110 of 159 =
+  0.6918, still under the bar.
+- **By slice:** `shared_origin_decoy_probe` 0 of 24, `shared_origin_probe`
+  3 of 14, `multi_misattribution_probe` 24 of 40, `own_cause` 44 of 51,
+  `wrong_attribution` 5 of 20.
+
+**Other things to know.**
+
+- **Job 3 now meets its bar.** Shared rows score 0.7143 (5 of 7) and
+  `none` rows 1.0 (33 of 33).
+- **One reply broke the contract.** Contract is 0.996, so 248 of 249. The
+  one is a `shared_origin_probe` row. On the 2026-09-28 exam it was 249 of
+  249.
+- **0920 names a decoy on 0 of 174 rows,** the same as the gold reply.
+
+**What this changes:** nothing in the plan. 0920 was trained on data
+from before Spec 4b, so this is the number the retrain on
+`out/dataset-1005-exam` must beat. That retrain started on 2026-10-06.
+Then comes the untuned baseline.
 
 ## Known limits of the training data and the exam
 

@@ -1367,3 +1367,10 @@ Left:
   other's key. None comes from a wrong gold. The exam has 1 pair.
 
 Full suite: 1,998 passed. Ruff: clean.
+
+2026-10-06: 0920 live on this exam (`out/eval/0920-exam1005`). Job 1
+0.9902 (101 of 102), met. Job 2 0.5736 (113 of 197), missed. Job 3 0.95
+(38 of 40), met. Length gap −0.375, met. No pin moved. The model card's
+"0920 on the rebuilt exam" section says where Job 2 went down. Next: the
+retrain on `out/dataset-1005-exam` (started 2026-10-06), then the
+untuned baseline.
