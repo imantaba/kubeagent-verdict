@@ -265,7 +265,9 @@ def test_the_contradiction_menu_ends_a_node_on_its_lease_and_a_claim_on_a_failed
                         "kubelet lease was not re-read\n") in user, e.key
                 assert f"== describe node /worker-2 ==\n{READY_DESCRIBE}" in user, e.key
             else:
-                failed = 'persistentvolumeclaims "data-0" is forbidden'
+                failed = ('persistentvolumeclaims "data-0" is forbidden: User "system:serviceaccount:kubeagent:kubeagent" cannot '
+                          'get resource "persistentvolumeclaims" in API group "" '
+                          'in the namespace "shop"')
                 assert ("    considered PVC data-0 (MissingStorageClass): attributed — "
                         "pod api-7f9c4d5b6-x2x9k mounts it\n"
                         f"      fresh read: unverified — fresh read failed: {failed}\n"

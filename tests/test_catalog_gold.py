@@ -10,7 +10,6 @@ import dataclasses
 import json
 import random
 import re
-from pathlib import Path
 
 import pytest
 
@@ -254,35 +253,8 @@ def test_no_trainable_recommendation_names_a_drawn_name():
 
 # ------------------------------------------------------------ the prompts
 
-DATASET_1004 = Path(__file__).resolve().parents[1] / "out" / "dataset-1004"
-
-
-@pytest.fixture(scope="module")
-def build_1004() -> dict[str, list]:
-    """The out/dataset-1004 pipeline: generate(17, 8000), split, drop held-out."""
-    ex = generate.generate(17, 8000)
-    tr, va = generate.split(ex, 17)
-    te = generate.test_set()
-    return {"train": generate.drop_held_out(tr, te),
-            "val": generate.drop_held_out(va, te), "test": te}
-
-
-@pytest.mark.skipif(not DATASET_1004.is_dir(), reason="out/dataset-1004 is not on this machine")
-@pytest.mark.parametrize("split", ["train", "val", "test"])
-def test_no_prompt_byte_moves_from_dataset_1004(build_1004, split):
-    """Spec test 5. The gold changes; the prompts never do. A builder that
-    raises and is drawn again would shift every later row, so this also
-    guards the random stream."""
-    path = DATASET_1004 / f"{split}.jsonl"
-    old = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-           if line.strip()]
-    new = [generate.to_row(e) for e in build_1004[split]]
-    assert len(new) == len(old)
-    # 2026-10-05 (Spec 4b-3): multi prompts move (no healthy-origin read, node counts); tests/test_multi_decoys.py pins every other prompt against out/dataset-1004-4b2.
-    for i, (a, b) in enumerate(zip(new, old)):
-        if b["meta"]["case"] == "multi":
-            continue
-        assert a["messages"][:2] == b["messages"][:2], (split, i)
+# 2026-10-05 (exam rebuild): replaced by tests/test_exam_rebuild_moves.py.
+# (was test_no_prompt_byte_moves_from_dataset_1004.)
 
 
 # ------------------------------------------------------------ the gold

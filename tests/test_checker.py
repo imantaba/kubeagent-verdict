@@ -30,12 +30,14 @@ from kubeagent_verdict.dataset import (
     checker,
     gather,
     generate,
+    gold,
     health,
     objects,
     render,
     rules,
     stories,
 )
+from kubeagent_verdict.dataset import shared_origin as so
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = Path(__file__).resolve().parent
@@ -705,6 +707,7 @@ COPIES = {
     "MAX_MODEL_LINE_RUNES": (checker.MAX_MODEL_LINE_RUNES, contract.MAX_MODEL_LINE_RUNES),
     "MAX_LINE": (checker.MAX_LINE, gather.MAX_LINE),
     "MAX_COMBINING": (checker.MAX_COMBINING, gather.MAX_COMBINING),
+    "_FOLD": (checker._FOLD, gold._FOLD),
     "REGISTRY_THRESHOLD": (checker.REGISTRY_THRESHOLD, rules.REGISTRY_THRESHOLD),
     "SYSTEM_NAMESPACE": (checker.SYSTEM_NAMESPACE, render._SYSTEM_NAMESPACE),
     "TRUNCATION_MARKER": (checker.TRUNCATION_MARKER, contract.TRUNCATION_MARKER),
@@ -866,3 +869,152 @@ def test_b7_mutations():
     bare = "\n".join(ln for ln in ex.user.splitlines()
                      if not ln.startswith(("  node ", "  system "))) + "\n"
     assert _rule_fails(ex, bare, "B7")
+
+
+# ------------------------------------------------ exam rebuild, item 7
+
+def _golden_with(old: str, new: str) -> checker.Report:
+    system, user, assistant, meta = _golden()
+    assert old in user
+    return checker.check(system, user.replace(old, new, 1), assistant, meta)
+
+
+_SVC = "  - shop/api (NoReadyEndpoints): service has 0 ready endpoints\n"
+
+
+@pytest.mark.parametrize("extra, fires", [
+    ("  - zz/api (ClusterIP): no ready endpoints\n", False),
+    ("  - aa/api (ClusterIP): no ready endpoints\n", True),            # out of order
+    (_SVC, True),                                                       # duplicate key
+    ("  - shop/api (LoadBalancer): no external address\n", False),      # NoExternalAddress after NoEndpoints
+])
+def test_b6_service_lines_sort_by_namespace_name_problem(extra, fires):
+    rep = _golden_with(_SVC, _SVC + extra)
+    assert ("B6" in _fired(rep)) is fires, _where(rep)
+
+
+def test_b6_no_external_address_before_no_endpoints_fails():
+    rep = _golden_with(_SVC, "  - shop/api (LoadBalancer): no external address\n" + _SVC)
+    assert "B6" in _fired(rep), _where(rep)
+
+
+_W1 = "  node worker-1 NotReady: KubeletNotReady — container runtime is down\n"
+
+
+@pytest.mark.parametrize("tail, fires", [
+    ("x " * 70, True),        # a 140-rune message with spaces
+    ("y" * 121, False),       # 120 runes plus the cut mark fits
+    ("y" * 122, True),
+])
+def test_f3_a_message_only_not_ready_line_is_cut_at_120_runes(tail, fires):
+    rep = _golden_with(_W1, f"  node worker-1 NotReady: {tail.rstrip()}\n")
+    assert ("F3" in _fired(rep)) is fires, _where(rep)
+
+
+def test_f3_a_reason_keeps_the_512_cap():
+    rep = _golden_with(_W1, "  node worker-1 NotReady: K" + "a" * 199 + "\n")
+    assert "F3" not in _fired(rep), _where(rep)
+
+
+@pytest.mark.parametrize("age, fires", [("0s", True), ("39s", True), ("40s", False),
+                                        ("1m5s", False)])
+def test_is15_a_lease_age_under_40s_fails(age, fires):
+    """clusterhealth.go:137-144: a lease is stale only past 40s, so a
+    younger age is never printed."""
+    _s, user, _a, _m = _golden()
+    assert _WORKER_2 in user
+    fired, inspected = _is15(user.replace(
+        _WORKER_2, f"  node worker-2 kubelet not heartbeating (lease {age} stale)\n", 1))
+    assert inspected and fired is fires
+
+
+def test_b7_extra_system_lines_at_the_gather_cap(monkeypatch):
+    system, user, assistant, meta = _golden()
+    entries = len(checker._context(system, user, assistant, meta).p.entries)
+    sys_line = "  system kube-system/coredns 0/2 Degraded\n"
+
+    def run(extra: str, patch: bool) -> bool:
+        if patch:
+            monkeypatch.setattr(checker, "MAX_GATHER_WORKLOADS", entries)
+        else:
+            # the golden has 10 entries, so a cap of 10 is "at the cap";
+            # one more puts it below the cap, where an extra line is wrong
+            monkeypatch.setattr(checker, "MAX_GATHER_WORKLOADS", entries + 1)
+        rep = checker.check(system, user.replace(sys_line, sys_line + extra, 1), assistant, meta)
+        return "B7" in _fired(rep)
+
+    assert not run("  system kube-system/metrics-server 0/1 CrashLoopBackOff\n", True)
+    assert run(sys_line, True)                                  # a rendered entry again
+    assert run("  system kube-system/metrics-server\n", True)  # not a system line
+    assert run("  system kube-system/metrics-server 0/1 CrashLoopBackOff\n", False)
+
+
+def test_b4_policy_line_needs_only_probe_failures(exam_rows):
+    for row in exam_rows:
+        system, user, assistant, meta = _parts(row)
+        if "    network policy: pods selected by" not in user:
+            continue
+        x = checker._context(system, user, assistant, meta)
+        e = next(e for e in x.p.entries
+                 if any(checker._sub_kind(s.text) == "N" for s in e.subs)
+                 and not any(checker._sub_kind(s.text) == "M" for s in e.subs))
+        probe = next(s.text for s in e.subs
+                     if s.text.startswith(checker._ISSUE_PREFIX + "ProbeFailure"))
+        broken = user.replace(probe, probe.replace("ProbeFailure", "RestartLoop", 1), 1)
+        assert "B4" not in _fired(checker.check(system, user, assistant, meta))
+        assert "B4" in _fired(checker.check(system, broken, assistant, meta))
+        return
+    pytest.fail("no exam row carries a network-policy line")
+
+
+def test_ans2_does_not_count_a_ruled_out_candidate_line(exam_rows):
+    for row in exam_rows:
+        system, user, assistant, meta = _parts(row)
+        x = checker._context(system, user, assistant, meta)
+        for name, wm in meta["workloads"].items():
+            b = x.block(name)
+            if not wm["own_cause_keywords"] or b is None:
+                continue
+            for cd in b.cands:
+                if cd.verdict != "ruled out" or user.lower().count(cd.cause.lower()) != 1:
+                    continue
+                m = copy.deepcopy(meta)
+                m["workloads"][name]["own_cause_keywords"] = [cd.cause.lower()]
+                assert "ANS-2" in _fired(checker.check(system, user, assistant, m))
+                return
+    pytest.fail("no exam row has a ruled-out candidate whose cause is unique in the prompt")
+
+
+# ------------------------------------------------ exam rebuild, item 1
+
+@pytest.mark.parametrize("text, ok", [
+    ("0/3 nodes are available: 1 node(s) had untolerated taint {x: y}, 2 Insufficient cpu.", True),
+    ("0/4 nodes are available: 1 node(s) had untolerated taint {x: y}, 2 Insufficient cpu.", False),
+    ("0/3 nodes are available: 1 node(s) were unschedulable, 2 Insufficient memory. (x4)", True),
+    ("(0/3 nodes are available: 3 Insufficient cpu.)", True),
+    ("0/5 nodes are available: 1 node(s) were unschedulable, 2 node(s) had volume…", True),
+    ("0/3 nodes are available for this pod", True),
+    ("0/3 nodes are available: pod has unbound immediate PersistentVolumeClaims.", True),
+    (("0/3 nodes are available: 1 node(s) were unschedulable, pod has unbound immediate "
+      "PersistentVolumeClaims."), False),
+    (("0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: "
+      "3 No preemption victims found for incoming pod."), True),
+    (("0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: "
+      "2 No preemption victims found for incoming pod."), False),
+])
+def test_sched_sum_ok(text, ok):
+    assert checker._sched_sum_ok(text) is ok
+
+
+def test_every_story_scheduler_line_sums_to_its_node_count():
+    """The whole story set, both worlds, seeds 0-5: every scheduler line adds
+    up to its node count."""
+    bad = []
+    for st in stories.by_key().values():
+        for world in ("broken", "healthy"):
+            for seed in range(6):
+                d = so.draw(st, random.Random(seed), width=len(st.victims))
+                b = so.build(st, d, world=world)
+                bad += [(st.key, world, seed, ln) for ln in b.user.split("\n")
+                        if "nodes are available" in ln and not checker._sched_sum_ok(ln)]
+    assert bad == []

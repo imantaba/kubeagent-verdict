@@ -50,7 +50,9 @@ def test_draw_ending_node_matches_seed_1_sequence():
     assert drawn[0].fresh.ready == "True"
     assert drawn[0].fresh.how == "read"
     assert drawn[1].fresh.how == "read_failed"
-    assert drawn[1].fresh.message == 'nodes "worker-1" is forbidden'
+    assert drawn[1].fresh.message == (
+        'nodes "worker-1" is forbidden: User "system:serviceaccount:kubeagent:kubeagent" cannot get resource "nodes" '
+        'in API group "" at the cluster scope')
     assert drawn[2].scan_reason == "NotReady"
     assert drawn[2].fresh.ready == "True"
     assert drawn[3].scan_reason == "no kubelet lease"
@@ -65,15 +67,18 @@ def test_draw_ending_pvc_matches_seed_1_sequence():
     rng = random.Random(1)
     obj = o.Object(kind="pvc", name="data-0", scan_reason="FailedBinding",
                     placement="mounted", fresh=o.Fresh(how="read", phase="Pending"))
-    drawn = [render.draw_ending(obj, rng) for _ in range(6)]
+    drawn = [render.draw_ending(obj, rng, namespace="shop") for _ in range(6)]
     assert drawn[0].fresh.phase == "Bound"
     assert drawn[0].fresh.how == "read"
     assert drawn[1].fresh.phase == "Bound"
     assert drawn[2].fresh.how == "read_failed"
-    assert drawn[2].fresh.message == 'persistentvolumeclaims "data-0" is forbidden'
+    long = ('persistentvolumeclaims "data-0" is forbidden: User '
+            '"system:serviceaccount:kubeagent:kubeagent" cannot get '
+            'resource "persistentvolumeclaims" in API group "" in the namespace "shop"')
+    assert drawn[2].fresh.message == long
     assert drawn[3].fresh.phase == "Bound"
     assert drawn[4].fresh.how == "read_failed"
-    assert drawn[4].fresh.message == 'persistentvolumeclaims "data-0" is forbidden'
+    assert drawn[4].fresh.message == long
     assert drawn[5].fresh.how == "read_failed"
 
 
@@ -243,7 +248,7 @@ def test_deciding_ending_draws_every_ending_and_each_one_decides(obj, endings):
     rng = random.Random(7)
     seen = set()
     for _ in range(200):
-        drawn = render.deciding_ending(obj, rng)
+        drawn = render.deciding_ending(obj, rng, namespace="shop")
         seen.add(_ending(obj, drawn))
         assert _decide(drawn).decided, drawn
     assert seen == endings
@@ -270,7 +275,7 @@ def test_deciding_ending_never_keeps_a_declared_fresh_that_does_not_confirm():
     assert [d.outcome for d in _decide(bound).decisions] == ["refuted"]
     rng = random.Random(7)
     node_seen = {_ending(ready, render.deciding_ending(ready, rng)) for _ in range(200)}
-    pvc_seen = {_ending(bound, render.deciding_ending(bound, rng)) for _ in range(200)}
+    pvc_seen = {_ending(bound, render.deciding_ending(bound, rng, namespace="shop")) for _ in range(200)}
     assert node_seen == {"lease", "read_failed"}
     assert pvc_seen == {"read_failed"}
 

@@ -4097,11 +4097,17 @@ def _rule_out_the_must_not_word(row: dict, verdict: dict) -> None:
 def test_a_right_answer_that_rules_out_a_must_not_word_scores_on_the_exam():
     """Limit 14 on the exam. The probe adds ", not an init container" or
     "; the node is not cordoned" to the gold cause of each workload with
-    that must-not word: 51 answers change, and every one is still right.
-    Before 2026-10-05 (Spec 4b-4) all 51 scored 0: 146 of 197 = 0.7411.
-    Now 197 of 197."""
+    that must-not word: 75 answers change, and every one is still right.
+    Before 2026-10-05 (Spec 4b-4) all of them scored 0. Now 197 of 197.
+
+    2026-10-05 (exam rebuild): 75 answers change, was 51. The 24 new ones are
+    the exam's 14 shared_origin_probe and 10 shared_origin_decoy_probe
+    workloads: "init container" now sits on the must-not list of every story
+    victim that is not an init container (Task 3). The rate does not move,
+    because a right answer that rules the word out still scores 1."""
     rows = _corpus_rows()
-    assert _count_changed(rows, _rule_out_the_must_not_word) == 51
+    # 2026-10-05 (exam rebuild): was 51. The +24 is Task 3's "init container" must-not word.
+    assert _count_changed(rows, _rule_out_the_must_not_word) == 75
     board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _rule_out_the_must_not_word)))
     assert board["jobs"]["job2"] == {"rate": 1.0, "n": 197}
 
@@ -4223,11 +4229,18 @@ def test_a_wrong_answer_with_a_stray_negator_fails_on_the_exam():
     """Limit 14's other side. For each job-2 workload with the must-not word
     `pressure` or `init container`, the probe answers with its keys plus a
     wrong cause that names that word, with a "not" that belongs to another
-    word: 51 answers change, and each one is wrong. Before 2026-10-05 (Spec
+    word: 75 answers change, and each one is wrong. Before 2026-10-05 (Spec
     4b-4) they scored 146 of 197. With job 3's plain 24-character window
     they scored 197 of 197. Now the window stops at the clause and keeps 3
-    words: 146 of 197 = 0.7411."""
+    words, so all 75 fail: 122 of 197 = 0.6193.
+
+    2026-10-05 (exam rebuild): 75 answers change, was 51 (146 of 197 =
+    0.7411). The 24 new ones are the exam's 14 shared_origin_probe and 10
+    shared_origin_decoy_probe workloads, which now carry the must-not word
+    "init container" (Task 3). Each is still wrong, so the rate fell by
+    exactly those 24: 197 - 75 = 122."""
     rows = _corpus_rows()
-    assert _count_changed(rows, _negate_the_wrong_word) == 51
+    # 2026-10-05 (exam rebuild): was 51 and 0.7411. The +24 is Task 3's "init container" must-not word.
+    assert _count_changed(rows, _negate_the_wrong_word) == 75
     board = score.scoreboard(score.evaluate(rows, _gold_bot_with(rows, _negate_the_wrong_word)))
-    assert board["jobs"]["job2"] == {"rate": 0.7411, "n": 197}
+    assert board["jobs"]["job2"] == {"rate": 0.6193, "n": 197}

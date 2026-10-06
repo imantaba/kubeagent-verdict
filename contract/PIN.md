@@ -1197,4 +1197,173 @@ exam rows, so they move with the rebuild and its one re-pin:
 - B4's fourth arm, the shared-cause cap. It needs a new Go capture.
 - image-pull-secret-expired graded as unverified.
 
+2026-10-05: done in "Exam rebuild" below, except B4's fourth arm.
+
 Full suite: 1,954 passed. Ruff: clean.
+
+### 2026-10-05 — Exam rebuild
+
+Three pins moved, and one more with them. The build folder is
+`out/dataset-1005-exam`. The command is:
+
+```
+.venv/bin/kv-dataset --seed 17 --size 8000 --out out/dataset-1005-exam
+```
+
+`out/dataset-1005` is untouched, and the two folders have the same row
+counts per split (6,439 train, 739 val, 249 exam) and the same case at
+each index. The design is in
+`docs/superpowers/specs/2026-10-05-exam-rebuild-design.md`.
+
+The nine items, in short. Eight of them change the rows or the checks:
+service lines on a down node (two forms: `matching pods on down node <n>
+(NotReady)` and `matching pods on down node <n> (no kubelet lease)`; 33 of
+the 215 changed service lines are the second form), must-not words on
+the shared-origin family and the registry-fault key, IS-22's sum half
+with the scheduler texts, the refused-read text, and the checker's extra
+checks. Item 8 is
+docs-only (a pinning test): it changes no row and no check. The grader
+(`score.py`) did not change. The bars did not move. The fixtures
+under `tests/fixtures/gather_go*/`, `rules_golden.json` and
+`contract/golden/` keep their bytes.
+
+New hashes, old to new:
+
+| Pin | Old | New |
+|---|---|---|
+| `GRADED_VIEW_SHA256` | `a1a3c8d4ebf62cec64bf2d0f98d2187592911725e90025269afeb8e97ade03e9` | `a2e0011fefdf6a2e8dc7424618eda1603b1625f01354bab7a991095e2e8ccea1` |
+| `FROZEN_SLICE_SHA256` | `660f2b55fbc08426122381285d40a628f8a2a666f2756348086e71acf773f8b3` | `0b16a43329e8933f43f5438bc852910771f579834f0875ae37b150036d7d5370` |
+| `EVAL_SET_SHA256` | `94b384623a66bbee21520275c0282973ade7b089c3e8cdab94447398c218661e` | `70ccc5ae23033fdfd610cd48b849ca1d5d285d4edf5216e63a24c1301e46c0ee` |
+| `OTHER_FAMILIES_SHA256` (the 229 non-shared-origin exam rows) | `745ac86ddcd0850427510bf7034c1bfe879dc4f739e4a275fe0a43de6bbc054a` | `a6c7ac5aae87571a24b43360784b1ee944eeee30c421cc3eea9b15d289863b58` |
+
+`_PROBE_DECOYS_SHA256` did not move.
+
+What moved against `out/dataset-1005` (a row "moved" when its prompt or
+its gold bytes differ):
+
+| Split | Rows | Prompts moved | Golds moved |
+|---|---|---|---|
+| train | 6,439 | 1,090 | 838 |
+| val | 739 | 167 | 121 |
+| exam | 249 | 42 | 32 |
+
+A new test, `tests/test_exam_rebuild_moves.py`, pins three things. No row
+or line count moved. Every changed prompt line is one of three kinds
+(refused-read, scheduler, service), and the old line keeps its kind: it
+is never swapped for a different kind. And the system message of every
+row is byte-identical (9 tests).
+
+IS-22 sum violations (the reasons in "0/N nodes are available" add up to
+N). Before is the new rule run on the old build. After is 0 everywhere:
+
+| Split | Before | After |
+|---|---|---|
+| train | 110 | 0 |
+| val | 22 | 0 |
+| exam | 4 | 0 |
+
+Job counts. The exam still has 197 job-2 workloads and 102 job-1
+workloads, and 40 job-3 rows. None moved. Cause counts on the exam are
+counted as `(job, has_must_not)`. `(2, False)` is job-2 workloads whose
+answer has no must-not word. `(2, True)` is job-2 workloads whose answer
+has one. `(2, False)` went 140 to 110 and `(2, True)` 57 to 87 (the 30
+are workloads whose answer now carries a must-not word); `(1, False)` stays 102.
+
+The full grader on train and val, with the gold bot
+(`score.evaluate(..., grade_job2=True)`): job 2 scores 1.0 on train
+(8,047 workloads) and on val (906). 0 golds hold their own must-not
+word. Two denominators. 6,584 train and 766 val are the named job-2
+golds. Of those, 4,310 train and 505 val carry a must-not word. The
+count is 0 of 4,310 and 0 of 505.
+
+Other gate numbers (unchanged by the rebuild): job 1 1.0 on all three
+splits, job 3 1.0 on all three, decoy rate 0.0 on 3,598 train, 422 val
+and 174 exam workloads. `none_of_these` is 1,463 of 11,192 = 0.1307 of
+train answers, the same before and after.
+
+The weak pairs. `WEAK_PAIRS` on the exam: 1 pair, was 3
+(`tests/test_answer_keys.py`). The exam still has 34 keys. The one left
+is the same cause written two ways: both golds say a default-deny
+NetworkPolicy is behind a failing readiness probe, so passing it is
+right. The pool (every answer key in the build): 208 keys and 162 pairs, was 178
+pairs on main. The key count did not move. The 16 lost pairs were traced
+and none is a bug:
+- 11 lose to the must-not word "init container";
+- 1 loses to "liveness" (the NetworkPolicy key);
+- 2 lose to "containerd" (the coredns readiness key: the corefile
+  containerd gold, and the "creating its containerd task exceeded the
+  deadline" gold);
+- 1 loses to the authentication words from the registry-fault key (the
+  bad-tag key against "its init image pull is unauthorized...");
+- 1 loses because item 2 retired the key ("containerd", "task"). That is
+  a key change, not a must-not word.
+
+Measured again by hand on main `c23dab3` and on this branch, with the
+same measure as the pin test: 178 pairs before, 162 after, 16 lost, 0
+gained.
+
+No gold is wrong. A new test,
+`test_the_pool_weak_pair_count_does_not_grow`, pins (208, 162).
+
+Pool answer-key counts: `(total, non_empty)` was (13946, 1085), now
+(13946, 5063). The 3,978 more are 1,750 `shared_origin` and 2,053
+`shared_origin_decoy` workloads, plus 175 in `own_cause`, `multi`,
+`empty_candidates` and `wrong_attribution`. Not moved: `checked == 7979`,
+`story_keyed == 83`, the 34 exam keys.
+
+The 4b-4 bots and probes on the new exam, job 2 (197 workloads unless
+noted). All of them read from the tests at HEAD, and the tests pass:
+
+| Bot or probe | Before | After |
+|---|---|---|
+| hedge bot (cause, then a decoy) | 0.4162 | 0.4162 |
+| three cut-paste bots | 0.0 | 0.0 |
+| two label-strip bots | 0.0 | 0.0 |
+| decoy probe (first decoy in capitals) | {1.0, 174} | {1.0, 174} |
+| right-answer negator probe | 1.0 (51 answers) | 1.0 (75 answers) |
+| wrong-answer negator probe | 0.7411 = 146 of 197 (51 answers) | 0.6193 = 122 of 197 (75 answers) |
+| log-cause label probe | 1.0 (32 answers) | 1.0 (32 answers) |
+| "stage" for `tag` probe | 0.9695 = 191 of 197 | 0.9695 = 191 of 197 |
+
+Both negator probes went from 51 to 75 changed answers. The 24 extra
+are 14 `shared_origin_probe` and 10 `shared_origin_decoy_probe`
+workloads. "init container" is now a must-not word on every story
+victim that is not an init container. The right-answer probe still
+passes all of them, since ruling the word out is fine. The wrong-answer
+probe now fails all 75, so its rate fell by exactly 24 of 197.
+
+The new registry-fault probe
+(`test_a_registry_fault_answer_scores_0_on_the_bad_tag_workloads`).
+Three answers that name a registry fault ("the image registry is
+unreachable", "pulling the image from the registry timed out", "the
+registry returned unauthorized for the image") score 0 on each of the
+30 bad-image-tag workloads. Before item 4 they passed the key
+`("image", "registry")`. An answer that rules the fault out ("the
+registry is not unreachable; the image tag is wrong") still scores 1.0.
+
+Hand re-pins, old to new (all dated 2026-10-05, exam rebuild, in a
+comment):
+- four hashes, above;
+- pool `(total, non_empty)`: (13946, 1085) to (13946, 5063);
+- exam counts: `(2, False)` 140 to 110, `(2, True)` 57 to 87;
+- rule-out probe: 51 to 75 changed answers, rate stays 197 of 197;
+- stray-negator probe: 51 to 75 changed answers, 0.7411 to 0.6193;
+- `WEAK_PAIRS`: 3 pairs to 1;
+- the key-count test is split out from the weak-pairs test, so they fail
+  apart.
+
+Removed: `test_no_prompt_byte_moves_from_dataset_1004` and the
+`_needs_old` tests in `tests/test_multi_decoys.py`. They compared the
+build with an old folder that no longer matches by design. The what-moved
+test replaces them.
+
+Not moved, so not re-pinned: `tests/test_oracle.py`, `GATED_POOL`,
+`checked == 7979`, `story_keyed == 83`, 34 keys.
+
+Left:
+- B4's fourth arm, the shared-cause cap. It needs a new Go capture.
+- The benign pool pairs. 162 pairs are left in the pool, down from 178.
+  Each is a pair of answer keys where one cause's text can pass the
+  other's key. None comes from a wrong gold. The exam has 1 pair.
+
+Full suite: 1,998 passed. Ruff: clean.

@@ -49,7 +49,8 @@ def test_unverified_twin_shows_the_refused_node_read():
     # (rules.py:325-330), which is job 1 but never counts toward rules.shared.
     b = _twins("node-not-ready", unverified=True)[0]
     node = b.draw.scope_value
-    assert f'nodes "{node}" is forbidden' in b.user
+    assert (f'nodes "{node}" is forbidden: User "system:serviceaccount:kubeagent:kubeagent" cannot get resource "nodes" '
+            'in API group "" at the cluster scope') in b.user
     assert all(r.result.decided and r.result.outcome == "unverified" for r in b.rows)
     assert all(r.workload.decided_outcome == "unverified" for r in b.rows)
     assert b.user.count(" — unverified\n") == len(b.rows)

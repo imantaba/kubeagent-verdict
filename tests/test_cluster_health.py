@@ -137,6 +137,14 @@ def test_the_not_ready_issue_carries_the_node_name():
     assert got.node_issues == ("worker-2 " + K4,)
 
 
+def test_down_nodes_names_the_node_the_block_prints_not_ready():
+    """Exam rebuild, item 9: the service line's endpoint cause reads the
+    same down nodes the cluster-health block judged."""
+    workloads = (_wl(candidates=(_node("worker-2"),)),)
+    assert render.cluster_health(workloads, ()).node_issues[0].startswith("worker-2 ")
+    assert render.down_nodes(workloads, ()) == (health.DownNode("worker-2", "NotReady"),)
+
+
 def test_a_system_job_omits_the_count():
     """clusterhealth/clusterhealth_test.go:107: a Job or CronJob prints its
     status only. A Failed status alone flags the workload

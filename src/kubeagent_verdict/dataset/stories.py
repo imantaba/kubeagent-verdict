@@ -37,6 +37,7 @@ class Answer:
     rationale: str
     confidence: str = "high"
     link: bool = False
+    must_not: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.anchor.strip():
@@ -54,6 +55,11 @@ class Answer:
             raise ValueError(f"{self.cause!r}: the rationale is empty")
         if self.confidence not in CONFIDENCES:
             raise ValueError(f"{self.cause!r}: confidence {self.confidence!r}")
+        for w in self.must_not:
+            if not w or w != w.lower() or w.strip() != w:
+                raise ValueError(f"{self.cause!r}: must-not word {w!r} is not lowercase and trimmed")
+            if w in self.cause.lower():
+                raise ValueError(f"{self.cause!r}: must-not word {w!r} is inside the cause")
 
 
 def validate_answer(a: Answer) -> None:
@@ -242,7 +248,8 @@ _STORIES: tuple[Story, ...] = (
                 healthy=Answer(anchor="context deadline exceeded after 1s",
                                cause="its readiness probe exceeded its deadline on a slow dependency",
                                keys=("deadline", "exceeded"), confidence="medium",
-                               rationale="its probe event shows a deadline exceeded"),
+                               rationale="its probe event shows a deadline exceeded",
+                               must_not=("containerd",)),
                 none_phrase="its readiness probe fails"),
             VictimText(
                 workload_kind="StatefulSet", status="Running",
@@ -789,8 +796,8 @@ _STORIES: tuple[Story, ...] = (
                 reason="no node has room for the pod",
                 evidence="1 node(s) had untolerated taint node.kubernetes.io/network-unavailable",
                 events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
-                           "untolerated taint node.kubernetes.io/network-unavailable, and the "
-                           "other nodes have insufficient memory"), 4),),
+                           "untolerated taint node.kubernetes.io/network-unavailable, "
+                           "{other_nodes} Insufficient memory"), 4),),
                 broken=Answer(anchor="untolerated taint node.kubernetes.io/network-unavailable",
                               cause="its pod is kept off one node by an untolerated "
                                     "network-unavailable taint",
@@ -799,9 +806,9 @@ _STORIES: tuple[Story, ...] = (
                               link=True),
                 evidence_healthy="1 node(s) had untolerated taint dedicated=gpu",
                 events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
-                                 "untolerated taint dedicated=gpu, and the other nodes have "
-                                 "insufficient memory"), 4),),
-                healthy=Answer(anchor="the other nodes have insufficient memory",
+                                 "untolerated taint dedicated=gpu, "
+                                 "{other_nodes} Insufficient memory"), 4),),
+                healthy=Answer(anchor="Insufficient memory",
                                cause="its pod cannot be scheduled because the other nodes have "
                                      "insufficient memory",
                                keys=("insufficient", "memory"),
@@ -913,19 +920,20 @@ _STORIES: tuple[Story, ...] = (
             VictimText(
                 workload_kind="StatefulSet", status="Pending", issue="Unschedulable",
                 reason="no node has room for the pod",
-                evidence="0/{nodes} nodes are available: 1 node(s) were unschedulable",
+                evidence="0/{nodes} nodes are available: 1 node(s) were unschedulable, "
+                         "{other_nodes} node(s) had volume node affinity conflict",
                 events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) were "
-                           "unschedulable, 2 node(s) had volume node affinity conflict"), 4),),
+                           "unschedulable, {other_nodes} node(s) had volume node affinity conflict"), 4),),
                 broken=Answer(anchor="1 node(s) were unschedulable",
                               cause="its pod cannot be scheduled because one node is "
                                     "unschedulable and the other nodes conflict with its volume",
                               keys=("unschedulable", "conflict"), confidence="medium",
                               rationale="its scheduling event says a node is unschedulable",
                               link=True),
-                evidence_healthy="0/{nodes} nodes are available: 3 node(s) had volume node affinity conflict",
-                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 3 node(s) had "
+                evidence_healthy="0/{nodes} nodes are available: {nodes} node(s) had volume node affinity conflict",
+                events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: {nodes} node(s) had "
                                  "volume node affinity conflict"), 4),),
-                healthy=Answer(anchor="3 node(s) had volume node affinity conflict",
+                healthy=Answer(anchor="node(s) had volume node affinity conflict",
                                cause="its pod cannot be scheduled because its volume is "
                                      "pinned by its node affinity to a zone the nodes are not in",
                                keys=("volume", "affinity"),
@@ -1059,7 +1067,7 @@ _STORIES: tuple[Story, ...] = (
                 reason="no node has room for the pod",
                 evidence="1 node(s) had untolerated taint node.kubernetes.io/disk-pressure",
                 events=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
-                           "untolerated taint node.kubernetes.io/disk-pressure, 2 Insufficient cpu."), 4),),
+                           "untolerated taint node.kubernetes.io/disk-pressure, {other_nodes} Insufficient cpu."), 4),),
                 broken=Answer(anchor="untolerated taint node.kubernetes.io/disk-pressure",
                               cause="its pod is kept off one node by an untolerated "
                                     "disk-pressure taint",
@@ -1068,7 +1076,7 @@ _STORIES: tuple[Story, ...] = (
                               link=True),
                 evidence_healthy="1 node(s) had untolerated taint dedicated=gpu",
                 events_healthy=(("FailedScheduling", ("0/{nodes} nodes are available: 1 node(s) had "
-                                 "untolerated taint dedicated=gpu, 2 Insufficient cpu."), 4),),
+                                 "untolerated taint dedicated=gpu, {other_nodes} Insufficient cpu."), 4),),
                 healthy=Answer(anchor="untolerated taint dedicated=gpu",
                                cause="its pod is missing a toleration for the dedicated gpu taint",
                                keys=("dedicated", "taint"),
@@ -1083,7 +1091,7 @@ _STORIES: tuple[Story, ...] = (
                 broken=Answer(anchor="failed to create containerd task: no space left on device",
                               cause="its container cannot start because containerd failed "
                                     "to create its task, with no space left on the device",
-                              keys=("containerd", "task"), confidence="medium",
+                              keys=("space", "containerd"), confidence="medium",
                               rationale="its start event says the device has no space left"),
                 events_healthy=(("Failed", ("Error: failed to create containerd task: no space left "
                                  "on device. Ephemeral storage: pod limit 1Gi, currently used 1Gi"), 3),),
@@ -1163,7 +1171,7 @@ _STORIES: tuple[Story, ...] = (
                 workload_kind="Job", status="Pending", issue="Unschedulable",
                 reason="no node has room for the pod",
                 evidence="0/{nodes} nodes are available for this pod",
-                events=(("FailedScheduling", "0/{nodes} nodes are available: no node fits this pod", 5),),
+                events=(("FailedScheduling", "0/{nodes} nodes are available: {nodes} Insufficient cpu.", 5),),
                 none_phrase="its pod cannot be scheduled"),
         ),
         broken=World(),

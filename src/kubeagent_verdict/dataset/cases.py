@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 from kubeagent_verdict import contract as c
 from kubeagent_verdict import remediation as rem
-from kubeagent_verdict.dataset import gather, gold, render, rules, stories
+from kubeagent_verdict.dataset import gather, gold, health, render, rules, stories
 from kubeagent_verdict.dataset import names as names_mod
 from kubeagent_verdict.dataset import shared_origin as so
 from kubeagent_verdict.dataset.catalog import CatalogEntry
@@ -223,11 +223,21 @@ def _row_decoy(decoys: list[str]) -> dict:
     return {"decoy_cause": decoys[0]} if decoys else {}
 
 
-def _service_issues(e: CatalogEntry, n: Names) -> tuple[c.ServiceIssue, ...]:
-    if e.service_issue is None:
+def _service_issues(e: CatalogEntry, n: Names,
+                    down: tuple[health.DownNode, ...]) -> tuple[c.ServiceIssue, ...]:
+    """The entry's Service, through the svchealth port: one Service selecting
+    app=<name>, one EndpointSlice with 2 not-ready addresses, and the
+    workload's 2 not-ready pods on its node (the workload is 0/2 ready)."""
+    if e.service_type is None:
         return ()
-    typ, detail = e.service_issue
-    return (c.ServiceIssue(namespace=n.ns, name=n.name, type=typ, detail=_fmt(detail, n)),)
+    sel = (("app", n.name),)
+    svc = health.Service(n.ns, n.name, type=e.service_type, selector=sel)
+    sl = health.EndpointSlice(n.ns, n.name, ready=("false", "false"))
+    pods = (health.Pod(n.ns, n.pod, n.node, labels=sel),
+            health.Pod(n.ns, f"{n.pod}-b", n.node, labels=sel))
+    issues = health.annotate_endpoint_cause(
+        health.service_issues((svc,), (sl,), ()), (svc,), pods, down)
+    return tuple(i.contract() for i in issues)
 
 
 def _answer(rows: list[dict], summary: str) -> str:
@@ -292,7 +302,7 @@ def _deciding_winner(e: CatalogEntry, n: Names, case: str, rng: random.Random):
     row's first rng draw."""
     obj = bind(_winner_object(e, case), dataclasses.asdict(n))
     try:
-        return deciding_ending(obj, rng)
+        return deciding_ending(obj, rng, namespace=n.ns)
     except ValueError as err:
         raise ValueError(f"{case}: the rules do not decide {e.key} ({err})") from err
 
@@ -319,7 +329,8 @@ def _job1_example(e: CatalogEntry, n: Names, menu: tuple, case: str, *,
     if not result.decided:
         raise ValueError(f"{case}: the rules do not decide {e.key}")
     w = _workload(e, n, candidates, render.header_for(candidates), result=result)
-    user = _user_message(None, "", _service_issues(e, n), (w,), res.reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n, render.down_nodes((w,), res.reads)),
+                         (w,), res.reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     cause, conf = result.cause, "high"
     rows = [{"workload": key, "cause": cause, "confidence": conf,
@@ -488,7 +499,8 @@ def _undecided_example(e: CatalogEntry, n: Names, *, case: str, shape: str,
     (candidates,), (result,) = res.candidates, res.results
     w = _workload(e, n, candidates, render.header_for(candidates), result=result,
                   with_log_cause=not thin)
-    user = _user_message(None, "", _service_issues(e, n), (w,), res.reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n, render.down_nodes((w,), res.reads)),
+                         (w,), res.reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     if thin:
         cause, conf, keywords, must_not = c.NONE_OF_THESE, "low", [], []
@@ -624,7 +636,7 @@ def _contradiction_menu(n: Names, objects: tuple) -> tuple:
     """
     names = dataclasses.asdict(n)
     endings = {"node": "lease", "pvc": "read_failed", "registry": "auth"}
-    return tuple(unverify(bind(obj, names), endings[obj.kind]) for obj in objects)
+    return tuple(unverify(bind(obj, names), endings[obj.kind], namespace=n.ns) for obj in objects)
 
 
 def contradiction_probe(e: CatalogEntry, n: Names) -> Example:
@@ -679,7 +691,8 @@ def empty_candidates(e: CatalogEntry, n: Names) -> Example:
     names = dataclasses.asdict(n)
     registries = tuple(bind(obj, names) for obj in e.objects if obj.kind == "registry")
     reads = gather.gather([gather_workload(e, n, registries)]).reads
-    user = _user_message(None, "", _service_issues(e, n), (w,), reads, key=e.key)
+    user = _user_message(None, "", _service_issues(e, n, render.down_nodes((w,), reads)),
+                         (w,), reads, key=e.key)
     key = f"{n.ns}/{n.name}"
     own = sorted(gold.own_lines(user, [key])[key])
     g = _entry_gold(e, n, own, [])
@@ -813,7 +826,7 @@ def _shared_origin_example(case: str, built: so.Built, **extra) -> Example:
                             "confidence": rg.confidence, "rationale": rg.rationale})
         metas[row.key] = render.workload_meta(row.result, expected_cause=cause,
                                               own_cause_keywords=list(rg.keys),
-                                              own_cause_must_not=[])
+                                              own_cause_must_not=list(rg.must_not))
         # `rules.decide` skips ruled-out candidates, so decisions and
         # candidates do not line up: ask gold which causes the rules threw out.
         decoys[row.key] = gold.excluded_causes(row)
@@ -996,7 +1009,7 @@ def _multi_objects(pairs: list[tuple[CatalogEntry, Names]],
     for e, n in pairs:
         names_dict = dataclasses.asdict(n)
         own.append(tuple(
-            render.draw_ending(render.bind(obj, names_dict), rng)
+            render.draw_ending(render.bind(obj, names_dict), rng, namespace=n.ns)
             if obj.intent == "decoy" else render.bind(obj, names_dict)
             for obj in e.objects))
     return [own[i] + _foreign_objects(pairs, own, i) for i in range(len(pairs))]

@@ -36,7 +36,7 @@ ENTRIES = [
             rationale="The readiness probe fails with HTTP 500, so the application answers its "
                       "health endpoint with an error."),
         none_phrase="its readiness probe fails",
-        service_issue=("NoReadyEndpoints", "service has 0 ready endpoints"),
+        service_type="ClusterIP",
         objects=(
             Object(kind="node", name="{node}", scan_reason="NotReady", placement="on",
                    fresh=NODE_NOT_READY, intent="decoy"),

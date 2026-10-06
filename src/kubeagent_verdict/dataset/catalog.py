@@ -69,7 +69,7 @@ class CatalogEntry:
     own_cause_must_not: tuple[str, ...] = ()
     grounding: tuple[str, ...] = ()  # substrings that must appear in this slug's corpus assertions
     network_policies: tuple[str, ...] = ()
-    service_issue: tuple[str, str] | None = None  # (type, detail template)
+    service_type: str | None = None   # a Service fronts the workload; svchealth prints its line
     notes: str = ""
     # The nodes, PVCs and registries this entry puts on the menu. Empty for
     # the 9 entries with no fault-side object (control-plane read failures,
@@ -91,6 +91,11 @@ class CatalogEntry:
 # must-not word on the main-container stories. Never bare "init":
 # "initial" and "initialize" would trip it.
 INIT_CONTAINER = ("init container", "init-container", "initcontainer")
+
+# Words that name a registry fault rather than a missing tag (exam rebuild,
+# item 4). G2 skips the bad-tag entry's 2-word decoy, so these do its job.
+REGISTRY_FAULT = ("unreachable", "refused", "timed out", "timeout", "unauthorized",
+                  "authentication", "rate limit", "dial tcp", "no such host")
 
 
 def all_entries() -> tuple[CatalogEntry, ...]:
